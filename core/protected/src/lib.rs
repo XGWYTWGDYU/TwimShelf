@@ -1,8 +1,8 @@
 //! Protected-post module for TwimShelf.
 //!
 //! Fetches a post with the user's X session (`auth_token` + `ct0`) through the same GraphQL
-//! `TweetDetail` operation the web client uses, and checks the session with the v1.1
-//! `account/verify_credentials` endpoint. The core calls these functions directly on blocking
+//! `TweetDetail` operation the web client uses, and checks the session with the GraphQL `Viewer`
+//! operation, falling back to the v1.1 account endpoints. The core calls these functions directly on blocking
 //! worker threads; there is no subprocess, no Tokio runtime on the calling thread, and no file
 //! access.
 //!
@@ -35,6 +35,8 @@ const MIN_REQUEST_TIME: Duration = Duration::from_millis(500);
 const VERIFY_URL: &str =
     "https://api.x.com/1.1/account/verify_credentials.json?skip_status=true&include_entities=false";
 const SETTINGS_URL: &str = "https://x.com/i/api/1.1/account/settings.json";
+/// Still answers web sessions that send no `x-client-transaction-id`, unlike the two above.
+const MULTI_LIST_URL: &str = "https://x.com/i/api/1.1/account/multi/list.json";
 
 /// Fetches one post (a status link, e.g. `https://x.com/someone/status/1700000000000000001`).
 ///
@@ -58,14 +60,14 @@ pub fn fetch_post(
 
 /// Checks the cookies (Settings → 检查 Cookie) and returns the signed-in account.
 ///
-/// Blocking. Uses `account/verify_credentials`, with `account/settings` as a fallback for older
-/// or partially available endpoints.
+/// Blocking. Uses the web client's GraphQL `Viewer` query, then `account/multi/list`,
+/// `account/verify_credentials` and `account/settings`; a 404 from one falls through to the next.
 pub fn check_credentials(credentials: &Credentials) -> Result<Account, ProtectedError> {
     let cookies = Cookies::new(credentials)?;
     let client = http::client()?;
     let transport = ReqwestTransport::new(client);
     let deadline = Instant::now() + TOTAL_BUDGET;
-    check_credentials_with(&cookies, &transport, deadline)
+    check_credentials_with(&cookies, &transport, ops::global(), deadline)
 }
 
 pub(crate) fn fetch_post_with(
@@ -182,8 +184,9 @@ fn graphql(
                     "X 返回的数据为空（接口格式可能已变化）".into(),
                 ));
             }
-            414 | 400 if !use_post => {
-                // Long GET URLs and some parameter changes are accepted only as POST.
+            414 | 400 | 422 if !use_post => {
+                // Long GET URLs and some parameter changes are accepted only as POST; a 422
+                // "must be defined" also gets one POST retry with the full JSON body.
                 use_post = true;
             }
             404 => {
@@ -250,11 +253,14 @@ fn build_graphql_request(
             .map_err(|_| ProtectedError::Other("无法构造 X 请求地址".into()))?;
         {
             let mut query = url.query_pairs_mut();
-            query.append_pair("variables", &compact(variables));
-            query.append_pair("features", &compact(&meta.features));
+            // Everything goes out verbatim, `false` entries included: since October 2026 X
+            // rejects a request whose `false` variables (e.g. `includePromotedContent`) are
+            // missing with HTTP 422 "must be defined", and the web client sends all flags.
+            query.append_pair("variables", &verbatim(variables));
+            query.append_pair("features", &verbatim(&meta.features));
             if let Some(toggles) = &meta.field_toggles {
                 if toggles.as_object().is_some_and(|map| !map.is_empty()) {
-                    query.append_pair("fieldToggles", &compact(toggles));
+                    query.append_pair("fieldToggles", &verbatim(toggles));
                 }
             }
         }
@@ -271,10 +277,15 @@ fn build_graphql_request(
 pub(crate) fn check_credentials_with(
     cookies: &Cookies,
     transport: &dyn Transport,
+    table: &OpsTable,
     deadline: Instant,
 ) -> Result<Account, ProtectedError> {
     let mut last_error: Option<ProtectedError> = None;
-    for (index, url) in [VERIFY_URL, SETTINGS_URL].iter().enumerate() {
+    // Index 0 is the GraphQL `Viewer` query; the rest are plain v1.1 GETs.
+    for (index, url) in ["", MULTI_LIST_URL, VERIFY_URL, SETTINGS_URL]
+        .iter()
+        .enumerate()
+    {
         let cap = if index == 0 {
             API_TIMEOUT
         } else {
@@ -284,12 +295,26 @@ pub(crate) fn check_credentials_with(
             Ok(timeout) => timeout,
             Err(error) => return Err(last_error.unwrap_or(error)),
         };
-        let request = HttpRequest {
-            method: Method::Get,
-            url: (*url).to_string(),
-            headers: http::api_headers(cookies),
-            body: None,
-            timeout,
+        let request = if index == 0 {
+            let Some(meta) = table.get(ops::VIEWER) else {
+                continue;
+            };
+            let variables = ops::viewer_variables();
+            match build_graphql_request(&meta, ops::VIEWER, &variables, false, cookies, deadline) {
+                Ok(request) => HttpRequest { timeout, ..request },
+                Err(error) => {
+                    remember_error(&mut last_error, error);
+                    continue;
+                }
+            }
+        } else {
+            HttpRequest {
+                method: Method::Get,
+                url: (*url).to_string(),
+                headers: http::api_headers(cookies),
+                body: None,
+                timeout,
+            }
         };
         let response = match transport.send(&request) {
             Ok(response) => response,
@@ -357,7 +382,7 @@ pub(crate) fn check_credentials_with(
         .unwrap_or_else(|| ProtectedError::Other("无法检查 Cookie，X 接口可能已变化".into())))
 }
 
-/// Keeps the most informative error while trying the two account endpoints. A fallback endpoint
+/// Keeps the most informative error while trying the account endpoints. A fallback endpoint
 /// failing with 404/500 must not hide the first endpoint's "Cookie rejected".
 fn remember_error(slot: &mut Option<ProtectedError>, candidate: ProtectedError) {
     fn rank(error: &ProtectedError) -> u8 {
@@ -392,19 +417,9 @@ fn request_timeout(deadline: Instant, cap: Duration) -> Result<Duration, Protect
     Ok(remaining.min(cap).max(MIN_REQUEST_TIME))
 }
 
-/// Drops `false` feature flags: X treats a missing flag as false and this keeps GET URLs short.
-fn compact(value: &Value) -> String {
-    match value {
-        Value::Object(map) => {
-            let filtered: serde_json::Map<String, Value> = map
-                .iter()
-                .filter(|(_, value)| !matches!(value, Value::Bool(false)))
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect();
-            serde_json::to_string(&Value::Object(filtered)).unwrap_or_else(|_| "{}".into())
-        }
-        other => serde_json::to_string(other).unwrap_or_else(|_| "{}".into()),
-    }
+/// Serialises a value as-is, keeping `false` entries (X now requires them to be present).
+fn verbatim(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "{}".into())
 }
 
 #[cfg(test)]

@@ -50,6 +50,15 @@ pub(crate) fn map_http_failure(response: &HttpResponse, cookies: &Cookies) -> Pr
         }
         404 => not_found(error.as_ref(), cookies),
         408 => ProtectedError::Network("请求超时（HTTP 408），请稍后重试".into()),
+        422 => {
+            let detail = error
+                .as_ref()
+                .map(|error| format!("：{}", safe(&error.message, cookies)))
+                .unwrap_or_default();
+            ProtectedError::Other(format!(
+                "X 拒绝了请求参数（HTTP 422）{detail}；X 可能又改了接口，请更新 TwimShelf"
+            ))
+        }
         420 | 429 => rate_limited_opt(Some(response), value.as_ref()),
         500..=599 => ProtectedError::Network(format!(
             "X 服务器暂时不可用（HTTP {}），请稍后重试",

@@ -14,6 +14,9 @@ use crate::http::{HttpRequest, Method, Transport};
 
 pub(crate) const TWEET_DETAIL: &str = "TweetDetail";
 pub(crate) const TWEET_BY_ID: &str = "TweetResultByRestId";
+/// The web client's "who am I" query; used by the cookie check. The community table does not
+/// carry it, so `refresh` leaves it alone.
+pub(crate) const VIEWER: &str = "Viewer";
 
 const COMMUNITY_URL: &str =
     "https://raw.githubusercontent.com/fa0311/twitter-openapi/refs/heads/main/src/config/placeholder.json";
@@ -49,6 +52,17 @@ impl OpsTable {
                 query_id: "xZfFqfOmKQu_OXekGI59mg".to_string(),
                 features: default_features(),
                 field_toggles: Some(by_id_field_toggles()),
+            },
+        );
+        ops.insert(
+            VIEWER.to_string(),
+            OpMeta {
+                query_id: "TpQxQtWMTMnIAMPlMGMqNw".to_string(),
+                features: viewer_features(),
+                field_toggles: Some(json!({
+                    "isDelegate": false,
+                    "withAuxiliaryUserLabels": false
+                })),
             },
         );
         Self {
@@ -197,6 +211,22 @@ pub(crate) fn by_id_variables(id: &str) -> Value {
         "includePromotedContent": false,
         "withVoice": false,
         "withBirdwatchNotes": true
+    })
+}
+
+pub(crate) fn viewer_variables() -> Value {
+    json!({ "withCommunitiesMemberships": true })
+}
+
+fn viewer_features() -> Value {
+    json!({
+        "creator_subscriptions_tweet_preview_api_enabled": true,
+        "profile_label_improvements_pcf_label_in_post_enabled": true,
+        "responsive_web_graphql_timeline_navigation_enabled": true,
+        "responsive_web_profile_redirect_enabled": true,
+        "rweb_tipjar_consumption_enabled": false,
+        "subscriptions_upsells_api_enabled": false,
+        "verified_phone_label_enabled": false
     })
 }
 

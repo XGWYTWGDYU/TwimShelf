@@ -388,6 +388,9 @@ pub(crate) fn parse_account(root: &Value) -> Option<Account> {
             "/data/user_result/result/core/screen_name",
             "/data/user_results/result/core/screen_name",
             "/data/viewer/user_results/result/core/screen_name",
+            "/data/viewer/user_results/result/legacy/screen_name",
+            "/users/0/screen_name",
+            "/0/user/screen_name",
         ],
     )?;
     let screen_name = screen_name.trim().trim_start_matches('@').to_string();
@@ -404,6 +407,9 @@ pub(crate) fn parse_account(root: &Value) -> Option<Account> {
             "/data/user_result/result/core/name",
             "/data/user_results/result/core/name",
             "/data/viewer/user_results/result/core/name",
+            "/data/viewer/user_results/result/legacy/name",
+            "/users/0/name",
+            "/0/user/name",
         ],
     )
     .filter(|name| !name.trim().is_empty());
@@ -531,5 +537,27 @@ mod tests {
         let account = parse_account(&value).unwrap();
         assert_eq!(account.screen_name, "someone");
         assert_eq!(account.name, None);
+    }
+
+    #[test]
+    fn parses_account_from_viewer_and_multi_list() {
+        let viewer: Value = serde_json::json!({"data": {"viewer": {"user_results": {"result": {
+            "core": {"screen_name": "someone", "name": "Some One"}
+        }}}}});
+        let legacy: Value = serde_json::json!({"data": {"viewer": {"user_results": {"result": {
+            "legacy": {"screen_name": "someone", "name": "Some One"}
+        }}}}});
+        let multi: Value = serde_json::json!({"users": [
+            {"user_id": "1", "screen_name": "someone", "name": "Some One"}
+        ]});
+        let old_multi: Value = serde_json::json!([
+            {"user": {"id_str": "1", "screen_name": "someone", "name": "Some One"}}
+        ]);
+        for value in [viewer, legacy, multi, old_multi] {
+            let account = parse_account(&value).unwrap();
+            assert_eq!(account.screen_name, "someone");
+            assert_eq!(account.name.as_deref(), Some("Some One"));
+        }
+        assert!(parse_account(&serde_json::json!({"users": []})).is_none());
     }
 }
