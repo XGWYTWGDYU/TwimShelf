@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>$(TL_APP_NAME)</string>
+	<string>TwimShelf</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

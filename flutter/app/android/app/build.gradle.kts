@@ -22,7 +22,6 @@ android {
 
     defaultConfig {
         applicationId = identity.getProperty("applicationId")
-        manifestPlaceholders["appName"] = identity.getProperty("appName")
         manifestPlaceholders["shareEnabled"] = identity.getProperty("shareEnabled")
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -104,7 +103,7 @@ abstract class GenerateShareCatalogTask : DefaultTask() {
 val generateShareCatalog = tasks.register<GenerateShareCatalogTask>("generateShareCatalog") {
     catalogsDirectory.set(layout.projectDirectory.dir("../../assets/l10n"))
     outputDirectory.set(layout.buildDirectory.dir("generated/res/shareCatalog"))
-    appName.set(identity.getProperty("appName"))
+    appName.set("TwimShelf")
 }
 androidComponents.onVariants { variant ->
     variant.sources.res?.addGeneratedSourceDirectory(generateShareCatalog,

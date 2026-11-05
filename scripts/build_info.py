@@ -20,7 +20,7 @@ print(json.dumps({
     'version': get('version'),
     'build_number': get('build_number'),
     'source_commit': sys.argv[1] if len(sys.argv) > 1 else '',
-    'app_name': get('native.name'),
+    'app_name': 'TwimShelf',
     'native': {
         'macOS': {'minimum_version': '15.0', 'architecture': 'arm64', 'bundle_id': f'{bundle}.mac',
                   'signing': 'ad-hoc', 'notarized': False, 'share_extension': get('native.share_extension_mac') == 'true'},

@@ -5,8 +5,9 @@ project(runner LANGUAGES CXX)
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "twimshelf")
-# name, application id, "open with": from config.yaml (scripts/apply.py)
+# application id, "open with": from config.yaml (scripts/apply.py)
 include("${CMAKE_CURRENT_SOURCE_DIR}/identity.cmake")
+set(TL_APP_NAME "TwimShelf")
 # The icon name stays stable across release and debug builds.
 set(APP_ICON_NAME "${TL_APPLICATION_ID}")
 # The unique GTK application identifier for this application. See:

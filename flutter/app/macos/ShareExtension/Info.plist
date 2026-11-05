@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Import to $(TL_APP_NAME)</string>
+	<string>Import to TwimShelf</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -33,7 +33,7 @@
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
 	</dict>
 	<key>TLAppName</key>
-	<string>$(TL_APP_NAME)</string>
+	<string>TwimShelf</string>
 	<key>TLAppGroup</key>
 	<string>$(TL_APP_GROUP)</string>
 	<key>TLAppURLScheme</key>

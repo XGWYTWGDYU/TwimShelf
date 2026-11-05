@@ -1243,7 +1243,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(TL_BUNDLE_ID).mac.debug";
 				SDKROOT = macosx;
-				TL_URL_SCHEME = "$(TL_URL_SCHEME_BASE)-debug";
+				TL_URL_SCHEME = "twimshelf-debug";
 			};
 			name = Debug;
 		};
@@ -1336,7 +1336,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "$(TL_BUNDLE_ID).mac.share";
 				PRODUCT_NAME = TwimShelfShare;
 				SDKROOT = macosx;
-				TL_URL_SCHEME = "$(TL_URL_SCHEME_BASE)";
+				TL_URL_SCHEME = twimshelf;
 			};
 			name = Release;
 		};
@@ -1444,7 +1444,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(TL_BUNDLE_ID).mac";
 				SDKROOT = macosx;
-				TL_URL_SCHEME = "$(TL_URL_SCHEME_BASE)";
+				TL_URL_SCHEME = twimshelf;
 			};
 			name = Release;
 		};
@@ -1468,7 +1468,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "$(TL_BUNDLE_ID).mac.debug.share";
 				PRODUCT_NAME = TwimShelfShare;
 				SDKROOT = macosx;
-				TL_URL_SCHEME = "$(TL_URL_SCHEME_BASE)-debug";
+				TL_URL_SCHEME = "twimshelf-debug";
 			};
 			name = Debug;
 		};

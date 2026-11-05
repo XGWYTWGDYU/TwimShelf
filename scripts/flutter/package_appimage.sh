@@ -32,7 +32,6 @@ exec "$HERE/twimshelf" "$@"
 RUN
 chmod +x "$app/AppRun"
 mkdir -p "$out"
-name=$(python3 "$ROOT/scripts/apply.py" get flutter.name | tr -d ' ')
-target="$out/$name-Flutter-$version-linux-$arch.AppImage"
+target="$out/TwimShelf-Flutter-$version-linux-$arch.AppImage"
 ARCH=$arch APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$app" "$target"
 echo "$target"

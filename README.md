@@ -64,7 +64,7 @@ cd TwimShelf
 
 Windows 上运行 `powershell -ExecutionPolicy Bypass -File build.ps1`。详细说明、Xcode 的用法和常见问题见 **[构建指南](BUILDING.md)**。
 
-应用名称、图标、Bundle ID、分享扩展、构建目录都集中在 [`config.yaml`](config.yaml) 里修改。
+Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都集中在 [`config.yaml`](config.yaml) 里修改。图标来自根目录的 `icon.png`。
 
 ## 源码结构
 

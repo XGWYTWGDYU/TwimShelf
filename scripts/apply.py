@@ -8,19 +8,20 @@
   python3 scripts/apply.py where cache|apps|build         a build location (absolute)
 
 Writes small generated files that the projects read (never edits code):
-  native/Identity.xcconfig                    native: names, bundle ids, version, signing, app groups
+  native/Identity.xcconfig                    native: bundle ids, version, signing, app groups
   flutter/app/ios/Flutter/Identity.xcconfig   Flutter iOS
   flutter/app/macos/Runner/Configs/Identity.xcconfig   Flutter macOS
-  flutter/app/android/identity.properties     Android: applicationId, name, share target
-  flutter/app/linux/identity.cmake            Linux: application id, name
-  flutter/app/windows/runner/identity.h       Windows: window title, file names
-  flutter/installer/product.json                    the Windows setup
+  flutter/app/android/identity.properties     Android: applicationId, share target
+  flutter/app/linux/identity.cmake            Linux: application id, "open with"
+  flutter/app/lib/app/identity.g.dart         Dart: the Linux application id
+  flutter/installer/product.json              the Windows setup: "send to"
 the build location (build.dir: <dir>/cache for every cache, <dir>/apps for packages):
   the Xcode projects' Derived Data location (per-user project settings, not committed) and
       BuildLocation.xcconfig (the Rust core's cache for Xcode builds; not committed)
   links from the Flutter projects' build folders (build, .dart_tool, .gradle, Pods, .cxx, the
       Rust core libraries) into <dir>/cache
-and, when they changed, the icons (native AppIcon set, Flutter launcher icons), the Flutter Xcode
+and, when they changed, the icons (icon.png to the native AppIcon set to the Flutter launcher
+icons), the Flutter Xcode
 projects and the native Xcode project (only when a share extension is switched on or off).
 Only the Python standard library is used, plus Pillow when icons have to be made.
 """
@@ -30,6 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FLUTTER = ROOT / 'flutter/app'
 STATE = ROOT / 'native/.applied.json'
+ICON = 'icon.png'   # the one source of every icon of every app
 
 
 def load_yaml(path):
@@ -94,15 +96,30 @@ def locations(c):
     return {'build': b, 'cache': b / 'cache', 'apps': b / 'apps'}
 
 
+def is_link(p):
+    """A symbolic link, or on Windows a junction."""
+    try:
+        return p.is_symlink() or bool(getattr(os.lstat(p), 'st_reparse_tag', 0))
+    except OSError:
+        return False
+
+
+def remove_link(p):
+    if sys.platform == 'win32':
+        os.rmdir(p)  # removes the link, never what it points to
+    else:
+        p.unlink()
+
+
 def link(path, target):
     """`path` (in the source tree) becomes a link to `target` (in the cache). What a real folder
     already holds moves along; a link elsewhere (an older location) is pointed here."""
     p, t = ROOT / path, Path(target)
     t.mkdir(parents=True, exist_ok=True)
-    if p.is_symlink():
-        if Path(os.readlink(p)) == t:
+    if is_link(p):
+        if Path(os.readlink(p).removeprefix('\\\\?\\')) == t:
             return
-        p.unlink()
+        remove_link(p)
     elif p.exists():
         for item in p.iterdir():
             dest = t / item.name
@@ -110,23 +127,22 @@ def link(path, target):
                 shutil.move(str(item), str(dest))
         shutil.rmtree(p)
     p.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.symlink(t, p, target_is_directory=True)
-    except OSError:
-        if sys.platform != 'win32':
-            raise
-        # Windows without Developer Mode: a junction needs no special right
+    if sys.platform == 'win32':
+        # a junction: it needs no special right, and CMake refuses to unpack archives through a
+        # symbolic link (llama.cpp, media_kit)
         subprocess.check_call(['cmd', '/c', 'mklink', '/J', str(p), str(t)], stdout=subprocess.DEVNULL)
+    else:
+        os.symlink(t, p, target_is_directory=True)
 
 
 def unlink(path):
     """A link made by an earlier version of this script goes back to a real folder (with what
     the cache held)."""
     p = ROOT / path
-    if not p.is_symlink():
+    if not is_link(p):
         return
-    target = Path(os.readlink(p))
-    p.unlink()
+    target = Path(os.readlink(p).removeprefix('\\\\?\\'))
+    remove_link(p)
     if target.exists():
         shutil.move(str(target), str(p))
 
@@ -202,10 +218,9 @@ def native(c, state):
     style, identity = mac_signing(team, n.get('mac_signing_identity', ''))
     # an app group is written differently on iOS and the Mac. With no share extension the app has
     # no entitlements at all, so that any Apple account (or on the Mac, none) can sign it.
-    group_ios = (n.get('app_group_ios') or f"group.{n['bundle_id']}") if share_ios else ''
-    group_mac = (n.get('app_group_mac') or f"{team}.{n['bundle_id']}") if share_mac else ''
+    group_ios = f"group.{n['bundle_id']}" if share_ios else ''
+    group_mac = f"{team}.{n['bundle_id']}" if share_mac else ''
     write('native/Identity.xcconfig', HEADER + '\n'.join([
-        f"TL_APP_NAME = {n['name']}",
         f"TL_BUNDLE_ID = {n['bundle_id']}",
         f"MARKETING_VERSION = {c['version']}",
         f"CURRENT_PROJECT_VERSION = {c['build_number']}",
@@ -216,15 +231,8 @@ def native(c, state):
         f"TL_MAC_ENTITLEMENTS = {'native/macOS/TwimShelf.entitlements' if share_mac else ''}",
         f"TL_MAC_SIGN_IDENTITY = {identity}",
         f"TL_MAC_SIGN_STYLE = {style}",
-        f"TL_URL_SCHEME_BASE = {n.get('url_scheme', 'twimshelf')}",
     ]) + '\n// where builds go: build.dir in config.yaml (generated by the same script, not committed)\n#include? "BuildLocation.xcconfig"\n')
-    # the share extension's name in the share sheet: a system string, the app's name written into it
-    plist = ROOT / 'native/ShareExtension/InfoPlist.xcstrings'
-    old = state.get('native_name', 'TwimShelf')
-    if old != n['name'] and plist.exists():
-        plist.write_text(plist.read_text(encoding='utf8').replace(old, n['name']), encoding='utf8')
-    state['native_name'] = n['name']
-    app_icon_set(c)
+    app_icon_set()
     # the share extension is a target the apps embed or not: project.yml says which (its two
     # embedding lines); the Xcode project is generated again only when that changes
     share = {'iOS': share_ios, 'macOS': share_mac}
@@ -245,16 +253,16 @@ def native(c, state):
             sys.exit('config: the share extension changed: run this again with XcodeGen installed (brew install xcodegen)')
 
 
-def app_icon_set(c):
-    """The native AppIcon set (committed, the source of every other icon) from `icon` of
-    config.yaml; made again only when that file changed, so most builds need no image library."""
+def app_icon_set():
+    """The native AppIcon set (committed, the source of every other icon) from icon.png; made again
+    only when that file changed, so most builds need no image library."""
     tool = ROOT / 'scripts/flutter/make_icons.py'
     stamp = ROOT / 'native/Resources/Assets.xcassets/AppIcon.appiconset/source.sha256'
-    current = file_hash(c['icon'])
+    current = file_hash(ICON)
     if not current:
-        sys.exit(f"config.yaml: icon {c['icon']} does not exist")
+        sys.exit(f'{ICON} does not exist')
     if not stamp.exists() or stamp.read_text().strip() != current:
-        r = subprocess.run([sys.executable, str(tool), '--app-icon', str(ROOT / c['icon'])])
+        r = subprocess.run([sys.executable, str(tool), '--app-icon', str(ROOT / ICON)])
         if r.returncode != 0:
             sys.exit('config: the AppIcon set could not be made (scripts/flutter/make_icons.py)')
         stamp.write_text(current + '\n')
@@ -284,7 +292,6 @@ def flutter(c, state):
     team = f.get('development_team', '')
     need_team('flutter', team, share_ios or share_mac)
     write('flutter/app/ios/Flutter/Identity.xcconfig', HEADER + '\n'.join([
-        f"TL_APP_NAME = {f['apple_name']}",
         f"PRODUCT_BUNDLE_IDENTIFIER = {f['apple_bundle_id']}",
         f"DEVELOPMENT_TEAM = {team}",
         f"TL_FLUTTER_BUNDLE = {f['apple_bundle_id']}",
@@ -294,7 +301,6 @@ def flutter(c, state):
     ]) + '\n// where builds go: build.dir in config.yaml (not committed)\n#include? "BuildLocation.xcconfig"\n')
     style, identity = mac_signing(team)
     write('flutter/app/macos/Runner/Configs/Identity.xcconfig', HEADER + '\n'.join([
-        f"TL_APP_NAME = {f['apple_name']}",
         f"PRODUCT_BUNDLE_IDENTIFIER = {f['apple_bundle_id']}",
         f"DEVELOPMENT_TEAM = {team}",
         f"TL_FLUTTER_BUNDLE = {f['apple_bundle_id']}",
@@ -321,35 +327,26 @@ def flutter(c, state):
     if new != text:
         pubspec.write_text(new, encoding='utf-8')
     write('flutter/app/lib/app/identity.g.dart', HEADER + '\n'.join([
-        "import 'dart:io';",
-        '',
-        '/// This build\'s name, as the system shows it.',
-        f"String get appName => Platform.isIOS || Platform.isMacOS ? {json.dumps(f['apple_name'], ensure_ascii=False)} : {json.dumps(f['name'], ensure_ascii=False)};",
+        "const appName = 'TwimShelf';",
         '',
         '/// The application id on Linux: menu entry, icon, window class.',
         f"const desktopId = {json.dumps(f['desktop_id'])};",
     ]) + '\n')
     write('flutter/app/android/identity.properties', '# ' + HEADER[3:] + '\n'.join([
         f"applicationId={f['android_package']}",
-        f"appName={f['name']}",
         f"shareEnabled={'true' if share else 'false'}",
     ]) + '\n')
     write('flutter/app/linux/identity.cmake', '# ' + HEADER[3:] + '\n'.join([
         f'set(TL_APPLICATION_ID "{f["desktop_id"]}")',
-        f'set(TL_APP_NAME "{f["name"]}")',
         f'set(TL_SHARE_ENABLED {"ON" if share else "OFF"})',
     ]) + '\n')
-    write('flutter/app/windows/runner/identity.h', HEADER + '#pragma once\n' + '\n'.join([
-        f'#define TL_APP_NAME_W L"{f["name"]}"',
-        f'#define TL_APP_NAME "{f["name"]}"',
-    ]) + '\n')
-    product = {'id': re.sub(r'[^A-Za-z0-9.]', '', f['name']) or 'App', 'name': f['name'], 'publisher': f['name'],
-               'executable': 'TwimShelf.exe', 'file': re.sub(r'\s+', '', f['name']), 'version': '0', 'sendTo': share}
+    product = {'id': 'TwimShelf', 'name': 'TwimShelf', 'publisher': 'TwimShelf',
+               'executable': 'TwimShelf.exe', 'file': 'TwimShelf', 'version': '0', 'sendTo': share}
     write('flutter/installer/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
     # every icon of the Flutter apps comes from the AppIcon set; without them there is no build
-    app_icon_set(c)
+    app_icon_set()
     tool = ROOT / 'scripts/flutter/make_icons.py'
-    stamp = file_hash(c['icon']) + file_hash('scripts/flutter/make_icons.py')
+    stamp = file_hash(ICON) + file_hash('scripts/flutter/make_icons.py')
     if state.get('flutter_icon') != stamp or subprocess.run([sys.executable, str(tool), '--check'], stdout=subprocess.DEVNULL).returncode != 0:
         r = subprocess.run([sys.executable, str(tool)])
         if r.returncode != 0:

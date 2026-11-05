@@ -131,14 +131,12 @@ powershell -ExecutionPolicy Bypass -File build.ps1 flutter-windows
 
 ## 配置：config.yaml
 
-所有版本的身份都在根目录的 [`config.yaml`](config.yaml) 里。改完之后不需要手动做什么，`build.sh`、`build.ps1` 和 Xcode 的构建按钮都会先按它重新生成配置。
+Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都在根目录的 [`config.yaml`](config.yaml) 里，代码里用到它们的地方都引用这里。应用名称 TwimShelf 直接写在代码里，不在配置中。改完之后不需要手动做什么，`build.sh`、`build.ps1` 和 Xcode 的构建按钮都会先按它重新生成配置。
 
 | 配置项 | 含义 |
 | --- | --- |
 | `version`、`build_number` | 所有平台共用的版本号和构建号 |
-| `icon` | 图标来源，默认 `icon.png` |
 | `build.dir` | 构建缓存和产物的位置 |
-| `native.name`、`flutter.name`、`flutter.apple_name` | 显示的应用名称 |
 | `native.bundle_id` | 原生版的 Bundle ID 前缀：iOS 用 `<前缀>.ios`，Mac 用 `<前缀>.mac` |
 | `flutter.apple_bundle_id` | Flutter 版 iOS 和 macOS 的 Bundle ID |
 | `flutter.android_package` | Android 的 applicationId |
@@ -176,7 +174,7 @@ iOS 和 Mac 的「分享到 TwimShelf」默认关闭。扩展通过 App Group �
 开启方法：
 
 1. 在 `config.yaml` 里把对应的 `share_extension_ios` 或 `share_extension_mac` 改成 `true`，并填写同一节的 `development_team`（只在 Xcode 里选 Team 不够）。这是个人信息，不要提交这个改动。
-2. 如果要自定义共享组，填写 `native.app_group_ios`、`native.app_group_mac`。留空时 iOS 使用 `group.<bundle_id>`，Mac 使用 `<Team ID>.<bundle_id>`。Flutter 版的共享组由 `apple_bundle_id` 决定。
+2. 共享组由 Bundle ID 决定：iOS 使用 `group.<bundle_id>`，Mac 使用 `<Team ID>.<bundle_id>`，不用单独配置。
 3. 运行配置。原生版开关变化时需要重新生成工程，所以要先安装 XcodeGen：
 
 ```bash

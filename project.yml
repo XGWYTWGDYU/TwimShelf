@@ -7,7 +7,7 @@ packages:
   # the MLX engine, shared with the Flutter app's Apple runner (it brings mlx-swift-lm and
   # swift-transformers)
   TLLocalAI: { path: native/TLLocalAI }
-# names, bundle ids, version, team, app groups, URL scheme: from config.yaml (scripts/apply.py)
+# bundle ids, version, team, app groups: from config.yaml (scripts/apply.py)
 configFiles:
   Debug: native/Identity.xcconfig
   Release: native/Identity.xcconfig
@@ -49,7 +49,7 @@ targets:
     info:
       path: native/iOS/Info.plist
       properties: &plist
-        CFBundleDisplayName: $(TL_APP_NAME)
+        CFBundleDisplayName: TwimShelf
         TLAppGroup: $(TL_APP_GROUP_IOS)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -90,19 +90,19 @@ targets:
       configs:
         # debug builds are a separate app: own settings, keychain items and window frames,
         # so test runs never read or change the installed app's
-        Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug, TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)-debug }
+        Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug, TL_URL_SCHEME: twimshelf-debug }
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac
         ARCHS: arm64
         CODE_SIGN_ENTITLEMENTS: $(TL_MAC_ENTITLEMENTS)   # none without the share extension
-        TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)
+        TL_URL_SCHEME: twimshelf
         CODE_SIGN_STYLE: $(TL_MAC_SIGN_STYLE)
         CODE_SIGN_IDENTITY: $(TL_MAC_SIGN_IDENTITY)
         DEVELOPMENT_TEAM: $(TL_TEAM)
     info:
       path: native/macOS/Info.plist
       properties:
-        CFBundleDisplayName: $(TL_APP_NAME)
+        CFBundleDisplayName: TwimShelf
         TLAppGroup: $(TL_APP_GROUP_MAC)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -143,8 +143,8 @@ targets:
     info:
       path: native/ShareExtension/iOS/Info.plist
       properties:
-        CFBundleDisplayName: Import to $(TL_APP_NAME)
-        TLAppName: $(TL_APP_NAME)
+        CFBundleDisplayName: Import to TwimShelf
+        TLAppName: TwimShelf
         TLAppGroup: $(TL_APP_GROUP_IOS)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -161,13 +161,13 @@ targets:
     sources: [native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift, native/ShareExtension/InfoPlist.xcstrings, native/ShareExtension/macOS, native/Shared/L10n.swift, native/Resources/Localizable.xcstrings, native/Resources/Assets.xcassets]   # the icon in the share menu
     settings:
       configs:
-        Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug.share, TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)-debug }
+        Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug.share, TL_URL_SCHEME: twimshelf-debug }
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.share
         PRODUCT_NAME: TwimShelfShare
         ARCHS: arm64
         CODE_SIGN_ENTITLEMENTS: native/ShareExtension/macOS/Share.entitlements
-        TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)
+        TL_URL_SCHEME: twimshelf
         CODE_SIGN_STYLE: $(TL_MAC_SIGN_STYLE)
         CODE_SIGN_IDENTITY: $(TL_MAC_SIGN_IDENTITY)
         DEVELOPMENT_TEAM: $(TL_TEAM)
@@ -175,8 +175,8 @@ targets:
     info:
       path: native/ShareExtension/macOS/Info.plist
       properties:
-        CFBundleDisplayName: Import to $(TL_APP_NAME)
-        TLAppName: $(TL_APP_NAME)
+        CFBundleDisplayName: Import to TwimShelf
+        TLAppName: TwimShelf
         TLAppGroup: $(TL_APP_GROUP_MAC)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         TLAppURLScheme: $(TL_URL_SCHEME)

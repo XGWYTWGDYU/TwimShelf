@@ -20,9 +20,9 @@ def config(key):
 
 
 def generate(output, app_id=None, app_name=None, icon_name=None):
-    """app_id (a debug build's has its suffix), app_name, icon_name: from config.yaml unless given."""
+    """app_id (a debug build's has its suffix), icon_name: from config.yaml unless given."""
     app_id = app_id or config('flutter.desktop_id')
-    app_name = app_name or config('flutter.name')
+    app_name = app_name or 'TwimShelf'
     icon_name = icon_name or app_id
     output = Path(output).resolve()
     build = Path(subprocess.check_output([sys.executable, str(ROOT / 'scripts/apply.py'), 'where', 'build'], text=True).strip()).resolve()

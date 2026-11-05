@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Import to $(TL_APP_NAME)</string>
+	<string>Import to TwimShelf</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -35,7 +35,7 @@
 	<key>TLAppGroup</key>
 	<string>$(TL_APP_GROUP_MAC)</string>
 	<key>TLAppName</key>
-	<string>$(TL_APP_NAME)</string>
+	<string>TwimShelf</string>
 	<key>TLAppURLScheme</key>
 	<string>$(TL_URL_SCHEME)</string>
 </dict>
