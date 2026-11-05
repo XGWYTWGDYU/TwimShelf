@@ -162,7 +162,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 flutter-windows
 | `build/cache` | 所有缓存：Rust、Xcode Derived Data、Flutter、Gradle、Dart 依赖、下载的 SDK、日志 |
 | `build/apps` | 安装包 |
 
-完整构建所有平台大约需要几十 GB。空间不够时可以把 `build.dir` 改成其他磁盘上的绝对路径，或者直接删除 `build` 目录来清理。有两个例外，它们都留在工程目录里，同样被 Git 忽略：CocoaPods 的 `Pods`，以及 Windows 上 Flutter 的 `flutter/app/build`、`flutter/installer/build`。
+完整构建所有平台大约需要几十 GB。空间不够时可以把 `build.dir` 改成其他磁盘上的绝对路径，或者直接删除 `build` 目录来清理。CocoaPods 的 `Pods` 是个例外，它必须留在工程目录里（同样被 Git 忽略）。
 
 ## 开启苹果平台的分享扩展
 

@@ -26,8 +26,7 @@ def generate(output, app_id=None, app_name=None, icon_name=None):
     icon_name = icon_name or app_id
     output = Path(output).resolve()
     build = Path(subprocess.check_output([sys.executable, str(ROOT / 'scripts/apply.py'), 'where', 'build'], text=True).strip()).resolve()
-    allowed = (build, ROOT / 'flutter/app/build', ROOT / 'flutter/installer/build')   # the last two: Windows
-    if (output == ROOT or ROOT in output.parents) and not any(a in output.parents for a in allowed):
+    if (output == ROOT or ROOT in output.parents) and build not in output.parents:
         raise ValueError('Generated assets belong in build.dir of config.yaml, not in the sources')
     # what an earlier id left here would go into the bundle with the rest
     shutil.rmtree(output / 'icons', ignore_errors=True)

@@ -48,6 +48,10 @@ if(TL_LLAMA_VULKAN)
 endif()
 
 include(FetchContent)
+# CMake refuses to unpack an archive through a link, and on Windows the build folder is reached
+# through one (flutter/app/build, scripts/apply.py): unpack in the folder it really is
+file(REAL_PATH "${CMAKE_BINARY_DIR}" TL_REAL_BINARY_DIR)
+set(FETCHCONTENT_BASE_DIR "${TL_REAL_BINARY_DIR}/_deps")
 # the NDK has Vulkan's C headers only; llama.cpp's backend is written against the C++ ones
 if(ANDROID AND GGML_VULKAN)
   FetchContent_Declare(vulkan_headers
