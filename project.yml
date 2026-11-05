@@ -1,171 +1,183 @@
-# Template: run python3 scripts/configure.py; do not run XcodeGen on this file directly.
 name: TwimShelf
 options:
-  bundleIdPrefix: ""
+  bundleIdPrefix: org.twimshelf
+  # English is the fallback for languages the app does not have; the catalogs hold zh-Hans, zh-Hant, ja too
+  developmentLanguage: en
 packages:
-  mlx-swift-lm: { url: https://github.com/ml-explore/mlx-swift-lm, from: 3.32.3 }
-  swift-transformers: { url: https://github.com/huggingface/swift-transformers, from: 1.3.0 }
+  # the MLX engine, shared with the Flutter app's Apple runner (it brings mlx-swift-lm and
+  # swift-transformers)
+  TLLocalAI: { path: native/TLLocalAI }
+# names, bundle ids, version, team, app groups, URL scheme: from config.yaml (scripts/apply.py)
+configFiles:
+  Debug: native/Identity.xcconfig
+  Release: native/Identity.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    SWIFT_OBJC_BRIDGING_HEADER: app/Shared/tl_core.h
+    SWIFT_OBJC_BRIDGING_HEADER: native/Shared/tl_core.h
     OTHER_LDFLAGS: -ltl_core
     LIBRARY_SEARCH_PATHS: $(BUILT_PRODUCTS_DIR)
     CODE_SIGN_IDENTITY: "-"
     PRODUCT_NAME: TwimShelf
-    MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "1"
-    ASSETCATALOG_COMPILER_APPICON_NAME: ""
+    # GitHub builds pass TL_UPDATE_REPO=owner/name (检查更新); empty everywhere else = no update check
+    TL_UPDATE_REPO: ""
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     SWIFT_STRICT_CONCURRENCY: minimal
 targetTemplates:
   App:
     dependencies:
-      - { package: mlx-swift-lm, product: MLXVLM }
-      - { package: mlx-swift-lm, product: MLXLMCommon }
-      - { package: mlx-swift-lm, product: MLXEmbedders }
-      - { package: swift-transformers, product: Tokenizers }
+      - { package: TLLocalAI }
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
 targets:
-  TwitterLibrary-iOS:
+  TwimShelf-iOS:
     templates: [App]
     type: application
     platform: iOS
     deploymentTarget: "18.0"
-    sources: [app/Shared, app/iOS, app/Resources]
-    dependencies:
-      - { target: TwitterLibrary-iOSShare, embed: true, codeSign: true }
+    sources: [native/Shared, native/iOS, native/Resources, native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift]
+    dependencies: []   # share-extension (TwimShelf-iOSShare)
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
-        DEVELOPMENT_TEAM: ""
-        PRODUCT_BUNDLE_IDENTIFIER: ""
-        CODE_SIGN_ENTITLEMENTS: app/iOS/TwitterLibrary.entitlements
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: $(TL_TEAM)
+        PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).ios
+        CODE_SIGN_ENTITLEMENTS: $(TL_IOS_ENTITLEMENTS)   # none without the share extension
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     info:
-      path: app/iOS/Info.plist
+      path: native/iOS/Info.plist
       properties: &plist
-        CFBundleDisplayName: TwimShelf
+        CFBundleDisplayName: $(TL_APP_NAME)
+        TLAppGroup: $(TL_APP_GROUP_IOS)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        TLUpdateRepository: $(TL_UPDATE_REPO)
         UILaunchScreen: { UIColorName: "" }
         UIApplicationSceneManifest: { UIApplicationSupportsMultipleScenes: false }
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         "UISupportedInterfaceOrientations~ipad": [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
-        NSLocalNetworkUsageDescription: 用于在局域网中发现你的其他设备并直接同步资料库。
+        NSLocalNetworkUsageDescription: Used to find your other devices on the local network and sync the library with them directly.
+        NSFaceIDUsageDescription: Used to unlock the app when the app lock is on.
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: downloadPosts
+            UIApplicationShortcutItemTitle: Download Posts
+            UIApplicationShortcutItemIconSymbolName: arrow.down.circle
         NSBonjourServices: [_twlib._tcp]
         UIBackgroundModes: [audio]
         CADisableMinimumFrameDurationOnPhone: true   # 120 Hz grid zoom on ProMotion phones
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: false
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: local.twitterlibrary.tlpack
-            UTTypeDescription: TwimShelf 导出包
+          - UTTypeIdentifier: org.twimshelf.tlpack
+            UTTypeDescription: TwimShelf Export
             UTTypeConformsTo: [public.zip-archive, public.data]
             UTTypeTagSpecification: { public.filename-extension: [tlpack] }
         CFBundleDocumentTypes:
-          - CFBundleTypeName: TwimShelf 导出包
-            LSItemContentTypes: [local.twitterlibrary.tlpack]
+          - CFBundleTypeName: TwimShelf Export
+            LSItemContentTypes: [org.twimshelf.tlpack]
             LSHandlerRank: Owner
             CFBundleTypeRole: Viewer
-  TwitterLibrary-macOS:
+  TwimShelf-macOS:
     templates: [App]
     type: application
     platform: macOS
     deploymentTarget: "15.0"
-    sources: [app/Shared, app/macOS, app/Resources]
-    dependencies:
-      - { target: TwitterLibrary-macOSShare, embed: true, codeSign: true }
+    sources: [native/Shared, native/macOS, native/Resources, native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift]
+    dependencies: []   # share-extension (TwimShelf-macOSShare)
     settings:
       configs:
         # debug builds are a separate app: own settings, keychain items and window frames,
         # so test runs never read or change the installed app's
-        Debug: { PRODUCT_BUNDLE_IDENTIFIER: "", TL_URL_SCHEME: twimshelf-debug }
+        Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug, TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)-debug }
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ""
+        PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac
         ARCHS: arm64
-        CODE_SIGN_ENTITLEMENTS: app/macOS/TwitterLibrary.entitlements
-        TL_URL_SCHEME: twimshelf
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
-        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_ENTITLEMENTS: $(TL_MAC_ENTITLEMENTS)   # none without the share extension
+        TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)
+        CODE_SIGN_STYLE: $(TL_MAC_SIGN_STYLE)
+        CODE_SIGN_IDENTITY: $(TL_MAC_SIGN_IDENTITY)
+        DEVELOPMENT_TEAM: $(TL_TEAM)
     info:
-      path: app/macOS/Info.plist
+      path: native/macOS/Info.plist
       properties:
-        CFBundleDisplayName: TwimShelf
+        CFBundleDisplayName: $(TL_APP_NAME)
+        TLAppGroup: $(TL_APP_GROUP_MAC)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        TLUpdateRepository: $(TL_UPDATE_REPO)
         LSApplicationCategoryType: public.app-category.photography
         CFBundleURLTypes:
-          - CFBundleURLName: local.twitterlibrary.share
+          - CFBundleURLName: $(TL_BUNDLE_ID).share
             CFBundleURLSchemes: [$(TL_URL_SCHEME)]
         NSPrincipalClass: NSApplication
-        NSLocalNetworkUsageDescription: 用于在局域网中发现你的其他设备并直接同步资料库。
+        NSLocalNetworkUsageDescription: Used to find your other devices on the local network and sync the library with them directly.
         NSBonjourServices: [_twlib._tcp, _twlib-debug._tcp]   # the debug build advertises its own type
         UTExportedTypeDeclarations:
-          - UTTypeIdentifier: local.twitterlibrary.tlpack
-            UTTypeDescription: TwimShelf 导出包
+          - UTTypeIdentifier: org.twimshelf.tlpack
+            UTTypeDescription: TwimShelf Export
             UTTypeConformsTo: [public.zip-archive, public.data]
             UTTypeTagSpecification: { public.filename-extension: [tlpack] }
         CFBundleDocumentTypes:
-          - CFBundleTypeName: TwimShelf 导出包
-            LSItemContentTypes: [local.twitterlibrary.tlpack]
+          - CFBundleTypeName: TwimShelf Export
+            LSItemContentTypes: [org.twimshelf.tlpack]
             LSHandlerRank: Owner
             CFBundleTypeRole: Viewer
-  TwitterLibrary-iOSShare:
+  TwimShelf-iOSShare:
     type: app-extension
     platform: iOS
+    preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
     deploymentTarget: "18.0"
-    sources: [app/ShareExtension/Common, app/ShareExtension/iOS]
+    sources: [native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift, native/ShareExtension/InfoPlist.xcstrings, native/ShareExtension/iOS, native/Shared/L10n.swift, native/Resources/Localizable.xcstrings, native/Resources/Assets.xcassets]   # the icon in the share menu
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
-        DEVELOPMENT_TEAM: ""
-        PRODUCT_BUNDLE_IDENTIFIER: ""
+        CODE_SIGN_IDENTITY: "Apple Development"
+        DEVELOPMENT_TEAM: $(TL_TEAM)
+        PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).ios.share
         PRODUCT_NAME: TwimShelfShare
-        SWIFT_OBJC_BRIDGING_HEADER: ""
-        OTHER_LDFLAGS: ""
-        CODE_SIGN_ENTITLEMENTS: app/ShareExtension/iOS/Share.entitlements
+        CODE_SIGN_ENTITLEMENTS: native/ShareExtension/iOS/Share.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     info:
-      path: app/ShareExtension/iOS/Info.plist
+      path: native/ShareExtension/iOS/Info.plist
       properties:
-        CFBundleDisplayName: 导入 TwimShelf
+        CFBundleDisplayName: Import to $(TL_APP_NAME)
+        TLAppName: $(TL_APP_NAME)
+        TLAppGroup: $(TL_APP_GROUP_IOS)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionAttributes:
-            NSExtensionActivationRule: 'SUBQUERY (extensionItems, $extensionItem, SUBQUERY ($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.folder").@count > 0).@count > 0'
-  TwitterLibrary-macOSShare:
+            NSExtensionActivationRule: 'SUBQUERY (extensionItems, $extensionItem, SUBQUERY ($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.folder" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text").@count > 0).@count > 0'
+  TwimShelf-macOSShare:
     type: app-extension
     platform: macOS
+    preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
     deploymentTarget: "15.0"
-    sources: [app/ShareExtension/Common, app/ShareExtension/macOS]
+    sources: [native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift, native/ShareExtension/InfoPlist.xcstrings, native/ShareExtension/macOS, native/Shared/L10n.swift, native/Resources/Localizable.xcstrings, native/Resources/Assets.xcassets]   # the icon in the share menu
     settings:
       configs:
-        Debug: { PRODUCT_BUNDLE_IDENTIFIER: "", TL_URL_SCHEME: twimshelf-debug }
+        Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug.share, TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)-debug }
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ""
+        PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.share
         PRODUCT_NAME: TwimShelfShare
         ARCHS: arm64
-        SWIFT_OBJC_BRIDGING_HEADER: ""
-        OTHER_LDFLAGS: ""
-        CODE_SIGN_ENTITLEMENTS: app/ShareExtension/macOS/Share.entitlements
-        TL_URL_SCHEME: twimshelf
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
-        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_ENTITLEMENTS: native/ShareExtension/macOS/Share.entitlements
+        TL_URL_SCHEME: $(TL_URL_SCHEME_BASE)
+        CODE_SIGN_STYLE: $(TL_MAC_SIGN_STYLE)
+        CODE_SIGN_IDENTITY: $(TL_MAC_SIGN_IDENTITY)
+        DEVELOPMENT_TEAM: $(TL_TEAM)
         ENABLE_APP_SANDBOX: YES
     info:
-      path: app/ShareExtension/macOS/Info.plist
+      path: native/ShareExtension/macOS/Info.plist
       properties:
-        CFBundleDisplayName: 导入 TwimShelf
+        CFBundleDisplayName: Import to $(TL_APP_NAME)
+        TLAppName: $(TL_APP_NAME)
+        TLAppGroup: $(TL_APP_GROUP_MAC)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         TLAppURLScheme: $(TL_URL_SCHEME)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -173,26 +185,54 @@ targets:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionAttributes:
-            NSExtensionActivationRule: 'SUBQUERY (extensionItems, $extensionItem, SUBQUERY ($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.folder").@count > 0).@count > 0'
-  TwitterLibrary-iOSUITests:
+            NSExtensionActivationRule: 'SUBQUERY (extensionItems, $extensionItem, SUBQUERY ($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.folder" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text").@count > 0).@count > 0'
+  TwimShelf-iOSUITests:
     type: bundle.ui-testing
     platform: iOS
     deploymentTarget: "18.0"
-    sources: [app/iOSUITests]
-    dependencies: [{ target: TwitterLibrary-iOS }]
+    sources: [native/iOSUITests]
+    dependencies: [{ target: TwimShelf-iOS }]
     settings:
       base:
-        SWIFT_OBJC_BRIDGING_HEADER: ""
-        OTHER_LDFLAGS: ""
         GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: TwitterLibrary-iOS
-        PRODUCT_NAME: TwitterLibraryUITests
-        PRODUCT_BUNDLE_IDENTIFIER: ""
+        TEST_TARGET_NAME: TwimShelf-iOS
+        PRODUCT_NAME: TwimShelfUITests
+        PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).uitests
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
-
+  # The grid zoom against Photos: 9 recorded pinches replayed frame by frame, and synthetic
+  # gestures (research/MetalGridZoom/Tests). Run after any change to ZoomEngine / GridConfig.
+  GridTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: native/GridTests
+        excludes: [Fixtures]
+      - native/Shared/Grid/GridConfig.swift
+      - native/Shared/Grid/ZoomEngine.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).gridtests
+        SWIFT_OPTIMIZATION_LEVEL: -O
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
 schemes:
-  TwitterLibrary-iOS:
-    build: { targets: { TwitterLibrary-iOS: all, TwitterLibrary-iOSUITests: [test] } }
-    test: { targets: [TwitterLibrary-iOSUITests] }
-  TwitterLibrary-macOS:
-    build: { targets: { TwitterLibrary-macOS: all } }
+  TwimShelf-iOS:
+    build:
+      targets: { TwimShelf-iOS: all, TwimShelf-iOSUITests: [test] }
+      # config.yaml first (names, ids, icons): Xcode reads the generated settings after this
+      preActions:
+        - script: python3 "$SRCROOT/scripts/apply.py" native
+          settingsTarget: TwimShelf-iOS
+    test: { targets: [TwimShelf-iOSUITests] }
+  TwimShelf-macOS:
+    build:
+      targets: { TwimShelf-macOS: all }
+      # config.yaml first (names, ids, icons): Xcode reads the generated settings after this
+      preActions:
+        - script: python3 "$SRCROOT/scripts/apply.py" native
+          settingsTarget: TwimShelf-macOS
+  GridTests:
+    build: { targets: { GridTests: [test] } }
+    test: { targets: [GridTests] }

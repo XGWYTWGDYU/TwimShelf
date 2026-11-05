@@ -33,12 +33,12 @@ pub fn client() -> reqwest::Client {
 /// Reads a response body up to `max` bytes (an answer larger than that is refused, not buffered).
 pub async fn read_limited(resp: reqwest::Response, max: usize) -> anyhow::Result<Vec<u8>> {
     use futures_util::StreamExt;
-    if resp.content_length().map_or(false, |n| n as usize > max) { bail!("响应过大"); }
+    if resp.content_length().map_or(false, |n| n as usize > max) { bail!(tr!("net.tooLarge")); }
     let mut out = Vec::new();
     let mut s = resp.bytes_stream();
     while let Some(c) = s.next().await {
         let c = c?;
-        if out.len() + c.len() > max { bail!("响应过大"); }
+        if out.len() + c.len() > max { bail!(tr!("net.tooLarge")); }
         out.extend_from_slice(&c);
     }
     Ok(out)

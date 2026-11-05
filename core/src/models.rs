@@ -2,6 +2,11 @@
 //! files, *.safetensors) — the same folder `mlx_lm`/`mlx-vlm` and the HF hub produce. Nothing
 //! proprietary: a model is exported as that folder in a plain ZIP, and any such folder or ZIP can
 //! be imported. Several models can be installed side by side, one folder each.
+//!
+//! The Flutter apps for Android, Windows and Linux run llama.cpp instead: their models are GGUF
+//! files (the weights, and for a vision model its projector) chosen from a Hugging Face repo, in
+//! a folder with a small `tl-model.json` naming them. Only the Apple apps export, import or pull
+//! models from other devices (MLX folders run on Apple silicon only).
 use crate::download::runtime;
 use crate::net::client;
 use anyhow::{bail, Context};
@@ -29,13 +34,24 @@ pub struct ModelInfo {
     pub vision: bool,
     pub bytes: u64,
     pub path: String,
+    /// `mlx` (a model folder) or `gguf` (llama.cpp files named by `tl-model.json`).
+    #[serde(default = "mlx")] pub format: String,
+    /// GGUF only: the weights' file and the vision projector's (a tagger has one).
+    #[serde(default)] pub weights: Option<String>,
+    #[serde(default)] pub projector: Option<String>,
 }
+
+fn mlx() -> String { "mlx".into() }
+const GGUF_MANIFEST: &str = "tl-model.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GgufManifest { format: String, #[serde(default)] repo: Option<String>, weights: String, #[serde(default)] projector: Option<String> }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelFile { pub name: String, pub size: u64, pub sha256: Option<String> }
 
 #[derive(Debug, Clone, Serialize, Default)]
-pub struct ModelDownloadStatus { pub repo: String, pub running: bool, pub total_bytes: u64, pub done_bytes: u64, pub file: String, pub error: Option<String>, pub finished: bool }
+pub struct ModelDownloadStatus { pub repo: String, pub running: bool, pub total_bytes: u64, pub done_bytes: u64, pub file: String, pub error: Option<String>, pub finished: bool, pub verifying: bool }
 
 static STATUS: Mutex<Option<ModelDownloadStatus>> = Mutex::new(None);
 /// Limits for an imported model ZIP: files in it, and bytes after unpacking.
@@ -54,7 +70,7 @@ pub(crate) fn begin_external(label: &str, total: u64) -> anyhow::Result<()> {
 /// lock, so two taps (or a download and a pull from another device) can never both start.
 fn claim(s: ModelDownloadStatus) -> anyhow::Result<()> {
     let mut g = STATUS.lock().unwrap_or_else(|e| e.into_inner());
-    if g.as_ref().map_or(false, |s| s.running) { bail!("已有模型正在下载"); }
+    if g.as_ref().map_or(false, |s| s.running) { bail!(tr!("models.busy")); }
     CANCEL.store(false, Ordering::SeqCst);
     *g = Some(s);
     Ok(())
@@ -70,6 +86,12 @@ pub(crate) fn end_external(r: &anyhow::Result<()>) {
 pub(crate) fn is_wanted_file(name: &str) -> bool { wanted(name) }
 pub(crate) fn checked_id(id: &str) -> anyhow::Result<&str> { safe_id(id) }
 pub fn cancel() { CANCEL.store(true, Ordering::SeqCst) }
+/// Waits for `f`, or stops at once when the user cancels (a stalled connection sends nothing that
+/// would otherwise let the download notice).
+async fn or_cancel<F: std::future::Future>(f: F) -> anyhow::Result<F::Output> {
+    let cancelled = async { while !CANCEL.load(Ordering::SeqCst) { tokio::time::sleep(std::time::Duration::from_millis(200)).await; } };
+    tokio::select! { r = f => Ok(r), _ = cancelled => bail!(tr!("common.cancelled")) }
+}
 fn update(f: impl FnOnce(&mut ModelDownloadStatus)) { if let Some(s) = STATUS.lock().unwrap().as_mut() { f(s) } }
 
 pub fn slug(repo: &str) -> String { repo.replace('/', "--") }
@@ -86,22 +108,23 @@ struct TreeEntry { #[serde(rename = "type")] kind: String, path: String, size: u
 #[derive(Deserialize)]
 struct Lfs { oid: String }
 
-pub fn start_download(repo: String, models_dir: PathBuf) -> anyhow::Result<()> {
+/// `revision` pins the files (the store's models); None follows the repo's `main`.
+pub fn start_download(repo: String, revision: Option<String>, models_dir: PathBuf) -> anyhow::Result<()> {
     claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
     runtime().spawn(async move {
-        let r = download(&repo, &models_dir).await;
+        let r = download(&repo, revision.as_deref().unwrap_or("main"), &models_dir).await;
         update(|s| { s.running = false; s.finished = r.is_ok(); s.error = r.err().map(|e| format!("{e:#}")); });
     });
     Ok(())
 }
 
-async fn download(repo: &str, models_dir: &Path) -> anyhow::Result<()> {
-    let tree: Vec<TreeEntry> = client().get(format!("https://huggingface.co/api/models/{repo}/tree/main"))
-        .send().await?.error_for_status()?.json().await.context("读取模型文件列表失败")?;
+async fn download(repo: &str, revision: &str, models_dir: &Path) -> anyhow::Result<()> {
+    let tree: Vec<TreeEntry> = or_cancel(async { client().get(format!("https://huggingface.co/api/models/{repo}/tree/{revision}"))
+        .send().await?.error_for_status()?.json().await.context(tr!("models.listFailed")) }).await??;
     let files: Vec<ModelFile> = tree.into_iter().filter(|e| e.kind == "file" && wanted(&e.path))
         .map(|e| ModelFile { name: e.path, size: e.size, sha256: e.lfs.map(|l| l.oid) }).collect();
-    if !files.iter().any(|f| f.name.ends_with(".safetensors")) { bail!("仓库中没有 safetensors 权重"); }
-    let total: u64 = files.iter().try_fold(0u64, |a, f| a.checked_add(f.size)).ok_or_else(|| anyhow::anyhow!("模型文件大小无效"))?;
+    if !files.iter().any(|f| f.name.ends_with(".safetensors")) { bail!(tr!("models.noWeights")); }
+    let total: u64 = files.iter().try_fold(0u64, |a, f| a.checked_add(f.size)).ok_or_else(|| anyhow::anyhow!(tr!("models.badSize")))?;
     let dir = models_dir.join(slug(repo));
     if is_complete(&dir) { update(|s| { s.total_bytes = total; s.done_bytes = total; }); return Ok(()); }
     fs::create_dir_all(&dir)?;
@@ -109,9 +132,9 @@ async fn download(repo: &str, models_dir: &Path) -> anyhow::Result<()> {
     update(|s| s.total_bytes = total);
     let mut done = 0u64;
     for f in &files {
-        if CANCEL.load(Ordering::SeqCst) { bail!("已取消"); }
+        if CANCEL.load(Ordering::SeqCst) { bail!(tr!("common.cancelled")); }
         update(|s| { s.file = f.name.clone(); s.done_bytes = done; });
-        fetch_file(repo, &dir, f, done).await.with_context(|| format!("下载 {} 失败", f.name))?;
+        fetch_file(repo, revision, &dir, f, done).await.with_context(|| tr!("models.fileFailed", file = f.name))?;
         done += f.size;
     }
     validate_dir(&dir)?;
@@ -121,69 +144,158 @@ async fn download(repo: &str, models_dir: &Path) -> anyhow::Result<()> {
 }
 
 /// Downloads one file with HTTP Range resume, then verifies size (and sha256 for LFS files).
-async fn fetch_file(repo: &str, dir: &Path, f: &ModelFile, base: u64) -> anyhow::Result<()> {
+async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base: u64) -> anyhow::Result<()> {
     let dst = dir.join(&f.name);
-    if dst.exists() && fs::metadata(&dst)?.len() == f.size { return Ok(()); }
+    if dst.exists() && fs::metadata(&dst)?.len() == f.size {
+        // a file of the right length left by an earlier run is checked, when it can be
+        let Some(want) = &f.sha256 else { return Ok(()) };
+        let p = dst.clone();
+        if tokio::task::spawn_blocking(move || sha256_file(&p)).await??.eq_ignore_ascii_case(want) { return Ok(()); }
+        fs::remove_file(&dst)?;
+    }
     let part = dir.join(format!("{}.partial", f.name));
-    for attempt in 0..5u32 {
-        if attempt > 0 { tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await; }
+    // failures in a row: any data received starts the count again, so a long download over a
+    // flaky connection goes on for as long as it moves
+    let mut fails = 0u32;
+    loop {
+        if fails >= 5 { bail!(tr!("models.retriesFailed")); }
+        if fails > 0 { or_cancel(tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(fails)))).await?; }
         let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if have < f.size || f.size == 0 {
-            let mut rq = client().get(format!("https://huggingface.co/{repo}/resolve/main/{}", f.name));
+            update(|s| s.done_bytes = base + have);
+            let mut rq = client().get(format!("https://huggingface.co/{repo}/resolve/{revision}/{}", f.name));
             if have > 0 { rq = rq.header("Range", format!("bytes={have}-")); }
-            let resp = match rq.send().await.and_then(|r| r.error_for_status()) { Ok(r) => r, Err(_) if attempt < 4 => continue, Err(e) => return Err(e.into()) };
+            let resp = match or_cancel(rq.send()).await?.and_then(|r| r.error_for_status()) {
+                Ok(r) => r,
+                Err(_) if fails < 4 => { fails += 1; continue }
+                Err(e) => return Err(e.into()),
+            };
             let append = have > 0 && resp.status().as_u16() == 206;
             let mut out = tokio::fs::OpenOptions::new().create(true).write(true).append(append).truncate(!append).open(&part).await?;
             let mut got = if append { have } else { 0 };
             let mut stream = resp.bytes_stream();
-            let mut failed = false;
-            while let Some(c) = stream.next().await {
-                if CANCEL.load(Ordering::SeqCst) { bail!("已取消"); }
+            let (mut failed, mut moved) = (false, false);
+            while let Some(c) = or_cancel(stream.next()).await? {
                 match c {
-                    Ok(c) => { out.write_all(&c).await?; got += c.len() as u64; update(|s| s.done_bytes = base + got); }
+                    Ok(c) => { out.write_all(&c).await?; got += c.len() as u64; moved = true; update(|s| s.done_bytes = base + got); }
                     Err(_) => { failed = true; break; }
                 }
             }
             out.flush().await?;
             out.sync_all().await?;
-            if failed { continue; }
+            drop(out);
+            if failed { fails = if moved { 1 } else { fails + 1 }; continue; }
         }
         let len = fs::metadata(&part)?.len();
-        if f.size != 0 && len != f.size { let _ = fs::remove_file(&part); continue; }
+        if f.size != 0 && len != f.size { let _ = fs::remove_file(&part); fails += 1; continue; }
         if let Some(want) = &f.sha256 {
+            // a large file takes a while: the status says so, it does not look stuck at 100%
+            update(|s| s.verifying = true);
             let p = part.clone();
-            let got = tokio::task::spawn_blocking(move || sha256_file(&p)).await??;
-            if &got != want { let _ = fs::remove_file(&part); bail!("校验失败"); }
+            let got = tokio::task::spawn_blocking(move || sha256_file(&p)).await?;
+            update(|s| s.verifying = false);
+            if &got? != want { let _ = fs::remove_file(&part); bail!(tr!("models.verifyFailed")); }
         }
-        fs::rename(&part, &dst)?;
+        rename_when_free(&part, &dst).await?;
         return Ok(());
     }
-    bail!("多次重试后仍失败")
+}
+
+/// Windows refuses a rename while another program (an antivirus checking the new file) has it
+/// open, usually for a moment.
+async fn rename_when_free(from: &Path, to: &Path) -> anyhow::Result<()> {
+    for _ in 0..40 {
+        match fs::rename(from, to) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+            r => return Ok(r?),
+        }
+    }
+    Ok(fs::rename(from, to)?)
 }
 
 fn sha256_file(p: &Path) -> anyhow::Result<String> {
     let mut h = Sha256::new();
     let mut r = BufReader::with_capacity(1 << 20, File::open(p)?);
     let mut buf = vec![0u8; 1 << 20];
-    loop { let n = r.read(&mut buf)?; if n == 0 { break; } h.update(&buf[..n]); }
+    loop {
+        if CANCEL.load(Ordering::SeqCst) { bail!(tr!("common.cancelled")); }
+        let n = r.read(&mut buf)?; if n == 0 { break; } h.update(&buf[..n]);
+    }
     Ok(hex::encode(h.finalize()))
 }
 
 fn is_complete(dir: &Path) -> bool {
-    dir.join("config.json").is_file() && !dir.join(MARKER).exists() && validate_dir(dir).is_ok()
+    if dir.join(MARKER).exists() { return false; }
+    if let Some(m) = gguf_manifest(dir) { return gguf_ok(&dir.join(&m.weights)) && m.projector.as_ref().map_or(true, |p| gguf_ok(&dir.join(p))); }
+    dir.join("config.json").is_file() && validate_dir(dir).is_ok()
+}
+
+fn gguf_manifest(dir: &Path) -> Option<GgufManifest> {
+    let m: GgufManifest = serde_json::from_slice(&fs::read(dir.join(GGUF_MANIFEST)).ok()?).ok()?;
+    (m.format == "gguf" && safe_file(&m.weights) && m.projector.as_deref().map_or(true, safe_file)).then_some(m)
+}
+
+fn safe_file(n: &str) -> bool { !n.is_empty() && !n.contains(['/', '\\']) && !n.starts_with('.') && n.to_ascii_lowercase().ends_with(".gguf") }
+
+/// A GGUF file starts with "GGUF" and a version; a cut-off copy is caught by its size check
+/// when it is downloaded.
+fn gguf_ok(p: &Path) -> bool {
+    let mut h = [0u8; 8];
+    File::open(p).and_then(|mut f| f.read_exact(&mut h)).is_ok() && &h[..4] == b"GGUF"
+}
+
+/// llama.cpp models: only `weights` (and `projector`, a vision model's) from `repo`, checked
+/// like every model file (size, SHA-256), into a folder that names them.
+pub fn start_download_gguf(repo: String, revision: Option<String>, weights: String, projector: Option<String>, models_dir: PathBuf) -> anyhow::Result<()> {
+    if !safe_file(&weights) || !projector.as_deref().map_or(true, safe_file) { bail!(tr!("models.badName")); }
+    claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
+    runtime().spawn(async move {
+        let r = download_gguf(&repo, revision.as_deref().unwrap_or("main"), &weights, projector.as_deref(), &models_dir).await;
+        update(|s| { s.running = false; s.finished = r.is_ok(); s.error = r.err().map(|e| format!("{e:#}")); });
+    });
+    Ok(())
+}
+
+async fn download_gguf(repo: &str, revision: &str, weights: &str, projector: Option<&str>, models_dir: &Path) -> anyhow::Result<()> {
+    let tree: Vec<TreeEntry> = or_cancel(async { client().get(format!("https://huggingface.co/api/models/{repo}/tree/{revision}"))
+        .send().await?.error_for_status()?.json().await.context(tr!("models.listFailed")) }).await??;
+    let names: Vec<&str> = std::iter::once(weights).chain(projector).collect();
+    let files: Vec<ModelFile> = names.iter().map(|n| tree.iter().find(|e| e.kind == "file" && e.path == *n)
+        .map(|e| ModelFile { name: e.path.clone(), size: e.size, sha256: e.lfs.as_ref().map(|l| l.oid.clone()) })
+        .ok_or_else(|| anyhow::anyhow!(tr!("models.noWeights")))).collect::<anyhow::Result<_>>()?;
+    let total: u64 = files.iter().try_fold(0u64, |a, f| a.checked_add(f.size)).ok_or_else(|| anyhow::anyhow!(tr!("models.badSize")))?;
+    // one folder per weights file: two quantizations of one repo can sit side by side
+    let dir = models_dir.join(format!("{}--{}", slug(repo), weights.trim_end_matches(".gguf")));
+    if is_complete(&dir) { update(|s| { s.total_bytes = total; s.done_bytes = total; }); return Ok(()); }
+    fs::create_dir_all(&dir)?;
+    fs::write(dir.join(MARKER), repo)?;
+    update(|s| s.total_bytes = total);
+    let mut done = 0u64;
+    for f in &files {
+        if CANCEL.load(Ordering::SeqCst) { bail!(tr!("common.cancelled")); }
+        update(|s| { s.file = f.name.clone(); s.done_bytes = done; });
+        fetch_file(repo, revision, &dir, f, done).await.with_context(|| tr!("models.fileFailed", file = f.name))?;
+        if !gguf_ok(&dir.join(&f.name)) { bail!(tr!("models.fileDamaged", name = f.name)); }
+        done += f.size;
+    }
+    let m = GgufManifest { format: "gguf".into(), repo: Some(repo.into()), weights: weights.into(), projector: projector.map(Into::into) };
+    fs::write(dir.join(GGUF_MANIFEST), serde_json::to_vec_pretty(&m)?)?;
+    fs::remove_file(dir.join(MARKER))?;
+    update(|s| s.done_bytes = total);
+    Ok(())
 }
 
 /// Checks a model folder: parsable config.json, at least one safetensors file, and every
 /// safetensors header consistent with the file size (catches truncated or corrupted copies).
 pub fn validate_dir(dir: &Path) -> anyhow::Result<()> {
-    let cfg: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("config.json")).context("缺少 config.json")?).context("config.json 无法解析")?;
-    if !cfg.is_object() { bail!("config.json 格式不正确"); }
+    let cfg: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("config.json")).context(tr!("models.noConfig"))?).context(tr!("models.configUnreadable"))?;
+    if !cfg.is_object() { bail!(tr!("models.configBad")); }
     let mut n = 0;
     for e in fs::read_dir(dir)? {
         let p = e?.path();
         if p.extension().and_then(|x| x.to_str()) == Some("safetensors") { check_safetensors(&p)?; n += 1; }
     }
-    if n == 0 { bail!("没有 .safetensors 权重文件"); }
+    if n == 0 { bail!(tr!("models.noSafetensors")); }
     Ok(())
 }
 
@@ -193,25 +305,30 @@ pub fn check_safetensors(p: &Path) -> anyhow::Result<()> {
     let len = fs::metadata(p)?.len();
     let mut f = File::open(p)?;
     let mut h = [0u8; 8];
-    f.read_exact(&mut h).with_context(|| format!("{name} 已损坏"))?;
+    f.read_exact(&mut h).with_context(|| tr!("models.fileDamaged", name = name))?;
     let hl = u64::from_le_bytes(h);
-    if hl == 0 || hl > 100 << 20 || 8 + hl > len { bail!("{name} 头部损坏"); }
+    if hl == 0 || hl > 100 << 20 || 8 + hl > len { bail!(tr!("models.headerDamaged", name = name)); }
     let mut buf = vec![0u8; hl as usize];
     f.read_exact(&mut buf)?;
-    let hdr: serde_json::Value = serde_json::from_slice(&buf).with_context(|| format!("{name} 头部无法解析"))?;
+    let hdr: serde_json::Value = serde_json::from_slice(&buf).with_context(|| tr!("models.headerUnreadable", name = name))?;
     let mut end = 0u64;
     for (k, v) in hdr.as_object().into_iter().flatten() {
         if k == "__metadata__" { continue; }
-        let off = v["data_offsets"].as_array().and_then(|a| a.get(1)).and_then(|x| x.as_u64()).with_context(|| format!("{name} 张量 {k} 缺少偏移"))?;
+        let off = v["data_offsets"].as_array().and_then(|a| a.get(1)).and_then(|x| x.as_u64()).with_context(|| tr!("models.tensorNoOffset", name = name, k = k))?;
         end = end.max(off);
     }
-    if 8u64.checked_add(hl).and_then(|x| x.checked_add(end)) != Some(len) { bail!("{name} 大小与头部不符（文件不完整）"); }
+    if 8u64.checked_add(hl).and_then(|x| x.checked_add(end)) != Some(len) { bail!(tr!("models.sizeMismatch", name = name)); }
     Ok(())
 }
 
 fn dir_info(dir: &Path) -> Option<ModelInfo> {
     if !is_complete(dir) { return None; }
     let id = dir.file_name()?.to_string_lossy().into_owned();
+    if let Some(m) = gguf_manifest(dir) {
+        let bytes = fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum();
+        return Some(ModelInfo { repo: m.repo, model_type: None, vision: m.projector.is_some(), bytes, path: dir.to_string_lossy().into_owned(), id,
+            format: "gguf".into(), weights: Some(m.weights), projector: m.projector });
+    }
     let cfg: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("config.json")).ok()?).ok()?;
     let bytes = fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum();
     Some(ModelInfo {
@@ -219,6 +336,7 @@ fn dir_info(dir: &Path) -> Option<ModelInfo> {
         model_type: cfg["model_type"].as_str().map(str::to_string),
         vision: cfg.get("vision_config").map_or(false, |v| !v.is_null()),
         bytes, path: dir.to_string_lossy().into_owned(), id,
+        format: mlx(), weights: None, projector: None,
     })
 }
 
@@ -250,13 +368,41 @@ pub fn installed(models_dir: &Path) -> Vec<ModelInfo> {
 }
 
 fn safe_id(id: &str) -> anyhow::Result<&str> {
-    if id.is_empty() || id.contains('/') || id.contains("..") || id.starts_with('.') { bail!("非法模型名"); }
+    if id.is_empty() || id.contains('/') || id.contains("..") || id.starts_with('.') { bail!(tr!("models.badName")); }
     Ok(id)
 }
 
 pub fn delete(models_dir: &Path, id: &str) -> anyhow::Result<()> {
     let d = models_dir.join(safe_id(id)?);
-    if d.exists() { fs::remove_dir_all(d)?; }
+    claimed(id, || {
+        if d.exists() { fs::remove_dir_all(&d)?; }
+        Ok(())
+    })
+}
+
+/// Runs a change to the models folder as a model operation: not beside a download, a pull or
+/// another change (each would pull the folder from under the other).
+fn claimed<T>(label: &str, f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+    claim(ModelDownloadStatus { repo: label.into(), running: true, ..Default::default() })?;
+    let r = f();
+    update(|s| { s.running = false; s.finished = r.is_ok(); s.error = r.as_ref().err().map(|e| format!("{e:#}")); });
+    r
+}
+
+/// Puts a finished folder in place of [dst]. The old one is only set aside until the new one is
+/// there: a failure in between leaves the model that worked.
+pub(crate) fn replace_dir(new: &Path, dst: &Path) -> anyhow::Result<()> {
+    if !dst.exists() {
+        fs::rename(new, dst)?;
+        return Ok(());
+    }
+    let old = dst.with_file_name(staging_name("replaced"));
+    fs::rename(dst, &old)?;
+    if let Err(e) = fs::rename(new, dst) {
+        fs::rename(&old, dst)?;
+        return Err(e.into());
+    }
+    let _ = fs::remove_dir_all(&old);
     Ok(())
 }
 
@@ -282,6 +428,10 @@ pub fn export_zip(models_dir: &Path, id: &str, out: &Path) -> anyhow::Result<u64
 
 /// Imports a standard model folder or a ZIP of one. Files are staged, validated, then moved in.
 pub fn import(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
+    claimed(&path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), || import_claimed(models_dir, path))
+}
+
+fn import_claimed(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
     fs::create_dir_all(models_dir)?;
     let staging = models_dir.join(staging_name("import"));
     let _ = fs::remove_dir_all(&staging);
@@ -296,7 +446,7 @@ pub fn import(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
             name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
         } else {
             let mut z = zip::ZipArchive::new(BufReader::new(File::open(path)?))?;
-            if z.len() > MAX_ZIP_ENTRIES { bail!("ZIP 里的文件太多（{} 个），不像一个模型", z.len()); }
+            if z.len() > MAX_ZIP_ENTRIES { bail!(tr!("models.zipTooMany", n = z.len())); }
             let mut written = 0u64;
             for i in 0..z.len() {
                 let mut e = z.by_index(i)?;
@@ -309,23 +459,23 @@ pub fn import(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
                 fs::create_dir_all(dst.parent().unwrap())?;
                 let n = io::copy(&mut (&mut e).take(MAX_MODEL_BYTES - written + 1), &mut BufWriter::new(File::create(&dst)?))?;
                 written += n;
-                if written > MAX_MODEL_BYTES { bail!("ZIP 解压后超过 {} GB，不像一个模型", MAX_MODEL_BYTES >> 30); }
+                if written > MAX_MODEL_BYTES { bail!(tr!("models.zipTooBig", gb = MAX_MODEL_BYTES >> 30)); }
             }
         }
         // The model root is the staging dir or its single sub-folder.
         let mut root = staging.clone();
         if !root.join("config.json").exists() {
             let subs: Vec<PathBuf> = fs::read_dir(&staging)?.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.join("config.json").exists()).collect();
-            if subs.len() != 1 { bail!("找不到模型文件夹（需要 config.json 与 .safetensors）"); }
+            if subs.len() != 1 { bail!(tr!("models.noFolder")); }
             name = subs[0].file_name().unwrap().to_string_lossy().into_owned();
             root = subs[0].clone();
         }
         validate_dir(&root)?;
         let name: String = name.chars().map(|c| if c == '/' || c == '\\' { '-' } else { c }).collect();
         let dst = models_dir.join(safe_id(name.trim_start_matches('.'))?);
-        if dst.exists() { fs::remove_dir_all(&dst)?; }
-        fs::rename(&root, &dst)?;
-        dir_info(&dst).context("导入后的模型无效")
+        if CANCEL.load(Ordering::SeqCst) { bail!(tr!("common.cancelled")); }
+        replace_dir(&root, &dst)?;
+        dir_info(&dst).context(tr!("models.importedInvalid"))
     })();
     let _ = fs::remove_dir_all(&staging);
     r
@@ -333,6 +483,22 @@ pub fn import(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replacing_a_model_keeps_the_old_one_when_it_cannot_go_through() {
+        let d = std::env::temp_dir().join(format!("tl-replace-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(d.join("old")).unwrap();
+        std::fs::write(d.join("old/w"), b"old").unwrap();
+        std::fs::create_dir_all(d.join("new")).unwrap();
+        std::fs::write(d.join("new/w"), b"new").unwrap();
+        // the new one is not there: nothing changes
+        assert!(super::replace_dir(&d.join("missing"), &d.join("old")).is_err());
+        assert_eq!(std::fs::read(d.join("old/w")).unwrap(), b"old");
+        super::replace_dir(&d.join("new"), &d.join("old")).unwrap();
+        assert_eq!(std::fs::read(d.join("old/w")).unwrap(), b"new");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "nothing left beside it");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
     use super::*;
 
     fn fake_model(dir: &Path) {

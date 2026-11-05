@@ -30,6 +30,8 @@ pub enum Op {
     FolderMedia { folder: String, media_id: String, present: bool, hlc: u64 },
     /// "最近添加" mark of a post: wall-clock ms when it was batch-downloaded (grow-only, max).
     Recent { post_id: String, at: u64 },
+    /// A media came in through a share extension (从相册导入); grow-only.
+    Album { media_id: String },
     /// An app setting shared by every device (e.g. the AI prompt): a last-writer-wins register
     /// over (clock, value), `None` = back to the default (`rules::merge_alias`).
     Setting { key: String, value: Option<String>, hlc: u64 },
@@ -43,7 +45,7 @@ pub enum Op {
 /// Kinds this version understands (the `t` field). A record of any other kind is a newer
 /// app's and is kept as `Op::Unknown`; a record of a known kind that does not parse is an
 /// error (never skipped silently).
-pub const KNOWN_OPS: &[&str] = &["post", "media", "tag", "tagsrc", "aidone", "trash", "alias", "folder", "foldermedia", "recent", "setting"];
+pub const KNOWN_OPS: &[&str] = &["post", "media", "tag", "tagsrc", "aidone", "trash", "alias", "folder", "foldermedia", "recent", "setting", "album"];
 
 /// Parses a stored or received record.
 fn both_bits() -> u8 { 3 }
@@ -83,19 +85,22 @@ impl Store {
 
     /// Ops the holder of `theirs` is missing, in (device, seq) order, at most `limit`.
     pub fn ops_since(&self, theirs: &VersionVector, limit: usize) -> rusqlite::Result<Vec<LoggedOp>> {
-        let mine = self.version_vector()?;
+        self.ops_since_until(theirs, &self.version_vector()?, limit)
+    }
+
+    pub fn ops_since_until(&self, theirs: &VersionVector, mine: &VersionVector, limit: usize) -> rusqlite::Result<Vec<LoggedOp>> {
         let mut out = vec![];
-        let mut st = self.conn().prepare_cached("SELECT seq, body FROM op WHERE device=?1 AND seq>?2 ORDER BY seq LIMIT ?3")?;
-        for (dev, &max) in &mine {
+        let mut st = self.conn().prepare_cached("SELECT seq, body FROM op WHERE device=?1 AND seq>?2 AND seq<=?4 ORDER BY seq LIMIT ?3")?;
+        for (dev, &max) in mine {
             let have = theirs.get(dev).copied().unwrap_or(0);
             let Some((first, _)) = crate::rules::missing_range(max, have) else { continue };
-            let rows = st.query_map(params![dev, first - 1, (limit - out.len()) as i64], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+            let rows = st.query_map(params![dev, first - 1, (limit - out.len()) as i64, max], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
             for row in rows {
                 let (seq, body) = row?;
                 // Never skip an entry silently: the peer would advance past it and never get it.
                 // Records of a newer app's kinds are passed on as they are.
                 let op = serde_json::from_str::<serde_json::Value>(&body).map_err(|e| e.to_string()).and_then(parse_op).map_err(|e| rusqlite::Error::ToSqlConversionFailure(
-                    format!("同步记录 {dev}#{seq} 已损坏，无法解析：{e}").into()))?;
+                    tr!("oplog.damaged", dev = dev, seq = seq, e = e).into()))?;
                 out.push(LoggedOp { device: dev.clone(), seq, op });
             }
             if out.len() >= limit { break; }
@@ -222,6 +227,7 @@ impl Store {
                     self.apply_member(folder, media_id, TagReg { origin: *present as u8, hlc: *hlc })?;
                 }
                 Op::Recent { post_id, at } => self.apply_recent(post_id, *at)?,
+                Op::Album { media_id } => self.apply_album(media_id)?,
                 Op::Setting { key, value, hlc } => {
                     self.observe_hlc(*hlc)?;
                     self.apply_setting(key, (*hlc, value.clone()))?;

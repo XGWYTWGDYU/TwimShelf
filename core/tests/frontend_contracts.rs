@@ -1,6 +1,6 @@
 //! UI contracts: the same target set for preview/execution, exact undo, durable cancellation.
 use std::{sync::Arc, time::{Instant, Duration}};
-use tl_core::{actions::{ActionKind as K, ActionRequest}, library::Library, model::{PostMeta, MediaKind, Origin}, oplog::{Op, LoggedOp}, rules::{self, TrashAction}, triage::{Decision, TriageFilter}, store::Store};
+use tl_core::{actions::{ActionKind as K, ActionRequest}, library::Library, model::{PostMeta, MediaKind, Origin}, oplog::{Op, LoggedOp}, rules::{self, TrashAction}, store::Store};
 struct Fixture { lib: Arc<Library> }
 impl Fixture {
     fn new(n: usize) -> Self {
@@ -72,13 +72,6 @@ fn wait(mut done: impl FnMut() -> bool) { let until = Instant::now() + Duration:
     assert_eq!(f.lib.apply_action(&action(K::FolderRemove, vec![], vec!["p".into()])).unwrap().changes.len(), 4);
     f.lib.db().blob_arrived(&pending).unwrap(); assert!(f.lib.db().folders_of(&pending).unwrap().is_empty());
 }
-#[test] fn triage_rejects_changed_scope_without_marking_the_post_done() {
-    let f = Fixture::new(1); let shown = f.lib.db().triage_queue(&TriageFilter::default()).unwrap().remove(0); f.pending();
-    assert!(f.lib.triage_decide_checked("p", Decision::Delete, None, Some(&shown.media_ids)).is_err());
-    assert!(!f.lib.db().is_triaged("p").unwrap()); assert_eq!(f.lib.db().trash_reg(&id(0)).unwrap().state, rules::LIVE);
-    let refreshed = f.lib.db().triage_queue(&TriageFilter::default()).unwrap().remove(0); assert_eq!(refreshed.media_ids.len(), 2);
-    assert!(f.lib.triage_decide_checked("p", Decision::Delete, None, Some(&refreshed.media_ids)).unwrap());
-}
 #[test] fn bulk_action_rolls_back_on_database_failure() {
     let f = Fixture::new(2);
     f.lib.db().conn().execute_batch(&format!("CREATE TRIGGER fail_second BEFORE INSERT ON trash WHEN NEW.media_id='{}' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;", id(1))).unwrap();
@@ -132,4 +125,23 @@ fn wait(mut done: impl FnMut() -> bool) { let until = Instant::now() + Duration:
     { let s = Store::open(path.to_str().unwrap()).unwrap(); s.upsert_post(&PostMeta { id: "keep".into(), ..Default::default() }).unwrap(); s.conn().execute_batch("DROP TABLE verified_media; PRAGMA user_version=13;").unwrap(); }
     { let s = Store::open(path.to_str().unwrap()).unwrap(); assert_eq!(s.conn().query_row("SELECT count(*) FROM post WHERE id='keep'", [], |r|r.get::<_,i64>(0)).unwrap(), 1); assert_eq!(s.conn().query_row("SELECT count(*) FROM verified_media", [], |r|r.get::<_,i64>(0)).unwrap(), 0); }
     let _ = std::fs::remove_file(path);
+}
+
+/// Triage mode was removed in schema 15: a library from an older version (with its local
+/// `triage` table) opens without it, whatever version it comes from; a current one is untouched.
+#[test] fn old_triage_records_are_dropped_on_upgrade() {
+    let d = std::env::temp_dir().join(format!("tl-triage-drop-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+    let path = d.join("library.sqlite").to_string_lossy().into_owned();
+    drop(Store::open(&path).unwrap());
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE triage(post_id TEXT PRIMARY KEY, decision TEXT NOT NULL, folder TEXT, moved TEXT NOT NULL, at INTEGER NOT NULL);
+            INSERT INTO triage VALUES('p','keep',NULL,'[]',0); PRAGMA user_version=12;").unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    let left: i64 = s.conn().query_row("SELECT count(*) FROM sqlite_master WHERE name='triage'", [], |r| r.get(0)).unwrap();
+    assert_eq!(left, 0);
+    drop(s);
+    let _ = std::fs::remove_dir_all(&d);
 }

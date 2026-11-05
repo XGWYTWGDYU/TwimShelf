@@ -1,0 +1,31 @@
+# Install-time collection of libmpv + its codec dependencies. Run packaging on
+# the oldest supported Linux distribution; GPU drivers and the C runtime remain
+# host-provided. media_kit_libs_linux itself does NOT ship libmpv.
+file(GET_RUNTIME_DEPENDENCIES
+  LIBRARIES "@TL_LIBMPV@"
+  RESOLVED_DEPENDENCIES_VAR video_dependencies
+  UNRESOLVED_DEPENDENCIES_VAR unresolved
+  PRE_EXCLUDE_REGEXES "^linux-vdso" "^ld-linux"
+  POST_EXCLUDE_REGEXES "/lib(c|m|dl|rt|pthread|resolv|util|gcc_s|stdc\\+\\+)\\.so"
+    "/lib(GL|EGL|GLX|GLdispatch|OpenGL|vulkan|drm|gbm)\\.so")
+if(unresolved)
+  message(FATAL_ERROR "Unresolved video runtime dependencies: ${unresolved}")
+endif()
+list(APPEND video_dependencies "@TL_LIBMPV@")
+list(REMOVE_DUPLICATES video_dependencies)
+set(video_bytes 0)
+set(video_real_files "")
+foreach(library IN LISTS video_dependencies)
+  file(COPY "${library}" DESTINATION "${CMAKE_INSTALL_PREFIX}/lib" FOLLOW_SYMLINK_CHAIN)
+  get_filename_component(real "${library}" REALPATH)
+  list(APPEND video_real_files "${real}")
+endforeach()
+list(REMOVE_DUPLICATES video_real_files)
+foreach(library IN LISTS video_real_files)
+  file(SIZE "${library}" library_bytes)
+  math(EXPR video_bytes "${video_bytes} + ${library_bytes}")
+endforeach()
+file(MAKE_DIRECTORY "${CMAKE_INSTALL_PREFIX}/data")
+file(WRITE "${CMAKE_INSTALL_PREFIX}/data/video-native-size.json"
+  "{\"native_video_bytes\":${video_bytes}}\n")
+message(STATUS "Bundled video runtime bytes: ${video_bytes}")

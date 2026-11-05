@@ -34,7 +34,7 @@ fn update(f: impl FnOnce(&mut VerifyStatus)) { f(STATUS.lock().unwrap().get_or_i
 /// Starts checking all live media in the background; returns how many will be checked.
 pub fn start(lib: Arc<Library>) -> anyhow::Result<usize> {
     let _start = START_LOCK.lock().unwrap();
-    if status().running { anyhow::bail!("正在检查中"); }
+    if status().running { anyhow::bail!(tr!("verify.running")); }
     let list = lib.db().live_media_paths()?;
     let n = list.len();
     CANCEL.store(false, Ordering::SeqCst);
@@ -56,13 +56,23 @@ pub fn start(lib: Arc<Library>) -> anyhow::Result<usize> {
             let still = db.media_row(&id).ok().flatten().map_or(false, |r| r.3 == rel) && db.trash_reg(&id).map_or(false, |t| t.state == crate::rules::LIVE);
             if !still { drop(db); update(|s| s.checked += 1); continue; }
             let prev = db.bad_reason(&id).ok().flatten();
-            match found {
-                Some(reason) => { if db.set_bad(&id, Some(reason)).is_err() { update(|s| s.outcome = "failed".into()); break; } update(|s| s.bad += 1); }
-                // An intact file that does not decode stays flagged ('decode'): it was broken at the source.
-                None if prev.as_deref().map_or(false, |p| p == "missing" || p == "hash") => { if db.set_bad(&id, None).is_err() { update(|s| s.outcome = "failed".into()); break; } update(|s| s.fixed += 1); }
-                None => {}
-            }
-            if db.conn().execute("INSERT OR REPLACE INTO verified_media VALUES(?1,?2,unixepoch())", rusqlite::params![id, rel]).is_err() { update(|s| s.outcome = "failed".into()); break; }
+            // the mark and the record together: one disk flush per file, not two
+            let written = (|| -> rusqlite::Result<(bool, bool)> {
+                let tx = db.conn().unchecked_transaction()?;
+                let (mut bad, mut fixed) = (false, false);
+                match found {
+                    Some(reason) => { db.set_bad(&id, Some(reason))?; bad = true; }
+                    // An intact file that does not decode stays flagged ('decode'): it was broken at the source.
+                    None if prev.as_deref().map_or(false, |p| p == "missing" || p == "hash") => { db.set_bad(&id, None)?; fixed = true; }
+                    None => {}
+                }
+                db.conn().execute("INSERT OR REPLACE INTO verified_media VALUES(?1,?2,unixepoch())", rusqlite::params![id, rel])?;
+                tx.commit()?;
+                Ok((bad, fixed))
+            })();
+            let Ok((bad, fixed)) = written else { update(|s| s.outcome = "failed".into()); break; };
+            if bad { update(|s| s.bad += 1); }
+            if fixed { update(|s| s.fixed += 1); }
             drop(db);
             update(|s| { s.checked += 1; s.bytes += size; });
         }

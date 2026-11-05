@@ -23,9 +23,9 @@ pub struct ExportOptions {
     #[serde(default = "yes")] pub tags: bool,
     /// Folder memberships.
     #[serde(default = "yes")] pub folders: bool,
-    /// A plain zip of the media files, readable without this app: one folder per post
-    /// ("作者 - 帖子 ID/1.jpg, 2.mp4, …"), loose media under "散装媒体/". No manifest, so it
-    /// cannot be imported back with tags or folders (use the .tlpack for that).
+    /// A plain zip of the media files, readable without this app: all at its root, named after
+    /// their post ("作者 - 帖子 ID - 1.jpg"). No manifest, so it cannot be imported back with
+    /// tags or folders (use the .tlpack for that).
     #[serde(default)] pub media_only: bool,
 }
 fn yes() -> bool { true }
@@ -39,15 +39,15 @@ fn plain_name(s: &str) -> String {
     if t.is_empty() { "_".into() } else { t }
 }
 
-/// Where a media goes in a plain media zip.
+/// Its name in a plain media zip: every file at the zip's root, so the post is in the name.
 fn plain_entry(it: &FeedItem, index: usize, ext: &str) -> String {
     if it.post_id.starts_with(crate::import::LOOSE_PREFIX) {
-        return format!("散装媒体/{}.{ext}", &it.media_id[..it.media_id.len().min(16)]);
+        return format!("{}.{ext}", &it.media_id[..it.media_id.len().min(16)]);
     }
     let who = it.author_name.as_deref().filter(|s| !s.trim().is_empty())
         .or(it.screen_name.as_deref().filter(|s| !s.trim().is_empty()));
-    let folder = match who { Some(w) => format!("{} - {}", plain_name(w), plain_name(&it.post_id)), None => plain_name(&it.post_id) };
-    format!("{folder}/{}.{ext}", index + 1)
+    let post = match who { Some(w) => format!("{} - {}", plain_name(w), plain_name(&it.post_id)), None => plain_name(&it.post_id) };
+    format!("{post} - {}.{ext}", index + 1)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -60,11 +60,16 @@ pub struct Manifest {
     #[serde(default)] pub exclude_tags: Vec<String>,
     /// "selection" (tags / folders chosen) or "backup" (the whole library, for cold storage).
     #[serde(default)] pub kind: String,
+    /// Backup: media that also belong to other posts than the one they are listed under.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub also_claimed: Vec<PackClaim>,
     /// Backup: every folder, also empty ones, and the tag rename rules (old name → shown name).
     #[serde(default)] pub folders_all: Vec<String>,
     #[serde(default)] pub renames: Vec<(String, String)>,
     pub posts: Vec<PackPost>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PackClaim { pub media: String, pub ordinal: i64, pub post: PostMeta }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PackPost {
@@ -89,6 +94,8 @@ pub struct PackMedia {
     #[serde(default)] pub folders: Vec<String>,
     /// Backup: the media was in the recycle bin (it goes back there when it is new on import).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub trashed: bool,
+    /// Came in through a share extension (从相册导入).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub album: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -173,8 +180,8 @@ pub fn export_media(lib: &Library, media_ids: &[String], opts: ExportOptions, ou
         let snap = snapshot(&db, items.iter(), &opts, false)?;
         (items, snap)
     };
-    if items.is_empty() { bail!("没有可以导出的媒体"); }
-    let extras = Extras { kind: "selection", include: vec![], exclude: vec![], folders_all: vec![], renames: vec![] };
+    if items.is_empty() { bail!(tr!("export.nothing")); }
+    let extras = Extras { kind: "selection", ..Default::default() };
     write_pack(lib, items, vec![], opts, extras, snap, out)
 }
 
@@ -186,21 +193,31 @@ pub fn export_media(lib: &Library, media_ids: &[String], opts: ExportOptions, ou
 struct Snapshot { ai_models: HashMap<String, Vec<String>>, folders: HashMap<String, Vec<String>>, recent: HashMap<String, u64> }
 
 fn snapshot<'a>(db: &Store, items: impl Iterator<Item = &'a FeedItem>, opts: &ExportOptions, with_recent: bool) -> anyhow::Result<Snapshot> {
+    // whole tables read once, not several queries per media: a large backup holds the store for
+    // all of this, and every other part of the app waits for it
+    let (mut media, mut posts) = (std::collections::HashSet::new(), std::collections::HashSet::new());
+    for it in items { media.insert(it.media_id.as_str()); posts.insert(it.post_id.as_str()); }
     let mut s = Snapshot::default();
-    for it in items {
-        if opts.tags && !s.ai_models.contains_key(&it.media_id) { s.ai_models.insert(it.media_id.clone(), db.ai_models_for(&it.media_id)?); }
-        if opts.folders && !s.folders.contains_key(&it.media_id) { s.folders.insert(it.media_id.clone(), db.folders_of(&it.media_id)?); }
-        if with_recent && !s.recent.contains_key(&it.post_id) { s.recent.insert(it.post_id.clone(), db.recent_at(&it.post_id)?); }
+    if opts.tags {
+        for (id, model) in db.all_ai_done()? { if media.contains(id.as_str()) { s.ai_models.entry(id).or_default().push(model); } }
+        for id in &media { s.ai_models.entry(id.to_string()).or_default(); }
+    }
+    if opts.folders {
+        for (id, folder) in db.all_folder_media()? { if media.contains(id.as_str()) { s.folders.entry(id).or_default().push(folder); } }
+        for id in &media { s.folders.entry(id.to_string()).or_default(); }
+    }
+    if with_recent {
+        for (post, at) in db.all_recent()? { if posts.contains(post.as_str()) { s.recent.insert(post, at); } }
     }
     Ok(s)
 }
 
 /// Cold backup of the whole library: every media (also those in the recycle bin), post text,
 /// tags with origin and AI provenance, analysed-by records, folders (also empty ones), rename
-/// rules and "最近添加" marks. Not included: AI models, triage records (both local by design),
+/// rules and "最近添加" marks. Not included: AI models (local by design),
 /// sync identity and device pairings, import reports.
 pub fn export_backup(lib: &Library, out: &Path) -> anyhow::Result<ExportReport> {
-    let (live, bin, folders_all, renames, pending, snap) = {
+    let (live, bin, folders_all, renames, pending, snap, also_claimed) = {
         let db = lib.db();
         let live = db.export_items(&[], &[])?;
         let bin: Vec<FeedItem> = db.trash_items()?.into_iter().map(|t| t.item).collect();
@@ -212,17 +229,19 @@ pub fn export_backup(lib: &Library, out: &Path) -> anyhow::Result<ExportReport> 
         };
         let snap = snapshot(&db, live.iter().chain(bin.iter()), &ExportOptions::default(), true)?;
         let folders_all = db.folders()?.into_iter().map(|(n, _)| n).collect::<Vec<_>>();
-        (live, bin, folders_all, db.renames()?, pending, snap)
+        let also_claimed = db.secondary_claims()?.into_iter().map(|(media, ordinal, post)| PackClaim { media, ordinal, post }).collect::<Vec<_>>();
+        (live, bin, folders_all, db.renames()?, pending, snap, also_claimed)
     };
-    if live.is_empty() && bin.is_empty() { bail!("资料库是空的"); }
-    let mut rep = write_pack(lib, live, bin, ExportOptions::default(), Extras { kind: "backup", include: vec![], exclude: vec![], folders_all, renames }, snap, out)?;
+    if live.is_empty() && bin.is_empty() { bail!(tr!("export.libraryEmpty")); }
+    let mut rep = write_pack(lib, live, bin, ExportOptions::default(), Extras { kind: "backup", include: vec![], exclude: vec![], folders_all, renames, also_claimed }, snap, out)?;
     for (media_id, post_id) in pending {
-        rep.skipped.push(ExportSkip { media_id, post_id, reason: "文件还没有从其他设备同步过来，不在这份备份里".into() });
+        rep.skipped.push(ExportSkip { media_id, post_id, reason: tr!("export.notSyncedYet").into() });
     }
     Ok(rep)
 }
 
-struct Extras { kind: &'static str, include: Vec<String>, exclude: Vec<String>, folders_all: Vec<String>, renames: Vec<(String, String)> }
+#[derive(Default)]
+struct Extras { kind: &'static str, include: Vec<String>, exclude: Vec<String>, folders_all: Vec<String>, renames: Vec<(String, String)>, also_claimed: Vec<PackClaim> }
 
 /// Streams media into a `.tlpack`, verifying each file against its id (the SHA-256 of its
 /// content) on the way; a missing or damaged file is left out and listed with its reason.
@@ -238,6 +257,7 @@ fn write_pack(lib: &Library, live: Vec<FeedItem>, bin: Vec<FeedItem>, opts: Expo
 }
 
 fn write_pack_inner(lib: &Library, live: Vec<FeedItem>, bin: Vec<FeedItem>, opts: ExportOptions, extras: Extras, snap: Snapshot, out: &Path) -> anyhow::Result<ExportReport> {
+    if live.len() + bin.len() >= MAX_PACK_ENTRIES { bail!(tr!("export.tooLarge", detail = live.len() + bin.len())); }
     let mut by_post: BTreeMap<String, Vec<(FeedItem, bool)>> = BTreeMap::new();
     for it in live { by_post.entry(it.post_id.clone()).or_default().push((it, false)); }
     for it in bin { by_post.entry(it.post_id.clone()).or_default().push((it, true)); }
@@ -249,7 +269,7 @@ fn write_pack_inner(lib: &Library, live: Vec<FeedItem>, bin: Vec<FeedItem>, opts
     let mut rep = ExportReport::default();
     let mut posts = vec![];
     for (_, mut group) in by_post {
-        if EXPORT_CANCEL.load(std::sync::atomic::Ordering::SeqCst) { bail!("已取消导出"); }
+        if EXPORT_CANCEL.load(std::sync::atomic::Ordering::SeqCst) { bail!(tr!("export.cancelled")); }
         group.sort_by_key(|(it, _)| it.ordinal);
         let f = &group[0].0;
         let meta = PostMeta { id: f.post_id.clone(), author_name: f.author_name.clone(), screen_name: f.screen_name.clone(),
@@ -262,7 +282,7 @@ fn write_pack_inner(lib: &Library, live: Vec<FeedItem>, bin: Vec<FeedItem>, opts
             let opened = if crate::rules::is_blob_path(it.path.as_bytes()) { File::open(lib.dir.join(&it.path)) } else { Err(std::io::Error::other("not a library file")) };
             let mut src = match opened {
                 Ok(f) => f,
-                Err(_) => { rep.skipped.push(ExportSkip { media_id: it.media_id.clone(), post_id: it.post_id.clone(), reason: "文件不在这台设备上（可能还没有从其他设备同步过来）".into() }); continue; }
+                Err(_) => { rep.skipped.push(ExportSkip { media_id: it.media_id.clone(), post_id: it.post_id.clone(), reason: tr!("export.notHere").into() }); continue; }
             };
             zw.start_file(&file, stored)?;
             let (n, sha) = { let mut tee = Tee { w: &mut zw, h: Sha256::new(), n: 0 }; io::copy(&mut src, &mut tee)?; (tee.n, hex::encode(tee.h.finalize())) };
@@ -270,30 +290,32 @@ fn write_pack_inner(lib: &Library, live: Vec<FeedItem>, bin: Vec<FeedItem>, opts
                 // cut the entry out and drop its bytes (later entries continue from here)
                 zw.abort_file()?;
                 archive.truncate_here()?;
-                rep.skipped.push(ExportSkip { media_id: it.media_id.clone(), post_id: it.post_id.clone(), reason: "文件已损坏（内容与校验值不符），可以在资料库里「重新下载」后再导出".into() });
+                rep.skipped.push(ExportSkip { media_id: it.media_id.clone(), post_id: it.post_id.clone(), reason: tr!("export.damaged").into() });
                 continue;
             }
             rep.bytes += n;
             set_export(|p| p.bytes += n);
             rep.media += 1;
             if *trashed { rep.trashed += 1; }
-            if opts.media_only { media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models: vec![], tags: vec![], folders: vec![], trashed: false }); continue; }
+            if opts.media_only { media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models: vec![], tags: vec![], folders: vec![], trashed: false, album: false }); continue; }
             let ai_models = if opts.tags { snap.ai_models.get(&it.media_id).cloned().unwrap_or_default() } else { vec![] };
             let tags = if opts.tags { it.tags.iter().map(|t| PackTag { label: t.label.clone(), origin: t.origin, models: t.models.clone() }).collect() } else { vec![] };
             let folders = if opts.folders { snap.folders.get(&it.media_id).cloned().unwrap_or_default() } else { vec![] };
-            media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models, tags, folders, trashed: *trashed });
+            media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models, tags, folders, trashed: *trashed, album: it.album });
         }
         if media.is_empty() { continue; }
         let recent_at = if extras.kind == "backup" { snap.recent.get(&meta.id).copied().unwrap_or(0) } else { 0 };
         posts.push(PackPost { meta, media, recent_at });
         rep.posts += 1;
     }
-    if rep.media == 0 { bail!("没有可以导出的媒体（{} 个文件缺失或损坏）", rep.skipped.len()); }
+    if rep.media == 0 { bail!(tr!("export.nothingDamaged", n = rep.skipped.len())); }
     if !opts.media_only {
         let manifest = Manifest { format: FORMAT.into(), version: VERSION, created_at: now(), include_tags: extras.include, exclude_tags: extras.exclude,
-            kind: extras.kind.into(), folders_all: extras.folders_all, renames: extras.renames, posts };
+            kind: extras.kind.into(), also_claimed: extras.also_claimed, folders_all: extras.folders_all, renames: extras.renames, posts };
+        let bytes = serde_json::to_vec(&manifest)?;
+        if bytes.len() as u64 > MAX_MANIFEST_BYTES { bail!(tr!("export.tooLarge", detail = bytes.len())); }
         zw.start_file("manifest.json", zip::write::SimpleFileOptions::default())?;
-        serde_json::to_writer(&mut zw, &manifest)?;
+        zw.write_all(&bytes)?;
     }
     let mut w = zw.finish()?;
     w.flush()?;
@@ -316,63 +338,71 @@ pub fn import_pack_into(lib: &Library, path: &Path, folder: Option<&str>) -> any
     r
 }
 
-const MAX_MANIFEST_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_PACK_ENTRIES: usize = 100_000;
+// What a package may hold when imported; an export that would pass them is refused at once, so
+// the app never makes a backup it cannot restore.
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_PACK_ENTRIES: usize = 2_000_000;
+/// Longer than any real post id: a post id is in every record of the post and in the sync log.
+const MAX_POST_ID_BYTES: usize = 512;
 pub(crate) const MAX_MEDIA_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_PACK_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 
 fn read_bounded(input: impl Read, limit: u64) -> anyhow::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     input.take(limit + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > limit { bail!("导出包清单超过大小限制"); }
+    if bytes.len() as u64 > limit { bail!(tr!("pack.manifestTooBig")); }
     Ok(bytes)
 }
 
 fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow::Result<ImportReport> {
     lib.diag_import_start("tlpack");
     let mut z = zip::ZipArchive::new(BufReader::new(File::open(path)?))?;
-    if z.len() > MAX_PACK_ENTRIES { bail!("导出包文件数量超过限制"); }
-    let manifest: Manifest = serde_json::from_slice(&read_bounded(z.by_name("manifest.json").context("缺少 manifest.json")?, MAX_MANIFEST_BYTES)?)?;
-    if manifest.posts.len() > MAX_PACK_ENTRIES || manifest.posts.iter().map(|p| p.media.len()).sum::<usize>() > MAX_PACK_ENTRIES { bail!("导出包记录数量超过限制"); }
+    if z.len() > MAX_PACK_ENTRIES { bail!(tr!("pack.tooManyFiles")); }
+    let manifest: Manifest = serde_json::from_slice(&read_bounded(z.by_name("manifest.json").context(tr!("pack.noManifest"))?, MAX_MANIFEST_BYTES)?)?;
+    if manifest.posts.len() > MAX_PACK_ENTRIES || manifest.posts.iter().map(|p| p.media.len()).sum::<usize>() > MAX_PACK_ENTRIES { bail!(tr!("pack.tooManyRecords")); }
     let mut remaining = MAX_PACK_BYTES;
-    if manifest.format != FORMAT { bail!("不是 TwimShelf 导出包"); }
-    if manifest.version > VERSION { bail!("导出包版本 {} 比本应用新，请先升级", manifest.version); }
+    if manifest.format != FORMAT { bail!(tr!("pack.notPack")); }
+    if manifest.version > VERSION { bail!(tr!("pack.newer", version = manifest.version)); }
     let mut rep = ImportReport::default();
     rep.source = path.to_string_lossy().into_owned();
     crate::import::set_progress(|pr| pr.folders_total = manifest.posts.len());
     for p in &manifest.posts {
-        if crate::import::cancelled() { break; }
+        if crate::import::cancelled() { rep.incomplete = Some(tr!("import.cancelled")); break; }
+        if p.meta.id.len() > MAX_POST_ID_BYTES { rep.issue("unreadable", &p.meta.id.chars().take(40).collect::<String>(), tr!("pack.badPostId"), None); continue; }
         let mut stored = vec![];
         for m in &p.media {
             rep.entries += 1;
-            if safe_relative(&m.file).is_none() { rep.issue("unsafe_path", &m.file, "路径不安全（绝对路径或包含 ..），没有读取", None); continue; }
+            if safe_relative(&m.file).is_none() { rep.issue("unsafe_path", &m.file, tr!("pack.unsafePath"), None); continue; }
             let ext = Path::new(&m.file).extension().and_then(|e| e.to_str()).unwrap_or("bin").to_ascii_lowercase();
-            if !crate::rules::valid_ext(ext.as_bytes()) { rep.issue("unsupported", &m.file, "文件扩展名无效，没有读取", None); continue; }
+            if !crate::rules::valid_ext(ext.as_bytes()) { rep.issue("unsupported", &m.file, tr!("pack.badExt"), None); continue; }
             let tmp = lib.tmp_path();
             let _cleanup = crate::library::TempFile(tmp.clone());
             let mut h = Sha256::new();
             let mut head: Vec<u8> = Vec::with_capacity(16);
+            let mut store_failed = None;
             let read = (|| -> anyhow::Result<()> {
-                let mut e = z.by_name(&m.file).with_context(|| format!("导出包里缺少这个文件：{}", m.file))?;
-                if e.size() > MAX_MEDIA_BYTES || e.size() > remaining { bail!("导出包媒体超过大小限制"); }
+                let mut e = z.by_name(&m.file).with_context(|| tr!("pack.missingFile", file = m.file))?;
+                if e.size() > MAX_MEDIA_BYTES || e.size() > remaining { bail!(tr!("pack.mediaTooBig")); }
                 let mut media_bytes = 0u64;
-                let mut w = BufWriter::new(File::create(&tmp)?);
+                let file = File::create(&tmp).inspect_err(|e| store_failed = Some(e.to_string()))?;
+                let mut w = BufWriter::new(file);
                 let mut buf = vec![0u8; 1 << 20];
                 loop {
                     let n = e.read(&mut buf)?;
                     if n == 0 { break; }
                     media_bytes += n as u64;
-                    if media_bytes > MAX_MEDIA_BYTES || n as u64 > remaining { bail!("导出包媒体超过大小限制"); }
+                    if media_bytes > MAX_MEDIA_BYTES || n as u64 > remaining { bail!(tr!("pack.mediaTooBig")); }
                     remaining -= n as u64;
                     if head.len() < 16 { head.extend_from_slice(&buf[..n.min(16 - head.len())]); }
-                    h.update(&buf[..n]); w.write_all(&buf[..n])?;
+                    h.update(&buf[..n]); w.write_all(&buf[..n]).inspect_err(|e| store_failed = Some(e.to_string()))?;
                 }
-                w.into_inner()?.sync_all()?;
+                w.flush().and_then(|_| w.get_ref().sync_all()).inspect_err(|e| store_failed = Some(e.to_string()))?;
                 Ok(())
             })();
+            if let Some(why) = store_failed { rep.incomplete = Some(why); }
             if let Err(e) = read { let _ = fs::remove_file(&tmp); rep.issue("unreadable", &m.file, format!("{e:#}"), None); continue; }
             let sha = hex::encode(h.finalize());
-            if sha != m.sha256 { let _ = fs::remove_file(&tmp); rep.issue("unreadable", &m.file, "文件已损坏：内容与导出时记录的校验值不符", None); continue; }
+            if sha != m.sha256 { let _ = fs::remove_file(&tmp); rep.issue("unreadable", &m.file, tr!("pack.damaged"), None); continue; }
             // the same content check as downloads and imports: a matching checksum only proves the
             // file is what the package says, not that it is a picture or a video
             let photo = m.kind == MediaKind::Photo;
@@ -391,7 +421,7 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
             if db.post_meta(&p.meta.id)?.is_some() { rep.merged_posts += 1; }
             // fields beyond their limits are cut (see `PostMeta::clamped`), and the report says so
             let (meta, cut) = p.meta.clamped();
-            for field in cut { rep.issue("post_text_truncated", &p.meta.id, format!("帖子 {} 的{}过长，只保留了前面的部分", p.meta.id, field), None); }
+            for field in cut { rep.issue("post_text_truncated", &p.meta.id, tr!("import.fieldCut", id = p.meta.id, field = crate::i18n::text(field)), None); }
             db.upsert_post_checked(&meta, |id, ext| lib.dir.join(crate::oplog::blob_rel(id, ext)).exists())?;
             for (m, rel) in &stored {
                 rep.note_file(&m.sha256, &m.file, &p.meta.id);
@@ -413,6 +443,7 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
                 if !existed { rep.new_media += 1; }
                 for model in &m.ai_models { db.mark_ai_done(&m.sha256, model)?; }
                 for f in &m.folders { db.add_to_folder(f, &[m.sha256.clone()])?; }
+                if m.album { db.mark_album(&m.sha256)?; }
                 if m.trashed && new_here { db.trash_action(&m.sha256, crate::rules::TrashAction::Trash)?; rep.to_bin += 1; }
                 rep.media += 1;
             }
@@ -423,6 +454,18 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
         }
         rep.posts += 1;
         rep.ids.push(p.meta.id.clone());
+    }
+    // the other posts a media belongs to, for media that came in
+    for c in &manifest.also_claimed {
+        if c.post.id.len() > MAX_POST_ID_BYTES { continue; }
+        let db = lib.db();
+        let Some((_, _, kind, rel)) = db.media_row(&c.media)? else { continue };
+        let kind = if kind == "video" { MediaKind::Video } else { MediaKind::Photo };
+        let tx = db.conn().unchecked_transaction()?;
+        let (meta, _) = c.post.clamped();
+        db.upsert_post_checked(&meta, |id, ext| lib.dir.join(crate::oplog::blob_rel(id, ext)).exists())?;
+        db.add_media(&c.media, &meta.id, c.ordinal, &kind, &rel, false)?;
+        tx.commit()?;
     }
     {
         let db = lib.db();
@@ -445,6 +488,82 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A share's package goes away only when what is missing cannot come in later: a device that
+    /// cannot store a file says so in `incomplete`, a damaged package only in `issues`.
+    #[test]
+    fn a_package_says_when_it_can_be_tried_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmpdir("incomplete");
+        let lib = Library::open(d.join("a")).unwrap();
+        let file = d.join("x.png");
+        fs::write(&file, b"\x89PNG\r\n\x1a\nsynthetic").unwrap();
+        let (sha, rel) = lib.put_file(&file, &MediaKind::Photo, "png").unwrap();
+        {
+            let db = lib.db();
+            db.upsert_post_checked(&PostMeta { id: "1".into(), ..Default::default() }, |_, _| true).unwrap();
+            db.add_media(&sha, "1", 0, &MediaKind::Photo, &rel, false).unwrap();
+        }
+        let out = d.join("p.tlpack");
+        export_backup(&lib, &out).unwrap();
+
+        let other = Library::open(d.join("b")).unwrap();
+        let tmp = other.dir.join("tmp");
+        fs::create_dir_all(&tmp).unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o500)).unwrap();
+        let blocked = import_pack(&other, &out).unwrap();
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(blocked.incomplete.is_some(), "{blocked:?}");
+        let again = import_pack(&other, &out).unwrap();
+        assert_eq!((again.incomplete.clone(), again.new_media), (None, 1), "{again:?}");
+
+        let damaged = d.join("damaged.tlpack");
+        let (input, output) = (File::open(&out).unwrap(), File::create(&damaged).unwrap());
+        let mut z = zip::ZipArchive::new(input).unwrap();
+        let mut w = zip::ZipWriter::new(output);
+        let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for i in 0..z.len() {
+            let mut e = z.by_index(i).unwrap();
+            let name = e.name().to_string();
+            let mut bytes = vec![];
+            e.read_to_end(&mut bytes).unwrap();
+            if name != "manifest.json" { bytes.push(0); }
+            w.start_file(name, stored).unwrap();
+            w.write_all(&bytes).unwrap();
+        }
+        w.finish().unwrap();
+        let third = Library::open(d.join("c")).unwrap();
+        let bad = import_pack(&third, &damaged).unwrap();
+        assert!(bad.incomplete.is_none() && !bad.issues.is_empty(), "{bad:?}");
+    }
+
+    /// Two posts share one file: the backup keeps both, though a feed lists it under one.
+    #[test]
+    fn a_backup_keeps_every_post_a_media_belongs_to() {
+        let d = tmpdir("claims");
+        let lib = Library::open(d.join("a")).unwrap();
+        let file = d.join("x.png");
+        fs::write(&file, b"\x89PNG\r\n\x1a\nsynthetic").unwrap();
+        let kind = MediaKind::Photo;
+        let (sha, rel) = lib.put_file(&file, &kind, "png").unwrap();
+        {
+            let db = lib.db();
+            for id in ["1", "2"] {
+                let meta = PostMeta { id: id.into(), text: Some(format!("post {id}")), ..Default::default() };
+                db.upsert_post_checked(&meta, |_, _| true).unwrap();
+                db.add_media(&sha, id, 0, &kind, &rel, false).unwrap();
+            }
+        }
+        let out = d.join("b.tlpack");
+        export_backup(&lib, &out).unwrap();
+        let back = Library::open(d.join("b")).unwrap();
+        import_pack(&back, &out).unwrap();
+        let db = back.db();
+        assert!(db.post_meta("1").unwrap().is_some());
+        assert_eq!(db.post_meta("2").unwrap().and_then(|m| m.text).as_deref(), Some("post 2"));
+        let claims: i64 = db.conn().query_row("SELECT count(*) FROM media_claim", [], |r| r.get(0)).unwrap();
+        assert_eq!(claims, 2);
+    }
     use crate::model::SearchScope;
     use crate::library::FeedRequest;
 
@@ -502,7 +621,7 @@ mod tests {
         assert_eq!((r.posts, r.media, r.deleted), (1, 2, 0));
         let tmp_left = fs::read_dir(lib.dir.join("tmp")).map_or(0, |rd| rd.count());
         assert_eq!(tmp_left, 0, "nothing extracted or left behind");
-        let req = FeedRequest { terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
+        let req = FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
         let items = lib.feed(&req).unwrap();
         assert!(items.iter().all(|i| i.post_id == "77" && i.text.as_deref() == Some("中文正文")));
         let one = hex::encode(Sha256::digest(crate::testutil::jpg(b"one")));
@@ -526,6 +645,23 @@ mod tests {
         lib.set_trash_keep_days(30).unwrap();
         assert_eq!(lib.expire_trash(now + 31 * 86_400_000).unwrap(), 1);
         assert_eq!(lib.db().stats().unwrap().trashed, 0);
+    }
+
+    /// What is shared from another app is 从相册导入; what is dropped on a window is only loose.
+    #[test]
+    fn dropped_media_is_loose_without_the_album_mark() {
+        let d = tmpdir("dropped");
+        for (name, album) in [("shared", true), ("dropped", false)] {
+            let src = d.join(name);
+            fs::create_dir_all(&src).unwrap();
+            fs::write(src.join("1.jpg"), crate::testutil::jpg(name.as_bytes())).unwrap();
+            let lib = Library::open(d.join(format!("lib-{name}"))).unwrap();
+            crate::import::import_loose_dir_keep(&lib, &src, None, true, None, album).unwrap();
+            let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+            assert_eq!(all.len(), 1);
+            assert!(all[0].post_id.starts_with("loose:"), "both are loose");
+            assert_eq!(all[0].album, album);
+        }
     }
 
     /// Re-download of a damaged media from a post without a link falls back to peers.
@@ -558,7 +694,7 @@ mod tests {
         for (n, b) in [("1.jpg", "a"), ("2.jpg", "b"), ("3.jpg", "c")] { fs::write(src.join(n), crate::testutil::jpg(b.as_bytes())).unwrap(); }
         let lib = Library::open(d.join("lib")).unwrap();
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let all = lib.feed(&FeedRequest { terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         let mut ids: Vec<_> = all.iter().map(|i| (i.ordinal, i.media_id.clone())).collect(); ids.sort();
         lib.tag(&ids[0].1, "A", Origin::USER).unwrap();
         lib.tag(&ids[1].1, "A", Origin::AI).unwrap();
@@ -569,7 +705,7 @@ mod tests {
         let lib2 = Library::open(d.join("lib2")).unwrap();
         let r = import_pack(&lib2, &out).unwrap();
         assert_eq!(r.media, 2);
-        let got = lib2.feed(&FeedRequest { terms: vec!["a".into()], scope: SearchScope::Ai, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let got = lib2.feed(&FeedRequest { newest_first: false, terms: vec!["a".into()], scope: SearchScope::Ai, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].text.as_deref(), Some("帖子"));
     }
@@ -613,7 +749,7 @@ mod tests {
         for (n, b) in [("1.jpg", "a"), ("2.jpg", "b"), ("3.jpg", "c")] { fs::write(src.join(n), crate::testutil::jpg(b.as_bytes())).unwrap(); }
         let lib = Library::open(d.join("lib")).unwrap();
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let req = FeedRequest { terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
+        let req = FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
         let mut ids: Vec<_> = lib.feed(&req).unwrap().iter().map(|i| (i.ordinal, i.media_id.clone())).collect(); ids.sort();
         // media0: A (AI, by model m1, endorsed) ; media1: A + B ; media2: B
         lib.apply_ai_tags(&ids[0].1, "m1", &["a".into()], false).unwrap();
@@ -634,8 +770,67 @@ mod tests {
         assert!(lib2.db().media_needing_ai(10).unwrap().is_empty(), "analysed-by record survives");
     }
 
+    /// However a repeat arrives (inside one import, against the library, part of it new, in the
+    /// bin), each file is one media, nothing is lost, and the report accounts for every repeat.
     #[test]
-    fn media_only_zip_has_plain_post_folders_and_no_manifest() {
+    fn repeats_inside_an_import_and_against_the_library() {
+        use crate::rules::TrashAction::Trash;
+        let d = tmpdir("repeats");
+        let lib = Library::open(d.join("lib")).unwrap();
+        let live = |l: &Library| l.db().export_items(&[], &[]).unwrap().len();
+        let (a, b, c) = (crate::testutil::jpg(b"a"), crate::testutil::jpg(b"b"), crate::testutil::jpg(b"c"));
+        let zip_of = |name: &str, files: &[(&str, &Vec<u8>)]| {
+            let zp = d.join(name);
+            let mut z = zip::ZipWriter::new(File::create(&zp).unwrap());
+            let o = zip::write::SimpleFileOptions::default();
+            for (n, bytes) in files { z.start_file(*n, o).unwrap(); z.write_all(bytes).unwrap(); }
+            z.finish().unwrap();
+            zp
+        };
+        // the same file twice inside one post, and in two posts of one archive
+        let r = crate::import::import_zip(&lib, &zip_of("self.zip", &[("根/甲/1.jpg", &a), ("根/甲/2.jpg", &a), ("根/乙/1.jpg", &a), ("根/乙/2.jpg", &b)]), None).unwrap();
+        assert_eq!(r.new_media, 2);
+        assert_eq!(live(&lib), 2);
+        assert_eq!(r.new_media + r.duplicate_media, r.media, "every file counted once");
+        assert!(r.duplicate_media >= 2 && r.issues.iter().filter(|i| i.category == "duplicate").count() == r.duplicate_media, "each repeat listed");
+        // all of it again: nothing new, nothing lost
+        let r = crate::import::import_zip(&lib, &zip_of("again.zip", &[("根/甲/1.jpg", &a), ("根/甲/2.jpg", &a), ("根/乙/1.jpg", &a), ("根/乙/2.jpg", &b)]), None).unwrap();
+        assert_eq!(r.new_media, 0);
+        assert_eq!(live(&lib), 2);
+        // partly new, under another extension too
+        let r = crate::import::import_zip(&lib, &zip_of("part.zip", &[("根/丙/1.jpeg", &a), ("根/丙/2.jpg", &c)]), None).unwrap();
+        assert_eq!(r.new_media, 1);
+        assert_eq!(live(&lib), 3);
+        // loose: repeats inside the zip, and of what the library has
+        let r = crate::import::import_loose_zip(&lib, &zip_of("loose.zip", &[("x.jpg", &a), ("y/x.jpg", &a), ("z.jpg", &crate::testutil::jpg(b"d")), ("w.jpg", &crate::testutil::jpg(b"d"))]), None).unwrap();
+        assert_eq!(r.new_media, 1);
+        assert_eq!(live(&lib), 4);
+        // a media in the bin stays there, its repeat is reported
+        let sha = hex::encode(Sha256::digest(&c));
+        lib.trash_apply(&[sha.clone()], Trash).unwrap();
+        let r = crate::import::import_loose_zip(&lib, &zip_of("bin.zip", &[("c.jpg", &c)]), None).unwrap();
+        assert_eq!((r.new_media, r.deleted), (0, 1));
+        assert_eq!(live(&lib), 3);
+        assert!(lib.dir.join(lib.db().media_row(&sha).unwrap().unwrap().3).exists(), "its file is kept for a restore");
+        // a pack of this library, imported into itself and into a library sharing part of it
+        let out = d.join("all.tlpack");
+        export_backup(&lib, &out).unwrap();
+        let r = import_pack(&lib, &out).unwrap();
+        assert_eq!(r.new_media, 0);
+        assert_eq!(live(&lib), 3);
+        let other = Library::open(d.join("other")).unwrap();
+        crate::import::import_zip(&other, &zip_of("o.zip", &[("根/甲/1.jpg", &a), ("根/新/1.jpg", &crate::testutil::jpg(b"own"))]), None).unwrap();
+        let r = import_pack(&other, &out).unwrap();
+        assert!(r.new_media >= 2, "{}", r.new_media);
+        assert_eq!(live(&other), 4, "theirs, ours, the repeat once");
+        // an import with a folder takes in the repeats too
+        let r = crate::import::import_zip(&lib, &zip_of("f.zip", &[("根/甲/1.jpg", &a)]), Some("夹")).unwrap();
+        assert_eq!(r.new_media, 0);
+        assert!(r.folder_added >= 1);
+    }
+
+    #[test]
+    fn media_only_zip_has_every_file_at_its_root_and_no_manifest() {
         let d = tmpdir("plainzip");
         let src = d.join("src/今天/的帖子");
         fs::create_dir_all(&src).unwrap();
@@ -652,8 +847,8 @@ mod tests {
         let mut names: Vec<String> = (0..z.len()).map(|i| z.by_index(i).unwrap().name().to_string()).collect();
         names.sort();
         assert_eq!(names.len(), 2, "{names:?}");
-        assert!(names.iter().all(|n| !n.contains("manifest") && n.ends_with(".jpg") && n.matches('/').count() == 1), "{names:?}");
-        assert!(names[0].ends_with("/1.jpg") && names[1].ends_with("/2.jpg"), "numbered in post order: {names:?}");
+        assert!(names.iter().all(|n| !n.contains("manifest") && n.ends_with(".jpg") && !n.contains('/')), "{names:?}");
+        assert!(names[0].ends_with(" - 1.jpg") && names[1].ends_with(" - 2.jpg"), "numbered in post order: {names:?}");
         // the files are the originals, byte for byte
         let mut got = vec![];
         z.by_name(&names[0]).unwrap().read_to_end(&mut got).unwrap();
@@ -670,7 +865,7 @@ mod tests {
         for (n, b) in [("1.jpg", "a"), ("2.jpg", "b")] { fs::write(src.join(n), crate::testutil::jpg(b.as_bytes())).unwrap(); }
         let lib = Library::open(d.join("lib")).unwrap();
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let req = |kind| FeedRequest { terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(),
+        let req = |kind| FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(),
             filter: crate::library::FeedFilter { kind, ..Default::default() } };
         let all = lib.feed(&req(None)).unwrap();
         assert_eq!(all.len(), 2);

@@ -1,0 +1,46 @@
+{
+  "data": {
+    "tweet_result": {
+      "result": {
+        "__typename": "TweetWithVisibilityResults",
+        "tweet": {
+          "rest_id": "1700000000000000002",
+          "core": {
+            "user_results": {
+              "result": {
+                "__typename": "User",
+                "rest_id": "900000003",
+                "legacy": {
+                  "screen_name": "longform",
+                  "name": "Long Form",
+                  "protected": false
+                }
+              }
+            }
+          },
+          "legacy": {
+            "full_text": "This is the full long-form text that does not fit\u2026",
+            "created_at": "Sun Jan 14 08:00:00 +0000 2024",
+            "extended_entities": {
+              "media": [
+                {
+                  "id_str": "1800000000000000003",
+                  "type": "photo",
+                  "media_url_https": "https://pbs.twimg.com/media/LONG.jpg",
+                  "url": "https://t.co/LONGPIC"
+                }
+              ]
+            }
+          },
+          "note_tweet": {
+            "note_tweet_results": {
+              "result": {
+                "text": "Long &amp; complete https://t.co/LONGPIC"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

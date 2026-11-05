@@ -26,6 +26,8 @@ use tokio::net::{TcpListener, TcpStream};
 /// Largest encrypted frame (after authentication). Ops are sent in batches of at most
 /// OPS_BYTES, so a batch always fits; one op is never larger than a post (its fields are limited, see PostMeta::clamped).
 const MAX_FRAME: usize = 16 << 20;
+/// Largest op in the log, with room for the batch around it (see `Store::record`).
+pub(crate) const MAX_OP_BYTES: usize = 15 << 20;
 /// Largest frame before authentication: handshake messages are tiny, and a stranger on the
 /// network must not make this device allocate megabytes per connection.
 const MAX_HANDSHAKE_FRAME: usize = 64 << 10;
@@ -163,7 +165,7 @@ const MODEL_SILENCE: Duration = Duration::from_secs(60);
 
 /// Waits for a peer's answer, for at most `MODEL_SILENCE`.
 async fn silence_limited<T>(f: impl std::future::Future<Output = anyhow::Result<T>>) -> anyhow::Result<T> {
-    tokio::time::timeout(MODEL_SILENCE, f).await.map_err(|_| anyhow!("对方长时间没有回应"))?
+    tokio::time::timeout(MODEL_SILENCE, f).await.map_err(|_| anyhow!(tr!("sync.peerSilent")))?
 }
 
 /// A step of pulling a model from a peer: ends at once when the transfer is cancelled (not only
@@ -173,7 +175,7 @@ async fn model_wait<T>(f: impl std::future::Future<Output = anyhow::Result<T>>) 
     let cancelled = async { while !crate::models::external_cancelled() { tokio::time::sleep(Duration::from_millis(100)).await; } };
     tokio::select! {
         biased;
-        _ = cancelled => bail!("已取消"),
+        _ = cancelled => bail!(tr!("common.cancelled")),
         r = silence_limited(f) => r,
     }
 }
@@ -186,30 +188,31 @@ struct Channel { s: Box<dyn Wire>, tx: ChaCha20Poly1305, rx: ChaCha20Poly1305, t
 
 impl Channel {
     fn check(&self) -> anyhow::Result<()> {
-        if self.revoked.has_changed().unwrap_or(true) { bail!("同步账户已退出或更改"); }
+        if self.revoked.has_changed().unwrap_or(true) { bail!(tr!("sync.accountGone")); }
         Ok(())
     }
     fn nonce(n: u64) -> Nonce { let mut b = [0u8; 12]; b[4..].copy_from_slice(&n.to_be_bytes()); *Nonce::from_slice(&b) }
     async fn send_raw(&mut self, b: &[u8]) -> anyhow::Result<()> {
         self.check()?;
-        let c = self.tx.encrypt(&Self::nonce(self.tx_n), b).map_err(|_| anyhow!("encrypt"))?;
-        self.tx_n += 1;
+        let n = crate::rules::take_channel_nonce(&mut self.tx_n).ok_or_else(|| anyhow!("channel nonce exhausted"))?;
+        let c = self.tx.encrypt(&Self::nonce(n), b).map_err(|_| anyhow!("encrypt"))?;
         tokio::select! {
             biased;
-            _ = self.revoked.changed() => bail!("同步账户已退出或更改"),
+            _ = self.revoked.changed() => bail!(tr!("sync.accountGone")),
             r = write_frame(&mut self.s, &c) => r,
         }
     }
     async fn recv_raw(&mut self) -> anyhow::Result<Vec<u8>> {
         self.check()?;
+        if self.rx_n == u64::MAX { bail!("channel nonce exhausted"); }
         let c = tokio::select! {
             biased;
-            _ = self.revoked.changed() => bail!("同步账户已退出或更改"),
+            _ = self.revoked.changed() => bail!(tr!("sync.accountGone")),
             r = read_frame(&mut self.s, MAX_FRAME) => r?,
         };
         self.check()?;
-        let p = self.rx.decrypt(&Self::nonce(self.rx_n), c.as_ref()).map_err(|_| anyhow!("消息认证失败"))?;
-        self.rx_n += 1;
+        let p = self.rx.decrypt(&Self::nonce(self.rx_n), c.as_ref()).map_err(|_| anyhow!(tr!("sync.authFailed")))?;
+        crate::rules::take_channel_nonce(&mut self.rx_n).ok_or_else(|| anyhow!("channel nonce exhausted"))?;
         Ok(p)
     }
     async fn send(&mut self, m: &Msg) -> anyhow::Result<()> { self.send_raw(&serde_json::to_vec(m)?).await }
@@ -258,7 +261,7 @@ impl SyncNode {
     pub fn new(lib: Arc<Library>) -> Arc<SyncNode> {
         Arc::new(SyncNode {
             account_revision: tokio::sync::watch::channel(0).0,
-            lib, account: Mutex::new(None), device_name: Mutex::new("设备".into()), port: Mutex::new(None),
+            lib, account: Mutex::new(None), device_name: Mutex::new(tr!("sync.defaultName").into()), port: Mutex::new(None),
             pairing: Mutex::new(None), peers: Mutex::new(BTreeMap::new()), active: Mutex::new(HashSet::new()), peer_sessions: Mutex::new(HashSet::new()), failed: Mutex::new(BTreeMap::new()), transfer: Mutex::new(None),
             join: Mutex::new(JoinState::default()), changes: AtomicU64::new(0), shutdown: Mutex::new(None),
         })
@@ -328,12 +331,26 @@ impl SyncNode {
                                     log::debug(&format!("incoming {addr}: {e:#}"));
                                 }
                             });
+                        } else {
+                            // iOS may invalidate a listener during suspension. Do not busy-loop
+                            // on a permanently failed socket; foreground recovery rebinds it.
+                            break;
                         }
                     }
                 }
             });
         }
         Ok(port)
+    }
+
+    /// A suspended iOS process may retain its advertised port after the OS invalidated
+    /// the listening socket. Rebind on foreground without revoking authenticated sessions.
+    pub async fn restart_listener(self: &Arc<Self>) -> anyhow::Result<u16> {
+        if let Some(tx) = self.shutdown.lock().unwrap().take() { let _ = tx.send(true); }
+        *self.port.lock().unwrap() = None;
+        let account = self.account();
+        let name = self.device_name.lock().unwrap().clone();
+        self.start(account, name).await
     }
 
     pub fn stop(&self) {
@@ -355,7 +372,7 @@ impl SyncNode {
     /// Shows a fresh 6-digit pairing code on this (already paired) device.
     pub fn begin_pairing(&self) -> anyhow::Result<String> {
         let account = self.account.lock().unwrap();
-        if account.is_none() { bail!("尚未创建同步账户"); }
+        if account.is_none() { bail!(tr!("sync.noAccountYet")); }
         let code = format!("{:06}", rand::random::<u32>() % 1_000_000);
         *self.pairing.lock().unwrap() = Some(Pairing { code: code.clone(), expires: Instant::now() + PAIR_TTL, attempts: 0 });
         Ok(code)
@@ -406,8 +423,8 @@ impl SyncNode {
     async fn connect_auth(&self, host: &str, port: u16, mode: &str) -> anyhow::Result<Channel> {
         let revoked = self.account_revision.subscribe();
         let epoch = self.lib.epoch();
-        let acct = self.account().ok_or_else(|| anyhow!("尚未加入同步账户"))?;
-        let mut s = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect((host, port))).await.map_err(|_| anyhow!("连接超时"))??;
+        let acct = self.account().ok_or_else(|| anyhow!(tr!("sync.notJoined")))?;
+        let mut s = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect((host, port))).await.map_err(|_| anyhow!(tr!("sync.timeout")))??;
         let _ = s.set_nodelay(true);
         let ni: [u8; 32] = rand::random();
         // A peer may accept the connection and then say nothing: its answer is waited for a
@@ -417,16 +434,16 @@ impl SyncNode {
         let handshake = async {
             send_json(&mut s, &Hello1 { v: 1, mode: mode.into(), account: Some(acct.id.clone()), device: self.device_id(), nonce: Some(hex::encode(ni)), spake: None }).await?;
             let h2: Hello2 = recv_json(&mut s).await?;
-            if let Some(e) = h2.error { bail!("对方拒绝：{e}"); }
+            if let Some(e) = h2.error { bail!(tr!("sync.refused", e = e)); }
             let nr = hex::decode(h2.nonce.unwrap_or_default())?;
-            if !hmac_ok(&acct.key, &[b"R", &ni, &nr], &hex::decode(h2.mac.unwrap_or_default())?) { bail!("对方未通过认证"); }
+            if !hmac_ok(&acct.key, &[b"R", &ni, &nr], &hex::decode(h2.mac.unwrap_or_default())?) { bail!(tr!("sync.peerUnauthenticated")); }
             send_json(&mut s, &Hello3 { mac: Some(hex::encode(hmac(&acct.key, &[b"I", &ni, &nr]))), ack: None }).await?;
             Ok::<_, anyhow::Error>(nr)
         };
         let nr = tokio::select! {
             biased;
-            _ = leaving.changed() => bail!("同步账户已退出或更改"),
-            r = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake) => r.map_err(|_| anyhow!("对方没有回应（握手超时）"))??,
+            _ = leaving.changed() => bail!(tr!("sync.accountGone")),
+            r = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake) => r.map_err(|_| anyhow!(tr!("sync.handshakeTimeout")))??,
         };
         let (i2r, r2i) = session_keys(&acct.key, &ni, &nr);
         Ok(Channel { s: Box::new(s), tx: i2r, rx: r2i, tx_n: 0, rx_n: 0, epoch, revoked })
@@ -438,11 +455,12 @@ impl SyncNode {
     async fn serve_models(&self, mut ch: Channel) -> anyhow::Result<()> {
         let dir = self.lib.models_dir();
         match ch.recv().await? {
-            Msg::ListModels => ch.send(&Msg::Models { list: crate::models::installed(&dir) }).await,
+            // MLX folders only: they run on Apple devices alone, and only those pull models
+            Msg::ListModels => ch.send(&Msg::Models { list: crate::models::installed(&dir).into_iter().filter(|m| m.format == "mlx").collect() }).await,
             Msg::FetchModel { id } => {
-                let Ok(id) = crate::models::checked_id(&id).map(str::to_string) else { return ch.send(&Msg::ModelError { message: "非法模型名".into() }).await };
+                let Ok(id) = crate::models::checked_id(&id).map(str::to_string) else { return ch.send(&Msg::ModelError { message: tr!("models.badName").into() }).await };
                 let mdir = dir.join(&id);
-                if crate::models::validate_dir(&mdir).is_err() { return ch.send(&Msg::ModelError { message: "对方没有这个模型".into() }).await; }
+                if crate::models::validate_dir(&mdir).is_err() { return ch.send(&Msg::ModelError { message: tr!("sync.noSuchModel").into() }).await; }
                 let mut names: Vec<String> = std::fs::read_dir(&mdir)?.filter_map(|e| e.ok()).filter(|e| e.path().is_file())
                     .map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| crate::models::is_wanted_file(n)).collect();
                 names.sort();
@@ -495,11 +513,11 @@ impl SyncNode {
             loop {
                 match model_wait(ch.recv()).await? {
                     Msg::ModelFile { name, size } => {
-                        if name.contains('/') || name.contains("..") || !crate::models::is_wanted_file(&name) { bail!("非法文件名 {name}"); }
+                        if name.contains('/') || name.contains("..") || !crate::models::is_wanted_file(&name) { bail!(tr!("sync.badFileName", name = name)); }
                         let mut f = tokio::fs::File::create(staging.join(&name)).await?;
                         let mut left = size;
                         while left > 0 {
-                            if crate::models::external_cancelled() { bail!("已取消"); }
+                            if crate::models::external_cancelled() { bail!(tr!("common.cancelled")); }
                             let c = model_wait(ch.recv_raw()).await?;
                             if c.is_empty() || c.len() as u64 > left { bail!("protocol: invalid model chunk"); }
                             f.write_all(&c).await?;
@@ -519,8 +537,7 @@ impl SyncNode {
             let _db = self.lib.db_at(ch.epoch)?;
             crate::models::validate_dir(&staging)?;
             let dst = dir.join(&id);
-            if dst.exists() { std::fs::remove_dir_all(&dst)?; }
-            std::fs::rename(&staging, &dst)?;
+            crate::models::replace_dir(&staging, &dst)?;
             Ok(())
         }.await;
         if r.is_err() { let _ = std::fs::remove_dir_all(&staging); }
@@ -557,7 +574,7 @@ impl SyncNode {
         let me = self.clone();
         let revision = self.account_revision.subscribe();
         tokio::spawn(async move {
-            let r = tokio::time::timeout(Duration::from_secs(20), me.do_join(&host, port, code.trim())).await.unwrap_or_else(|_| Err(anyhow!("连接超时")));
+            let r = tokio::time::timeout(Duration::from_secs(20), me.do_join(&host, port, code.trim())).await.unwrap_or_else(|_| Err(anyhow!(tr!("sync.timeout"))));
             let mut account = me.account.lock().unwrap();
             if revision.has_changed().unwrap_or(true) { return; }
             let mut j = me.join.lock().unwrap();
@@ -575,15 +592,15 @@ impl SyncNode {
     }
 
     async fn do_join(&self, host: &str, port: u16, code: &str) -> anyhow::Result<Account> {
-        if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) { bail!("验证码应为 6 位数字"); }
-        let mut s = TcpStream::connect((host, port)).await.context("无法连接到该设备")?;
+        if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) { bail!(tr!("sync.codeFormat")); }
+        let mut s = TcpStream::connect((host, port)).await.context(tr!("sync.cannotConnect"))?;
         let (st, msg_a) = Spake2::<Ed25519Group>::start_a(&Password::new(code.as_bytes()), &Identity::new(b"tl-joiner"), &Identity::new(b"tl-host"));
         send_json(&mut s, &Hello1 { v: 1, mode: "pair".into(), account: None, device: self.device_id(), nonce: None, spake: Some(hex::encode(msg_a)) }).await?;
         let h2: Hello2 = recv_json(&mut s).await?;
-        if let Some(e) = h2.error { bail!(if e == "no_pairing" { "该设备没有在显示验证码，或验证码已过期".to_string() } else { e }); }
-        let k = st.finish(&hex::decode(h2.spake.unwrap_or_default())?).map_err(|_| anyhow!("配对失败"))?;
+        if let Some(e) = h2.error { bail!(if e == "no_pairing" { tr!("sync.codeNotShown").to_string() } else { e }); }
+        let k = st.finish(&hex::decode(h2.spake.unwrap_or_default())?).map_err(|_| anyhow!(tr!("sync.pairFailed")))?;
         let aead = ChaCha20Poly1305::new(Key::from_slice(&k[..32]));
-        let opened = aead.decrypt(&Channel::nonce(0), hex::decode(h2.sealed.unwrap_or_default())?.as_ref()).map_err(|_| anyhow!("验证码错误"))?;
+        let opened = aead.decrypt(&Channel::nonce(0), hex::decode(h2.sealed.unwrap_or_default())?.as_ref()).map_err(|_| anyhow!(tr!("sync.codeWrong")))?;
         let v: serde_json::Value = serde_json::from_slice(&opened)?;
         let key: [u8; 32] = hex::decode(v["key"].as_str().unwrap_or_default())?.try_into().map_err(|_| anyhow!("bad key"))?;
         send_json(&mut s, &Hello3 { mac: None, ack: Some(hex::encode(hmac(&k, &[b"paired"]))) }).await?;
@@ -603,7 +620,7 @@ impl SyncNode {
 
     /// Syncs with one peer; concurrent requests for the same address are coalesced.
     pub async fn sync_with(self: &Arc<Self>, host: &str, port: u16) -> anyhow::Result<()> {
-        let acct = self.account().ok_or_else(|| anyhow!("尚未加入同步账户"))?;
+        let acct = self.account().ok_or_else(|| anyhow!(tr!("sync.notJoined")))?;
         let key = format!("{host}:{port}");
         if !self.active.lock().unwrap().insert(key.clone()) { return Ok(()); }
         // removed on every exit, panics included (a stuck entry would silently block this address)
@@ -614,7 +631,7 @@ impl SyncNode {
         let r = tokio::time::timeout(Duration::from_secs(3600), async {
             let ch = self.connect_auth(host, port, "sync").await?;
             self.run_session(ch, true, key.clone()).await
-        }).await.unwrap_or_else(|_| Err(anyhow!("同步超时")));
+        }).await.unwrap_or_else(|_| Err(anyhow!(tr!("sync.syncTimeout"))));
         let mut failed = self.failed.lock().unwrap();
         match &r {
             Ok(()) => { failed.remove(&key); }
@@ -637,6 +654,19 @@ impl SyncNode {
             let db = self.lib.db_at(ch.epoch)?;
             let applied = db.retry_pending_ops(|id, ext| self.lib.dir.join(blob_rel(id, ext)).exists())?;
             if applied > 0 { self.changes.fetch_add(1, Ordering::SeqCst); }
+            // files gone from this device are asked for again below, like files never received.
+            // Looking at every file holds the library and takes long on a slow disk: every ten
+            // minutes at most, however many devices connect every 20 seconds.
+            let due = {
+                static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+                let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+                let every = std::time::Duration::from_secs(if cfg!(test) { 0 } else { 600 });
+                let due = last.map_or(true, |t| t.elapsed() >= every);
+                if due { *last = Some(std::time::Instant::now()); }
+                due
+            };
+            let missing = if due { db.note_missing_files(|p| self.lib.dir.join(p).exists())? } else { 0 };
+            if missing > 0 { self.lib.diag("files_missing_refetch", serde_json::json!({ "files": missing })); self.changes.fetch_add(1, Ordering::SeqCst); }
             db.version_vector()?
         };
         let me = self.device_id();
@@ -684,8 +714,9 @@ impl SyncNode {
 
     async fn send_ops(&self, ch: &mut Channel, their_vv: &VersionVector) -> anyhow::Result<()> {
         let mut vv = their_vv.clone();
+        let upper = self.lib.db().version_vector()?;
         loop {
-            let ops = self.lib.db().ops_since(&vv, OPS_BATCH)?;
+            let ops = self.lib.db().ops_since_until(&vv, &upper, OPS_BATCH)?;
             if ops.is_empty() { break; }
             for o in &ops { let e = vv.entry(o.device.clone()).or_insert(0); *e = crate::rules::vv_advance(*e, o.seq); }
             // cut by size too, in order (each device's ops stay in sequence across batches)
@@ -734,6 +765,7 @@ impl SyncNode {
                             crate::oplog::Op::FolderMedia { .. } => "folder_member".to_string(),
                             crate::oplog::Op::Recent { .. } => "recently_added".to_string(),
                             crate::oplog::Op::Setting { .. } => "setting".to_string(),
+                            crate::oplog::Op::Album { .. } => "album".to_string(),
                             crate::oplog::Op::Unknown(_) => "from_newer_app_version".to_string(),
                         };
                         *kinds.entry(k).or_default() += 1;
@@ -808,7 +840,7 @@ impl SyncNode {
                         continue;
                     }
                     let epoch = ch.epoch;
-                    if self.lib.epoch() != epoch { let _ = tokio::fs::remove_file(&tmp).await; bail!("资料库已被清除"); }
+                    if self.lib.epoch() != epoch { let _ = tokio::fs::remove_file(&tmp).await; bail!(tr!("library.wiped")); }
                     let stored_path;
                     {
                         let _account = self.account.lock().unwrap();
@@ -893,6 +925,31 @@ mod pairing_tests {
         let d = std::env::temp_dir().join(format!("tl-pair-{}-{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         SyncNode::new(Arc::new(Library::open(&d).unwrap()))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn foreground_listener_rebind_preserves_account_and_active_channels() {
+        let (host, client) = (node("rebind-host"), node("rebind-client"));
+        let acct = Account::generate();
+        let old = host.start(Some(acct.clone()), "Phone".into()).await.unwrap();
+        client.start(Some(acct.clone()), "Mac".into()).await.unwrap();
+        let channel = client.connect_auth("127.0.0.1", old, "sync").await.unwrap();
+        let revision = *host.account_revision.borrow();
+        let new = host.restart_listener().await.unwrap();
+        assert_ne!(old, new);
+        assert_eq!(*host.account_revision.borrow(), revision, "listener recovery must not revoke active transfers");
+        assert_eq!(host.status().account_id.as_deref(), Some(acct.id.as_str()));
+        channel.check().unwrap();
+        assert!(client.peer_models("127.0.0.1", new).await.unwrap().is_empty());
+        drop(channel);
+        client.sync_with("127.0.0.1", new).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if TcpStream::connect(("127.0.0.1", old)).await.is_err() { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        host.stop(); client.stop();
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1064,6 +1121,105 @@ mod pairing_tests {
         (a, b, pa)
     }
 
+    /// Leaving the account and keeping the library, changing things on both sides meanwhile, then
+    /// joining again: nothing is lost, each side gets what the other did, and a repeat of the same
+    /// file on both sides stays one media.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn leaving_keeping_the_library_and_joining_again_loses_nothing() {
+        use crate::rules::TrashAction::*;
+        let (a, b) = (node(&format!("re{}", rand::random::<u32>())), node(&format!("re{}", rand::random::<u32>())));
+        let acct = Account::generate();
+        let pa = a.start(Some(acct.clone()), "A".into()).await.unwrap();
+        b.start(Some(acct.clone()), "B".into()).await.unwrap();
+        put(&a.lib, "共有", &[("1.jpg", b"shared"), ("2.jpg", b"binned-on-a"), ("3.jpg", b"tagged-on-b")]);
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        assert_eq!(visible(&b.lib).len(), 3);
+
+        // B leaves, keeping everything
+        b.stop();
+        b.start(None, "B".into()).await.unwrap();
+        assert_eq!(visible(&b.lib).len(), 3, "leaving removes nothing");
+        // apart: both add, one bins, one tags, and both add the same new file
+        put(&a.lib, "只在A", &[("a.jpg", b"only-a"), ("same.jpg", b"both")]);
+        put(&b.lib, "只在B", &[("b.jpg", b"only-b"), ("same.jpg", b"both")]);
+        a.lib.trash_apply(&[sha(b"binned-on-a")], Trash).unwrap();
+        b.lib.tag(&sha(b"tagged-on-b"), "猫", crate::model::Origin(1)).unwrap();
+
+        // B joins again (the same account key)
+        b.stop();
+        b.start(Some(acct), "B".into()).await.unwrap();
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        let (va, vb) = (visible(&a.lib), visible(&b.lib));
+        assert_eq!(va, vb, "the same library on both");
+        for id in [sha(b"shared"), sha(b"tagged-on-b"), sha(b"only-a"), sha(b"only-b"), sha(b"both")] {
+            assert!(va.contains(&id), "{id} is there");
+            assert!(file(&a.lib, &id).exists() && file(&b.lib, &id).exists(), "{id} has its file on both");
+        }
+        assert_eq!(va.len(), 5);
+        assert_eq!(a.lib.trash_list().unwrap().len(), 1, "the bin came along, and the file is kept");
+        assert!(file(&b.lib, &sha(b"binned-on-a")).exists());
+        let tags = |l: &Library| l.db().feed_filtered(&[], &[], crate::model::SearchScope::Both, Default::default(), &Default::default()).unwrap()
+            .into_iter().find(|i| i.media_id == sha(b"tagged-on-b")).unwrap().tags.len();
+        assert_eq!((tags(&a.lib), tags(&b.lib)), (1, 1));
+    }
+
+    /// Joining another account with a library of its own merges the two: nobody loses media.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn joining_another_account_merges_the_libraries() {
+        let (a, b) = (node(&format!("mj{}", rand::random::<u32>())), node(&format!("mj{}", rand::random::<u32>())));
+        let (one, two) = (Account::generate(), Account::generate());
+        let pa = a.start(Some(one), "A".into()).await.unwrap();
+        b.start(Some(two.clone()), "B".into()).await.unwrap();
+        put(&a.lib, "A的", &[("a.jpg", b"from-a")]);
+        put(&b.lib, "B的", &[("b.jpg", b"from-b")]);
+        assert!(b.sync_with("127.0.0.1", pa).await.is_err() || visible(&b.lib).len() == 1, "another account's device gives nothing");
+        a.stop();
+        let pa = a.start(Some(two), "A".into()).await.unwrap();
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        assert_eq!(visible(&a.lib), visible(&b.lib));
+        assert_eq!(visible(&a.lib).len(), 2);
+    }
+
+    /// 从相册导入 travels with the media, and only what a share brought in has it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_album_mark_syncs() {
+        let (a, b, pa) = pair().await;
+        put(&a.lib, "帖子", &[("1.jpg", b"from-a-post")]);
+        let share = a.lib.dir.join("share");
+        std::fs::create_dir_all(&share).unwrap();
+        std::fs::write(share.join("p.jpg"), crate::testutil::jpg(b"from-album")).unwrap();
+        crate::import::import_loose_dir(&a.lib, &share, None, true).unwrap();
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        let filter = crate::library::FeedFilter { album_only: true, ..Default::default() };
+        for l in [&a.lib, &b.lib] {
+            let v = l.db().feed_filtered(&[], &[], crate::model::SearchScope::Both, Default::default(), &filter).unwrap();
+            assert_eq!(v.len(), 1);
+            assert_eq!(v[0].media_id, sha(b"from-album"));
+            assert!(v[0].album);
+            assert_eq!(visible(l).len(), 2);
+        }
+    }
+
+    /// A file deleted by hand on one device (not through the app) comes back from another device
+    /// at the next sync, and the other device keeps its own: missing is not a deletion.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn files_lost_on_one_device_come_back_from_another() {
+        let (a, b, pa) = pair().await;
+        put(&a.lib, "帖子", &[("1.jpg", b"one"), ("2.jpg", b"two")]);
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        let x = sha(b"one");
+        assert!(file(&b.lib, &x).exists());
+        // B loses a file outside the app
+        std::fs::remove_file(file(&b.lib, &x)).unwrap();
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        assert!(file(&b.lib, &x).exists(), "fetched again from A");
+        assert!(file(&a.lib, &x).exists(), "A keeps its file");
+        assert_eq!(b.lib.db().bad_reason(&x).unwrap(), None);
+        assert_eq!(visible(&a.lib).len(), 2);
+        assert_eq!(visible(&b.lib).len(), 2);
+    }
+
     /// Binning, permanent deletion and explicit re-download all travel between devices, and a
     /// permanent deletion removes the file everywhere without it ever being requested again.
     #[tokio::test(flavor = "multi_thread")]
@@ -1172,6 +1328,26 @@ mod log {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn channel_nonce_exhaustion_rejects_send_and_receive() {
+        use super::*;
+        let (a, b) = tokio::io::duplex(1024);
+        let (tx, rx) = session_keys(&[7; 32], &[1; 32], &[2; 32]);
+        let (_revision, revoked) = tokio::sync::watch::channel(0);
+        let mut sender = Channel { s: Box::new(a), tx: tx.clone(), rx: rx.clone(),
+            tx_n: u64::MAX - 1, rx_n: 0, epoch: 0, revoked: revoked.clone() };
+        let mut receiver = Channel { s: Box::new(b), tx: rx, rx: tx,
+            tx_n: 0, rx_n: u64::MAX - 1, epoch: 0, revoked };
+        sender.send_raw(b"last permitted nonce").await.unwrap();
+        assert_eq!(receiver.recv_raw().await.unwrap(), b"last permitted nonce");
+        for _ in 0..2 {
+            assert!(sender.send_raw(b"must not wrap").await.unwrap_err().to_string().contains("nonce exhausted"));
+            // Reject before waiting for a frame, even while the peer is still connected.
+            let err = tokio::time::timeout(Duration::from_secs(1), receiver.recv_raw()).await.unwrap().unwrap_err();
+            assert!(err.to_string().contains("nonce exhausted"));
+            assert_eq!((sender.tx_n, receiver.rx_n), (u64::MAX, u64::MAX));
+        }
+    }
     use super::*;
     use crate::model::{Origin, SearchScope};
     use crate::library::FeedRequest;
@@ -1189,7 +1365,7 @@ mod tests {
         std::fs::remove_dir_all(l.dir.join("src")).unwrap();
     }
     fn feed(l: &Library, terms: &[&str]) -> Vec<crate::library::FeedItem> {
-        l.feed(&FeedRequest { terms: terms.iter().map(|s| s.to_string()).collect(), scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap()
+        l.feed(&FeedRequest { newest_first: false, terms: terms.iter().map(|s| s.to_string()).collect(), scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap()
     }
 
     #[tokio::test(flavor = "multi_thread")]

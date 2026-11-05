@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7533f35efb9c4d92bb47fa38513f93edc968af2eb2f4e4629cc9f171e48a6db0 # shrinks to entries = [("帖子D/.DS_Store", Jpeg(0)), ("包/帖子A/1.jpg", Jpeg(0))]

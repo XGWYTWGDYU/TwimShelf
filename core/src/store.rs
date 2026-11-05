@@ -28,10 +28,9 @@ pub struct FolderOverview { pub name: String, pub count: i64, pub videos: i64, p
 pub struct TrashItem { #[serde(flatten)] pub item: FeedItem, /// When it was moved to the bin (ms since 1970).
     pub trashed_at_ms: u64 }
 
-/// Schema version. Versions 3–9 are migrated in place (columns and tables are only added);
-/// older ones predate the user's data and are recreated; a newer one (written by a newer app)
-/// is refused rather than silently downgraded.
-const VERSION: i64 = 14;
+/// Schema version. Versions from 3 on are migrated in place; anything older, or a newer one
+/// (written by a newer app), is refused: a library is never rebuilt from nothing or downgraded.
+const VERSION: i64 = 18;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS post(id TEXT PRIMARY KEY, author_name TEXT, screen_name TEXT, text TEXT, created_at TEXT, url TEXT,
@@ -64,6 +63,8 @@ CREATE INDEX IF NOT EXISTS trash_state ON trash(state);
 -- Local only: permanently deleted media whose file still has to be removed from disk.
 CREATE TABLE IF NOT EXISTS gc(media_id TEXT PRIMARY KEY);
 -- Local only: media whose file failed verification ('missing', 'hash', 'decode').
+-- Width and height of a media as displayed, from its file (0×0: the file says nothing). Local.
+CREATE TABLE IF NOT EXISTS media_size(media_id TEXT PRIMARY KEY, w INTEGER NOT NULL, h INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS verified_media(media_id TEXT PRIMARY KEY, path TEXT NOT NULL, checked_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS bad_media(media_id TEXT PRIMARY KEY, reason TEXT NOT NULL, at INTEGER NOT NULL);
 -- Rename rules: 「label src is now called dst」 (dst NULL = rule removed). LWW register, synced.
@@ -74,11 +75,10 @@ CREATE TABLE IF NOT EXISTS tag_alias(src TEXT PRIMARY KEY, dst TEXT, hlc INTEGER
 CREATE TABLE IF NOT EXISTS folder(name TEXT PRIMARY KEY, deleted INTEGER NOT NULL, hlc INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS folder_media(folder TEXT NOT NULL, media_id TEXT NOT NULL, present INTEGER NOT NULL, hlc INTEGER NOT NULL, PRIMARY KEY(folder, media_id));
 CREATE INDEX IF NOT EXISTS folder_media_media ON folder_media(media_id);
--- Triage mode: posts decided on this device (keep / delete / folder). LOCAL ONLY: never written
--- to the op log, never synced. moved = media the decision changed (for undo).
-CREATE TABLE IF NOT EXISTS triage(post_id TEXT PRIMARY KEY, decision TEXT NOT NULL, folder TEXT, moved TEXT NOT NULL, at INTEGER NOT NULL);
 -- Recently added (最近添加): when a post was batch-downloaded (ms). Grow-only register; expiry is computed.
 CREATE TABLE IF NOT EXISTS recent(post_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+-- Media brought in through a share extension as media (从相册导入). Grow-only, synced.
+CREATE TABLE IF NOT EXISTS album(media_id TEXT PRIMARY KEY);
 -- Settings shared by every device (the AI prompt…): LWW register (hlc, value), NULL = default. Synced.
 CREATE TABLE IF NOT EXISTS setting(key TEXT PRIMARY KEY, value TEXT, hlc INTEGER NOT NULL);
 -- AI analysis attempts that failed ON THIS DEVICE, per (media, model). LOCAL ONLY: never in the
@@ -98,11 +98,6 @@ fn in_folder_sql(k: usize) -> String {
 /// raw tag id → canonical (id, label) after rename rules.
 const TAG_VIEW: &str = "CREATE VIEW IF NOT EXISTS tag_c AS SELECT r.id AS raw_id, c.id AS id, c.label AS label FROM tag r JOIN tag c ON c.id = coalesce(r.canon, r.id);";
 
-const DROP_ALL: &str = "PRAGMA foreign_keys=OFF;
-DROP TABLE IF EXISTS tag_src; DROP TABLE IF EXISTS tag_media; DROP TABLE IF EXISTS tag_media_v1; DROP TABLE IF EXISTS tag_vec;
-DROP TABLE IF EXISTS ai_done; DROP TABLE IF EXISTS tag; DROP TABLE IF EXISTS media; DROP TABLE IF EXISTS post;
-DROP TABLE IF EXISTS job; DROP TABLE IF EXISTS meta; DROP TABLE IF EXISTS op; DROP TABLE IF EXISTS want_blob; DROP TABLE IF EXISTS media_claim; DROP TABLE IF EXISTS setting;
-DROP TABLE IF EXISTS trash; DROP TABLE IF EXISTS gc; DROP TABLE IF EXISTS verified_media; DROP TABLE IF EXISTS bad_media; DROP TABLE IF EXISTS tag_alias; DROP VIEW IF EXISTS tag_c; DROP TABLE IF EXISTS folder; DROP TABLE IF EXISTS folder_media; DROP TABLE IF EXISTS triage; DROP TABLE IF EXISTS recent; DROP TABLE IF EXISTS op_pending; DROP TABLE IF EXISTS ai_fail;";
 
 /// A media row needing AI work.
 #[derive(Debug, serde::Serialize)]
@@ -132,14 +127,22 @@ impl Store {
         let conn = Connection::open(path)?;
         // FULL: a committed transaction survives a power loss (not only an app crash)
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;")?;
+        // lower() of SQLite knows ASCII only; terms are lowercased by Rust, for every script
+        conn.create_scalar_function("ulower", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC, |c| {
+            Ok(c.get_raw(0).as_str().map(|t| t.to_lowercase()).unwrap_or_default())
+        })?;
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let existed = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type='table'", [], |r| r.get::<_, i64>(0))? > 0;
         if existed && version > VERSION {
             return Err(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
-                Some(format!("资料库由更新版本的 App 创建（第 {version} 版，本 App 支持到第 {VERSION} 版），请更新 App"))));
+                Some(tr!("store.newer", version = version, VERSION = VERSION))));
         }
-        let reset = existed && version < 3;
-        if reset { conn.execute_batch(DROP_ALL)?; conn.execute_batch("PRAGMA foreign_keys=ON;")?; }
+        // A format from before any release, or a damaged version number: never rebuilt from nothing,
+        // which would delete the library. It stays as it is, and the person is told.
+        if existed && version < 3 {
+            return Err(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                Some(tr!("store.tooOld", version = version))));
+        }
         // up to date: opening writes nothing (a full disk must not keep the library from opening)
         if existed && version == VERSION { return Ok((Store { conn }, false)); }
         let has = |table: &str, col: &str| -> rusqlite::Result<bool> {
@@ -179,6 +182,12 @@ impl Store {
                         WHERE c.media_id=media.id ORDER BY c.post_id, c.ordinal LIMIT 1)
                       WHERE EXISTS(SELECT 1 FROM media_claim c JOIN post p ON p.id=c.post_id WHERE c.media_id=media.id);")?;
             }
+            // v14 → v15: triage mode is gone; its decisions were local to this device (never in
+            // the op log), so the table simply goes. A step of the ladder like the others: a
+            // library from any older version passes it once, however many versions it skips.
+            conn.execute_batch("DROP TABLE IF EXISTS triage;")?;
+            // v15 → v16: every post that arrives looks up its claims by post
+            conn.execute_batch("CREATE INDEX IF NOT EXISTS media_claim_post ON media_claim(post_id, media_id);")?;
             conn.execute_batch(TAG_VIEW)?;
             conn.execute_batch(&format!("PRAGMA user_version={VERSION};"))?;
             Ok(())
@@ -187,7 +196,7 @@ impl Store {
             Ok(()) => conn.execute_batch("COMMIT;")?,
             Err(e) => { let _ = conn.execute_batch("ROLLBACK;"); return Err(e); }
         }
-        Ok((Store { conn }, reset))
+        Ok((Store { conn }, false))
     }
 
     /// Local import/download of a post: present fields are written with a fresh clock, so the
@@ -834,12 +843,60 @@ impl Store {
 
     // ---------- verification ----------
 
+    /// Media whose size has not been read yet: (id, path, kind).
+    pub fn media_without_size(&self, limit: usize) -> rusqlite::Result<Vec<(String, String, String)>> {
+        let mut st = self.conn.prepare_cached("SELECT m.id, m.path, m.kind FROM media m WHERE NOT EXISTS(SELECT 1 FROM media_size s WHERE s.media_id=m.id) LIMIT ?1")?;
+        let rows = st.query_map([limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect()
+    }
+
+    pub fn set_media_sizes(&self, sizes: &[(&str, u32, u32)]) -> rusqlite::Result<()> {
+        self.atomic(|| {
+            let mut st = self.conn.prepare_cached("INSERT OR REPLACE INTO media_size(media_id, w, h) VALUES(?1, ?2, ?3)")?;
+            for (id, w, h) in sizes { st.execute(rusqlite::params![id, w, h])?; }
+            Ok(())
+        })
+    }
+
+    /// The sizes that are known (never 0×0).
+    pub fn media_sizes(&self) -> rusqlite::Result<std::collections::HashMap<String, (u32, u32)>> {
+        let mut st = self.conn.prepare_cached("SELECT media_id, w, h FROM media_size WHERE w>0 AND h>0")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?))))?;
+        rows.collect()
+    }
+
     pub fn set_bad(&self, media_id: &str, reason: Option<&str>) -> rusqlite::Result<()> {
         match reason {
             Some(r) => self.conn.execute("INSERT OR REPLACE INTO bad_media VALUES(?1,?2,unixepoch())", params![media_id, r])?,
             None => self.conn.execute("DELETE FROM bad_media WHERE media_id=?1", [media_id])?,
         };
         Ok(())
+    }
+
+    /// What this device lacks, as part of working out what to ask peers for: a media whose file
+    /// is gone (deleted by hand, a cleaning tool) is marked `missing`, which `wanted_blobs` asks
+    /// peers for; one whose file came back is unmarked. Nothing is sent to peers: a missing file
+    /// is not a deletion, so the others never lose theirs. Returns how many were newly missing.
+    pub fn note_missing_files(&self, exists: impl Fn(&str) -> bool) -> rusqlite::Result<usize> {
+        let rows: Vec<(String, String, Option<String>)> = {
+            let mut st = self.conn.prepare("SELECT m.id, m.path, b.reason FROM media m LEFT JOIN bad_media b ON b.media_id=m.id WHERE m.path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM trash x WHERE x.media_id=m.id AND x.state=2)")?;
+            let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+            v
+        };
+        let mut newly = 0;
+        self.atomic(|| {
+            for (id, path, reason) in &rows {
+                let there = exists(path);
+                match (there, reason.as_deref()) {
+                    (false, Some("missing")) | (true, None) => {}
+                    (false, _) => { self.set_bad(id, Some("missing"))?; newly += 1; }
+                    (true, Some("missing")) => self.set_bad(id, None)?,
+                    (true, Some(_)) => {}
+                }
+            }
+            Ok(())
+        })?;
+        Ok(newly)
     }
 
     pub fn bad_reason(&self, media_id: &str) -> rusqlite::Result<Option<String>> {
@@ -918,14 +975,21 @@ impl Store {
     /// The feed query: search terms plus the extra filters (author, exact tags, review state,
     /// damaged files). Only live media (never the recycle bin).
     pub fn feed_filtered(&self, label_sets: &[Vec<String>], terms: &[String], scope: SearchScope, fields: crate::library::SearchFields, f: &crate::library::FeedFilter) -> rusqlite::Result<Vec<FeedItem>> {
-        // which tag origins count (1 = mine, 2 = AI; "common" needs both bits)
-        let origin_ok = match scope { SearchScope::Mine => "(tm.origin & 1)!=0", SearchScope::Ai => "(tm.origin & 2)!=0", SearchScope::Both => "(tm.origin & 3)!=0", SearchScope::Common => "(tm.origin & 3)=3" };
+        // which tag origins count (1 = mine, 2 = AI; "common" needs both bits), or exactly the
+        // origins the search allows (`rules::origins_for`)
+        let origin_ok = match &f.origins {
+            Some(set) => {
+                let v: Vec<String> = set.iter().filter(|o| (1..=3).contains(*o)).map(|o| o.to_string()).collect();
+                if v.is_empty() { "0".to_string() } else { format!("(tm.origin & 3) IN ({})", v.join(",")) }
+            }
+            None => match scope { SearchScope::Mine => "(tm.origin & 1)!=0", SearchScope::Ai => "(tm.origin & 2)!=0", SearchScope::Both => "(tm.origin & 3)!=0", SearchScope::Common => "(tm.origin & 3)=3" }.to_string(),
+        };
         let mut sql = format!("SELECT m.id, m.post_id, m.ordinal, m.kind, m.path, p.text, p.author_name, p.screen_name, p.url, p.created_at FROM media m JOIN post p ON p.id=m.post_id WHERE {LIVE_SQL}");
         let mut args: Vec<String> = vec![];
         if let Some(a) = f.author.as_ref().map(|a| a.trim().trim_start_matches('@').to_lowercase()).filter(|a| !a.is_empty()) {
             args.push(a);
             let k = args.len();
-            sql += &format!(" AND (lower(coalesce(p.screen_name,''))=?{k} OR (p.screen_name IS NULL AND lower(coalesce(p.author_name,''))=?{k}))");
+            sql += &format!(" AND (ulower(coalesce(p.screen_name,''))=?{k} OR (p.screen_name IS NULL AND ulower(coalesce(p.author_name,''))=?{k}))");
         }
         for l in &f.labels {
             args.push(l.trim().to_lowercase());
@@ -938,13 +1002,40 @@ impl Store {
         }
         if f.bad_only { sql += " AND EXISTS(SELECT 1 FROM bad_media b WHERE b.media_id=m.id)"; }
         if f.loose_only { sql += " AND m.post_id LIKE 'loose:%'"; }
+        if f.exclude_loose { sql += " AND m.post_id NOT LIKE 'loose:%'"; }
+        if f.album_only { sql += " AND m.id IN (SELECT media_id FROM album)"; }
         if f.recent_only { sql += " AND m.post_id IN (SELECT post_id FROM recent)"; }
         match f.kind { Some(MediaKind::Video) => sql += " AND m.kind='video'", Some(MediaKind::Photo) => sql += " AND m.kind!='video'", None => {} }
         if let Some(name) = f.folder.as_ref().filter(|n| !n.is_empty()) {
             args.push(name.clone());
             sql += &format!(" AND {}", in_folder_sql(args.len()));
         }
+        for name in f.exclude_folders.iter().filter(|n| !n.is_empty()) {
+            args.push(name.clone());
+            sql += &format!(" AND NOT {}", in_folder_sql(args.len()));
+        }
         let fields = if !fields.text && !fields.author { crate::library::SearchFields { tags: true, text: false, author: false } } else { fields };
+        // words with a minus: the media must not contain any of them in a searched field
+        // ("contains" only: tags that contain the word, the text, the author)
+        let excluded: Vec<String> = f.exclude_terms.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).collect();
+        let labels = if excluded.is_empty() || !fields.tags { vec![] } else { self.all_labels()? };
+        for term in &excluded {
+            let mut parts: Vec<String> = vec![];
+            if fields.tags {
+                let set: Vec<&String> = labels.iter().filter(|l| l.contains(term.as_str())).collect();
+                if !set.is_empty() {
+                    let ph: Vec<String> = set.iter().map(|l| { args.push((*l).clone()); format!("?{}", args.len()) }).collect();
+                    parts.push(format!("EXISTS(SELECT 1 FROM (SELECT raw.media_id, c.label, max(raw.origin & 1) | max(raw.origin & 2) AS origin FROM tag_media raw JOIN tag_c c ON c.raw_id=raw.tag_id GROUP BY raw.media_id, c.id) tm JOIN tag t ON t.label=tm.label WHERE tm.media_id=m.id AND {origin_ok} AND t.label IN ({}))", ph.join(",")));
+                }
+            }
+            if fields.text || fields.author {
+                args.push(term.clone());
+                let k = args.len();
+                if fields.text { parts.push(format!("instr(ulower(coalesce(p.text,'')), ?{k})>0")); }
+                if fields.author { parts.push(format!("(instr(ulower(coalesce(p.author_name,'')), ?{k})>0 OR instr(ulower(coalesce(p.screen_name,'')), ?{k})>0)")); }
+            }
+            if !parts.is_empty() { sql += &format!(" AND NOT ({})", parts.join(" OR ")); }
+        }
         for (i, term) in terms.iter().enumerate() {
             let mut parts: Vec<String> = vec![];
             if fields.tags {
@@ -962,22 +1053,30 @@ impl Store {
             args.push(term.clone());
             let k = args.len();
             if fields.text {
-                parts.push(format!("instr(lower(coalesce(p.text,'')), ?{k})>0"));
+                parts.push(format!("instr(ulower(coalesce(p.text,'')), ?{k})>0"));
                 // fuzzy search reaches the post text too: words close in meaning to the term (the
                 // labels it expanded to) count as well. Never for authors or folders. (Labels that
                 // contain the term add nothing: the term itself already matches there.)
                 for l in label_sets.get(i).into_iter().flatten().filter(|l| !l.contains(term.as_str())).take(32) {
                     args.push(l.clone());
-                    parts.push(format!("instr(lower(coalesce(p.text,'')), ?{})>0", args.len()));
+                    parts.push(format!("instr(ulower(coalesce(p.text,'')), ?{})>0", args.len()));
                 }
             }
-            if fields.author { parts.push(format!("(instr(lower(coalesce(p.author_name,'')), ?{k})>0 OR instr(lower(coalesce(p.screen_name,'')), ?{k})>0)")); }
+            if fields.author { parts.push(format!("(instr(ulower(coalesce(p.author_name,'')), ?{k})>0 OR instr(ulower(coalesce(p.screen_name,'')), ?{k})>0)")); }
             sql += &format!(" AND ({})", parts.join(" OR "));
         }
         let mut items = self.query_items(&sql, &args)?;
         // the window is decided by the verified rule, not by SQL arithmetic
         if f.recent_only { items.retain(|i| i.recent); }
+        if f.exclude_recent { items.retain(|i| !i.recent); }
         Ok(items)
+    }
+
+    /// Each post's place in the order things were added to this library: its newest media's row.
+    pub fn posts_added(&self) -> rusqlite::Result<std::collections::HashMap<String, i64>> {
+        let mut st = self.conn.prepare_cached("SELECT post_id, max(rowid) FROM media GROUP BY post_id")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect();
+        v
     }
 
     /// Labels a search term can match: only tags that are on at least one media in the library
@@ -1023,7 +1122,7 @@ impl Store {
     /// Counts an attempt before the model runs (so a crash during it counts too); `reason` is
     /// what is shown if nothing else is recorded. Local only.
     pub fn ai_attempt_begin(&self, media_id: &str, model: &str, now: i64) -> rusqlite::Result<()> {
-        self.conn.execute("INSERT INTO ai_fail VALUES(?1,?2,1,'分析时应用意外退出',?3) ON CONFLICT(media_id, model) DO UPDATE SET attempts=attempts+1, reason='分析时应用意外退出', at=?3",
+        self.conn.execute("INSERT INTO ai_fail VALUES(?1,?2,1,'@ai.crashed',?3) ON CONFLICT(media_id, model) DO UPDATE SET attempts=attempts+1, reason='@ai.crashed', at=?3",
             params![media_id, model, now]).map(|_| ())
     }
 
@@ -1043,9 +1142,12 @@ impl Store {
     pub fn ai_failures(&self) -> rusqlite::Result<Vec<AiFailure>> {
         let mut st = self.conn.prepare(&format!("SELECT f.media_id, f.model, f.attempts, f.reason, f.at FROM ai_fail f JOIN media m ON m.id=f.media_id
             WHERE f.attempts>={} AND f.media_id NOT IN (SELECT media_id FROM ai_done) AND NOT EXISTS(SELECT 1 FROM trash x WHERE x.media_id=m.id AND x.state!=0) ORDER BY f.at DESC", crate::rules::MAX_AI_ATTEMPTS))?;
-        let v = st.query_map([], |r| Ok(AiFailure { media_id: r.get(0)?, model: r.get(1)?, attempts: r.get(2)?, reason: r.get(3)?, at: r.get(4)? }))?.collect();
+        let v = st.query_map([], |r| Ok(AiFailure { media_id: r.get(0)?, model: r.get(1)?, attempts: r.get(2)?, reason: Self::shown_reason(r.get(3)?), at: r.get(4)? }))?.collect();
         v
     }
+
+    /// A stored reason that is a message key ("@ai.crashed") in the current language.
+    fn shown_reason(r: String) -> String { match r.strip_prefix('@') { Some(k) => crate::i18n::text(k), None => r } }
 
     /// Lets this device try those media again.
     pub fn ai_failures_clear(&self) -> rusqlite::Result<usize> { self.conn.execute("DELETE FROM ai_fail", []) }
@@ -1068,11 +1170,14 @@ impl Store {
 
     /// Live media carrying any of `include` (all when empty) and none of `exclude`
     /// (`rules::export_selected`), in post order. Paths stay relative.
+    fn live_items_sql(narrower: &str) -> String {
+        format!("SELECT m.id, m.post_id, m.ordinal, m.kind, m.path, p.text, p.author_name, p.screen_name, p.url, p.created_at FROM media m JOIN post p ON p.id=m.post_id WHERE {LIVE_SQL}{narrower} ORDER BY m.post_id, m.ordinal")
+    }
+
     pub fn export_items(&self, include: &[String], exclude: &[String]) -> rusqlite::Result<Vec<FeedItem>> {
         let norm = |v: &[String]| -> Vec<String> { v.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).collect() };
         let (inc, exc) = (norm(include), norm(exclude));
-        let sql = format!("SELECT m.id, m.post_id, m.ordinal, m.kind, m.path, p.text, p.author_name, p.screen_name, p.url, p.created_at FROM media m JOIN post p ON p.id=m.post_id WHERE {LIVE_SQL} ORDER BY m.post_id, m.ordinal");
-        let items = self.query_items(&sql, &[])?;
+        let items = self.query_items(&Self::live_items_sql(""), &[])?;
         Ok(items.into_iter().filter(|it| {
             let tags: Vec<(String, u8)> = it.tags.iter().map(|t| (t.label.clone(), t.origin)).collect();
             crate::rules::export_selected(&tags, &inc, &exc)
@@ -1082,8 +1187,48 @@ impl Store {
     /// The live media with these ids (what a search showed), in post order. Ids that are gone,
     /// in the recycle bin or unknown are left out.
     pub fn items_of(&self, ids: &[String]) -> rusqlite::Result<Vec<FeedItem>> {
-        let want: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
-        Ok(self.export_items(&[], &[])?.into_iter().filter(|it| want.contains(it.media_id.as_str())).collect())
+        // through a temporary list of ids: a small export reads only what it takes
+        self.conn.execute_batch("CREATE TEMP TABLE IF NOT EXISTS wanted_media(id TEXT PRIMARY KEY); DELETE FROM wanted_media;")?;
+        {
+            let mut st = self.conn.prepare_cached("INSERT OR IGNORE INTO wanted_media VALUES(?1)")?;
+            for id in ids { st.execute([id])?; }
+        }
+        let items = self.query_items(&Self::live_items_sql(" AND m.id IN (SELECT id FROM wanted_media)"), &[]);
+        self.conn.execute_batch("DELETE FROM wanted_media;")?;
+        items
+    }
+
+    /// The claims of media by posts other than the one shown as their owner, with those posts: what
+    /// a feed does not list, and a backup must keep. (media, ordinal, post)
+    pub fn secondary_claims(&self) -> rusqlite::Result<Vec<(String, i64, PostMeta)>> {
+        let mut st = self.conn.prepare("SELECT c.media_id, c.ordinal, c.post_id FROM media_claim c JOIN media m ON m.id=c.media_id JOIN post p ON p.id=c.post_id WHERE NOT (c.post_id=m.post_id AND c.ordinal=m.ordinal) ORDER BY c.post_id, c.ordinal")?;
+        let rows: Vec<(String, i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+        let mut out = Vec::with_capacity(rows.len());
+        for (media, ordinal, post) in rows {
+            if let Some(meta) = self.post_meta(&post)? { out.push((media, ordinal, meta)); }
+        }
+        Ok(out)
+    }
+
+    /// Every (media, model) analysed, by media and model.
+    pub(crate) fn all_ai_done(&self) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut st = self.conn.prepare("SELECT media_id, model FROM ai_done ORDER BY media_id, model")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect();
+        v
+    }
+
+    /// Every (media, folder), as `folders_of` lists them.
+    pub(crate) fn all_folder_media(&self) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut st = self.conn.prepare("SELECT fm.media_id, fm.folder FROM folder_media fm JOIN folder f ON f.name=fm.folder WHERE fm.present=1 AND f.deleted=0 ORDER BY fm.media_id, fm.folder")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect();
+        v
+    }
+
+    /// Every (post, mark time) of 最近添加.
+    pub(crate) fn all_recent(&self) -> rusqlite::Result<Vec<(String, u64)>> {
+        let mut st = self.conn.prepare("SELECT post_id, at FROM recent")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))?.collect();
+        v
     }
 
     /// Models that analysed a media.
@@ -1098,50 +1243,43 @@ impl Store {
         let mut items: Vec<FeedItem> = st.query_map(rusqlite::params_from_iter(args.iter()), |r| Ok(FeedItem {
             media_id: r.get(0)?, post_id: r.get(1)?, ordinal: r.get(2)?,
             kind: if r.get::<_, String>(3)? == "video" { MediaKind::Video } else { MediaKind::Photo },
-            path: r.get(4)?, text: r.get(5)?, author_name: r.get(6)?, screen_name: r.get(7)?, url: r.get(8)?, created_at: r.get(9)?, tags: vec![], bad: None, recent: false,
+            path: r.get(4)?, text: r.get(5)?, author_name: r.get(6)?, screen_name: r.get(7)?, url: r.get(8)?, created_at: r.get(9)?, tags: vec![], bad: None, recent: false, album: false, size: None,
         }))?.collect::<Result<_, _>>()?;
         {
             let recent = self.recent_posts(now_ms())?;
             if !recent.is_empty() { for it in &mut items { it.recent = recent.contains(&it.post_id); } }
+            let album = self.album_media()?;
+            if !album.is_empty() { for it in &mut items { it.album = album.contains(&it.media_id); } }
         }
-        {
-            let mut bq = self.conn.prepare_cached("SELECT media_id, reason FROM bad_media")?;
-            let bad: std::collections::HashMap<String, String> = bq.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
-            if !bad.is_empty() { for it in &mut items { it.bad = bad.get(&it.media_id).cloned(); } }
-        }
-        if items.len() > 30_000 {
-            // One pass over all live tags beats one indexed lookup per media at this size.
-            let mut by: std::collections::HashMap<String, Vec<TagView>> = std::collections::HashMap::with_capacity(items.len());
-            let mut tq = self.conn.prepare_cached("SELECT tm.media_id, t.label, max(tm.origin & 1) | max(tm.origin & 2) AS o FROM tag_media tm JOIN tag_c t ON t.raw_id=tm.tag_id WHERE tm.origin != 0 GROUP BY tm.media_id, t.id")?;
-            let mut rows = tq.query([])?;
-            while let Some(r) = rows.next()? { by.entry(r.get(0)?).or_default().push(TagView { label: r.get(1)?, origin: r.get(2)?, models: vec![] }); }
-            for it in &mut items {
-                if let Some(mut v) = by.remove(&it.media_id) { v.sort_by(|a, b| a.label.cmp(&b.label)); it.tags = v; }
+        // Limit detail queries to this result set, including narrow searches and exports.
+        // Chunking stays below SQLite's parameter limit and avoids one query per media.
+        for chunk in items.chunks_mut(400) {
+            let ids: Vec<String> = chunk.iter().map(|i| i.media_id.clone()).collect();
+            let ph = vec!["?"; ids.len()].join(",");
+            let mut tags: std::collections::HashMap<String, Vec<TagView>> = Default::default();
+            let mut tq = self.conn.prepare(&format!("SELECT tm.media_id, t.label, max(tm.origin & 1) | max(tm.origin & 2) FROM tag_media tm JOIN tag_c t ON t.raw_id=tm.tag_id WHERE tm.media_id IN ({ph}) AND tm.origin != 0 GROUP BY tm.media_id, t.id ORDER BY t.label"))?;
+            let mut rows = tq.query(rusqlite::params_from_iter(ids.iter()))?;
+            while let Some(r) = rows.next()? {
+                tags.entry(r.get(0)?).or_default().push(TagView { label: r.get(1)?, origin: r.get(2)?, models: vec![] });
             }
-        } else {
-            let mut tq = self.conn.prepare_cached("SELECT t.label, max(tm.origin & 1) | max(tm.origin & 2) FROM tag_media tm JOIN tag_c t ON t.raw_id=tm.tag_id WHERE tm.media_id=?1 AND tm.origin != 0 GROUP BY t.id ORDER BY t.label")?;
-            for it in &mut items {
-                it.tags = tq.query_map([&it.media_id], |r| Ok(TagView { label: r.get(0)?, origin: r.get(1)?, models: vec![] }))?.collect::<Result<_, _>>()?;
-            }
-        }
-        // Provenance for AI tags: one pass over present sources.
-        let mut src: std::collections::HashMap<(String, String), Vec<String>> = std::collections::HashMap::new();
-        {
-            let mut sq = self.conn.prepare_cached("SELECT DISTINCT s.media_id, t.label, s.model FROM tag_src s JOIN tag_c t ON t.raw_id=s.tag_id WHERE s.present=1")?;
-            let mut rows = sq.query([])?;
+            let mut src: std::collections::HashMap<(String, String), Vec<String>> = Default::default();
+            let mut sq = self.conn.prepare(&format!("SELECT DISTINCT s.media_id, t.label, s.model FROM tag_src s JOIN tag_c t ON t.raw_id=s.tag_id WHERE s.media_id IN ({ph}) AND s.present=1 ORDER BY s.model"))?;
+            let mut rows = sq.query(rusqlite::params_from_iter(ids.iter()))?;
             while let Some(r) = rows.next()? { src.entry((r.get(0)?, r.get(1)?)).or_default().push(r.get(2)?); }
-        }
-        if !src.is_empty() {
-            for it in &mut items {
-                for t in &mut it.tags {
-                    if let Some(m) = src.get(&(it.media_id.clone(), t.label.clone())) { t.models = m.clone(); t.models.sort(); }
+            let mut bq = self.conn.prepare(&format!("SELECT media_id, reason FROM bad_media WHERE media_id IN ({ph})"))?;
+            let bad: std::collections::HashMap<String, String> = bq.query_map(rusqlite::params_from_iter(ids.iter()), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+            for it in chunk {
+                it.bad = bad.get(&it.media_id).cloned();
+                it.tags = tags.remove(&it.media_id).unwrap_or_default();
+                for tag in &mut it.tags {
+                    tag.models = src.remove(&(it.media_id.clone(), tag.label.clone())).unwrap_or_default();
                 }
             }
         }
         Ok(items)
     }
 
-    /// Queues a URL; failed jobs are re-queued, finished ones left alone.
+    /// Queues a URL, with no options (see `enqueue_job_with`).
     pub fn enqueue_job(&self, url: &str) -> rusqlite::Result<()> { self.enqueue_job_with(url, None) }
 
     /// Queues a link with its options (JSON). Every new request queues it again, also when an
@@ -1265,8 +1403,14 @@ impl Store {
     pub(crate) fn record(&self, op: &crate::oplog::Op) -> rusqlite::Result<()> {
         let dev = self.device_id()?;
         let last: i64 = self.conn.query_row("SELECT coalesce(max(seq),0) FROM op WHERE device=?1", [&dev], |r| r.get(0))?;
-        let seq = last.checked_add(1).ok_or_else(|| rusqlite::Error::ToSqlConversionFailure("本机同步记录编号已用尽".into()))?;
-        self.conn.execute("INSERT INTO op VALUES(?1,?2,?3)", params![dev, seq, serde_json::to_string(op).unwrap()])?;
+        let seq = last.checked_add(1).ok_or_else(|| rusqlite::Error::ToSqlConversionFailure(tr!("store.seqExhausted").into()))?;
+        let body = serde_json::to_string(op).unwrap();
+        // the sync frame holds one op at most and sequence numbers have no gaps: a larger one could
+        // never be sent, and everything after it would stay on this device
+        if body.len() > crate::sync::MAX_OP_BYTES {
+            return Err(rusqlite::Error::ToSqlConversionFailure(tr!("store.opTooLarge", bytes = body.len()).into()));
+        }
+        self.conn.execute("INSERT INTO op VALUES(?1,?2,?3)", params![dev, seq, body])?;
         Ok(())
     }
 
@@ -1290,6 +1434,25 @@ impl Store {
         self.record(&crate::oplog::Op::Recent { post_id: post_id.into(), at })
     }) }
 
+    /// Marks a media as brought in through a share extension (从相册导入); synced.
+    pub fn mark_album(&self, media_id: &str) -> rusqlite::Result<()> { self.atomic(|| {
+        if self.conn.execute("INSERT OR IGNORE INTO album VALUES(?1)", [media_id])? > 0 {
+            self.record(&crate::oplog::Op::Album { media_id: media_id.into() })?;
+        }
+        Ok(())
+    }) }
+
+    pub(crate) fn apply_album(&self, media_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute("INSERT OR IGNORE INTO album VALUES(?1)", [media_id])?;
+        Ok(())
+    }
+
+    pub fn album_media(&self) -> rusqlite::Result<std::collections::HashSet<String>> {
+        let mut st = self.conn.prepare_cached("SELECT media_id FROM album")?;
+        let v = st.query_map([], |r| r.get(0))?.collect();
+        v
+    }
+
     /// Merges a mark (max of the two times, `rules::merge_recent`).
     pub(crate) fn apply_recent(&self, post_id: &str, at: u64) -> rusqlite::Result<()> {
         let cur = self.recent_at(post_id)?;
@@ -1299,6 +1462,12 @@ impl Store {
     }
 
     // ---------- shared settings ----------
+
+    pub(crate) fn settings_with_prefix(&self, prefix: &str) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut st = self.conn.prepare("SELECT key, value FROM setting WHERE value IS NOT NULL AND substr(key, 1, length(?1))=?1")?;
+        let v = st.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?.collect();
+        v
+    }
 
     /// A setting shared by every device (None = the default).
     pub fn setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
@@ -1348,7 +1517,7 @@ impl Store {
 
     /// Wipes every row. Never recorded in the sync log.
     pub fn wipe(&self) -> rusqlite::Result<()> {
-        self.atomic(|| self.conn.execute_batch("DELETE FROM tag_src; DELETE FROM tag_media; DELETE FROM tag_vec; DELETE FROM ai_done; DELETE FROM tag; DELETE FROM media; DELETE FROM post; DELETE FROM job; DELETE FROM op; DELETE FROM want_blob; DELETE FROM media_claim; DELETE FROM setting; DELETE FROM meta; DELETE FROM trash; DELETE FROM gc; DELETE FROM verified_media; DELETE FROM bad_media; DELETE FROM tag_alias; DELETE FROM folder; DELETE FROM folder_media; DELETE FROM triage; DELETE FROM recent; DELETE FROM op_pending; DELETE FROM ai_fail;"))
+        self.atomic(|| self.conn.execute_batch("DELETE FROM album; DELETE FROM tag_src; DELETE FROM tag_media; DELETE FROM tag_vec; DELETE FROM ai_done; DELETE FROM tag; DELETE FROM media; DELETE FROM post; DELETE FROM job; DELETE FROM op; DELETE FROM want_blob; DELETE FROM media_claim; DELETE FROM setting; DELETE FROM meta; DELETE FROM trash; DELETE FROM gc; DELETE FROM verified_media; DELETE FROM media_size; DELETE FROM bad_media; DELETE FROM tag_alias; DELETE FROM folder; DELETE FROM folder_media; DELETE FROM recent; DELETE FROM op_pending; DELETE FROM ai_fail;"))
     }
 
     pub fn conn(&self) -> &Connection { &self.conn }

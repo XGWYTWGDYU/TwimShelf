@@ -60,11 +60,11 @@ impl PostMeta {
         let mut cutlist = vec![];
         let p = PostMeta {
             id: self.id.clone(),
-            author_name: cut(&self.author_name, Self::MAX_FIELD_BYTES, "作者", &mut cutlist),
-            screen_name: cut(&self.screen_name, Self::MAX_FIELD_BYTES, "用户名", &mut cutlist),
-            text: cut(&self.text, Self::MAX_TEXT_BYTES, "正文", &mut cutlist),
-            created_at: cut(&self.created_at, Self::MAX_FIELD_BYTES, "时间", &mut cutlist),
-            url: cut(&self.url, Self::MAX_FIELD_BYTES, "链接", &mut cutlist),
+            author_name: cut(&self.author_name, Self::MAX_FIELD_BYTES, "field.author", &mut cutlist),
+            screen_name: cut(&self.screen_name, Self::MAX_FIELD_BYTES, "field.screenName", &mut cutlist),
+            text: cut(&self.text, Self::MAX_TEXT_BYTES, "field.text", &mut cutlist),
+            created_at: cut(&self.created_at, Self::MAX_FIELD_BYTES, "field.date", &mut cutlist),
+            url: cut(&self.url, Self::MAX_FIELD_BYTES, "field.url", &mut cutlist),
         };
         (p, cutlist)
     }

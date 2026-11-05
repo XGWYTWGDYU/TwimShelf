@@ -1,0 +1,241 @@
+# Builds every app of every platform on GitHub's machines.
+#
+#   Pull request            build and test, keep the packages as workflow artifacts
+#   Push to main            the same; and when config.yaml has a version without a tag yet
+#                           (v<version>), publish a release with all the packages
+#   Run workflow (by hand)  the same as a push
+#
+# So releasing is: raise `version` and `build_number` in config.yaml, push to main.
+#
+# Optional repository secrets, for an Android package that can update itself across releases.
+# Without them each build is signed with that machine's throwaway debug key:
+#   ANDROID_KEYSTORE_BASE64   the release keystore, base64
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # the packages look for updates in this repository (检查更新)
+  TL_UPDATE_REPO: ${{ github.repository }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: |
+          version=$(python3 scripts/apply.py get version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          release=false
+          if [[ "$GITHUB_EVENT_NAME" != pull_request && "$GITHUB_REF" == refs/heads/main ]] &&
+             ! git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            release=true
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "Version $version, publish a release: $release" >> "$GITHUB_STEP_SUMMARY"
+
+  test-core:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable --no-self-update
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: cargo-test-${{ runner.os }}-
+      - name: Rust tests
+        working-directory: core
+        run: cargo test --locked --features heif
+      - name: Project checks
+        run: |
+          python3 scripts/checks/icons.py
+          python3 scripts/flutter/test_desktop_packaging.py "$RUNNER_TEMP/packaging"
+
+  apple:
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [native-macos, native-ios, flutter-macos, flutter-ios]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Use the newest Xcode on this machine
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          xcodebuild -version
+      - run: rustup update stable --no-self-update
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cache/pub
+          key: deps-${{ matrix.target }}-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          restore-keys: deps-${{ matrix.target }}-
+      - name: Build
+        run: ./build.sh --yes ${{ matrix.target }}
+      - name: Licenses of everything in the packages
+        if: matrix.target == 'flutter-macos'
+        run: python3 scripts/third_party_notices.py build/apps/THIRD-PARTY-NOTICES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: build/apps/*
+          if-no-files-found: error
+          retention-days: 30
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make room (the NDK and the native builds take many gigabytes)
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: rustup update stable --no-self-update
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cache/pub
+          key: deps-android-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          restore-keys: deps-android-
+      - name: Release key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE" ]]; then
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: this APK is signed with a throwaway debug key and cannot update an earlier one in place"
+            exit 0
+          fi
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/release.jks" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > flutter/app/android/key.properties
+      - name: Build
+        run: ./build.sh --yes flutter-android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flutter-android
+          path: build/apps/*
+          if-no-files-found: error
+          retention-days: 30
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: rustup update stable --no-self-update
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cache/pub
+          key: deps-linux-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          restore-keys: deps-linux-
+      - name: Build
+        run: |
+          sudo apt-get update -qq
+          ./build.sh --yes flutter-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flutter-linux
+          path: build/apps/*
+          if-no-files-found: error
+          retention-days: 30
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - run: git config --system core.longpaths true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: rustup update stable --no-self-update
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cache/pub
+          key: deps-windows-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          restore-keys: deps-windows-
+      - name: Vulkan SDK (GPU support for on-device AI)
+        run: |
+          Invoke-WebRequest https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe -OutFile "$env:RUNNER_TEMP\vulkan_sdk.exe"
+          Start-Process "$env:RUNNER_TEMP\vulkan_sdk.exe" -Wait -ArgumentList '--root','C:\VulkanSDK','--accept-licenses','--default-answer','--confirm-command','install'
+          "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
+          "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
+      - name: Build
+        run: powershell -ExecutionPolicy Bypass -File build.ps1 -Yes flutter-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flutter-windows
+          path: build/apps/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: [plan, test-core, apple, android, linux, windows]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Build info and checksums
+        working-directory: packages
+        run: |
+          python3 ../scripts/build_info.py "$GITHUB_SHA" > BUILD-INFO.json
+          sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS.txt"
+          mv "$RUNNER_TEMP/SHA256SUMS.txt" SHA256SUMS.txt
+          ls -la
+      - name: Publish
+        run: gh release create "v$VERSION" packages/* --target "$GITHUB_SHA" --title "TwimShelf $VERSION" --notes ""

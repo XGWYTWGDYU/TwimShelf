@@ -7,6 +7,14 @@
 pub const USER: u8 = 1;
 pub const AI: u8 = 2;
 
+/// Reserve a channel nonce before encryption/decryption. Exhaustion is terminal; never
+/// wrap or saturate a counter and then reuse a nonce under the same session key.
+pub fn take_channel_nonce(counter: &mut u64) -> Option<u64> {
+    let nonce = *counter;
+    *counter = nonce.checked_add(1)?;
+    Some(nonce)
+}
+
 /// Does a tag with `origin` match a search scope mask (1 = mine, 2 = AI, 3 = both)?
 pub fn scope_matches(origin: u8, mask: u8) -> bool { origin & mask & 3 != 0 }
 
@@ -92,6 +100,34 @@ pub fn export_selected<L: PartialEq>(tags: &[(L, u8)], include: &[L], exclude: &
 /// yourself or an AI tag you endorsed.
 pub fn reviewed<L>(tags: &[(L, u8)]) -> bool { tags.iter().any(|(_, o)| o & USER != 0) }
 
+// ---------- search ----------
+
+/// The tag origins a search counts (1 = only mine, 2 = only the AI's, 3 = both), from its
+/// scope mask (1 = mine, 2 = AI, 3 = either, 4 = both together) minus the origins written with
+/// a minus: "-我的" takes away every tag I added or endorsed, "-AI" every tag the AI gave,
+/// "-共同" the tags both of us gave.
+pub fn origins_for(scope_mask: u8, exclude_mine: bool, exclude_ai: bool, exclude_common: bool) -> Vec<u8> {
+    [1u8, 2, 3].into_iter().filter(|&o| {
+        let allowed = if scope_mask == 4 { o == 3 } else { o & scope_mask & 3 != 0 };
+        allowed && !(exclude_mine && o & USER != 0) && !(exclude_ai && o & AI != 0) && !(exclude_common && o == 3)
+    }).collect()
+}
+
+/// What a search with plain "contains" matching selects (the SQL of `Store::feed_filtered` with
+/// the label sets "every label containing the word"): every word occurs in at least one searched
+/// field, and no excluded word occurs in any. Tags count only with an allowed origin; text and
+/// author compare ASCII-lowercased, as SQLite's `lower` does. With neither text nor author
+/// searched, the tags are.
+pub fn search_matches(fields: (bool, bool, bool), origins: &[u8], tags: &[(&str, u8)], text: &str, author: &[&str], terms: &[&str], exclude: &[&str]) -> bool {
+    let (tags_on, text_on, author_on) = if !fields.1 && !fields.2 { (true, false, false) } else { fields };
+    let hit = |w: &str| {
+        (tags_on && tags.iter().any(|(l, o)| origins.contains(&(o & 3)) && l.contains(w)))
+            || (text_on && text.to_ascii_lowercase().contains(w))
+            || (author_on && author.iter().any(|a| a.to_ascii_lowercase().contains(w)))
+    };
+    terms.iter().all(|w| hit(w)) && !exclude.iter().any(|w| hit(w))
+}
+
 /// Review filter of the feed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -111,10 +147,6 @@ pub fn import_folder_member(media: (usize, bool, bool), touched: &[bool]) -> boo
     media.1 && (media.2 || (media.0 < touched.len() && touched[media.0]))
 }
 
-// ---------- triage mode ----------
-
-/// A post (or a loose media) is offered in triage mode when it still has live media, was never
-/// triaged on this device, and matches the triage filter.
 /// AI analysis attempts after which this device stops trying a media (another device still can).
 pub const MAX_AI_ATTEMPTS: i64 = 2;
 
@@ -125,12 +157,7 @@ pub fn ai_skip(attempts: i64, failed_at: i64, run_start: i64) -> bool {
     attempts >= MAX_AI_ATTEMPTS || (attempts > 0 && run_start > 0 && failed_at >= run_start)
 }
 
-pub fn triage_eligible(live_media: usize, triaged: bool, matches: bool) -> bool { live_media > 0 && !triaged && matches }
 
-/// Undo of a triage delete restores media the action binned that are still in the bin (not ones
-/// already binned before it, nor ones deleted permanently or restored meanwhile).
-/// `moved` = the delete's plan, `state` = current bin state of each media (rules::LIVE/TRASHED/PURGED).
-pub fn triage_undo_restores(moved: bool, state: u8) -> bool { moved && state == TRASHED }
 
 // ---------- tag renaming ----------
 
@@ -496,6 +523,26 @@ mod tests {
 mod proofs {
     use super::*;
 
+    #[kani::proof]
+    fn channel_nonces_never_wrap_or_repeat() {
+        let initial: u64 = kani::any();
+        let mut counter = initial;
+        let first = take_channel_nonce(&mut counter);
+        if initial == u64::MAX {
+            assert_eq!(first, None);
+            assert_eq!(counter, initial);
+            assert_eq!(take_channel_nonce(&mut counter), None);
+        } else {
+            assert_eq!(first, Some(initial));
+            assert_eq!(counter, initial + 1);
+            if let Some(second) = take_channel_nonce(&mut counter) {
+                assert!(second > initial);
+            } else {
+                assert_eq!(initial, u64::MAX - 1);
+            }
+        }
+    }
+
     /// Up to three tag registers with distinct labels from {0..3} and any origin 0…3 (no heap).
     fn any_table() -> [(u8, u8); 3] {
         let t: [(u8, u8); 3] = [(kani::any(), kani::any()), (kani::any(), kani::any()), (kani::any(), kani::any())];
@@ -575,30 +622,6 @@ mod proofs {
         assert!((m == a || m == b) && m <= a && m <= b);
     }
 
-    #[kani::proof]
-    fn triage_rules() {
-        let live: usize = kani::any();
-        let triaged: bool = kani::any();
-        let matches: bool = kani::any();
-        kani::assume(live < 100);
-        // a triaged post never comes back; a post without live media is never offered
-        if triaged || live == 0 || !matches { assert!(!triage_eligible(live, triaged, matches)); }
-        // clearing the history makes every live, matching post eligible again
-        if live > 0 && matches { assert!(triage_eligible(live, false, matches)); }
-        // delete then undo: a 4-media post with any mix of live / binned media
-        // (the delete moves exactly the live media: `triage_decide` bins `live_media_of_post`)
-        let before: [bool; 4] = [kani::any(), kani::any(), kani::any(), kani::any()];
-        let moved = before;
-        for i in 0..4 {
-            // after the delete every media of the post is binned; undo brings back exactly the
-            // ones that were live before — never one that was already in the bin
-            let restored = triage_undo_restores(moved[i], TRASHED);
-            assert_eq!(restored, before[i]);
-            // nothing deleted permanently or already restored meanwhile is touched
-            assert!(!triage_undo_restores(moved[i], PURGED));
-            assert!(!triage_undo_restores(moved[i], LIVE));
-        }
-    }
 
     /// "最近添加": the mark merges as a semilattice (sync order never matters), is active only
     /// inside its window, and once expired it stays expired until a newer mark arrives; a newer
@@ -918,13 +941,13 @@ mod proofs {
     fn missing_range_exact() {
         let mine: i64 = kani::any();
         let have: i64 = kani::any();
-        kani::assume(mine >= 0 && have >= 0 && mine < 1 << 40 && have < 1 << 40);
+        kani::assume(mine >= 0 && have >= 0);
         match missing_range(mine, have) {
             Some((a, b)) => { assert!(a == have + 1 && b == mine && a <= b); }
             None => assert!(mine <= have),
         }
         let s: i64 = kani::any();
-        kani::assume(s >= 0 && s < 1 << 40);
+        kani::assume(s >= 0);
         let n = vv_advance(have, s);
         assert!(n >= have && n >= s && (n == have || n == s));
     }

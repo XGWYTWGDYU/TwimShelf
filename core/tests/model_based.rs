@@ -176,6 +176,7 @@ fn spec(ops: &[LoggedOp]) -> BTreeSet<String> {
             Op::FolderMedia { folder: f, media_id, present, hlc } => { let k = (f.clone(), media_id.clone()); let mut s = member.get(&k).cloned(); up(&mut s, (*hlc, *present)); member.insert(k, s.unwrap()); }
             Op::Recent { post_id, at } => { let e = recent.entry(post_id.clone()).or_insert(0); *e = (*e).max(*at); }
             Op::Setting { key, value, hlc } => { let mut s = settings.get(key).cloned(); up(&mut s, (*hlc, value.clone())); settings.insert(key.clone(), s.unwrap()); }
+            Op::Album { .. } => {}
             Op::Unknown(_) => {}
         }
     }

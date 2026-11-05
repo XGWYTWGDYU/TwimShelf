@@ -1,0 +1,9 @@
+// Generated from config.yaml by scripts/apply.py: edit config.yaml, not this file.
+TL_APP_NAME = TwimShelf
+PRODUCT_BUNDLE_IDENTIFIER = org.twimshelf.flutter.a426e3d2bf2bc7
+DEVELOPMENT_TEAM = 
+TL_FLUTTER_BUNDLE = org.twimshelf.flutter.a426e3d2bf2bc7
+TL_APP_GROUP = 
+TL_ENTITLEMENTS = 
+// where builds go: build.dir in config.yaml (not committed)
+#include? "BuildLocation.xcconfig"

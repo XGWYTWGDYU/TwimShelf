@@ -30,7 +30,7 @@ fn feed(lib: &Library, filter: serde_json::Value) -> Vec<FeedItem> {
 fn now() -> u64 { tl_core::store::now_ms() }
 
 /// Everything a backup should carry survives a round trip into an empty library; damaged and
-/// missing files are left out and listed; triage records and models are not included.
+/// missing files are left out and listed; models are not included.
 #[test]
 fn backup_round_trip_restores_the_library() {
     let d = tmp("round");
@@ -55,7 +55,6 @@ fn backup_round_trip_restores_the_library() {
     lib.db().add_to_folder("好看", &[b1.clone()]).unwrap();
     lib.trash_apply(&[a2.clone()], TrashAction::Trash).unwrap();
     lib.db().mark_recent("2", now()).unwrap();
-    assert!(lib.db().triage_decide("3", tl_core::triage::Decision::Keep, None).unwrap());
     // a3 damaged, c2 missing on this device
     std::fs::write(lib.dir.join(lib.db().media_row(&a3).unwrap().unwrap().3), b"broken").unwrap();
     std::fs::remove_file(lib.dir.join(lib.db().media_row(&c2).unwrap().unwrap().3)).unwrap();
@@ -87,7 +86,6 @@ fn backup_round_trip_restores_the_library() {
     assert!(lib2.db().folders().unwrap().iter().any(|(n, c)| n == "空文件夹" && *c == 0), "empty folder restored");
     assert_eq!(feed(&lib2, serde_json::json!({ "recent_only": true })).len(), 1, "最近添加 mark restored");
     assert_eq!(feed(&lib2, serde_json::json!({ "loose_only": true })).len(), 1);
-    assert_eq!(lib2.db().triage_queue(&Default::default()).unwrap().len(), 4, "triage records are not part of a backup");
 
     // restoring into the original library never deletes or bins anything that is live there
     lib.trash_apply(&[a2.clone()], TrashAction::Restore).unwrap();
@@ -179,7 +177,7 @@ fn share_inbox_heic_mov_and_record_deletion() {
     std::fs::write(b3.join("ok.jpg"), jpg(b"ok3")).unwrap();
     std::fs::write(b3.join("bad.jpg"), b"<html>").unwrap();
     let kept = d.join("Kept/share-3");
-    let r3 = tl_core::import::import_loose_dir_keep(&lib, &b3, None, true, Some(&kept)).unwrap();
+    let r3 = tl_core::import::import_loose_dir_keep(&lib, &b3, None, true, Some(&kept), true).unwrap();
     assert!(!b3.exists() && kept.join("bad.jpg").exists() && !kept.join("ok.jpg").exists());
     let saved = tl_core::import::load_report(Path::new(r3.report_file.as_ref().unwrap())).unwrap();
     assert_eq!(saved.source, kept.to_string_lossy());
@@ -234,16 +232,6 @@ fn recent_marks_converge_and_expire_without_ops() {
     assert!(c.recent_posts(t).unwrap().is_empty());
 }
 
-/// Triage can be limited to "最近添加" posts.
-#[test]
-fn triage_recent_filter() {
-    let s = store_with(&["p1", "p2", "loose:x"]);
-    s.mark_recent("p2", now()).unwrap();
-    let f = tl_core::triage::TriageFilter { recent_only: true, ..Default::default() };
-    let q: Vec<String> = s.triage_queue(&f).unwrap().into_iter().map(|u| u.post_id).collect();
-    assert_eq!(q, vec!["p2".to_string()]);
-    assert_eq!(s.triage_counts(&f).unwrap().remaining, 1);
-}
 
 use proptest::prelude::*;
 
@@ -417,4 +405,28 @@ proptest! {
         prop_assert!(!out.contains("://"), "{}", out);
         prop_assert!(out.chars().count() <= 200);
     }
+}
+
+/// 存储空间: media count by kind (binned ones apart), each file once; the database and the
+/// front end's places are groups of their own and never counted twice.
+#[test]
+fn storage_usage_groups() {
+    let d = tmp("storage");
+    let src = d.join("src");
+    post(&src, "帖子A", "1", &[("1.jpg", jpg(&[1; 1000])), ("2.jpg", jpg(&[2; 500])), ("3.mp4", mov(&[3; 2000]))]);
+    let lib = Library::open(d.join("lib")).unwrap();
+    lib.import_legacy_dir(&src).unwrap();
+    lib.trash_apply(&[sha(&jpg(&[2; 500]))], TrashAction::Trash).unwrap();
+    let cache = d.join("lib").join(".thumbs");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("t.jpg"), [0u8; 300]).unwrap();
+    let u = tl_core::storage::usage(&lib, &[tl_core::storage::ExtraPlace { key: "thumbnails".into(), path: cache.to_string_lossy().into() }]).unwrap();
+    let g = |k: &str| u.groups.iter().find(|g| g.key == k).cloned().unwrap();
+    assert_eq!((g("photos").bytes, g("photos").files), (1004, 1));
+    assert_eq!((g("bin").bytes, g("bin").files), (504, 1));
+    assert_eq!(g("videos").files, 1);
+    assert!(g("database").bytes > 0);
+    assert_eq!(g("thumbnails").bytes, 300, "the cache is its own group…");
+    assert!(g("libraryOther").bytes < 300 || !std::fs::read_dir(d.join("lib")).unwrap().any(|e| e.unwrap().path() == cache.join("t.jpg")), "…and not part of the library's other data");
+    assert_eq!(u.total, u.groups.iter().map(|g| g.bytes).sum::<u64>());
 }

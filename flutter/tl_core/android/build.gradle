@@ -1,0 +1,15 @@
+group = "org.twimshelf.tl_core"
+version = "1.0"
+
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath("com.android.tools.build:gradle:9.1.0") }
+}
+apply plugin: "com.android.library"
+
+android {
+    namespace = "org.twimshelf.tl_core"
+    compileSdk = 36
+    defaultConfig { minSdk = 31 }
+    sourceSets { main { jniLibs.srcDirs = ["src/main/jniLibs"] } }
+}

@@ -1,10 +1,10 @@
 """Compile the production value types without loading the app or a user's library."""
 from pathlib import Path
-import subprocess, tempfile, os
+import json, subprocess, tempfile, os
 root = Path(__file__).resolve().parents[3]
-activity = (root / 'app/Shared/ActivityCenter.swift').read_text()
-core = (root / 'app/Shared/Core.swift').read_text()
-sync = (root / 'app/Shared/SyncService.swift').read_text()
+activity = (root / 'native/Shared/ActivityCenter.swift').read_text()
+core = (root / 'native/Shared/Core.swift').read_text()
+sync = (root / 'native/Shared/SyncService.swift').read_text()
 def section(s, start, end): return s[s.index(start):s.index(end, s.index(start))]
 source = 'import Foundation\n' + section(activity, 'struct Activity:', '/// Polls every source')
 source += section(core, 'struct VerifyStatus:', 'enum DownloadRoute:')
@@ -53,7 +53,12 @@ sync.status?.peers = [.init(lastSync: 1000, lastError: nil)]
 precondition(sync.stateText.hasPrefix("上次同步成功于"))
 print("PASS: idle/missing/error sync states never claim synchronized")
 '''
+catalog = json.loads((root / 'native/Resources/Localizable.xcstrings').read_text())['strings']
+table = {k: v['localizations']['zh-Hans']['stringUnit']['value'] for k, v in catalog.items() if 'zh-Hans' in v.get('localizations', {}) and 'stringUnit' in v['localizations']['zh-Hans']}
+strings = 'import Foundation\nlet tlStrings: [String: String] = try! JSONDecoder().decode([String: String].self, from: Data(#"""\n' + json.dumps(table, ensure_ascii=False) + '\n"""#.utf8))\nfunc L(_ key: String, _ args: Any...) -> String { String(format: (tlStrings[key] ?? key).replacingOccurrences(of: "%lld", with: "%@"), arguments: args.map { String(describing: $0) as NSString }) }\n'
 with tempfile.TemporaryDirectory(prefix='tl-swift-contracts-') as out:
  p=Path(out); (p/'main.swift').write_text(source)
- subprocess.run(['swiftc','-module-cache-path',str(p/'cache'),str(p/'main.swift'),'-o',str(p/'checks')],check=True)
+ # the catalog's own Chinese text, as the app shows it: the checks read what the person would
+ (p/'strings.swift').write_text(strings)
+ subprocess.run(['swiftc','-module-cache-path',str(p/'cache'),str(p/'main.swift'),str(p/'strings.swift'),'-o',str(p/'checks')],check=True)
  subprocess.run([str(p/'checks')],check=True)

@@ -1,0 +1,3 @@
+// the Flutter app's share extension: the same sources as the native app's
+#include "../Runner/Configs/Identity.xcconfig"
+PRODUCT_BUNDLE_IDENTIFIER = $(TL_FLUTTER_BUNDLE).share

@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.14)
+project(tl_core LANGUAGES NONE)
+set(TL_CORE_LIBRARY "${CMAKE_CURRENT_LIST_DIR}/lib/tl_core.dll")
+if(NOT EXISTS "${TL_CORE_LIBRARY}")
+  message(FATAL_ERROR "Missing ${TL_CORE_LIBRARY}; run scripts/flutter/build_core.sh windows first")
+endif()
+set(tl_core_bundled_libraries "${TL_CORE_LIBRARY}" PARENT_SCOPE)

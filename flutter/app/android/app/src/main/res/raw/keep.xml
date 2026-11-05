@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The icon of the shortcut on the app's icon is looked up by name at run time: the release build's
+     resource shrinker cannot see that, and replaces it with an empty one. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@drawable/ic_shortcut_download" />

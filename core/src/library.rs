@@ -1,8 +1,7 @@
 //! A library directory: SQLite metadata + content-addressed blobs.
 use crate::legacy::{meta_from_folder_name, parse_sidecar};
 use crate::model::{MediaKind, Origin, SearchScope};
-#[allow(unused_imports)]
-use crate::rules as _rules;
+use std::collections::HashMap;
 use crate::store::Store;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -22,7 +21,7 @@ impl Drop for TempFile { fn drop(&mut self) { let _ = fs::remove_file(&self.0); 
 pub struct Library {
     pub dir: PathBuf,
     store: Mutex<Store>,
-    vec_cache: Mutex<Option<(String, std::collections::HashMap<String, Vec<f32>>)>>,
+    vec_cache: Mutex<Option<(String, std::sync::Arc<std::collections::HashMap<String, Vec<f32>>>)>>,
     /// Model folders live outside the library by default so tests and resets don't re-download them.
     models: Mutex<PathBuf>,
     /// Bumped by `wipe` while it holds the store: work started before (a download whose media
@@ -31,12 +30,16 @@ pub struct Library {
     epoch: std::sync::atomic::AtomicU64,
 }
 
+
 #[derive(Debug, Deserialize)]
 pub struct FeedRequest {
     #[serde(default)] pub terms: Vec<String>,
     pub scope: SearchScope,
     /// Shuffle with this seed; None keeps a stable order (the apps order with the system RNG).
     #[serde(default)] pub seed: Option<u64>,
+    /// By when it was added, newest first (instead of `seed`): a post's place is its newest media,
+    /// its media stay in their order.
+    #[serde(default)] pub newest_first: bool,
     /// Substring + semantic matching when true, exact label match when false.
     #[serde(default = "yes")] pub fuzzy: bool,
     /// Optional embedding per term (same order as `terms`), from `embed_model`.
@@ -63,10 +66,25 @@ pub struct FeedFilter {
     #[serde(default)] pub folder: Option<String>,
     /// Only loose media (imported without a post).
     #[serde(default)] pub loose_only: bool,
+    /// Only media brought in through a share extension (从相册导入).
+    #[serde(default)] pub album_only: bool,
     /// Only "最近添加" posts.
     #[serde(default)] pub recent_only: bool,
     /// Only photos or only videos.
     #[serde(default)] pub kind: Option<MediaKind>,
+    /// Search words written with a minus ("-猫"): media where any of them occurs in a searched
+    /// field (a tag of an allowed origin, the post text, the author) are left out. Plain
+    /// "contains" matching (`rules::search_matches`): an exclusion never reaches by meaning.
+    #[serde(default)] pub exclude_terms: Vec<String>,
+    /// Which tag origins a search counts, overriding the scope's (1 = only mine, 2 = only the
+    /// AI's, 3 = both together; "-我的", "-AI", "-共同" take theirs away). Some(empty): no tag.
+    #[serde(default)] pub origins: Option<Vec<u8>>,
+    /// Media in none of these folders ("-文件夹 名称").
+    #[serde(default)] pub exclude_folders: Vec<String>,
+    /// No "最近添加" posts ("-最近").
+    #[serde(default)] pub exclude_recent: bool,
+    /// No loose media ("-外部导入").
+    #[serde(default)] pub exclude_loose: bool,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -96,6 +114,77 @@ pub struct FeedItem {
     pub bad: Option<String>,
     /// The post is "最近添加" (batch-downloaded from a bookmarks JSON in the last 5 days).
     #[serde(default)] pub recent: bool,
+    /// Brought in through a share extension (从相册导入).
+    #[serde(default)] pub album: bool,
+    /// Width and height as displayed, once read from the file (`media_size`).
+    #[serde(default)] pub size: Option<(u32, u32)>,
+}
+
+/// A feed in a compact form for the apps: a library of a hundred thousand media listed item by
+/// item repeats each post's text, author and link for every one of its media, each tag list, and
+/// the library folder in every path (47 MB of JSON). Here each post and each distinct tag list
+/// comes once and media refer to them by position; paths are relative to `root`. `unpack` (and
+/// the apps' decoders) rebuild the same items.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct PackedFeed {
+    /// Prefix of every media path (the library folder, with its trailing separator).
+    pub root: String,
+    pub posts: Vec<PackedPost>,
+    /// Distinct tag lists: [label, origin, models] per tag.
+    pub tag_lists: Vec<Vec<(String, u8, Vec<String>)>>,
+    /// One per media: [media id, post (index), ordinal, kind ("p"/"v"), path below root,
+    /// tag list (index), damage or "", width and height (0 when not known) ].
+    pub media: Vec<(String, u32, i64, String, String, u32, String, u32, u32)>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct PackedPost {
+    pub id: String,
+    pub text: Option<String>,
+    pub author_name: Option<String>,
+    pub screen_name: Option<String>,
+    pub url: Option<String>,
+    pub created_at: Option<String>,
+    pub recent: bool,
+    #[serde(default)] pub album: bool,
+}
+
+impl PackedFeed {
+    pub fn pack(items: &[FeedItem], root: &str) -> PackedFeed {
+        let mut posts: Vec<PackedPost> = Vec::new();
+        let mut post_index: HashMap<&str, u32> = HashMap::new();
+        let mut tag_lists: Vec<Vec<(String, u8, Vec<String>)>> = Vec::new();
+        let mut tag_index: HashMap<Vec<(String, u8, Vec<String>)>, u32> = HashMap::new();
+        let mut media = Vec::with_capacity(items.len());
+        for it in items {
+            let p = *post_index.entry(it.post_id.as_str()).or_insert_with(|| {
+                posts.push(PackedPost { id: it.post_id.clone(), text: it.text.clone(), author_name: it.author_name.clone(), screen_name: it.screen_name.clone(), url: it.url.clone(), created_at: it.created_at.clone(), recent: it.recent, album: it.album });
+                posts.len() as u32 - 1
+            });
+            let tags: Vec<(String, u8, Vec<String>)> = it.tags.iter().map(|t| (t.label.clone(), t.origin, t.models.clone())).collect();
+            let t = match tag_index.get(&tags) { Some(&i) => i, None => { tag_lists.push(tags.clone()); let i = tag_lists.len() as u32 - 1; tag_index.insert(tags, i); i } };
+            let path = it.path.strip_prefix(root).unwrap_or(&it.path).to_string();
+            let kind = if matches!(it.kind, MediaKind::Video) { "v" } else { "p" };
+            media.push((it.media_id.clone(), p, it.ordinal, kind.to_string(), path, t, it.bad.clone().unwrap_or_default(), it.size.map_or(0, |s| s.0), it.size.map_or(0, |s| s.1)));
+        }
+        PackedFeed { root: root.to_string(), posts, tag_lists, media }
+    }
+
+    pub fn unpack(&self) -> Vec<FeedItem> {
+        self.media.iter().map(|(id, p, ordinal, kind, path, t, bad, w, h)| {
+            let post = &self.posts[*p as usize];
+            FeedItem {
+                media_id: id.clone(), post_id: post.id.clone(), ordinal: *ordinal,
+                kind: if kind == "v" { MediaKind::Video } else { MediaKind::Photo },
+                path: if path.starts_with('/') || path.contains(':') { path.clone() } else { format!("{}{path}", self.root) },
+                text: post.text.clone(), author_name: post.author_name.clone(), screen_name: post.screen_name.clone(),
+                url: post.url.clone(), created_at: post.created_at.clone(),
+                tags: self.tag_lists[*t as usize].iter().map(|(label, origin, models)| TagView { label: label.clone(), origin: *origin, models: models.clone() }).collect(),
+                bad: (!bad.is_empty()).then(|| bad.clone()), recent: post.recent, album: post.album,
+                size: (*w > 0 && *h > 0).then_some((*w, *h)),
+            }
+        }).collect()
+    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -103,6 +192,16 @@ pub struct TagView { pub label: String, pub origin: u8, /// AI models that propo
     pub models: Vec<String> }
 
 pub use crate::import::ImportReport;
+
+/// A file refused because its content is not the media it claims to be (an HTML error page saved
+/// as .jpg…): the import's "not_media" category, told apart by this type rather than by words.
+#[derive(Debug)]
+pub struct NotMedia(pub String);
+impl std::fmt::Display for NotMedia { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) } }
+impl std::error::Error for NotMedia {}
+
+/// Whether an error is (or wraps) a `NotMedia`.
+pub fn is_not_media(e: &anyhow::Error) -> bool { e.chain().any(|c| c.is::<NotMedia>()) }
 
 /// Post metadata of a legacy folder: the sidecar when present, else the folder name is the text.
 pub fn legacy_post_meta(folder_name: &str, sidecar: Option<String>) -> crate::model::PostMeta {
@@ -136,12 +235,13 @@ impl Library {
     pub fn open(dir: impl Into<PathBuf>) -> anyhow::Result<Library> {
         let dir = dir.into();
         fs::create_dir_all(dir.join("blobs"))?;
-        let (store, reset) = Store::open_reporting(dir.join("library.sqlite").to_str().unwrap())?;
-        if reset {
-            // The old schema was discarded; its blobs are unreferenced now.
-            for d in ["blobs", "tmp"] { let _ = fs::remove_dir_all(dir.join(d)); }
-            fs::create_dir_all(dir.join("blobs"))?;
-        }
+        let db = dir.join("library.sqlite");
+        let had_media = fs::read_dir(dir.join("blobs")).map_or(false, |mut r| r.next().is_some());
+        let (store, _) = Store::open_reporting(db.to_str().unwrap())?;
+        // media files on disk but no media in the database (the database was deleted): the files
+        // stay — they are not orphans. Sync brings the library's records back from the account's
+        // other devices and finds the files already here.
+        let lost = had_media && store.conn().query_row("SELECT count(*) FROM media", [], |r| r.get::<_, i64>(0)).unwrap_or(0) == 0;
         // Leftovers from interrupted downloads/syncs/imports: nothing is mid-write at startup.
         let _ = fs::remove_dir_all(dir.join("tmp"));
         let models = dir.join("models");
@@ -149,7 +249,9 @@ impl Library {
         // Housekeeping below writes to the database; on a full disk it fails, and the library must
         // still open (so media can be deleted to make room). Each step is retried at the next start.
         if let Err(e) = lib.settle() { lib.diag("maintenance_skipped", serde_json::json!({ "step": "settle", "error": crate::diagnostics::scrub(&format!("{e:#}")) })); } // finish file removals interrupted by a quit
-        if let Ok(n) = lib.sweep_orphan_blobs() { if n > 0 { lib.diag("orphan_files_removed", serde_json::json!({ "files": n })); } }
+        if !lost {
+            if let Ok(n) = lib.sweep_orphan_blobs() { if n > 0 { lib.diag("orphan_files_removed", serde_json::json!({ "files": n })); } }
+        }
         lib.keep_reserve();
         let _ = lib.db().prune_recent(crate::store::now_ms());
         let _ = lib.db().gc_dead_tags();
@@ -332,6 +434,17 @@ impl Library {
         Ok(Some(reason.to_string()))
     }
 
+    /// A grid could not make a thumbnail, with this core's decoders. A format it does not decode
+    /// (HEIC, AVIF…) is no sign of damage: only the file itself is checked then.
+    pub fn report_thumbnail_failed(&self, media_id: &str) -> anyhow::Result<Option<String>> {
+        let Some((_, _, _, rel)) = self.db().media_row(media_id)? else { return Ok(None) };
+        let ext = Path::new(&rel).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        if ["jpg", "jpeg", "png", "gif", "webp"].contains(&ext.as_str()) { return self.report_bad(media_id); }
+        let Some(reason) = self.check_file(media_id, &rel) else { return Ok(None) };
+        self.db().set_bad(media_id, Some(reason))?;
+        Ok(Some(reason.to_string()))
+    }
+
     /// Exclusive access to the metadata store.
     pub fn db(&self) -> MutexGuard<'_, Store> { self.store.lock().unwrap_or_else(|e| e.into_inner()) }
 
@@ -341,7 +454,7 @@ impl Library {
     /// The store, if the library has not been wiped since `epoch` was read.
     pub fn db_at(&self, epoch: u64) -> anyhow::Result<MutexGuard<'_, Store>> {
         let db = self.db();
-        if self.epoch() != epoch { anyhow::bail!("资料库已被清除"); }
+        if self.epoch() != epoch { anyhow::bail!(tr!("library.wiped")); }
         Ok(db)
     }
 
@@ -382,7 +495,8 @@ impl Library {
         Ok(removed)
     }
 
-    /// Copies bytes into blobs/ab/<sha>.<ext> atomically; returns (sha, relative path).
+    /// Copies bytes into blobs/ab/<sha>.<ext> atomically; returns (sha, relative path). How tests
+    /// put a file in place: the app stores through a temporary file and the media checks instead.
     pub fn put_blob(&self, bytes: &[u8], ext: &str) -> anyhow::Result<(String, String)> {
         let sha = hex::encode(Sha256::digest(bytes));
         let rel = format!("blobs/{}/{}.{}", &sha[..2], sha, ext);
@@ -419,7 +533,16 @@ impl Library {
         let rel = format!("blobs/{}/{}.{}", &sha[..2], sha, ext);
         let dst = self.dir.join(&rel);
         let damaged = || db.bad_reason(sha).ok().flatten().map_or(false, |r| r == "missing" || r == "hash");
-        if dst.exists() && !damaged() { fs::remove_file(tmp)?; } else {
+        // A copy we know is right takes the place of a file that is not, marked as such or not. The
+        // length is cheap; the content is read only when no check has vouched for the file (the
+        // exception is a file that went bad after a check: `verify` finds that one).
+        let intact = || -> bool {
+            let same_len = fs::metadata(&dst).ok().map(|m| m.len()) == fs::metadata(tmp).ok().map(|m| m.len());
+            if !same_len { return false; }
+            let checked = db.conn().prepare_cached("SELECT 1 FROM verified_media WHERE media_id=?1").and_then(|mut s| s.exists([sha])).unwrap_or(false);
+            checked || self.check_file(sha, &rel).is_none()
+        };
+        if dst.exists() && !damaged() && intact() { fs::remove_file(tmp)?; } else {
             fs::create_dir_all(dst.parent().unwrap())?;
             db.conn().execute("DELETE FROM verified_media WHERE media_id=?1", [sha])?;
             fs::rename(tmp, &dst)?;
@@ -435,7 +558,9 @@ impl Library {
     /// Media matching every term (substring on tag labels within scope), shuffled by seed.
     pub fn feed(&self, req: &FeedRequest) -> anyhow::Result<Vec<FeedItem>> {
         let terms: Vec<String> = req.terms.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).collect();
-        let sets: Vec<Vec<String>> = if !req.fuzzy {
+        let sets: Vec<Vec<String>> = if terms.is_empty() || (!req.fields.tags && !req.fields.text && req.fields.author) {
+            vec![]
+        } else if !req.fuzzy {
             // without the semantic part a term still matches every tag that contains it
             // (棒球 → 棒球服): "contains" is the baseline, meaning-based matches come on top
             let labels = self.db().all_labels()?;
@@ -449,12 +574,27 @@ impl Library {
             }).collect()
         };
         let mut items = self.db().feed_filtered(&sets, &terms, req.scope, req.fields, &req.filter)?;
-        if let Some(seed) = req.seed {
+        if req.newest_first {
+            let added = self.db().posts_added()?;
+            let at = |post: &str| added.get(post).copied().unwrap_or(0);
+            items.sort_by(|a, b| at(&b.post_id).cmp(&at(&a.post_id)).then_with(|| a.post_id.cmp(&b.post_id)).then(a.ordinal.cmp(&b.ordinal)));
+        } else if let Some(seed) = req.seed {
             let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(seed);
             items.shuffle(&mut rng);
         }
-        for it in &mut items { it.path = self.dir.join(&it.path).to_string_lossy().into_owned(); }
+        crate::media_size::read_few(self)?;
+        let sizes = self.db().media_sizes()?;
+        for it in &mut items {
+            it.path = self.dir.join(&it.path).to_string_lossy().into_owned();
+            it.size = sizes.get(&it.media_id).copied();
+        }
         Ok(items)
+    }
+
+    /// The feed in the compact form the apps read (`PackedFeed`).
+    pub fn feed_packed(&self, req: &FeedRequest) -> anyhow::Result<PackedFeed> {
+        let items = self.feed(req)?;
+        Ok(PackedFeed::pack(&items, &self.dir.join("").to_string_lossy()))
     }
 
     /// The folders page: folders with counts and covers (paths resolved), plus photo and video totals.
@@ -491,14 +631,15 @@ impl Library {
         self.put_reader(&mut fs::File::open(src)?, kind, ext)
     }
 
-    /// Why a file was refused as media (shown in import reports). Always starts with 内容不是 or
+    /// Why a file was refused as media (shown in import reports; returned as a `NotMedia`
+    /// error, which the import tells apart by type).
     /// names the actual content.
     pub fn not_media_reason(sn: crate::rules::Sniff, photo: bool) -> String {
         use crate::rules::Sniff::*;
-        let want = if photo { "图片（JPEG / PNG / GIF / WebP / HEIC）" } else { "视频（MP4 / MOV）" };
-        let actual = match sn { Html => "网页（HTML），常见于下载失败时保存下来的错误页面", Text => "纯文本", Empty => "空文件（0 字节）",
-            Jpeg | Png | Gif | Webp | Heif => "图片，但扩展名是视频", Mp4 | Mov => "视频，但扩展名是图片", Unknown => "无法识别的格式" };
-        format!("内容不是{want}：实际是{actual}")
+        let want = if photo { tr!("media.want.photo") } else { tr!("media.want.video") };
+        let actual = match sn { Html => tr!("media.actual.html"), Text => tr!("media.actual.text"), Empty => tr!("media.actual.empty"),
+            Jpeg | Png | Gif | Webp | Heif => tr!("media.actual.photoAsVideo"), Mp4 | Mov => tr!("media.actual.videoAsPhoto"), Unknown => tr!("media.actual.unknown") };
+        tr!("media.notMedia", want = want, actual = actual)
     }
 
     /// Streams any reader (a file, a zip entry) into the blob store with constant memory.
@@ -523,15 +664,15 @@ impl Library {
             let photo = *kind == MediaKind::Photo;
             let check = |head: &[u8]| -> anyhow::Result<()> {
                 let sn = crate::rules::sniff(head);
-                if !crate::rules::sniff_ok(sn, photo) { anyhow::bail!("{}", Self::not_media_reason(sn, photo)); }
+                if !crate::rules::sniff_ok(sn, photo) { anyhow::bail!(NotMedia(Self::not_media_reason(sn, photo))); }
                 Ok(())
             };
             loop {
-                if cancelled() { anyhow::bail!("已取消"); }
+                if cancelled() { anyhow::bail!(tr!("common.cancelled")); }
                 let n = input.read(&mut buf)?;
                 if n == 0 { break; }
                 total += n as u64;
-                if total > max_bytes { anyhow::bail!("文件超过大小限制（{} GB）", max_bytes >> 30); }
+                if total > max_bytes { anyhow::bail!(tr!("library.tooLarge", gb = max_bytes >> 30)); }
                 if head.len() < 16 { head.extend_from_slice(&buf[..n.min(16 - head.len())]); }
                 if !checked && head.len() >= 16 { check(&head)?; checked = true; }
                 h.update(&buf[..n]);
@@ -556,7 +697,7 @@ impl Library {
     pub fn apply_ai_tags_at(&self, epoch: u64, media_id: &str, model: &str, labels: &[String], replace_old: bool) -> anyhow::Result<()> {
         let db = self.db_at(epoch)?;
         if db.media_row(media_id)?.is_none() || db.trash_reg(media_id)?.state != crate::rules::LIVE {
-            anyhow::bail!("媒体已删除或移入回收站");
+            anyhow::bail!(tr!("library.mediaGone"));
         }
         let tx = db.conn().unchecked_transaction()?;
         db.retag(media_id, model, labels, replace_old)?;
@@ -567,9 +708,9 @@ impl Library {
     /// Tag vectors for a model, cached in memory until they change.
     /// Never holds the cache lock while waiting for the store (wipe takes the store, then the
     /// cache: holding them in the other order here could deadlock with it).
-    fn vectors(&self, model: &str) -> anyhow::Result<std::collections::HashMap<String, Vec<f32>>> {
+    fn vectors(&self, model: &str) -> anyhow::Result<std::sync::Arc<std::collections::HashMap<String, Vec<f32>>>> {
         if let Some((m, v)) = self.vec_cache.lock().unwrap().as_ref() { if m == model { return Ok(v.clone()); } }
-        let (v, epoch) = { let db = self.db(); (db.vectors(model)?, self.epoch()) };
+        let (v, epoch) = { let db = self.db(); (std::sync::Arc::new(db.vectors(model)?), self.epoch()) };
         // store it only if no wipe happened meanwhile
         let mut cache = self.vec_cache.lock().unwrap();
         if self.epoch() == epoch { *cache = Some((model.to_string(), v.clone())); }
@@ -608,7 +749,10 @@ impl Library {
         let db = self.db();
         // from here on, work started before the wipe can no longer write (see `db_at`)
         self.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // the models stay: so do their prompts and the external models' settings, freshly recorded
+        let kept = if include_models { vec![] } else { db.settings_with_prefix("ai.")? };
         db.wipe()?;
+        for (key, value) in kept { db.set_setting(&key, Some(&value))?; }
         // Logical deletion is committed even if optional compaction cannot allocate space.
         let _ = db.conn().execute_batch("VACUUM");
         // after the store: the same order as everywhere else (store, then cache)
@@ -643,6 +787,45 @@ impl Library {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_right_copy_heals_a_file_that_went_bad_unnoticed() {
+        let d = std::env::temp_dir().join(format!("tl-heal-{}", rand::random::<u64>()));
+        let lib = Library::open(&d).unwrap();
+        let src = d.join("src.png");
+        std::fs::write(&src, b"\x89PNG\r\n\x1a\nsynthetic").unwrap();
+        let (sha, rel) = lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
+        std::fs::write(d.join(&rel), b"\x89PNG\r\n\x1a\nsynthetiX").unwrap();   // same length
+        lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
+        assert!(lib.check_file(&sha, &rel).is_none());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_library_of_an_ancient_format_is_refused_not_rebuilt() {
+        let d = std::env::temp_dir().join(format!("tl-old-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(d.join("blobs/ab")).unwrap();
+        std::fs::write(d.join("blobs/ab/keep"), b"x").unwrap();
+        {
+            let c = rusqlite::Connection::open(d.join("library.sqlite")).unwrap();
+            c.execute_batch("CREATE TABLE post(id TEXT); INSERT INTO post VALUES('mine'); PRAGMA user_version=2;").unwrap();
+        }
+        assert!(Library::open(&d).is_err());
+        assert!(d.join("blobs/ab/keep").exists());
+        let c = rusqlite::Connection::open(d.join("library.sqlite")).unwrap();
+        assert_eq!(c.query_row("SELECT count(*) FROM post", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn search_ignores_case_in_every_script() {
+        let d = std::env::temp_dir().join(format!("tl-case-{}", rand::random::<u64>()));
+        let lib = Library::open(&d).unwrap();
+        let s: String = lib.db().conn().query_row("SELECT ulower('ÄÉΣA')", [], |r| r.get(0)).unwrap();
+        assert_eq!(s, "ÄÉΣA".to_lowercase());
+        assert_eq!(s, "äéσa");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
     use super::*;
     use crate::legacy::SIDECAR_NAME;
     /// A permanent deletion and a restore arriving in the same sync batch: the file of the
@@ -739,19 +922,19 @@ mod tests {
         fs::write(src.join("帖子C/fake.mp4"), b"not a video").unwrap();
         let rep2 = lib.import_legacy_dir(&src).unwrap();
         assert!(rep2.skipped.iter().any(|s| s.contains("fake.mp4")));
-        let all = lib.feed(&FeedRequest { terms: vec![], scope: SearchScope::Both, seed: Some(1), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(1), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert_eq!(all.len(), 3);
         let b = all.iter().find(|i| i.post_id == "42").unwrap();
         assert_eq!(b.text.as_deref(), Some("hi"));
         lib.tag(&b.media_id, "白墙", Origin::AI).unwrap();
-        let q = |t: &str, s| lib.feed(&FeedRequest { terms: vec![t.into()], scope: s, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap().len();
+        let q = |t: &str, s| lib.feed(&FeedRequest { newest_first: false, terms: vec![t.into()], scope: s, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap().len();
         assert_eq!(q("墙", SearchScope::Both), 1);
         assert_eq!(q("墙", SearchScope::Mine), 0);
         assert_eq!(q("墙", SearchScope::Common), 0, "an AI-only tag is not common");
         lib.tag(&b.media_id, "白墙", Origin::USER).unwrap();
         assert_eq!(q("墙", SearchScope::Mine), 1);
         // text / author search
-        let f = |t: &str, fields: SearchFields| lib.feed(&FeedRequest { terms: vec![t.into()], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields, filter: Default::default() }).unwrap().len();
+        let f = |t: &str, fields: SearchFields| lib.feed(&FeedRequest { newest_first: false, terms: vec![t.into()], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields, filter: Default::default() }).unwrap().len();
         let text = SearchFields { tags: false, text: true, author: false };
         let author = SearchFields { tags: false, text: false, author: true };
         assert_eq!(f("hi", text), 1, "post text");
@@ -763,9 +946,9 @@ mod tests {
         assert_eq!(q("墙", SearchScope::Ai), 1);
         // "common": only where the tag is both mine and the AI's
         assert_eq!(q("墙", SearchScope::Common), 1, "the AI tag I also added is common");
-        let exact = lib.feed(&FeedRequest { terms: vec!["墙".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let exact = lib.feed(&FeedRequest { newest_first: false, terms: vec!["墙".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert!(!exact.is_empty(), "without fuzzy a term still matches the tags that contain it");
-        let none = lib.feed(&FeedRequest { terms: vec!["不存在的词".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let none = lib.feed(&FeedRequest { newest_first: false, terms: vec!["不存在的词".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert!(none.is_empty());
         fs::remove_dir_all(&tmp).unwrap();
     }
@@ -784,7 +967,7 @@ mod tests {
         }
         let lib = Library::open(tmp.join("lib")).unwrap();
         lib.import_legacy_dir(&src).unwrap();
-        let all = lib.feed(&FeedRequest { terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         let media = |post: &str| all.iter().find(|i| i.post_id == post).unwrap().media_id.clone();
         lib.tag(&media("2"), "小猫咪", Origin::AI).unwrap();
         lib.tag(&media("3"), "风景", Origin::USER).unwrap();
@@ -792,7 +975,7 @@ mod tests {
         lib.db().set_vector("m", "风景", &[0.0, 1.0]).unwrap();
         // "喵" means 小猫咪 (by vectors), and is written nowhere
         let run = |terms: &[&str], vecs: Vec<Option<Vec<f32>>>, fuzzy: bool, tags: bool, text: bool, author: bool| -> Vec<String> {
-            let mut v: Vec<String> = lib.feed(&FeedRequest { terms: terms.iter().map(|t| t.to_string()).collect(), scope: SearchScope::Both, seed: None, fuzzy,
+            let mut v: Vec<String> = lib.feed(&FeedRequest { newest_first: false, terms: terms.iter().map(|t| t.to_string()).collect(), scope: SearchScope::Both, seed: None, fuzzy,
                 term_vectors: vecs, embed_model: Some("m".into()), threshold: 0.7, fields: SearchFields { tags, text, author }, filter: Default::default() }).unwrap()
                 .into_iter().map(|i| i.post_id).collect();
             v.sort(); v

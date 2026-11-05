@@ -1,7 +1,0 @@
-[package]
-name = "tl-protected-api"
-version = "1.0.0"
-edition = "2021"
-description = "Types shared by TwimShelf's core and the protected-post module (no dependencies)."
-
-[dependencies]

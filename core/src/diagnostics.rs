@@ -98,18 +98,18 @@ pub fn export(lib: &Library, out: &Path, app_info: &str) -> anyhow::Result<usize
         "import_records": import_summary(lib),
     });
     add(&mut z, "summary.json", serde_json::to_string_pretty(&summary)?.as_bytes())?;
-    add(&mut z, "说明.txt", "TwimShelf 诊断信息\n\napp.log：问题日志（时间、级别、模块、原因）。\ndiagnostics.log：统计日志，只有数字和错误原因。\ncrashes/：系统崩溃诊断（MetricKit）和未捕获异常。\nsummary.json：版本、设备、资料库数量、导入记录的分类计数。\n\n不包含图片、视频、帖子正文、作者、标签名、文件名、Cookie 或同步凭据。\n".as_bytes())?;
+    add(&mut z, &tr!("readme.name"), tr!("diag.readme").as_bytes())?;
     z.finish()?.flush()?;
     fs::rename(&tmp, out)?;
     Ok(n)
 }
 
-/// Error text for logs: links (which name the user's posts) become "<链接>", capped at 200 chars.
+/// Error text for logs: links (which name the user's posts) become tr!("diag.link"), capped at 200 chars.
 pub fn scrub(s: &str) -> String {
     // any URL (any scheme, any case), then any absolute path or home-relative path
     let re = regex_lite();
-    let out = re.0.replace_all(s, "<链接>");
-    let out = re.1.replace_all(&out, "<路径>");
+    let out = re.0.replace_all(s, tr!("diag.link"));
+    let out = re.1.replace_all(&out, tr!("diag.path2"));
     out.chars().take(200).collect()
 }
 

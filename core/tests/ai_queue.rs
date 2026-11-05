@@ -14,6 +14,42 @@ fn replica() -> Store {
 }
 fn mid(m: u8) -> String { format!("{m:064}") }
 fn pending(s: &Store, since: i64) -> Vec<String> { s.media_needing_ai_for("qwen", since, 10).unwrap().into_iter().map(|m| m.media_id).collect() }
+
+/// Bridge the finite proof state to the real SQL selector, including the last media index
+/// and every reachable combination of retry budgets and current-run failure marks.
+#[test]
+fn finite_queue_model_matches_sql_for_all_reachable_states() {
+    use tl_core::tagmodel::{head, Queue, N};
+    let s = replica();
+    for done in 0u8..(1 << N) {
+        s.conn().execute("DELETE FROM ai_done", []).unwrap();
+        for m in 0..N {
+            if done & (1 << m) != 0 {
+                s.conn().execute("INSERT INTO ai_done VALUES(?1,'other-model')", [mid(m as u8)]).unwrap();
+            }
+        }
+        for f0 in 0..=MAX_AI_ATTEMPTS as u8 {
+            for f1 in 0..=MAX_AI_ATTEMPTS as u8 {
+                for f2 in 0..=MAX_AI_ATTEMPTS as u8 {
+                    for run_failed in 0u8..(1 << N) {
+                        let q = Queue { fail: [f0, f1, f2], run_failed };
+                        if (0..N).any(|m| q.fail[m] == 0 && run_failed & (1 << m) != 0) { continue; }
+                        s.conn().execute("DELETE FROM ai_fail", []).unwrap();
+                        for m in 0..N {
+                            if q.fail[m] > 0 {
+                                let at = if run_failed & (1 << m) != 0 { 200 } else { 100 };
+                                s.conn().execute("INSERT INTO ai_fail VALUES(?1,'qwen',?2,'error',?3)",
+                                    rusqlite::params![mid(m as u8), q.fail[m], at]).unwrap();
+                            }
+                        }
+                        assert_eq!(pending(&s, 150).first().cloned(), head(done, &q).map(|m| mid(m as u8)),
+                            "done={done}, queue={q:?}");
+                    }
+                }
+            }
+        }
+    }
+}
 /// Sends everything `from` has that `to` lacks.
 fn sync(from: &Store, to: &Store) {
     let ops = from.ops_since(&to.version_vector().unwrap(), 100_000).unwrap();

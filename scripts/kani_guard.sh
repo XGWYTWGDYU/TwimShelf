@@ -7,6 +7,8 @@
 LIMIT_MB=${LIMIT_MB:-4096}
 TIMEOUT_S=${TIMEOUT_S:-600}
 cd "$(dirname "$0")/../core" || exit 1
+TL_KANI_CACHE=$(python3 ../scripts/apply.py where cache) || exit 1
+export CARGO_TARGET_DIR="$TL_KANI_CACHE/kani"
 
 # every process below $1 (children, grandchildren, …)
 tree() {
@@ -18,7 +20,7 @@ tree() {
 failed=0
 for h in "$@"; do
   log=$(mktemp)
-  cargo kani --lib --harness "$h" >"$log" 2>&1 &
+  cargo kani --manifest-path verification/Cargo.toml --lib --harness "$h" >"$log" 2>&1 &
   pid=$!
   start=$(date +%s)
   killed=""

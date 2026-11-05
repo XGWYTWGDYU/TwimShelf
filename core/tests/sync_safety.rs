@@ -254,30 +254,6 @@ fn media_addresses_are_x_media_servers_only() {
     }
 }
 
-/// Undoing a triage decision reverts exactly that decision: not a later deletion of the same
-/// media (after a restore elsewhere), not a folder membership the user added by hand afterwards.
-#[test]
-fn triage_undo_reverts_only_its_own_change() {
-    use tl_core::triage::Decision;
-    let id = "a".repeat(64);
-    let s = Store::open(":memory:").unwrap();
-    s.upsert_post(&PostMeta { id: "p".into(), ..Default::default() }).unwrap();
-    s.add_media(&id, "p", 0, &MediaKind::Photo, &format!("blobs/aa/{id}.jpg"), false).unwrap();
-    assert!(s.triage_decide("p", Decision::Delete, None).unwrap());
-    // restored, then deleted again (a different deletion)
-    s.trash_action(&id, tl_core::rules::TrashAction::Restore).unwrap();
-    s.trash_action(&id, tl_core::rules::TrashAction::Trash).unwrap();
-    assert!(s.triage_undo("p").unwrap());
-    assert_eq!(s.trash_reg(&id).unwrap().state, tl_core::rules::TRASHED, "the later deletion stays");
-
-    // folder: the user added the media to the folder again by hand after the decision
-    s.trash_action(&id, tl_core::rules::TrashAction::Restore).unwrap();
-    assert!(s.triage_decide("p", Decision::Folder, Some("夹")).unwrap());
-    s.remove_from_folder("夹", &[id.clone()]).unwrap();
-    s.add_to_folder("夹", &[id.clone()]).unwrap();
-    assert!(s.triage_undo("p").unwrap());
-    assert_eq!(s.folders_of(&id).unwrap(), vec!["夹".to_string()], "the hand-made membership stays");
-}
 
 /// A rename rule from a backup never clears a newer rule of this library (backup: a → b;
 /// here, later: b → c): a ends up shown as c and b → c stays.

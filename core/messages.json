@@ -1,0 +1,1256 @@
+{
+ "action.folderEmpty": {
+  "en": "The folder name can't be empty",
+  "ja": "フォルダ名を空にはできません",
+  "zh-Hans": "文件夹名称不能为空",
+  "zh-Hant": "資料夾名稱不能為空"
+ },
+ "action.tagEmpty": {
+  "en": "The tag can't be empty",
+  "ja": "タグを空にはできません",
+  "zh-Hans": "标签不能为空",
+  "zh-Hant": "標籤不能為空"
+ },
+ "ai.crashed": {
+  "en": "The app quit unexpectedly during the analysis",
+  "ja": "分析中にアプリが予期せず終了しました",
+  "zh-Hans": "分析时应用意外退出",
+  "zh-Hant": "分析時 App 意外結束"
+ },
+ "common.cancelled": {
+  "en": "Canceled",
+  "ja": "キャンセルしました",
+  "zh-Hans": "已取消",
+  "zh-Hant": "已取消"
+ },
+ "diag.link": {
+  "en": "<link>",
+  "ja": "<リンク>",
+  "zh-Hans": "<链接>",
+  "zh-Hant": "<連結>"
+ },
+ "diag.path2": {
+  "en": "<path>",
+  "ja": "<パス>",
+  "zh-Hans": "<路径>",
+  "zh-Hant": "<路徑>"
+ },
+ "diag.readme": {
+  "en": "{app} diagnostics\n\napp.log: the problem log (time, level, module, reason).\ndiagnostics.log: the statistics log, numbers and error reasons only.\ncrashes/: system crash diagnostics (MetricKit) and uncaught exceptions.\nsummary.json: version, device, library counts, import record counts by category.\n\nNo pictures, videos, post text, authors, tag names, file names, cookies or sync credentials.\n",
+  "ja": "{app} 診断情報\n\napp.log：問題ログ（時刻・レベル・モジュール・理由）。\ndiagnostics.log：統計ログ（数字とエラー理由のみ）。\ncrashes/：システムのクラッシュ診断（MetricKit）と捕捉されない例外。\nsummary.json：バージョン、デバイス、ライブラリの件数、読み込み記録の種類別件数。\n\n画像・動画・投稿本文・作者・タグ名・ファイル名・Cookie・同期の認証情報は含まれません。\n",
+  "zh-Hans": "{app} 诊断信息\n\napp.log：问题日志（时间、级别、模块、原因）。\ndiagnostics.log：统计日志，只有数字和错误原因。\ncrashes/：系统崩溃诊断（MetricKit）和未捕获异常。\nsummary.json：版本、设备、资料库数量、导入记录的分类计数。\n\n不包含图片、视频、帖子正文、作者、标签名、文件名、Cookie 或同步凭据。\n",
+  "zh-Hant": "{app} 診斷資訊\n\napp.log：問題日誌（時間、層級、模組、原因）。\ndiagnostics.log：統計日誌，只有數字和錯誤原因。\ncrashes/：系統當機診斷（MetricKit）和未捕捉的例外。\nsummary.json：版本、裝置、資料庫數量、匯入記錄的分類計數。\n\n不包含圖片、影片、貼文內文、作者、標籤名稱、檔案名稱、Cookie 或同步憑證。\n"
+ },
+ "download.badLink": {
+  "en": "Not a valid post link",
+  "ja": "有効な投稿リンクではありません",
+  "zh-Hans": "不是有效的帖子链接",
+  "zh-Hant": "不是有效的貼文連結"
+ },
+ "download.bothFailed": {
+  "en": "Both FxTwitter and the protected-account module failed: {e}",
+  "ja": "FxTwitter と鍵アカウント用モジュールの両方が失敗しました：{e}",
+  "zh-Hans": "FxTwitter 与锁定账号模块均失败：{e}",
+  "zh-Hant": "FxTwitter 與鎖定帳號模組均失敗：{e}"
+ },
+ "download.cleanedUp": {
+  "en": "The file was cleaned up while being saved; please try again",
+  "ja": "保存中にファイルが片付けられました。再試行してください",
+  "zh-Hans": "文件在保存期间被清理了，请重试",
+  "zh-Hant": "檔案在儲存期間被清理了，請重試"
+ },
+ "download.mismatch": {
+  "en": "The post returned doesn't match the link",
+  "ja": "返された投稿がリンクと一致しません",
+  "zh-Hans": "返回的帖子与链接不一致",
+  "zh-Hant": "回傳的貼文與連結不一致"
+ },
+ "download.noCookie": {
+  "en": "No account cookie set (needed for posts of protected accounts)",
+  "ja": "アカウントの Cookie が未設定です（鍵アカウントの投稿に必要）",
+  "zh-Hans": "未设置账号 Cookie（锁定账号的帖子需要）",
+  "zh-Hant": "未設定帳號 Cookie（鎖定帳號的貼文需要）"
+ },
+ "download.noMedia": {
+  "en": "The post has no pictures or videos",
+  "ja": "投稿に画像や動画がありません",
+  "zh-Hans": "帖子没有图片或视频",
+  "zh-Hant": "貼文沒有圖片或影片"
+ },
+ "download.noMediaMaybeLocked": {
+  "en": "The post has no media to download (for a protected account, set the cookie)",
+  "ja": "投稿にダウンロードできるメディアがありません（鍵アカウントなら Cookie を設定してください）",
+  "zh-Hans": "帖子没有可下载的媒体（若为锁定账号，请设置 Cookie）",
+  "zh-Hant": "貼文沒有可下載的媒體（若為鎖定帳號，請設定 Cookie）"
+ },
+ "download.notXMedia": {
+  "en": "The media address isn't on X's media servers",
+  "ja": "メディアのアドレスが X のメディアサーバーにありません",
+  "zh-Hans": "媒体地址不在 X 的媒体服务器上",
+  "zh-Hant": "媒體位址不在 X 的媒體伺服器上"
+ },
+ "download.stopped": {
+  "en": "Stopped",
+  "ja": "停止しました",
+  "zh-Hans": "已停止",
+  "zh-Hant": "已停止"
+ },
+ "download.stopping": {
+  "en": "Downloads are stopping; try again in a moment",
+  "ja": "ダウンロードを停止しています。しばらくしてから再試行してください",
+  "zh-Hans": "正在停止下载，请稍候再试",
+  "zh-Hant": "正在停止下載，請稍候再試"
+ },
+ "download.tooLarge": {
+  "en": "The file is too large (over {gb} GB)",
+  "ja": "ファイルが大きすぎます（{gb} GB 超）",
+  "zh-Hans": "文件过大（超过 {gb} GB）",
+  "zh-Hant": "檔案過大（超過 {gb} GB）"
+ },
+ "export.cancelled": {
+  "en": "Export canceled",
+  "ja": "書き出しをキャンセルしました",
+  "zh-Hans": "已取消导出",
+  "zh-Hant": "已取消匯出"
+ },
+ "export.damaged": {
+  "en": "The file is damaged (its content doesn't match its checksum); download it again in the library, then export",
+  "ja": "ファイルが破損しています（内容がチェックサムと一致しません）。ライブラリで再ダウンロードしてから書き出してください",
+  "zh-Hans": "文件已损坏（内容与校验值不符），可以在资料库里「重新下载」后再导出",
+  "zh-Hant": "檔案已損壞（內容與校驗值不符），可以在資料庫裡「重新下載」後再匯出"
+ },
+ "export.libraryEmpty": {
+  "en": "The library is empty",
+  "ja": "ライブラリは空です",
+  "zh-Hans": "资料库是空的",
+  "zh-Hant": "資料庫是空的"
+ },
+ "export.notHere": {
+  "en": "The file isn't on this device (it may not have synced from another device yet)",
+  "ja": "ファイルがこのデバイスにありません（ほかのデバイスからまだ同期されていない可能性があります）",
+  "zh-Hans": "文件不在这台设备上（可能还没有从其他设备同步过来）",
+  "zh-Hant": "檔案不在這台裝置上（可能還沒有從其他裝置同步過來）"
+ },
+ "export.notSyncedYet": {
+  "en": "The file hasn't synced from another device yet and isn't in this backup",
+  "ja": "ファイルはまだほかのデバイスから同期されていないため、このバックアップに含まれません",
+  "zh-Hans": "文件还没有从其他设备同步过来，不在这份备份里",
+  "zh-Hant": "檔案還沒有從其他裝置同步過來，不在這份備份裡"
+ },
+ "export.nothing": {
+  "en": "No media to export",
+  "ja": "書き出せるメディアがありません",
+  "zh-Hans": "没有可以导出的媒体",
+  "zh-Hant": "沒有可以匯出的媒體"
+ },
+ "export.nothingDamaged": {
+  "en": "No media to export ({n} files missing or damaged)",
+  "ja": "書き出せるメディアがありません（{n} 個のファイルが欠落・破損）",
+  "zh-Hans": "没有可以导出的媒体（{n} 个文件缺失或损坏）",
+  "zh-Hant": "沒有可以匯出的媒體（{n} 個檔案缺少或損壞）"
+ },
+ "export.tooLarge": {
+  "en": "This export is too large for one package ({detail}). Export part of the library instead.",
+  "ja": "この書き出しは1つのパッケージには大きすぎます（{detail}）。ライブラリの一部を書き出してください。",
+  "zh-Hans": "这次导出超出单个包的上限（{detail}），请分批导出。",
+  "zh-Hant": "這次匯出超出單一套件的上限（{detail}），請分批匯出。"
+ },
+ "ffi.downloadTimeout": {
+  "en": "Download timed out",
+  "ja": "ダウンロードがタイムアウトしました",
+  "zh-Hans": "下载超时",
+  "zh-Hant": "下載逾時"
+ },
+ "ffi.internal": {
+  "en": "Internal error: {msg}",
+  "ja": "内部エラー：{msg}",
+  "zh-Hans": "内部错误：{msg}",
+  "zh-Hant": "內部錯誤：{msg}"
+ },
+ "field.author": {
+  "en": "author",
+  "ja": "作者",
+  "zh-Hans": "作者",
+  "zh-Hant": "作者"
+ },
+ "field.date": {
+  "en": "date",
+  "ja": "日時",
+  "zh-Hans": "时间",
+  "zh-Hant": "時間"
+ },
+ "field.screenName": {
+  "en": "username",
+  "ja": "ユーザー名",
+  "zh-Hans": "用户名",
+  "zh-Hant": "使用者名稱"
+ },
+ "field.text": {
+  "en": "text",
+  "ja": "本文",
+  "zh-Hans": "正文",
+  "zh-Hant": "內文"
+ },
+ "field.url": {
+  "en": "link",
+  "ja": "リンク",
+  "zh-Hans": "链接",
+  "zh-Hant": "連結"
+ },
+ "hub.err.answer": {
+  "en": "Couldn't read the answer from Hugging Face",
+  "ja": "Hugging Face の応答を読み取れませんでした",
+  "zh-Hans": "无法读取 Hugging Face 的返回内容",
+  "zh-Hant": "無法讀取 Hugging Face 傳回的內容"
+ },
+ "hub.err.network": {
+  "en": "Can't reach Hugging Face. Check your connection and try again.",
+  "ja": "Hugging Face に接続できません。ネットワークを確認して再試行してください",
+  "zh-Hans": "连不上 Hugging Face，请检查网络后重试",
+  "zh-Hant": "連不上 Hugging Face，請檢查網路後重試"
+ },
+ "hub.err.noSpace": {
+  "en": "Not enough storage: needs {need}, only {free} free",
+  "ja": "空き容量が足りません：{need} 必要ですが、{free} しかありません",
+  "zh-Hans": "存储空间不足：需要 {need}，只有 {free}",
+  "zh-Hant": "儲存空間不足：需要 {need}，只有 {free}"
+ },
+ "hub.err.notFound": {
+  "en": "This model wasn't found, or it requires signing in",
+  "ja": "このモデルが見つからないか、サインインが必要です",
+  "zh-Hans": "找不到这个模型，或者它需要登录才能访问",
+  "zh-Hant": "找不到這個模型，或者它需要登入才能存取"
+ },
+ "hub.err.rateLimited": {
+  "en": "Hugging Face is limiting requests right now. Try again later.",
+  "ja": "Hugging Face がリクエストを制限しています。しばらくしてから再試行してください",
+  "zh-Hans": "Hugging Face 暂时限制了请求，请稍后再试",
+  "zh-Hant": "Hugging Face 暫時限制了請求，請稍後再試"
+ },
+ "hub.err.server": {
+  "en": "Hugging Face returned an error ({code})",
+  "ja": "Hugging Face がエラーを返しました（{code}）",
+  "zh-Hans": "Hugging Face 返回错误（{code}）",
+  "zh-Hant": "Hugging Face 傳回錯誤（{code}）"
+ },
+ "hub.hidden.arch": {
+  "en": "This device's engine doesn't support the {arch} architecture",
+  "ja": "このデバイスのエンジンは {arch} アーキテクチャに対応していません",
+  "zh-Hans": "这台设备的引擎不支持 {arch} 架构",
+  "zh-Hant": "這台裝置的引擎不支援 {arch} 架構"
+ },
+ "hub.hidden.badName": {
+  "en": "The repository name isn't valid",
+  "ja": "リポジトリ名が正しくありません",
+  "zh-Hans": "仓库名称不符合规范",
+  "zh-Hant": "儲存庫名稱不符合規範"
+ },
+ "hub.hidden.gated": {
+  "en": "Requires access approval on Hugging Face",
+  "ja": "Hugging Face でのアクセス申請が必要です",
+  "zh-Hans": "需要在 Hugging Face 申请访问权限",
+  "zh-Hant": "需要在 Hugging Face 申請存取權限"
+ },
+ "hub.hidden.noArch": {
+  "en": "The repository doesn't state its architecture, so it can't be checked",
+  "ja": "アーキテクチャが記載されていないため、実行できるか判断できません",
+  "zh-Hans": "仓库没有说明模型架构，无法判断能否运行",
+  "zh-Hant": "儲存庫沒有說明模型架構，無法判斷能否執行"
+ },
+ "hub.hidden.noVision": {
+  "en": "Not a vision model, so it can't tag pictures",
+  "ja": "ビジョンモデルではないため、画像にタグを付けられません",
+  "zh-Hans": "不是视觉模型，不能给图片打标签",
+  "zh-Hant": "不是視覺模型，不能為圖片加標籤"
+ },
+ "hub.hidden.split": {
+  "en": "Only has split files or files in subfolders, which aren't supported yet",
+  "ja": "分割ファイルまたはサブフォルダ内のファイルのみで、まだ対応していません",
+  "zh-Hans": "只有分片或子文件夹里的文件，暂不支持",
+  "zh-Hant": "只有分片或子資料夾裡的檔案，暫不支援"
+ },
+ "hub.hidden.tooManyParams": {
+  "en": "Over 27B parameters, which the store doesn't offer",
+  "ja": "27B パラメータを超えるため、ストアでは提供しません",
+  "zh-Hans": "超过 27B 参数，商店不提供",
+  "zh-Hant": "超過 27B 參數，商店不提供"
+ },
+ "hub.skipped.folder": {
+  "en": "Subfolder, not supported yet",
+  "ja": "サブフォルダのため、まだ対応していません",
+  "zh-Hans": "子文件夹，暂不支持",
+  "zh-Hant": "子資料夾，暫不支援"
+ },
+ "hub.skipped.split": {
+  "en": "Split file, not supported yet",
+  "ja": "分割ファイルのため、まだ対応していません",
+  "zh-Hans": "分片文件，暂不支持",
+  "zh-Hant": "分片檔案，暫不支援"
+ },
+ "import.atRoot": {
+  "en": "Placed in the root folder, not in any post folder",
+  "ja": "ルートに直接置かれていて、どの投稿フォルダにも属しません",
+  "zh-Hans": "文件直接放在根目录，不属于任何帖子文件夹",
+  "zh-Hant": "檔案直接放在根目錄，不屬於任何貼文資料夾"
+ },
+ "import.cancelled": {
+  "en": "Import canceled (what was imported stays)",
+  "ja": "読み込みをキャンセルしました（読み込み済みの分は残ります）",
+  "zh-Hans": "导入已取消（已导入的部分保留）",
+  "zh-Hant": "匯入已取消（已匯入的部分保留）"
+ },
+ "import.cat.duplicate": {
+  "en": "Duplicate content",
+  "ja": "重複した内容",
+  "zh-Hans": "内容重复",
+  "zh-Hant": "內容重複"
+ },
+ "import.cat.ignored_location": {
+  "en": "Not in a post folder",
+  "ja": "投稿フォルダにない",
+  "zh-Hans": "不在帖子文件夹里",
+  "zh-Hant": "不在貼文資料夾裡"
+ },
+ "import.cat.in_bin": {
+  "en": "In Recently Deleted or deleted",
+  "ja": "ゴミ箱にあるか削除済み",
+  "zh-Hans": "在回收站或已删除",
+  "zh-Hant": "在垃圾桶或已刪除"
+ },
+ "import.cat.not_media": {
+  "en": "Not a picture or video",
+  "ja": "画像や動画ではない",
+  "zh-Hans": "内容不是图片或视频",
+  "zh-Hant": "內容不是圖片或影片"
+ },
+ "import.cat.other": {
+  "en": "Other",
+  "ja": "その他",
+  "zh-Hans": "其他",
+  "zh-Hant": "其他"
+ },
+ "import.cat.post_hidden": {
+  "en": "Posts not shown separately",
+  "ja": "個別に表示されない投稿",
+  "zh-Hans": "不单独显示的帖子",
+  "zh-Hant": "不單獨顯示的貼文"
+ },
+ "import.cat.post_merged": {
+  "en": "Merged posts",
+  "ja": "統合された投稿",
+  "zh-Hans": "合并的帖子",
+  "zh-Hant": "合併的貼文"
+ },
+ "import.cat.post_not_imported": {
+  "en": "Post folders not imported",
+  "ja": "読み込まれなかった投稿フォルダ",
+  "zh-Hans": "未导入的帖子文件夹",
+  "zh-Hant": "未匯入的貼文資料夾"
+ },
+ "import.cat.post_text_truncated": {
+  "en": "Post details cut for length",
+  "ja": "長すぎて切り詰めた投稿情報",
+  "zh-Hans": "过长而被截取的帖子信息",
+  "zh-Hant": "過長而被截取的貼文資訊"
+ },
+ "import.cat.unreadable": {
+  "en": "Unreadable",
+  "ja": "読み込めない",
+  "zh-Hans": "无法读取",
+  "zh-Hant": "無法讀取"
+ },
+ "import.cat.unsafe_path": {
+  "en": "Unsafe path",
+  "ja": "安全でないパス",
+  "zh-Hans": "路径不安全",
+  "zh-Hant": "路徑不安全"
+ },
+ "import.cat.unsupported": {
+  "en": "Unsupported type",
+  "ja": "対応していない種類",
+  "zh-Hans": "不支持的类型",
+  "zh-Hant": "不支援的類型"
+ },
+ "import.duplicate": {
+  "en": "Byte-for-byte identical to another file; stored once",
+  "ja": "別のファイルとバイト単位で同一のため、1 つだけ保存しました",
+  "zh-Hans": "与另一个文件的内容逐字节相同，只保存一份",
+  "zh-Hant": "與另一個檔案的內容逐位元組相同，只儲存一份"
+ },
+ "import.existingFile": {
+  "en": "the same file already in the library",
+  "ja": "ライブラリにある同じファイル",
+  "zh-Hans": "资料库中已有的同一文件",
+  "zh-Hant": "資料庫中已有的同一檔案"
+ },
+ "import.existingPost": {
+  "en": "a post already in the library",
+  "ja": "ライブラリにある投稿",
+  "zh-Hans": "资料库中已有的帖子",
+  "zh-Hant": "資料庫中已有的貼文"
+ },
+ "import.fieldCut": {
+  "en": "Post {id}: the {field} was too long; only its beginning was kept",
+  "ja": "投稿 {id} の{field}が長すぎるため、先頭部分だけを残しました",
+  "zh-Hans": "帖子 {id} 的{field}过长，只保留了前面的部分",
+  "zh-Hant": "貼文 {id} 的{field}過長，只保留了前面的部分"
+ },
+ "import.hidden": {
+  "en": "Every item of this post is identical to files of another post; the media belong to that post, so this one isn't shown on its own",
+  "ja": "この投稿のメディアはすべて別の投稿のファイルと同一です。メディアはその投稿に属するため、この投稿は個別には表示されません",
+  "zh-Hans": "这个帖子的所有媒体都与其他帖子的文件完全相同，媒体归入那条帖子，因此这条帖子不单独显示",
+  "zh-Hant": "這則貼文的所有媒體都與其他貼文的檔案完全相同，媒體歸入那則貼文，因此這則貼文不單獨顯示"
+ },
+ "import.inBin": {
+  "en": "This file's item is in Recently Deleted or was deleted permanently; not brought back",
+  "ja": "このファイルのメディアはゴミ箱にあるか完全に削除済みのため、戻しませんでした",
+  "zh-Hans": "这个文件对应的媒体在回收站里或已被永久删除，未恢复",
+  "zh-Hant": "這個檔案對應的媒體在垃圾桶裡或已被永久刪除，未恢復"
+ },
+ "import.inSubfolder": {
+  "en": "In a subfolder of the post folder “{folder}” (only files placed directly in a post folder are read)",
+  "ja": "投稿フォルダ「{folder}」のサブフォルダ内にあります（投稿フォルダの直下のファイルだけを読み込みます）",
+  "zh-Hans": "在帖子文件夹「{folder}」的子文件夹里（只读取帖子文件夹里直接放着的文件）",
+  "zh-Hant": "在貼文資料夾「{folder}」的子資料夾裡（只讀取貼文資料夾裡直接放著的檔案）"
+ },
+ "import.manySidecars": {
+  "en": "The post folder has several “推文内容.txt” files; only the first was read",
+  "ja": "同じ投稿フォルダに「推文内容.txt」が複数あります。最初のものだけを読み込みました",
+  "zh-Hans": "同一个帖子文件夹里有多个「推文内容.txt」，只读取了第一个",
+  "zh-Hant": "同一個貼文資料夾裡有多個「推文内容.txt」，只讀取了第一個"
+ },
+ "import.merged": {
+  "en": "Post ID {id} exists already; its details and media were merged into the same post",
+  "ja": "投稿 ID {id} はすでにあるため、情報とメディアを同じ投稿に統合しました",
+  "zh-Hans": "帖子 ID {id} 已存在，信息与媒体合并到同一条帖子",
+  "zh-Hant": "貼文 ID {id} 已存在，資訊與媒體合併到同一則貼文"
+ },
+ "import.noExtension": {
+  "en": "No extension, so the type can't be told",
+  "ja": "拡張子がないため種類を判断できません",
+  "zh-Hans": "没有扩展名，无法判断类型",
+  "zh-Hant": "沒有副檔名，無法判斷類型"
+ },
+ "import.noMediaInFolder": {
+  "en": "No usable pictures or videos in the folder; no post was made",
+  "ja": "フォルダに使える画像や動画がないため、投稿を作成しませんでした",
+  "zh-Hans": "文件夹里没有可用的图片或视频，未创建帖子",
+  "zh-Hant": "資料夾裡沒有可用的圖片或影片，未建立貼文"
+ },
+ "import.notARecord": {
+  "en": "Not an import record: {path}",
+  "ja": "読み込み記録ではありません：{path}",
+  "zh-Hans": "不是导入记录：{path}",
+  "zh-Hant": "不是匯入記錄：{path}"
+ },
+ "import.notAtPostLevel": {
+  "en": "Not at the level of the post folders",
+  "ja": "投稿フォルダと同じ階層にありません",
+  "zh-Hans": "不在帖子文件夹所在的那一层目录里",
+  "zh-Hant": "不在貼文資料夾所在的那一層目錄裡"
+ },
+ "import.notRegular": {
+  "en": "Not a regular file (a symbolic link, alias or special file); not read",
+  "ja": "通常のファイルではありません（シンボリックリンク・エイリアス・特殊ファイル）。読み込みませんでした",
+  "zh-Hans": "不是普通文件（符号链接、快捷方式或特殊文件），没有读取",
+  "zh-Hant": "不是一般檔案（符號連結、捷徑或特殊檔案），沒有讀取"
+ },
+ "import.postOwner": {
+  "en": "post {owner}",
+  "ja": "投稿 {owner}",
+  "zh-Hans": "帖子 {owner}",
+  "zh-Hant": "貼文 {owner}"
+ },
+ "import.readme.head": {
+  "en": "{app} import problems\nSource: {source}\n\n",
+  "ja": "{app} 読み込みの問題一覧\n読み込み元：{source}\n\n",
+  "zh-Hans": "{app} 导入问题清单\\n来源：{source}\\n\\n",
+  "zh-Hant": "{app} 匯入問題清單\n來源：{source}\n\n"
+ },
+ "import.readme.item": {
+  "en": "[{category}] {path}\n    Reason: {reason}\n",
+  "ja": "[{category}] {path}\n    理由：{reason}\n",
+  "zh-Hans": "[{category}] {path}\\n    原因：{reason}\\n",
+  "zh-Hant": "[{category}] {path}\n    原因：{reason}\n"
+ },
+ "import.readme.match": {
+  "en": "    Matches: {s}\n",
+  "ja": "    一致：{s}\n",
+  "zh-Hans": "    对应：{s}\\n",
+  "zh-Hant": "    對應：{s}\n"
+ },
+ "import.readme.notTaken": {
+  "en": "(couldn't take it from the source: {error})\n",
+  "ja": "（読み込み元から取り出せませんでした：{error}）\n",
+  "zh-Hans": "（未能从来源中取出：{error}）\\n",
+  "zh-Hant": "（未能從來源中取出：{error}）\n"
+ },
+ "import.sidecarFailed": {
+  "en": "Couldn't read the post info: {e} (the folder name is used as the text)",
+  "ja": "投稿情報を読み込めません：{e}（フォルダ名を本文として使用）",
+  "zh-Hans": "读取帖子信息失败：{e}（改用文件夹名作为正文）",
+  "zh-Hant": "讀取貼文資訊失敗：{e}（改用資料夾名稱作為內文）"
+ },
+ "import.sourceGone": {
+  "en": "The import's source file can't be found: {source} (moved or deleted)",
+  "ja": "読み込み元のファイルが見つかりません：{source}（移動または削除済み）",
+  "zh-Hans": "找不到导入时的源文件：{source}（已移动或删除）",
+  "zh-Hant": "找不到匯入時的來源檔案：{source}（已移動或刪除）"
+ },
+ "import.unsafePath": {
+  "en": "Unsafe path (absolute, or containing ..); refused to protect the library",
+  "ja": "安全でないパス（絶対パスまたは .. を含む）のため、ライブラリ保護のため拒否しました",
+  "zh-Hans": "路径不安全（绝对路径或包含 ..），为保护资料库而拒绝",
+  "zh-Hant": "路徑不安全（絕對路徑或包含 ..），為保護資料庫而拒絕"
+ },
+ "import.unsupportedExt": {
+  "en": "Unsupported type .{e} (supported: jpg, png, webp, gif, heic, avif, mp4, mov)",
+  "ja": "対応していない種類 .{e}（対応：jpg、png、webp、gif、heic、avif、mp4、mov）",
+  "zh-Hans": "不支持的类型 .{e}（支持 jpg、png、webp、gif、heic、avif、mp4、mov）",
+  "zh-Hant": "不支援的類型 .{e}（支援 jpg、png、webp、gif、heic、avif、mp4、mov）"
+ },
+ "import.wipedWhileWaiting": {
+  "en": "The library was erased while waiting; this import was canceled",
+  "ja": "待機中にライブラリが消去されたため、この読み込みはキャンセルされました",
+  "zh-Hans": "资料库在等待期间被清除，这次导入已取消",
+  "zh-Hant": "資料庫在等待期間被清除，這次匯入已取消"
+ },
+ "library.mediaGone": {
+  "en": "The item was deleted or moved to Recently Deleted",
+  "ja": "メディアは削除されたかゴミ箱に移動されました",
+  "zh-Hans": "媒体已删除或移入回收站",
+  "zh-Hant": "媒體已刪除或移入垃圾桶"
+ },
+ "library.tooLarge": {
+  "en": "The file is over the size limit ({gb} GB)",
+  "ja": "ファイルがサイズ上限（{gb} GB）を超えています",
+  "zh-Hans": "文件超过大小限制（{gb} GB）",
+  "zh-Hant": "檔案超過大小限制（{gb} GB）"
+ },
+ "library.wiped": {
+  "en": "The library was erased",
+  "ja": "ライブラリは消去されました",
+  "zh-Hans": "资料库已被清除",
+  "zh-Hant": "資料庫已被清除"
+ },
+ "list.separator": {
+  "en": "、",
+  "ja": "、",
+  "zh-Hans": "、",
+  "zh-Hant": "、"
+ },
+ "media.actual.empty": {
+  "en": "an empty file (0 bytes)",
+  "ja": "空のファイル（0 バイト）",
+  "zh-Hans": "空文件（0 字节）",
+  "zh-Hant": "空檔案（0 位元組）"
+ },
+ "media.actual.html": {
+  "en": "a web page (HTML) — often an error page saved by a failed download",
+  "ja": "Web ページ（HTML）。ダウンロード失敗時に保存されたエラーページによくあります",
+  "zh-Hans": "网页（HTML），常见于下载失败时保存下来的错误页面",
+  "zh-Hant": "網頁（HTML），常見於下載失敗時儲存下來的錯誤頁面"
+ },
+ "media.actual.photoAsVideo": {
+  "en": "a picture with a video's extension",
+  "ja": "画像（拡張子は動画）",
+  "zh-Hans": "图片，但扩展名是视频",
+  "zh-Hant": "圖片，但副檔名是影片"
+ },
+ "media.actual.text": {
+  "en": "plain text",
+  "ja": "テキスト",
+  "zh-Hans": "纯文本",
+  "zh-Hant": "純文字"
+ },
+ "media.actual.unknown": {
+  "en": "an unrecognized format",
+  "ja": "認識できない形式",
+  "zh-Hans": "无法识别的格式",
+  "zh-Hant": "無法辨識的格式"
+ },
+ "media.actual.videoAsPhoto": {
+  "en": "a video with a picture's extension",
+  "ja": "動画（拡張子は画像）",
+  "zh-Hans": "视频，但扩展名是图片",
+  "zh-Hant": "影片，但副檔名是圖片"
+ },
+ "media.notMedia": {
+  "en": "Not {want}: it is {actual}",
+  "ja": "{want}ではありません：実際は{actual}です",
+  "zh-Hans": "内容不是{want}：实际是{actual}",
+  "zh-Hant": "內容不是{want}：實際是{actual}"
+ },
+ "media.want.photo": {
+  "en": "a picture (JPEG / PNG / GIF / WebP / HEIC)",
+  "ja": "画像（JPEG / PNG / GIF / WebP / HEIC）",
+  "zh-Hans": "图片（JPEG / PNG / GIF / WebP / HEIC）",
+  "zh-Hant": "圖片（JPEG / PNG / GIF / WebP / HEIC）"
+ },
+ "media.want.video": {
+  "en": "a video (MP4 / MOV)",
+  "ja": "動画（MP4 / MOV）",
+  "zh-Hans": "视频（MP4 / MOV）",
+  "zh-Hant": "影片（MP4 / MOV）"
+ },
+ "models.badName": {
+  "en": "Invalid model name",
+  "ja": "無効なモデル名",
+  "zh-Hans": "非法模型名",
+  "zh-Hant": "非法模型名稱"
+ },
+ "models.badSize": {
+  "en": "Invalid model file size",
+  "ja": "モデルファイルのサイズが無効です",
+  "zh-Hans": "模型文件大小无效",
+  "zh-Hant": "模型檔案大小無效"
+ },
+ "models.busy": {
+  "en": "A model is already downloading",
+  "ja": "すでにモデルをダウンロード中です",
+  "zh-Hans": "已有模型正在下载",
+  "zh-Hant": "已有模型正在下載"
+ },
+ "models.configBad": {
+  "en": "config.json isn't in the right format",
+  "ja": "config.json の形式が正しくありません",
+  "zh-Hans": "config.json 格式不正确",
+  "zh-Hant": "config.json 格式不正確"
+ },
+ "models.configUnreadable": {
+  "en": "config.json can't be parsed",
+  "ja": "config.json を解析できません",
+  "zh-Hans": "config.json 无法解析",
+  "zh-Hant": "config.json 無法解析"
+ },
+ "models.fileDamaged": {
+  "en": "{name} is damaged",
+  "ja": "{name} は破損しています",
+  "zh-Hans": "{name} 已损坏",
+  "zh-Hant": "{name} 已損壞"
+ },
+ "models.fileFailed": {
+  "en": "Downloading {file} failed",
+  "ja": "{file} のダウンロードに失敗しました",
+  "zh-Hans": "下载 {file} 失败",
+  "zh-Hant": "下載 {file} 失敗"
+ },
+ "models.headerDamaged": {
+  "en": "{name}'s header is damaged",
+  "ja": "{name} のヘッダが破損しています",
+  "zh-Hans": "{name} 头部损坏",
+  "zh-Hant": "{name} 標頭損壞"
+ },
+ "models.headerUnreadable": {
+  "en": "{name}'s header can't be parsed",
+  "ja": "{name} のヘッダを解析できません",
+  "zh-Hans": "{name} 头部无法解析",
+  "zh-Hant": "{name} 標頭無法解析"
+ },
+ "models.importedInvalid": {
+  "en": "The imported model is invalid",
+  "ja": "読み込んだモデルは無効です",
+  "zh-Hans": "导入后的模型无效",
+  "zh-Hant": "匯入後的模型無效"
+ },
+ "models.listFailed": {
+  "en": "Couldn't read the model's file list",
+  "ja": "モデルのファイル一覧を読み込めません",
+  "zh-Hans": "读取模型文件列表失败",
+  "zh-Hant": "讀取模型檔案列表失敗"
+ },
+ "models.noConfig": {
+  "en": "config.json is missing",
+  "ja": "config.json がありません",
+  "zh-Hans": "缺少 config.json",
+  "zh-Hant": "缺少 config.json"
+ },
+ "models.noFolder": {
+  "en": "No model folder found (config.json and .safetensors are needed)",
+  "ja": "モデルフォルダが見つかりません（config.json と .safetensors が必要）",
+  "zh-Hans": "找不到模型文件夹（需要 config.json 与 .safetensors）",
+  "zh-Hant": "找不到模型資料夾（需要 config.json 與 .safetensors）"
+ },
+ "models.noSafetensors": {
+  "en": "No .safetensors weight files",
+  "ja": ".safetensors の重みファイルがありません",
+  "zh-Hans": "没有 .safetensors 权重文件",
+  "zh-Hant": "沒有 .safetensors 權重檔案"
+ },
+ "models.noWeights": {
+  "en": "The repository has no safetensors weights",
+  "ja": "リポジトリに safetensors の重みがありません",
+  "zh-Hans": "仓库中没有 safetensors 权重",
+  "zh-Hant": "儲存庫中沒有 safetensors 權重"
+ },
+ "models.retriesFailed": {
+  "en": "Still failing after several retries",
+  "ja": "何度か再試行しても失敗しました",
+  "zh-Hans": "多次重试后仍失败",
+  "zh-Hant": "多次重試後仍失敗"
+ },
+ "models.sizeMismatch": {
+  "en": "{name}'s size doesn't match its header (incomplete file)",
+  "ja": "{name} のサイズがヘッダと一致しません（不完全なファイル）",
+  "zh-Hans": "{name} 大小与头部不符（文件不完整）",
+  "zh-Hant": "{name} 大小與標頭不符（檔案不完整）"
+ },
+ "models.tensorNoOffset": {
+  "en": "{name}: tensor {k} has no offsets",
+  "ja": "{name}：テンソル {k} にオフセットがありません",
+  "zh-Hans": "{name} 张量 {k} 缺少偏移",
+  "zh-Hant": "{name} 張量 {k} 缺少偏移"
+ },
+ "models.verifyFailed": {
+  "en": "Verification failed",
+  "ja": "検証に失敗しました",
+  "zh-Hans": "校验失败",
+  "zh-Hant": "校驗失敗"
+ },
+ "models.zipTooBig": {
+  "en": "The ZIP unpacks to over {gb} GB, too big for a model",
+  "ja": "ZIP の展開後が {gb} GB を超えます。モデルではないようです",
+  "zh-Hans": "ZIP 解压后超过 {gb} GB，不像一个模型",
+  "zh-Hant": "ZIP 解壓縮後超過 {gb} GB，不像一個模型"
+ },
+ "models.zipTooMany": {
+  "en": "The ZIP has too many files ({n}) to be a model",
+  "ja": "ZIP のファイルが多すぎます（{n} 個）。モデルではないようです",
+  "zh-Hans": "ZIP 里的文件太多（{n} 个），不像一个模型",
+  "zh-Hant": "ZIP 裡的檔案太多（{n} 個），不像一個模型"
+ },
+ "net.tooLarge": {
+  "en": "The response is too large",
+  "ja": "応答が大きすぎます",
+  "zh-Hans": "响应过大",
+  "zh-Hant": "回應過大"
+ },
+ "oplog.damaged": {
+  "en": "Sync record {dev}#{seq} is damaged and can't be read: {e}",
+  "ja": "同期記録 {dev}#{seq} は破損していて読み込めません：{e}",
+  "zh-Hans": "同步记录 {dev}#{seq} 已损坏，无法解析：{e}",
+  "zh-Hant": "同步記錄 {dev}#{seq} 已損壞，無法解析：{e}"
+ },
+ "pack.badExt": {
+  "en": "Invalid file extension; not read",
+  "ja": "拡張子が無効なため読み込みませんでした",
+  "zh-Hans": "文件扩展名无效，没有读取",
+  "zh-Hant": "副檔名無效，沒有讀取"
+ },
+ "pack.badPostId": {
+  "en": "A post's id in the package is too long; the post was left out.",
+  "ja": "パッケージ内の投稿 ID が長すぎるため、その投稿を除外しました。",
+  "zh-Hans": "包里有帖子 ID 过长，已跳过这个帖子。",
+  "zh-Hant": "套件裡有貼文 ID 過長，已略過這則貼文。"
+ },
+ "pack.damaged": {
+  "en": "The file is damaged: its content doesn't match the checksum recorded at export",
+  "ja": "ファイルが破損しています：内容が書き出し時に記録したチェックサムと一致しません",
+  "zh-Hans": "文件已损坏：内容与导出时记录的校验值不符",
+  "zh-Hant": "檔案已損壞：內容與匯出時記錄的校驗值不符"
+ },
+ "pack.manifestTooBig": {
+  "en": "The package's manifest is over the size limit",
+  "ja": "パッケージのマニフェストがサイズ上限を超えています",
+  "zh-Hans": "导出包清单超过大小限制",
+  "zh-Hant": "匯出包清單超過大小限制"
+ },
+ "pack.mediaTooBig": {
+  "en": "A media file of the package is over the size limit",
+  "ja": "パッケージのメディアがサイズ上限を超えています",
+  "zh-Hans": "导出包媒体超过大小限制",
+  "zh-Hant": "匯出包媒體超過大小限制"
+ },
+ "pack.missingFile": {
+  "en": "The package lacks this file: {file}",
+  "ja": "パッケージにこのファイルがありません：{file}",
+  "zh-Hans": "导出包里缺少这个文件：{file}",
+  "zh-Hant": "匯出包裡缺少這個檔案：{file}"
+ },
+ "pack.newer": {
+  "en": "Package version {version} is newer than this app; update the app first",
+  "ja": "パッケージのバージョン {version} はこのアプリより新しいため、先にアップデートしてください",
+  "zh-Hans": "导出包版本 {version} 比本应用新，请先升级",
+  "zh-Hant": "匯出包版本 {version} 比本 App 新，請先升級"
+ },
+ "pack.noManifest": {
+  "en": "manifest.json is missing",
+  "ja": "manifest.json がありません",
+  "zh-Hans": "缺少 manifest.json",
+  "zh-Hant": "缺少 manifest.json"
+ },
+ "pack.notPack": {
+  "en": "Not a {app} export package",
+  "ja": "{app} の書き出しパッケージではありません",
+  "zh-Hans": "不是 {app} 导出包",
+  "zh-Hant": "不是 {app} 匯出包"
+ },
+ "pack.tooManyFiles": {
+  "en": "The package has too many files",
+  "ja": "パッケージのファイル数が上限を超えています",
+  "zh-Hans": "导出包文件数量超过限制",
+  "zh-Hant": "匯出包檔案數量超過限制"
+ },
+ "pack.tooManyRecords": {
+  "en": "The package has too many records",
+  "ja": "パッケージの記録数が上限を超えています",
+  "zh-Hans": "导出包记录数量超过限制",
+  "zh-Hant": "匯出包記錄數量超過限制"
+ },
+ "pack.unsafePath": {
+  "en": "Unsafe path (absolute, or containing ..); not read",
+  "ja": "安全でないパス（絶対パスまたは .. を含む）のため読み込みませんでした",
+  "zh-Hans": "路径不安全（绝对路径或包含 ..），没有读取",
+  "zh-Hant": "路徑不安全（絕對路徑或包含 ..），沒有讀取"
+ },
+ "protected.accountCheck404": {
+  "en": "X's account check is unavailable (HTTP 404); the API may have changed",
+  "ja": "X のアカウント確認 API が使えません（HTTP 404）。API が変わった可能性があります",
+  "zh-Hans": "X 的账号检查接口不可用（HTTP 404），接口可能已变更",
+  "zh-Hant": "X 的帳號檢查介面無法使用（HTTP 404），介面可能已變更"
+ },
+ "protected.accountIncomplete": {
+  "en": "X returned incomplete account details (its format may have changed)",
+  "ja": "X が不完全なアカウント情報を返しました（形式が変わった可能性があります）",
+  "zh-Hans": "X 返回的账号信息不完整（接口格式可能已变化）",
+  "zh-Hant": "X 回傳的帳號資訊不完整（介面格式可能已變化）"
+ },
+ "protected.badCookie": {
+  "en": "The cookie's format is invalid; copy auth_token and ct0 from x.com again",
+  "ja": "Cookie の形式が無効です。x.com から auth_token と ct0 をもう一度コピーしてください",
+  "zh-Hans": "Cookie 格式无效，请重新从 x.com 复制 auth_token 和 ct0",
+  "zh-Hant": "Cookie 格式無效，請重新從 x.com 拷貝 auth_token 和 ct0"
+ },
+ "protected.badLink": {
+  "en": "Unrecognized post link; use the form https://x.com/<username>/status/<post id>",
+  "ja": "投稿リンクを認識できません。https://x.com/<ユーザー名>/status/<投稿 ID> の形式にしてください",
+  "zh-Hans": "无法识别帖子链接，请使用 https://x.com/<用户名>/status/<帖子编号> 格式",
+  "zh-Hant": "無法辨識貼文連結，請使用 https://x.com/<使用者名稱>/status/<貼文編號> 格式"
+ },
+ "protected.badURL": {
+  "en": "Couldn't build the X request address",
+  "ja": "X へのリクエストのアドレスを作成できません",
+  "zh-Hans": "无法构造 X 请求地址",
+  "zh-Hant": "無法建構 X 請求位址"
+ },
+ "protected.cannotCheck": {
+  "en": "Couldn't check the cookie; X's API may have changed",
+  "ja": "Cookie を確認できません。X の API が変わった可能性があります",
+  "zh-Hans": "无法检查 Cookie，X 接口可能已变化",
+  "zh-Hant": "無法檢查 Cookie，X 介面可能已變化"
+ },
+ "protected.connect": {
+  "en": "Couldn't connect to X: {m}",
+  "ja": "X に接続できません：{m}",
+  "zh-Hans": "无法连接 X：{m}",
+  "zh-Hant": "無法連線 X：{m}"
+ },
+ "protected.cookieExpired": {
+  "en": "The cookie is invalid or expired; sign in to x.com again and copy auth_token and ct0",
+  "ja": "Cookie が無効か期限切れです。x.com にログインし直して auth_token と ct0 をコピーしてください",
+  "zh-Hans": "Cookie 无效或已过期，请重新登录 x.com 后复制 auth_token 和 ct0",
+  "zh-Hant": "Cookie 無效或已過期，請重新登入 x.com 後拷貝 auth_token 和 ct0"
+ },
+ "protected.cookieExpiredHint": {
+  "en": "The cookie is invalid or expired (X says: {m})",
+  "ja": "Cookie が無効か期限切れです（X のメッセージ：{m}）",
+  "zh-Hans": "Cookie 无效或已过期（X 提示：{m}）",
+  "zh-Hant": "Cookie 無效或已過期（X 提示：{m}）"
+ },
+ "protected.cookieRejected": {
+  "en": "X rejected the cookie; sign in to x.com again and copy auth_token and ct0",
+  "ja": "X が Cookie を拒否しました。x.com にログインし直して auth_token と ct0 をコピーしてください",
+  "zh-Hans": "Cookie 被 X 拒绝，请重新登录 x.com 后复制 auth_token 和 ct0",
+  "zh-Hant": "Cookie 被 X 拒絕，請重新登入 x.com 後拷貝 auth_token 和 ct0"
+ },
+ "protected.cookieRejectedHint": {
+  "en": "X rejected the cookie; sign in to x.com again and copy auth_token and ct0 (X says: {m})",
+  "ja": "X が Cookie を拒否しました。x.com にログインし直して auth_token と ct0 をコピーしてください（X のメッセージ：{m}）",
+  "zh-Hans": "Cookie 被 X 拒绝，请重新登录 x.com 后复制 auth_token 和 ct0（X 提示：{m}）",
+  "zh-Hant": "Cookie 被 X 拒絕，請重新登入 x.com 後拷貝 auth_token 和 ct0（X 提示：{m}）"
+ },
+ "protected.crashed": {
+  "en": "The protected-account module stopped unexpectedly: {e}",
+  "ja": "鍵アカウント用モジュールが異常終了しました：{e}",
+  "zh-Hans": "锁定账号模块异常退出：{e}",
+  "zh-Hant": "鎖定帳號模組異常結束：{e}"
+ },
+ "protected.detail": {
+  "en": ": {d}",
+  "ja": "：{d}",
+  "zh-Hans": "：{d}",
+  "zh-Hant": "：{d}"
+ },
+ "protected.emptyData": {
+  "en": "X returned no data (its format may have changed)",
+  "ja": "X が空のデータを返しました（形式が変わった可能性があります）",
+  "zh-Hans": "X 返回的数据为空（接口格式可能已变化）",
+  "zh-Hant": "X 回傳的資料為空（介面格式可能已變化）"
+ },
+ "protected.graphqlRejected": {
+  "en": "X's GraphQL API refused the request; its parameters may have changed — try again later",
+  "ja": "X の GraphQL API がリクエストを拒否しました。パラメータが更新された可能性があります。しばらくしてから再試行してください",
+  "zh-Hans": "X 的 GraphQL 接口拒绝了请求，接口参数可能已更新，请稍后重试",
+  "zh-Hant": "X 的 GraphQL 介面拒絕了請求，介面參數可能已更新，請稍後重試"
+ },
+ "protected.hidden": {
+  "en": "[hidden]",
+  "ja": "[非表示]",
+  "zh-Hans": "[已隐藏]",
+  "zh-Hant": "[已隱藏]"
+ },
+ "protected.httpStatus": {
+  "en": "X's API returned HTTP {status}{detail}",
+  "ja": "X の API が HTTP {status} を返しました{detail}",
+  "zh-Hans": "X 接口返回 HTTP {status}{detail}",
+  "zh-Hant": "X 介面回傳 HTTP {status}{detail}"
+ },
+ "protected.loginPage": {
+  "en": "X returned its sign-in page; the cookie may have expired — copy auth_token and ct0 again",
+  "ja": "X がログインページを返しました。Cookie が失効した可能性があります。auth_token と ct0 をもう一度コピーしてください",
+  "zh-Hans": "X 返回了登录页面，Cookie 可能已失效，请重新复制 auth_token 和 ct0",
+  "zh-Hant": "X 回傳了登入頁面，Cookie 可能已失效，請重新拷貝 auth_token 和 ct0"
+ },
+ "protected.netInit": {
+  "en": "Couldn't set up networking: {e}",
+  "ja": "ネットワーク機能を初期化できません：{e}",
+  "zh-Hans": "无法初始化网络组件：{e}",
+  "zh-Hant": "無法初始化網路元件：{e}"
+ },
+ "protected.network": {
+  "en": "Network error: {m}",
+  "ja": "ネットワークエラー：{m}",
+  "zh-Hans": "网络错误：{m}",
+  "zh-Hant": "網路錯誤：{m}"
+ },
+ "protected.noCookie": {
+  "en": "First fill in the account cookie (auth_token and ct0) in Settings",
+  "ja": "先に設定でアカウントの Cookie（auth_token と ct0）を入力してください",
+  "zh-Hans": "请先在设置中填写账号 Cookie（auth_token 和 ct0）",
+  "zh-Hant": "請先在設定中填寫帳號 Cookie（auth_token 和 ct0）"
+ },
+ "protected.noLegacy": {
+  "en": "The post data lacks its legacy field (the format may have changed)",
+  "ja": "投稿データに legacy フィールドがありません（形式が変わった可能性があります）",
+  "zh-Hans": "帖子数据缺少 legacy 字段（接口格式可能已变化）",
+  "zh-Hant": "貼文資料缺少 legacy 欄位（介面格式可能已變化）"
+ },
+ "protected.noMedia": {
+  "en": "The post has no pictures or videos",
+  "ja": "投稿に画像や動画がありません",
+  "zh-Hans": "帖子没有图片或视频",
+  "zh-Hant": "貼文沒有圖片或影片"
+ },
+ "protected.noOperation": {
+  "en": "Internal error: GraphQL operation {operation} not found",
+  "ja": "内部エラー：GraphQL 操作 {operation} が見つかりません",
+  "zh-Hans": "内部错误：找不到 GraphQL 操作 {operation}",
+  "zh-Hant": "內部錯誤：找不到 GraphQL 操作 {operation}"
+ },
+ "protected.notAvailable": {
+  "en": "The protected-account module isn't connected yet",
+  "ja": "鍵アカウント用モジュールはまだ接続されていません",
+  "zh-Hans": "锁定账号下载模块尚未接入",
+  "zh-Hant": "鎖定帳號下載模組尚未接入"
+ },
+ "protected.notFound": {
+  "en": "The post doesn't exist or can't be seen: {m}",
+  "ja": "投稿が存在しないか、閲覧できません：{m}",
+  "zh-Hans": "帖子不存在或无权查看：{m}",
+  "zh-Hant": "貼文不存在或無權查看：{m}"
+ },
+ "protected.postGone": {
+  "en": "The post doesn't exist, was deleted, or this account can't see it",
+  "ja": "投稿が存在しないか、削除されたか、このアカウントでは閲覧できません",
+  "zh-Hans": "帖子不存在、已删除或当前账号无权查看",
+  "zh-Hant": "貼文不存在、已刪除或目前帳號無權查看"
+ },
+ "protected.postGoneHint": {
+  "en": "The post doesn't exist, was deleted, or this account can't see it (X says: {m})",
+  "ja": "投稿が存在しないか、削除されたか、このアカウントでは閲覧できません（X のメッセージ：{m}）",
+  "zh-Hans": "帖子不存在、已删除或当前账号无权查看（X 提示：{m}）",
+  "zh-Hant": "貼文不存在、已刪除或目前帳號無權查看（X 提示：{m}）"
+ },
+ "protected.rateLimited": {
+  "en": "Too many requests; try again later",
+  "ja": "リクエストが多すぎます。しばらくしてから再試行してください",
+  "zh-Hans": "请求过于频繁，请稍后再试",
+  "zh-Hant": "請求過於頻繁，請稍後再試"
+ },
+ "protected.rateLimitedFor": {
+  "en": "Too many requests; try again in {s} s",
+  "ja": "リクエストが多すぎます。{s} 秒後に再試行してください",
+  "zh-Hans": "请求过于频繁，请 {s} 秒后再试",
+  "zh-Hant": "請求過於頻繁，請 {s} 秒後再試"
+ },
+ "protected.rejected422": {
+  "en": "X refused the request parameters (HTTP 422){detail}; X may have changed its API again — please update the app",
+  "ja": "X がリクエストのパラメータを拒否しました（HTTP 422）{detail}。X が API を変えた可能性があります。アプリをアップデートしてください",
+  "zh-Hans": "X 拒绝了请求参数（HTTP 422）{detail}；X 可能又改了接口，请更新 App",
+  "zh-Hant": "X 拒絕了請求參數（HTTP 422）{detail}；X 可能又改了介面，請更新 App"
+ },
+ "protected.requestFailed": {
+  "en": "The request failed: {m}",
+  "ja": "リクエストに失敗しました：{m}",
+  "zh-Hans": "请求失败：{m}",
+  "zh-Hant": "請求失敗：{m}"
+ },
+ "protected.serverDown": {
+  "en": "X's servers are unavailable for now (HTTP {status}); try again later",
+  "ja": "X のサーバーが一時的に使えません（HTTP {status}）。しばらくしてから再試行してください",
+  "zh-Hans": "X 服务器暂时不可用（HTTP {status}），请稍后重试",
+  "zh-Hant": "X 伺服器暫時無法使用（HTTP {status}），請稍後重試"
+ },
+ "protected.timeout": {
+  "en": "The request timed out",
+  "ja": "リクエストがタイムアウトしました",
+  "zh-Hans": "请求超时",
+  "zh-Hant": "請求逾時"
+ },
+ "protected.timeout30": {
+  "en": "The request timed out (not done within 30 s); check the network and try again",
+  "ja": "リクエストがタイムアウトしました（30 秒以内に完了せず）。ネットワークを確認して再試行してください",
+  "zh-Hans": "请求超时（30 秒内未能完成），请检查网络后重试",
+  "zh-Hant": "請求逾時（30 秒內未能完成），請檢查網路後重試"
+ },
+ "protected.timeout408": {
+  "en": "The request timed out (HTTP 408); try again later",
+  "ja": "リクエストがタイムアウトしました（HTTP 408）。しばらくしてから再試行してください",
+  "zh-Hans": "请求超时（HTTP 408），请稍后重试",
+  "zh-Hant": "請求逾時（HTTP 408），請稍後重試"
+ },
+ "protected.unauthorized": {
+  "en": "The cookie is invalid or expired: {m}",
+  "ja": "Cookie が無効か期限切れです：{m}",
+  "zh-Hans": "Cookie 无效或已过期：{m}",
+  "zh-Hant": "Cookie 無效或已過期：{m}"
+ },
+ "protected.unknownError": {
+  "en": "Unknown error",
+  "ja": "不明なエラー",
+  "zh-Hans": "未知错误",
+  "zh-Hant": "未知錯誤"
+ },
+ "protected.unparsable": {
+  "en": "X returned data that can't be read (its format may have changed): {detail}",
+  "ja": "X が解析できないデータを返しました（形式が変わった可能性があります）：{detail}",
+  "zh-Hans": "X 返回了无法解析的数据（接口格式可能已变化）：{detail}",
+  "zh-Hant": "X 回傳了無法解析的資料（介面格式可能已變化）：{detail}"
+ },
+ "protected.webPage": {
+  "en": "X returned a web page instead of data (its format may have changed); try again later",
+  "ja": "X がデータではなく Web ページを返しました（形式が変わった可能性があります）。しばらくしてから再試行してください",
+  "zh-Hans": "X 返回了网页而不是数据（接口格式可能已变化），请稍后重试",
+  "zh-Hant": "X 回傳了網頁而不是資料（介面格式可能已變化），請稍後重試"
+ },
+ "protected.xError": {
+  "en": "X returned an error: {m}",
+  "ja": "X がエラーを返しました：{m}",
+  "zh-Hans": "X 返回错误：{m}",
+  "zh-Hant": "X 回傳錯誤：{m}"
+ },
+ "readme.name": {
+  "en": "README.txt",
+  "ja": "説明.txt",
+  "zh-Hans": "说明.txt",
+  "zh-Hant": "說明.txt"
+ },
+ "repair.deleted": {
+  "en": "The item was deleted",
+  "ja": "メディアは削除されました",
+  "zh-Hans": "媒体已被删除",
+  "zh-Hant": "媒體已被刪除"
+ },
+ "repair.goneFromPost": {
+  "en": "The post no longer has this item",
+  "ja": "投稿にこのメディアがもうありません",
+  "zh-Hans": "帖子里已找不到这张媒体",
+  "zh-Hant": "貼文裡已找不到這張媒體"
+ },
+ "repair.noLink": {
+  "en": "This post has no link, so it can't be downloaded again (the file itself is fine)",
+  "ja": "この投稿にはリンクがないため再ダウンロードできません（ファイル自体は正常です）",
+  "zh-Hans": "这条帖子没有链接，无法重新下载（文件本身完好）",
+  "zh-Hant": "這則貼文沒有連結，無法重新下載（檔案本身完好）"
+ },
+ "repair.notFound": {
+  "en": "This item couldn't be found",
+  "ja": "このメディアが見つかりません",
+  "zh-Hans": "找不到这张媒体",
+  "zh-Hant": "找不到這張媒體"
+ },
+ "store.newer": {
+  "en": "The library was made by a newer version of the app (format {version}; this one supports up to {VERSION}). Please update the app.",
+  "ja": "ライブラリは新しいバージョンのアプリで作成されています（形式 {version}、このアプリは {VERSION} まで対応）。アプリをアップデートしてください",
+  "zh-Hans": "资料库由更新版本的 App 创建（第 {version} 版，本 App 支持到第 {VERSION} 版），请更新 App",
+  "zh-Hant": "資料庫由更新版本的 App 建立（第 {version} 版，本 App 支援到第 {VERSION} 版），請更新 App"
+ },
+ "store.opTooLarge": {
+  "en": "This change is too large to sync ({bytes} bytes).",
+  "ja": "この変更は大きすぎて同期できません（{bytes} バイト）。",
+  "zh-Hans": "这项改动太大，无法同步（{bytes} 字节）。",
+  "zh-Hant": "這項改動太大，無法同步（{bytes} 位元組）。"
+ },
+ "store.seqExhausted": {
+  "en": "This device's sync record numbers are used up",
+  "ja": "このデバイスの同期記録番号を使い切りました",
+  "zh-Hans": "本机同步记录编号已用尽",
+  "zh-Hant": "本機同步記錄編號已用盡"
+ },
+ "store.tooOld": {
+  "en": "This library is in a format from before the first release (format {version}) and cannot be opened. Nothing was changed; please keep the folder and contact support.",
+  "ja": "このライブラリは最初のリリースより前の形式（形式 {version}）のため開けません。何も変更していません。フォルダはそのまま保管してください。",
+  "zh-Hans": "这个资料库是首个版本之前的格式（第 {version} 版），无法打开。没有改动任何内容，请保留这个文件夹。",
+  "zh-Hant": "這個資料庫是首個版本之前的格式（第 {version} 版），無法開啟。沒有改動任何內容，請保留這個資料夾。"
+ },
+ "sync.accountGone": {
+  "en": "The sync account was left or changed",
+  "ja": "同期アカウントから抜けたか、変更されました",
+  "zh-Hans": "同步账户已退出或更改",
+  "zh-Hant": "同步帳戶已退出或更改"
+ },
+ "sync.authFailed": {
+  "en": "Message authentication failed",
+  "ja": "メッセージの認証に失敗しました",
+  "zh-Hans": "消息认证失败",
+  "zh-Hant": "訊息驗證失敗"
+ },
+ "sync.badFileName": {
+  "en": "Invalid file name {name}",
+  "ja": "無効なファイル名 {name}",
+  "zh-Hans": "非法文件名 {name}",
+  "zh-Hant": "非法檔案名稱 {name}"
+ },
+ "sync.cannotConnect": {
+  "en": "Couldn't connect to that device",
+  "ja": "そのデバイスに接続できません",
+  "zh-Hans": "无法连接到该设备",
+  "zh-Hant": "無法連線到該裝置"
+ },
+ "sync.codeFormat": {
+  "en": "The code must be 6 digits",
+  "ja": "コードは 6 桁の数字です",
+  "zh-Hans": "验证码应为 6 位数字",
+  "zh-Hant": "驗證碼應為 6 位數字"
+ },
+ "sync.codeNotShown": {
+  "en": "That device isn't showing a code, or the code expired",
+  "ja": "そのデバイスはコードを表示していないか、コードの期限が切れています",
+  "zh-Hans": "该设备没有在显示验证码，或验证码已过期",
+  "zh-Hant": "該裝置沒有在顯示驗證碼，或驗證碼已過期"
+ },
+ "sync.codeWrong": {
+  "en": "Wrong code",
+  "ja": "コードが違います",
+  "zh-Hans": "验证码错误",
+  "zh-Hant": "驗證碼錯誤"
+ },
+ "sync.defaultName": {
+  "en": "Device",
+  "ja": "デバイス",
+  "zh-Hans": "设备",
+  "zh-Hant": "裝置"
+ },
+ "sync.handshakeTimeout": {
+  "en": "The other device didn't answer (handshake timed out)",
+  "ja": "相手のデバイスが応答しません（ハンドシェイクがタイムアウト）",
+  "zh-Hans": "对方没有回应（握手超时）",
+  "zh-Hant": "對方沒有回應（握手逾時）"
+ },
+ "sync.noAccountYet": {
+  "en": "No sync account has been created yet",
+  "ja": "同期アカウントがまだ作成されていません",
+  "zh-Hans": "尚未创建同步账户",
+  "zh-Hant": "尚未建立同步帳戶"
+ },
+ "sync.noSuchModel": {
+  "en": "The other device doesn't have this model",
+  "ja": "相手のデバイスにこのモデルはありません",
+  "zh-Hans": "对方没有这个模型",
+  "zh-Hant": "對方沒有這個模型"
+ },
+ "sync.notJoined": {
+  "en": "Not in a sync account yet",
+  "ja": "同期アカウントにまだ参加していません",
+  "zh-Hans": "尚未加入同步账户",
+  "zh-Hant": "尚未加入同步帳戶"
+ },
+ "sync.pairFailed": {
+  "en": "Pairing failed",
+  "ja": "ペアリングに失敗しました",
+  "zh-Hans": "配对失败",
+  "zh-Hant": "配對失敗"
+ },
+ "sync.peerSilent": {
+  "en": "The other device stopped answering",
+  "ja": "相手のデバイスから応答がありません",
+  "zh-Hans": "对方长时间没有回应",
+  "zh-Hant": "對方長時間沒有回應"
+ },
+ "sync.peerUnauthenticated": {
+  "en": "The other device didn't authenticate",
+  "ja": "相手のデバイスが認証されませんでした",
+  "zh-Hans": "对方未通过认证",
+  "zh-Hant": "對方未通過驗證"
+ },
+ "sync.refused": {
+  "en": "The other device refused: {e}",
+  "ja": "相手のデバイスが拒否しました：{e}",
+  "zh-Hans": "对方拒绝：{e}",
+  "zh-Hant": "對方拒絕：{e}"
+ },
+ "sync.syncTimeout": {
+  "en": "Sync timed out",
+  "ja": "同期がタイムアウトしました",
+  "zh-Hans": "同步超时",
+  "zh-Hant": "同步逾時"
+ },
+ "sync.timeout": {
+  "en": "Connection timed out",
+  "ja": "接続がタイムアウトしました",
+  "zh-Hans": "连接超时",
+  "zh-Hant": "連線逾時"
+ },
+ "update.badRepo": {
+  "en": "This build names no valid repository for updates",
+  "ja": "このビルドには更新用の有効なリポジトリがありません",
+  "zh-Hans": "此版本没有可用于更新的仓库",
+  "zh-Hant": "此版本沒有可用於更新的儲存庫"
+ },
+ "update.badUrl": {
+  "en": "The installer's address is not GitHub's",
+  "ja": "インストーラのアドレスが GitHub のものではありません",
+  "zh-Hans": "安装包的地址不是 GitHub 的地址",
+  "zh-Hant": "安裝檔的位址不是 GitHub 的位址"
+ },
+ "update.digestMismatch": {
+  "en": "The downloaded installer does not match the release (checksum)",
+  "ja": "ダウンロードしたインストーラがリリースと一致しません（チェックサム）",
+  "zh-Hans": "下载的安装包与发布版本不一致（校验值不符）",
+  "zh-Hant": "下載的安裝檔與發行版本不一致（校驗值不符）"
+ },
+ "update.http": {
+  "en": "GitHub answered with error {code}",
+  "ja": "GitHub がエラー {code} を返しました",
+  "zh-Hans": "GitHub 返回错误 {code}",
+  "zh-Hant": "GitHub 回傳錯誤 {code}"
+ },
+ "update.noInstaller": {
+  "en": "The release has no installer for this device",
+  "ja": "このリリースにはこのデバイス用のインストーラがありません",
+  "zh-Hans": "该版本没有适用于这台设备的安装包",
+  "zh-Hant": "該版本沒有適用於這台裝置的安裝檔"
+ },
+ "update.sizeMismatch": {
+  "en": "The downloaded installer is incomplete",
+  "ja": "ダウンロードしたインストーラが不完全です",
+  "zh-Hans": "下载的安装包不完整",
+  "zh-Hant": "下載的安裝檔不完整"
+ },
+ "verify.running": {
+  "en": "A check is already running",
+  "ja": "チェック中です",
+  "zh-Hans": "正在检查中",
+  "zh-Hant": "正在檢查中"
+ }
+}

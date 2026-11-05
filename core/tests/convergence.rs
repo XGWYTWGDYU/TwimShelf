@@ -384,7 +384,7 @@ fn records_from_a_newer_version_are_kept_and_passed_on() {
     // a known kind with broken fields is an error, never skipped
     assert!(serde_json::from_str::<LoggedOp>(r#"{"device":"d","seq":1,"op":{"t":"tag","media_id":5}}"#).is_err());
     // every kind this version writes is in the known list (so nothing of ours is ever "unknown")
-    let samples = [Op::Recent { post_id: "p".into(), at: 1 }, Op::AiDone { media_id: "m".into(), model: "x".into() },
+    let samples = [Op::Album { media_id: "m".into() }, Op::Recent { post_id: "p".into(), at: 1 }, Op::AiDone { media_id: "m".into(), model: "x".into() },
         Op::Folder { name: "f".into(), deleted: false, hlc: 1 }, Op::FolderMedia { folder: "f".into(), media_id: "m".into(), present: true, hlc: 1 },
         Op::Alias { src: "a".into(), dst: None, hlc: 1 }, Op::Trash { media_id: "m".into(), inc: 0, state: 0, hlc: 1 },
         Op::TagSrc { media_id: "m".into(), label: "l".into(), model: "x".into(), present: true, hlc: 1 }, Op::Tag { media_id: "m".into(), label: "l".into(), origin: 1, mask: 3, hlc: 1 },
@@ -393,7 +393,7 @@ fn records_from_a_newer_version_are_kept_and_passed_on() {
         let t = tl_core::oplog::op_value(&o)["t"].as_str().unwrap().to_string();
         assert!(tl_core::oplog::KNOWN_OPS.contains(&t.as_str()), "{t} missing from KNOWN_OPS");
     }
-    assert_eq!(tl_core::oplog::KNOWN_OPS.len(), 11, "one entry per kind");
+    assert_eq!(tl_core::oplog::KNOWN_OPS.len(), 12, "one entry per kind");
 }
 
 

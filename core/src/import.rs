@@ -65,6 +65,10 @@ pub struct ImportReport {
     /// Rename rules and empty folders a backup restored.
     #[serde(default)] pub renames_restored: usize,
     #[serde(default)] pub folders_restored: usize,
+    /// Why this import stopped short with something it could still do later (it was cancelled, or
+    /// this device could not store a file): keep the source and try again. A source that is itself
+    /// damaged does not get better: that is in `issues` only.
+    #[serde(default)] pub incomplete: Option<String>,
     #[serde(skip)] pub ids: Vec<String>,
     #[serde(skip)] first_by_sha: HashMap<String, String>,
     #[serde(skip)] folder_by_post: HashMap<String, String>,
@@ -132,7 +136,7 @@ pub fn begin(kind: &str) -> std::sync::MutexGuard<'static, ()> {
 pub(crate) fn begin_in(lib: &Library, kind: &str) -> anyhow::Result<std::sync::MutexGuard<'static, ()>> {
     let epoch = lib.epoch();
     let g = begin(kind);
-    if lib.epoch() != epoch { end(); anyhow::bail!("资料库在等待期间被清除，这次导入已取消"); }
+    if lib.epoch() != epoch { end(); anyhow::bail!(tr!("import.wipedWhileWaiting")); }
     Ok(g)
 }
 /// Stops a running import and waits until it has left the library (for "clear all data").
@@ -197,11 +201,11 @@ pub fn plan(entries: &[(String, bool, usize)]) -> Plan {
     }
     let r = p.root.len();
     for (c, key, path) in files {
-        if !c.starts_with(&p.root) { p.ignored.push((path, "不在帖子文件夹所在的那一层目录里".into())); continue; }
+        if !c.starts_with(&p.root) { p.ignored.push((path, tr!("import.notAtPostLevel").into())); continue; }
         match c.len() - r {
-            1 => p.ignored.push((path, "文件直接放在根目录，不属于任何帖子文件夹".into())),
+            1 => p.ignored.push((path, tr!("import.atRoot").into())),
             2 => p.posts.entry(c[r].clone()).or_default().push((c[c.len() - 1].clone(), key, path)),
-            _ => p.ignored.push((path, format!("在帖子文件夹「{}」的子文件夹里（只读取帖子文件夹里直接放着的文件）", c[r]))),
+            _ => p.ignored.push((path, tr!("import.inSubfolder", folder = c[r]))),
         }
     }
     for v in p.posts.values_mut() { v.sort(); }
@@ -271,7 +275,7 @@ impl Source for DirSource {
 /// Only plain files are read from an imported folder: a symbolic link (say 推文内容.txt pointing at
 /// a private file elsewhere) or a device/pipe (endless data) is listed as a problem instead.
 fn regular_file(p: &Path) -> anyhow::Result<()> {
-    if !fs::symlink_metadata(p)?.file_type().is_file() { anyhow::bail!("不是普通文件（符号链接、快捷方式或特殊文件），没有读取"); }
+    if !fs::symlink_metadata(p)?.file_type().is_file() { anyhow::bail!(tr!("import.notRegular")); }
     Ok(())
 }
 
@@ -303,16 +307,18 @@ pub fn import_loose_zip(lib: &Library, path: &Path, folder: Option<&str>) -> any
 /// files is moved there afterwards (out of the inbox, so it is not imported again) and the
 /// saved report points at the new place.
 pub fn import_loose_dir(lib: &Library, dir: &Path, folder: Option<&str>, consume: bool) -> anyhow::Result<ImportReport> {
-    import_loose_dir_keep(lib, dir, folder, consume, None)
+    import_loose_dir_keep(lib, dir, folder, consume, None, true)
 }
 
-pub fn import_loose_dir_keep(lib: &Library, dir: &Path, folder: Option<&str>, consume: bool, keep_to: Option<&Path>) -> anyhow::Result<ImportReport> {
+pub fn import_loose_dir_keep(lib: &Library, dir: &Path, folder: Option<&str>, consume: bool, keep_to: Option<&Path>, album: bool) -> anyhow::Result<ImportReport> {
     let mut src = DirSource { root: dir.to_path_buf(), files: vec![] };
     let _g = begin_in(lib, "loose_share")?;
     lib.diag_import_start("loose_share");
     let r = run_loose(lib, &mut src, folder);
     finish(&r);
     let rep = r?;
+    // what was shared from another app is 从相册导入; what was dropped on a window is only loose
+    if album { lib.mark_album(&rep)?; }
     if consume {
         let keep: std::collections::HashSet<PathBuf> = rep.issues.iter().filter(|i| i.is_file() && i.category != "duplicate" && i.category != "in_bin")
             .map(|i| dir.join(&i.path)).collect();
@@ -363,7 +369,7 @@ pub fn delete_reports(lib: &Library, reports: &[PathBuf], owned: &[PathBuf]) -> 
     for r in reports {
         let Ok(rc) = fs::canonicalize(r) else { continue };
         if rc.parent() != Some(dir.as_path()) || !rc.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("import-") && n.ends_with(".json")) {
-            anyhow::bail!("不是导入记录：{}", r.display());
+            anyhow::bail!(tr!("import.notARecord", path = r.display()));
         }
         if let Ok(rep) = load_report(&rc) {
             if let Ok(src) = fs::canonicalize(&rep.source) {
@@ -387,7 +393,7 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
     rep.entries = entries.iter().filter(|e| !e.1).count();
     let files: Vec<(String, usize)> = entries.iter().filter(|e| !e.1).filter_map(|(raw, _, key)| {
         match crate::archive::safe_relative(raw) {
-            None => { rep.issue("unsafe_path", raw, "路径不安全（绝对路径或包含 ..），为保护资料库而拒绝", None); None }
+            None => { rep.issue("unsafe_path", raw, tr!("import.unsafePath"), None); None }
             Some(rel) => {
                 let comps: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
                 if comps.iter().any(|c| c.starts_with('.') || c == "__MACOSX") { rep.system_files += 1; None }
@@ -395,13 +401,36 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
             }
         }
     }).collect();
-    set_progress(|p| p.folders_total = files.len());
+    // a folder that holds a 推文内容.txt directly is a post (as in an old-format import): its
+    // text, author and link stay with its media; everything else is loose media
+    let post_dirs: std::collections::BTreeSet<String> = files.iter()
+        .filter_map(|(p, _)| p.rsplit_once('/').map_or((p.as_str() == SIDECAR_NAME).then_some(""), |(d, f)| (f == SIDECAR_NAME).then_some(d)))
+        .map(str::to_string).collect();
+    let mut posts: BTreeMap<String, Vec<(String, usize, String)>> = BTreeMap::new();
+    let files: Vec<(String, usize)> = files.into_iter().filter(|(p, key)| {
+        let (dir, fname) = p.rsplit_once('/').unwrap_or(("", p.as_str()));
+        if !post_dirs.contains(dir) { return true; }
+        posts.entry(dir.to_string()).or_default().push((fname.to_string(), *key, p.clone()));
+        false
+    }).collect();
+    for v in posts.values_mut() { v.sort(); }
+    rep.folders = posts.len();
+    set_progress(|p| p.folders_total = files.len() + posts.len());
+    for (dir, list) in &posts {
+        if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
+        // a sidecar at the archive's root: the post is named after the archive
+        let name = dir.rsplit('/').next().filter(|n| !n.is_empty()).map(str::to_string)
+            .unwrap_or_else(|| Path::new(&rep.source).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
+        let folder_path = if dir.is_empty() { ".".to_string() } else { dir.clone() };
+        import_post_folder(lib, src, &mut rep, &name, &folder_path, list)?;
+        set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
+    }
     for (path, key) in files {
-        if cancelled() { anyhow::bail!("导入已取消（已导入的部分保留）"); }
+        if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
         let fname = path.rsplit('/').next().unwrap_or(&path).to_string();
         let Some((kind, ext)) = kind_for(Path::new(&fname)) else {
             let e = fname.rsplit_once('.').map(|x| x.1.to_lowercase()).unwrap_or_default();
-            rep.issue("unsupported", &path, if e.is_empty() { "没有扩展名，无法判断类型".to_string() } else { format!("不支持的类型 .{e}（支持 jpg、png、webp、gif、heic、avif、mp4、mov）") }, None);
+            rep.issue("unsupported", &path, if e.is_empty() { tr!("import.noExtension").to_string() } else { tr!("import.unsupportedExt", e = e) }, None);
             set_progress(|p| p.folders_done += 1);
             continue;
         };
@@ -413,7 +442,7 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
             }
             Err(e) => {
                 let msg = format!("{e:#}");
-                let cat = if msg.starts_with("内容不是") { "not_media" } else { "unreadable" };
+                let cat = if crate::library::is_not_media(&e) { "not_media" } else { "unreadable" };
                 rep.issue(cat, &path, msg, None);
             }
         }
@@ -445,57 +474,65 @@ fn run_inner(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
     let mut rep = ImportReport { source: src.path(), ..Default::default() };
     rep.entries = entries.iter().filter(|e| !e.1).count();
     rep.system_files = plan.system;
-    for u in &plan.unsafe_paths { rep.issue("unsafe_path", u, "路径不安全（绝对路径或包含 ..），为保护资料库而拒绝", None); }
+    for u in &plan.unsafe_paths { rep.issue("unsafe_path", u, tr!("import.unsafePath"), None); }
     for (p, why) in &plan.ignored { rep.issue("ignored_location", p, why.clone(), None); }
     rep.folders = plan.posts.len();
     set_progress(|p| p.folders_total = plan.posts.len());
     for (name, files) in &plan.posts {
-        if cancelled() { anyhow::bail!("导入已取消（已导入的部分保留）"); }
+        if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
         let folder_path = format!("{}{}", if plan.root.is_empty() { String::new() } else { plan.root.join("/") + "/" }, name);
-        // every entry lands in exactly one bucket: the sidecar read (sidecars), a sidecar that
-        // could not be read or a second one (issues), media or problems below
-        let chosen = files.iter().find(|(n, _, _)| n == SIDECAR_NAME).map(|(_, k, _)| *k);
-        let sidecar = match files.iter().find(|(n, _, _)| n == SIDECAR_NAME) {
-            Some((_, key, path)) => match src.read_bytes(*key, 4 << 20) {
-                Ok(b) => { rep.sidecars += 1; Some(decode_text(&b)) }
-                Err(e) => { rep.issue("unreadable", path, format!("读取帖子信息失败：{e}（改用文件夹名作为正文）"), None); None }
-            },
-            None => None,
-        };
-        let meta = legacy_post_meta(name, sidecar);
-        let mut stored = vec![];
-        for (fname, key, path) in files {
-            if fname == SIDECAR_NAME {
-                if Some(*key) != chosen { rep.issue("ignored_location", path, "同一个帖子文件夹里有多个「推文内容.txt」，只读取了第一个", None); }
-                continue;
-            }
-            let Some((kind, ext)) = kind_for(Path::new(fname)) else {
-                let ext = fname.rsplit_once('.').map(|x| x.1.to_lowercase()).unwrap_or_default();
-                rep.issue("unsupported", path, if ext.is_empty() { "没有扩展名，无法判断类型".to_string() } else { format!("不支持的类型 .{ext}（支持 jpg、png、webp、gif、heic、avif、mp4、mov）") }, None);
-                continue;
-            };
-            match src.store(*key, lib, &kind, ext) {
-                Ok((sha, rel)) => {
-                    set_progress(|p| { p.files_done += 1; p.current = Some(lib.dir.join(&rel).to_string_lossy().into_owned()); });
-                    stored.push(Stored { sha, rel, kind, src: path.clone() });
-                }
-                Err(e) => {
-                    let msg = format!("{e:#}");
-                    let cat = if msg.starts_with("内容不是") || msg.contains("网页") || msg.contains("空文件") { "not_media" } else { "unreadable" };
-                    rep.issue(cat, path, msg, None);
-                }
-            }
-        }
-        if stored.is_empty() {
-            rep.issue("post_not_imported", &folder_path, "文件夹里没有可用的图片或视频，未创建帖子", None);
-        } else {
-            lib.record_import(&meta, &stored, &folder_path, &mut rep)?;
-        }
+        import_post_folder(lib, src, &mut rep, name, &folder_path, files)?;
         set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
     }
     lib.import_into_folder(&mut rep, folder)?;
     lib.finish_report(&mut rep)?;
     Ok(rep)
+}
+
+/// One post folder: its sidecar (推文内容.txt) gives the post, the media directly inside are
+/// stored under it. `files`: (file name, entry key, path) in name order.
+fn import_post_folder(lib: &Library, src: &mut dyn Source, rep: &mut ImportReport, name: &str, folder_path: &str,
+                      files: &[(String, usize, String)]) -> anyhow::Result<()> {
+    // every entry lands in exactly one bucket: the sidecar read (sidecars), a sidecar that
+    // could not be read or a second one (issues), media or problems below
+    let chosen = files.iter().find(|(n, _, _)| n == SIDECAR_NAME).map(|(_, k, _)| *k);
+    let sidecar = match files.iter().find(|(n, _, _)| n == SIDECAR_NAME) {
+        Some((_, key, path)) => match src.read_bytes(*key, 4 << 20) {
+            Ok(b) => { rep.sidecars += 1; Some(decode_text(&b)) }
+            Err(e) => { rep.issue("unreadable", path, tr!("import.sidecarFailed", e = e), None); None }
+        },
+        None => None,
+    };
+    let meta = legacy_post_meta(name, sidecar);
+    let mut stored = vec![];
+    for (fname, key, path) in files {
+        if fname == SIDECAR_NAME {
+            if Some(*key) != chosen { rep.issue("ignored_location", path, tr!("import.manySidecars"), None); }
+            continue;
+        }
+        let Some((kind, ext)) = kind_for(Path::new(fname)) else {
+            let ext = fname.rsplit_once('.').map(|x| x.1.to_lowercase()).unwrap_or_default();
+            rep.issue("unsupported", path, if ext.is_empty() { tr!("import.noExtension").to_string() } else { tr!("import.unsupportedExt", e = ext) }, None);
+            continue;
+        };
+        match src.store(*key, lib, &kind, ext) {
+            Ok((sha, rel)) => {
+                set_progress(|p| { p.files_done += 1; p.current = Some(lib.dir.join(&rel).to_string_lossy().into_owned()); });
+                stored.push(Stored { sha, rel, kind, src: path.clone() });
+            }
+            Err(e) => {
+                let msg = format!("{e:#}");
+                let cat = if crate::library::is_not_media(&e) { "not_media" } else { "unreadable" };
+                rep.issue(cat, path, msg, None);
+            }
+        }
+    }
+    if stored.is_empty() {
+        rep.issue("post_not_imported", folder_path, tr!("import.noMediaInFolder"), None);
+    } else {
+        lib.record_import(&meta, &stored, folder_path, rep)?;
+    }
+    Ok(())
 }
 
 impl Library {
@@ -505,7 +542,7 @@ impl Library {
         // fields beyond their limits are cut (see `PostMeta::clamped`), and the report says so
         let (clamped, cut) = meta.clamped();
         let meta = &clamped;
-        for field in cut { rep.issue("post_text_truncated", folder, format!("帖子 {} 的{}过长，只保留了前面的部分", meta.id, field), None); }
+        for field in cut { rep.issue("post_text_truncated", folder, tr!("import.fieldCut", id = meta.id, field = crate::i18n::text(field)), None); }
         {
             let db = self.db();
             let tx = db.conn().unchecked_transaction()?;
@@ -515,8 +552,8 @@ impl Library {
             if existed {
                 rep.merged_posts += 1;
                 // a loose media's "post" is its content: a repeat is already listed as a duplicate file
-                if !meta.id.starts_with(LOOSE_PREFIX) { rep.issue("post_merged", folder, format!("帖子 ID {} 已存在，信息与媒体合并到同一条帖子", meta.id),
-                          Some(merged_with.unwrap_or_else(|| "资料库中已有的帖子".into()))); }
+                if !meta.id.starts_with(LOOSE_PREFIX) { rep.issue("post_merged", folder, tr!("import.merged", id = meta.id),
+                          Some(merged_with.unwrap_or_else(|| tr!("import.existingPost").into()))); }
             } else {
                 rep.folder_by_post.insert(meta.id.clone(), folder.to_string());
             }
@@ -528,14 +565,14 @@ impl Library {
                     rep.media += 1;
                     if known {
                         rep.duplicate_media += 1;
-                        let same = rep.first_by_sha.get(&f.sha).cloned().unwrap_or_else(|| "资料库中已有的同一文件".into());
-                        rep.issue("duplicate", &f.src, "与另一个文件的内容逐字节相同，只保存一份", Some(same));
+                        let same = rep.first_by_sha.get(&f.sha).cloned().unwrap_or_else(|| tr!("import.existingFile").into());
+                        rep.issue("duplicate", &f.src, tr!("import.duplicate"), Some(same));
                     } else {
                         rep.new_media += 1;
                     }
                 } else {
                     rep.deleted += 1;
-                    rep.issue("in_bin", &f.src, "这个文件对应的媒体在回收站里或已被永久删除，未恢复", None);
+                    rep.issue("in_bin", &f.src, tr!("import.inBin"), None);
                     if db.trash_reg(&f.sha)?.state == crate::rules::PURGED {
                         drop_files.push((f.sha.clone(), f.rel.clone()));
                     } else {
@@ -572,6 +609,20 @@ impl Library {
         Ok(())
     }
 
+    /// The media of a share (not those of a post folder in it, nor a repeat in the bin) are 从相册导入.
+    pub fn mark_album(&self, rep: &ImportReport) -> anyhow::Result<()> {
+        let db = self.db();
+        let tx = db.conn().unchecked_transaction()?;
+        for (post, shas) in &rep.shas_by_post {
+            if !post.starts_with(LOOSE_PREFIX) { continue; }
+            for sha in shas {
+                if db.trash_reg(sha)?.state == crate::rules::LIVE { db.mark_album(sha)?; }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Lists posts that ended up without media of their own, logs the counts and saves the report.
     pub fn finish_report(&self, rep: &mut ImportReport) -> anyhow::Result<()> {
         let mut ids = rep.ids.clone();
@@ -585,7 +636,7 @@ impl Library {
                 let mut owners: Vec<String> = vec![];
                 for sha in rep.shas_by_post.get(id).into_iter().flatten() {
                     if let Some((owner, _, _, _)) = db.media_row(sha)? {
-                        let o = rep.folder_by_post.get(&owner).cloned().unwrap_or_else(|| format!("帖子 {owner}"));
+                        let o = rep.folder_by_post.get(&owner).cloned().unwrap_or_else(|| tr!("import.postOwner", owner = owner));
                         if !owners.contains(&o) { owners.push(o); }
                     }
                 }
@@ -594,8 +645,8 @@ impl Library {
         }
         rep.posts_without_media = hidden.len();
         for (folder, owners) in hidden {
-            rep.issue("post_hidden", &folder, "这个帖子的所有媒体都与其他帖子的文件完全相同，媒体归入那条帖子，因此这条帖子不单独显示",
-                      (!owners.is_empty()).then(|| owners.join("、")));
+            rep.issue("post_hidden", &folder, tr!("import.hidden"),
+                      (!owners.is_empty()).then(|| owners.join(&tr!("list.separator"))));
         }
         // save the full report
         let dir = self.dir.join("logs").join("import-reports");
@@ -640,18 +691,19 @@ pub fn reports(lib: &Library) -> Vec<(String, u64, String, usize)> {
 
 pub fn load_report(path: &Path) -> anyhow::Result<ImportReport> { Ok(serde_json::from_slice(&fs::read(path)?)?) }
 
-pub fn category_title(c: &str) -> &'static str {
+pub fn category_title(c: &str) -> String {
     match c {
-        "not_media" => "内容不是图片或视频", "unsupported" => "不支持的类型", "unreadable" => "无法读取",
-        "duplicate" => "内容重复", "in_bin" => "在回收站或已删除", "ignored_location" => "不在帖子文件夹里",
-        "unsafe_path" => "路径不安全", "post_not_imported" => "未导入的帖子文件夹", "post_hidden" => "不单独显示的帖子",
-        "post_merged" => "合并的帖子", "post_text_truncated" => "过长而被截取的帖子信息", _ => "其他",
+        "not_media" => tr!("import.cat.not_media"), "unsupported" => tr!("import.cat.unsupported"), "unreadable" => tr!("import.cat.unreadable"),
+        "duplicate" => tr!("import.cat.duplicate"), "in_bin" => tr!("import.cat.in_bin"), "ignored_location" => tr!("import.cat.ignored_location"),
+        "unsafe_path" => tr!("import.cat.unsafe_path"), "post_not_imported" => tr!("import.cat.post_not_imported"), "post_hidden" => tr!("import.cat.post_hidden"),
+        "post_merged" => tr!("import.cat.post_merged"), "post_text_truncated" => tr!("import.cat.post_text_truncated"), _ => tr!("import.cat.other"),
     }
 }
 
 /// Writes the problem files of a report, byte for byte as they are in the source, into a ZIP:
 /// `<类别>/<原路径>` plus `说明.txt` listing every issue (also the folder-level ones).
 /// Returns how many files were written.
+#[cfg(unix)]
 fn open_report_file(root: &Path, name: &str) -> std::io::Result<File> {
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::fs::OpenOptionsExt;
@@ -674,11 +726,33 @@ fn open_report_file(root: &Path, name: &str) -> std::io::Result<File> {
     Ok(dir)
 }
 
+/// Windows has no `openat`: each component is checked not to be a link or another reparse point
+/// (junction, mount point) before going on, and the file itself is opened without following one.
+#[cfg(windows)]
+fn open_report_file(root: &Path, name: &str) -> std::io::Result<File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsafe report path");
+    let rel = crate::archive::safe_relative(name).ok_or_else(invalid)?;
+    if rel.components().next().is_none() { return Err(invalid()); }
+    let mut path = root.to_path_buf();
+    if fs::symlink_metadata(&path)?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 { return Err(invalid()); }
+    for component in rel.components() {
+        path.push(component);
+        if fs::symlink_metadata(&path)?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 { return Err(invalid()); }
+    }
+    let file = fs::OpenOptions::new().read(true).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(&path)?;
+    let m = file.metadata()?;
+    if !m.is_file() || m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 { return Err(invalid()); }
+    Ok(file)
+}
+
 pub fn export_issues(report: &Path, out: &Path) -> anyhow::Result<usize> {
     let rep = load_report(report)?;
     let wanted: Vec<&ImportIssue> = rep.issues.iter().filter(|i| i.is_file() && i.category != "unsafe_path").collect();
     let src_path = PathBuf::from(&rep.source);
-    if !src_path.exists() { anyhow::bail!("找不到导入时的源文件：{}（已移动或删除）", rep.source); }
+    if !src_path.exists() { anyhow::bail!(tr!("import.sourceGone", source = rep.source)); }
     let mut zip_src = if src_path.is_file() { Some(zip::ZipArchive::new(BufReader::new(File::open(&src_path)?))?) } else { None };
     let tmp = out.with_extension("zip.partial");
     let _cleanup = crate::library::TempFile(tmp.clone());
@@ -693,10 +767,10 @@ pub fn export_issues(report: &Path, out: &Path) -> anyhow::Result<usize> {
             if let Some(rel) = crate::archive::safe_relative(&crate::archive::entry_name(e.name_raw())) { index.insert(rel.to_string_lossy().into_owned(), i); }
         }
     }
-    let mut readme = format!("TwimShelf 导入问题清单\n来源：{}\n\n", rep.source);
+    let mut readme = tr!("import.readme.head", source = rep.source);
     for i in &rep.issues {
-        readme += &format!("[{}] {}\n    原因：{}\n", category_title(&i.category), i.path, i.reason);
-        if let Some(s) = &i.same_as { readme += &format!("    对应：{s}\n"); }
+        readme += &tr!("import.readme.item", category = category_title(&i.category), path = i.path, reason = i.reason);
+        if let Some(s) = &i.same_as { readme += &tr!("import.readme.match", s = s); }
     }
     for i in wanted {
         if crate::archive::safe_relative(&i.path).is_none() { continue; }
@@ -711,9 +785,9 @@ pub fn export_issues(report: &Path, out: &Path) -> anyhow::Result<usize> {
                 Err(_) => false,
             },
         };
-        if copied { n += 1; } else { readme += &format!("（未能从来源中取出：{}）\n", i.path); }
+        if copied { n += 1; } else { readme += &tr!("import.readme.notTaken", error = i.path); }
     }
-    zw.start_file("说明.txt", zip::write::SimpleFileOptions::default())?;
+    zw.start_file(tr!("readme.name"), zip::write::SimpleFileOptions::default())?;
     zw.write_all(readme.as_bytes())?;
     zw.finish()?.flush()?;
     fs::rename(&tmp, out)?;

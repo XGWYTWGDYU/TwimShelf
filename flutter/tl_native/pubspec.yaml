@@ -1,0 +1,25 @@
+name: tl_native
+description: "Native helpers for TwimShelf: video poster frames, the Apple MLX bridge."
+publish_to: 'none'
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.7
+  flutter: '>=3.35.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: TlNativePlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: TlNativePlugin
+        sharedDarwinSource: true
+      android:
+        package: org.twimshelf.tl_native
+        pluginClass: TlNativePlugin

@@ -16,11 +16,18 @@
 //!    not matter (strong eventual consistency).
 //! 3. Concurrent analyses of one media on two devices end, on both, with the union of the AI
 //!    tags; tags you added or endorsed are never touched by an analysis.
-//! 4. Progress: each analysis step strictly decreases a ranking function, so a run always ends
+//! 4. Progress: each success, media error or crash step strictly decreases a ranking function,
+//!    so a finite queue ends under these transitions
 //!    and one image that cannot be analysed never blocks the others (the old rule, "stop the
 //!    run on an error", leaves the queue head unchanged forever).
 //! 5. Liveness across devices: a media that any device can analyse ends up analysed on every
-//!    device, whichever device downloaded it.
+//!    device, whichever device downloaded it, assuming fresh retry budgets, fewer than MAX
+//!    crashes per media, successful attempts on capable devices, and the final syncs below.
+//!
+//! Scope: this abstracts additive analysis only. It does not model replace-old tagging,
+//! aliases, per-model sources, cancellation/undo, library epochs, concurrent workers, wall-clock
+//! run timestamps, or newly arriving media. Those require separate implementation tests;
+//! the ranking argument is not a proof that arbitrary frontend executions terminate.
 use crate::crdt::{merge_bits, TagBits};
 use crate::rules::MAX_AI_ATTEMPTS;
 
@@ -114,6 +121,7 @@ pub fn step(done: u8, q: Queue, m: usize, o: Outcome) -> (u8, Queue) {
 
 /// The old rule: an error stopped the run and changed nothing, so the next run started from the
 /// same media.
+#[cfg(test)]
 pub fn step_old(done: u8, m: usize, o: Outcome) -> u8 { if o == Outcome::Success { done | 1 << m } else { done } }
 
 /// Ranking function: what is left to try on this device. Every step lowers it (an attempt
@@ -258,16 +266,15 @@ mod proofs {
     fn any_replica() -> Replica {
         let mut r = Replica { done: kani::any(), ..Default::default() };
         kani::assume(r.done < 1 << N);
-        // two registers are enough: the others are merged by the same function, key by key
-        r.tags[0][0] = any_bits();
-        r.tags[1][1] = any_bits();
+        // Cover all keys independently, including off-diagonal and final-row indexing.
+        for row in &mut r.tags { for cell in row { *cell = any_bits(); } }
         r
     }
     fn any_op() -> Op {
         if kani::any() { let m: usize = kani::any(); kani::assume(m < N); Op::AiDone { m } }
         else {
             let (m, l): (usize, usize) = (kani::any(), kani::any());
-            kani::assume(m < 2 && l < 2 && m == l);
+            kani::assume(m < N && l < L);
             let (origin, mask): (u8, u8) = (kani::any(), kani::any());
             kani::assume(origin <= 3 && mask >= 1 && mask <= 3);
             Op::Tag { m, l, origin, mask, hlc: kani::any() }

@@ -46,15 +46,6 @@ impl Store {
     }
 }
 impl Library {
-    pub fn triage_decide_checked(&self, post: &str, decision: crate::triage::Decision, folder: Option<&str>, expected: Option<&[String]>) -> anyhow::Result<bool> {
-        let db = self.db(); let tx = db.conn().unchecked_transaction()?;
-        if let Some(expected) = expected {
-            let expected: Vec<String> = expected.iter().cloned().collect::<BTreeSet<_>>().into_iter().collect();
-            if expected != db.action_ids(&[], &[post.into()])? { anyhow::bail!("帖子内容已变化，请确认更新后的内容后重试"); }
-        }
-        let applied = db.triage_decide(post, decision, folder)?;
-        tx.commit()?; Ok(applied)
-    }
     pub fn bin_snapshot(&self) -> anyhow::Result<BinSnapshot> {
         let db = self.db();
         let mut entries = vec![]; let mut pending_count = 0;
@@ -74,8 +65,8 @@ impl Library {
             let tx = db.conn().unchecked_transaction()?;
             let ids = if let Some(expected) = &a.expected { expected.iter().map(|s| s.id.clone()).collect::<BTreeSet<_>>().into_iter().collect() } else { db.action_ids(&a.media, &a.posts)? };
             let folder = receipt.folder.as_deref().unwrap_or("");
-            if matches!(a.kind, ActionKind::FolderAdd | ActionKind::FolderRemove) && folder.is_empty() { anyhow::bail!("文件夹名称不能为空"); }
-            if a.kind == ActionKind::Tag && a.label.as_deref().unwrap_or("").trim().is_empty() { anyhow::bail!("标签不能为空"); }
+            if matches!(a.kind, ActionKind::FolderAdd | ActionKind::FolderRemove) && folder.is_empty() { anyhow::bail!(tr!("action.folderEmpty")); }
+            if a.kind == ActionKind::Tag && a.label.as_deref().unwrap_or("").trim().is_empty() { anyhow::bail!(tr!("action.tagEmpty")); }
             for id in ids {
                 if let Some(expected) = &a.expected { if !expected.contains(&Stamp::trash(&db, &id)?) { continue; } }
                 let changed = match a.kind {

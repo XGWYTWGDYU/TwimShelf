@@ -2,7 +2,7 @@
 use std::{fs, io::Read, path::PathBuf, sync::Arc};
 use tl_core::{
     library::Library, model::{MediaKind, PostMeta}, oplog::{LoggedOp, Op}, rules, store::Store,
-    sync::SyncNode, triage::{Decision, TriageFilter},
+    sync::SyncNode,
 };
 
 /// Imports and model transfers share process-wide state (a running import, the model status):
@@ -33,19 +33,6 @@ fn post_with_awaited_media() -> Store {
     s
 }
 
-// ---- finding 8: triage delete leaves awaited media of the post behind ----
-
-#[test]
-fn triage_delete_includes_media_still_awaited() {
-    let s = post_with_awaited_media();
-    assert!(s.triage_decide("p", Decision::Delete, None).unwrap());
-    s.blob_arrived(B).unwrap();
-    assert_eq!(s.post_live_count("p").unwrap(), 0, "the media whose file arrived later stays deleted with its post");
-    assert!(s.triage_queue(&TriageFilter::default()).unwrap().is_empty());
-    // undo brings back exactly what the decision binned, the awaited media too
-    assert!(s.triage_undo("p").unwrap());
-    assert_eq!(s.post_live_count("p").unwrap(), 2);
-}
 
 // ---- finding 9: whole-post folder actions leave awaited media out ----
 
@@ -55,11 +42,6 @@ fn whole_post_folder_actions_include_media_still_awaited() {
     s.add_posts_to_folder("f", &["p".into()]).unwrap();
     s.blob_arrived(B).unwrap();
     assert_eq!(s.folders_of(B).unwrap(), vec!["f".to_string()]);
-
-    let t = post_with_awaited_media();
-    assert!(t.triage_decide("p", Decision::Folder, Some("g")).unwrap());
-    t.blob_arrived(B).unwrap();
-    assert_eq!(t.folders_of(B).unwrap(), vec!["g".to_string()], "a triage folder decision covers the whole post too");
 }
 
 // ---- finding 4: a post that arrives locally is treated like one that arrives from a peer ----
@@ -213,7 +195,7 @@ fn post_fields_are_cut_at_character_boundaries() {
     assert!(std::str::from_utf8(c.text.as_ref().unwrap().as_bytes()).is_ok());
     assert_eq!(c.text.as_ref().unwrap().len(), PostMeta::MAX_TEXT_BYTES);
     assert_eq!(c.author_name.as_ref().unwrap().len(), PostMeta::MAX_FIELD_BYTES);
-    assert_eq!(cut, vec!["作者", "正文"]);
+    assert_eq!(cut, vec!["field.author", "field.text"]);
     let (same, none) = post("short").clamped();
     assert_eq!(same, post("short"));
     assert!(none.is_empty());
@@ -373,7 +355,7 @@ fn search_term_matches_tags_that_contain_it_without_semantic_search() {
         db.tag_media(&id, "棒球服", Origin::AI).unwrap();
     }
     let run = |term: &str, fuzzy: bool| l.feed(&FeedRequest {
-        terms: vec![term.into()], scope: SearchScope::Both, seed: Some(0), fuzzy, term_vectors: vec![], embed_model: None, threshold: 0.7,
+        newest_first: false, terms: vec![term.into()], scope: SearchScope::Both, seed: Some(0), fuzzy, term_vectors: vec![], embed_model: None, threshold: 0.7,
         fields: SearchFields { tags: true, text: true, author: true }, filter: Default::default(),
     }).unwrap().len();
     assert_eq!(run("棒球", false), 1, "no embedding model: still a containing match");

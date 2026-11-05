@@ -82,7 +82,7 @@ fn update(f: impl FnOnce(&mut DownloadStatus)) {
 /// Per-link options (each request may differ in route, revive, target folder and mark). Stored
 /// with the job, so links left over from an interrupted run keep them after a restart.
 #[derive(Clone, Serialize, Deserialize, Default)]
-struct LinkOpts { #[serde(default)] route: Route, #[serde(default)] revive: bool, #[serde(default)] folder: Option<String>, #[serde(default)] recent: bool }
+struct LinkOpts { #[serde(default)] route: Route, #[serde(default)] revive: bool, #[serde(default)] folder: Option<String>, #[serde(default)] recent: bool, #[serde(skip)] staged: bool }
 /// Held while deciding whether the worker keeps running, so a request arriving just as the
 /// worker finishes is never left waiting.
 static RUN_GUARD: Mutex<bool> = Mutex::new(false);
@@ -93,10 +93,10 @@ static RUN_GUARD: Mutex<bool> = Mutex::new(false);
 pub fn start(lib: Arc<Library>, req: DownloadRequest) -> anyhow::Result<usize> { start_impl(lib, req, false) }
 pub fn resume(lib: Arc<Library>, req: DownloadRequest) -> anyhow::Result<usize> { start_impl(lib, req, true) }
 fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> anyhow::Result<usize> {
-    let opts = LinkOpts { route: req.route, revive: req.revive, folder: req.folder.clone().filter(|f| !f.trim().is_empty()), recent: req.mark_recent };
+    let opts = LinkOpts { route: req.route, revive: req.revive, folder: req.folder.clone().filter(|f| !f.trim().is_empty()), recent: req.mark_recent, staged: false };
     let opts_json = serde_json::to_string(&opts)?;
     let mut running = RUN_GUARD.lock().unwrap();
-    if *running && CANCEL.load(Ordering::SeqCst) { bail!("正在停止下载，请稍候再试"); }
+    if *running && CANCEL.load(Ordering::SeqCst) { bail!(tr!("download.stopping")); }
     let pending = {
         let db = lib.db();
         let tx = db.conn().unchecked_transaction()?;
@@ -112,10 +112,11 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
         return Ok(n);
     }
     *running = true;
-    drop(running);
     let gen = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     CANCEL.store(false, Ordering::SeqCst);
     *STATUS.lock().unwrap() = Some(DownloadStatus { running: true, outcome: "running".into(), total: n, generation: gen, ..Default::default() });
+    // only now: a stop or a joining download in between would be overwritten by the lines above
+    drop(running);
     let concurrency = req.concurrency.clamp(1, 16);
     let interval = std::time::Duration::from_millis(req.interval_ms.min(600_000));
     runtime().spawn(async move {
@@ -125,7 +126,8 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
         let mut seen: std::collections::HashSet<(String, i64)> = std::collections::HashSet::new();
         let mut first = true;
         loop {
-            let fresh: Vec<(String, i64, Option<String>)> = lib.db().pending_jobs_epoch().unwrap_or_default().into_iter().filter(|(u, e, _)| !seen.contains(&(u.clone(), *e))).collect();
+            // an unreadable queue is not an empty one: said in the diagnostics, tried again on the next start
+            let fresh: Vec<(String, i64, Option<String>)> = lib.db().pending_jobs_epoch().inspect_err(|e| lib.diag("download_queue_unreadable", serde_json::json!({ "error": crate::diagnostics::scrub(&e.to_string()) }))).unwrap_or_default().into_iter().filter(|(u, e, _)| !seen.contains(&(u.clone(), *e))).collect();
             if fresh.is_empty() || CANCEL.load(Ordering::SeqCst) {
                 for t in tasks.drain(..) { let _ = t.await; }
                 // finish only if nothing new arrived meanwhile (checked under the guard)
@@ -150,7 +152,7 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
                 let o: LinkOpts = opts.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
                 tasks.push(tokio::spawn(async move {
                     update(|s| s.active.push(url.clone()));
-                    let r = tokio::select! { r = process(&lib, &url, &o) => r, _ = stopped() => Err(anyhow!("已停止")) };
+                    let r = tokio::select! { r = process(&lib, &url, &o) => r, _ = stopped() => Err(anyhow!(tr!("download.stopped"))) };
                     // the cause only (the link itself is the user's content)
                     if let Err(e) = &r { if !CANCEL.load(Ordering::SeqCst) { lib.diag("download_error", serde_json::json!({ "route": format!("{:?}", o.route), "error": crate::diagnostics::scrub(&format!("{e:#}")) })); } }
                     let counts = lib.db().finish_job_epoch(&url, epoch, r.as_ref().err().map(|e| e.to_string())).unwrap_or(true);
@@ -171,12 +173,19 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
     Ok(n)
 }
 
+/// Downloads one post into `lib`, a library of its own (`share`), outside the download queue:
+/// stopping the queue does not touch it, and it shows in no status.
+pub fn stage_link(lib: &Library, url: &str, route: Route) -> anyhow::Result<()> {
+    let o = LinkOpts { route, revive: false, folder: None, recent: false, staged: true };
+    runtime().block_on(process(lib, url, &o)).map(|_| ())
+}
+
 /// Ok(true) = downloaded, Ok(false) = already in the library.
 async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool> {
     let (route, revive, folder) = (o.route, o.revive, o.folder.as_deref());
     // a wipe meanwhile: nothing fetched for the old library may be written into the new one
     let epoch = lib.epoch();
-    let (_, id) = net::parse_status_url(url).ok_or_else(|| anyhow!("不是有效的帖子链接"))?;
+    let (_, id) = net::parse_status_url(url).ok_or_else(|| anyhow!(tr!("download.badLink")))?;
     let known = {
         let db = lib.db_at(epoch)?;
         let total = db.post_media_count(&id)?;
@@ -191,11 +200,11 @@ async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool>
     }
     let post = fetch_post(url, route).await?;
     // the post returned must be the one asked for (a wrong or tampered answer must not overwrite another post)
-    if post.meta.id != id { bail!("返回的帖子与链接不一致"); }
+    if post.meta.id != id { bail!(tr!("download.mismatch")); }
     let mut stored = vec![];
     for m in &post.media {
-        if CANCEL.load(Ordering::SeqCst) || lib.epoch() != epoch { bail!("已取消"); }
-        stored.push(fetch_blob(lib, &m.url, &m.kind, &m.headers, epoch).await?);
+        if (!o.staged && CANCEL.load(Ordering::SeqCst)) || lib.epoch() != epoch { bail!(tr!("common.cancelled")); }
+        stored.push(fetch_blob(lib, &m.url, &m.kind, &m.headers, epoch, !o.staged).await?);
     }
     {
         let db = lib.db_at(epoch)?;
@@ -203,7 +212,7 @@ async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool>
         // a sync may have removed after this download found it already there. Removals of such
         // files happen under this same lock, so what is seen here stays true until the media is
         // recorded: a media must never come back without its file.
-        if revive { for (_, rel, _) in &stored { if !lib.dir.join(rel).exists() { bail!("文件在保存期间被清理了，请重试"); } } }
+        if revive { for (_, rel, _) in &stored { if !lib.dir.join(rel).exists() { bail!(tr!("download.cleanedUp")); } } }
         let tx = db.conn().unchecked_transaction()?;
         db.upsert_post_checked(&post.meta, |id, ext| lib.dir.join(crate::oplog::blob_rel(id, ext)).exists())?;
         let mut added = false;
@@ -213,6 +222,7 @@ async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool>
         if o.recent && added { db.mark_recent(&post.meta.id, crate::store::now_ms())?; }
         tx.commit()?;
     }
+    if o.staged { return Ok(true); }
     update(|s| for (_, rel, _) in &stored {
         s.recent.push_back(lib.dir.join(rel).to_string_lossy().into_owned());
         if s.recent.len() > 12 { s.recent.pop_front(); }
@@ -225,7 +235,7 @@ async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool>
 async fn fetch_post(url: &str, route: Route) -> anyhow::Result<RemotePost> {
     let cookies = COOKIES.lock().unwrap().clone();
     let protected = |c: Option<Credentials>| async move {
-        let c = c.ok_or_else(|| anyhow!("未设置账号 Cookie（锁定账号的帖子需要）"))?;
+        let c = c.ok_or_else(|| anyhow!(tr!("download.noCookie")))?;
         crate::protected::fetch_post(url, &c).await.map_err(|e| anyhow!("{e}"))
     };
     let post: RemotePost = match route {
@@ -235,12 +245,12 @@ async fn fetch_post(url: &str, route: Route) -> anyhow::Result<RemotePost> {
         Route::Auto => match net::fetch_fx(url).await {
             Ok(p) if !p.media.is_empty() => p,
             first => match cookies {
-                Some(_) => protected(cookies).await.map_err(|e| anyhow!("FxTwitter 与锁定账号模块均失败：{e}"))?,
-                None => { first?; bail!("帖子没有可下载的媒体（若为锁定账号，请设置 Cookie）") }
+                Some(_) => protected(cookies).await.map_err(|e| anyhow!(tr!("download.bothFailed", e = e)))?,
+                None => { first?; bail!(tr!("download.noMediaMaybeLocked")) }
             },
         },
     };
-    if post.media.is_empty() { bail!("帖子没有图片或视频"); }
+    if post.media.is_empty() { bail!(tr!("download.noMedia")); }
     Ok(post)
 }
 
@@ -266,24 +276,24 @@ pub fn post_link(meta: &crate::model::PostMeta) -> Option<String> {
 /// its id (verified), or by a new media while the old one stays recoverable in the recycle bin.
 pub async fn repair(lib: &Library, media_id: &str) -> anyhow::Result<Repair> {
     let epoch = lib.epoch();
-    let (post_id, ordinal, kind, cur_rel) = lib.db().media_row(media_id)?.ok_or_else(|| anyhow!("找不到这张媒体"))?;
+    let (post_id, ordinal, kind, cur_rel) = lib.db().media_row(media_id)?.ok_or_else(|| anyhow!(tr!("repair.notFound")))?;
     let kind = if kind == "video" { MediaKind::Video } else { MediaKind::Photo };
     let meta = lib.db().post_meta(&post_id)?.unwrap_or_default();
     let Some(link) = post_link(&meta) else {
         // No source link (e.g. a legacy import): ask peers for a verified copy instead.
         match lib.check_file(media_id, &cur_rel) {
             Some(reason) => { lib.db_at(epoch)?.set_bad(media_id, Some(reason))?; return Ok(Repair::FromPeers) }
-            None => bail!("这条帖子没有链接，无法重新下载（文件本身完好）"),
+            None => bail!(tr!("repair.noLink")),
         }
     };
     let post = fetch_post(&link, Route::Auto).await?;
     let src = post.media.get(ordinal as usize).filter(|m| m.kind == kind)
         .or_else(|| post.media.iter().find(|m| m.kind == kind && post.media.len() == 1))
-        .ok_or_else(|| anyhow!("帖子里已找不到这张媒体"))?;
+        .ok_or_else(|| anyhow!(tr!("repair.goneFromPost")))?;
     let (tmp, sha, ext) = fetch_tmp(lib, &src.url, &kind, &src.headers, false).await?;
     let _tmp_cleanup = crate::library::TempFile(tmp.clone());
     let db = lib.db_at(epoch)?;
-    if db.media_row(media_id)?.is_none() || db.trash_reg(media_id)?.state != crate::rules::LIVE { bail!("媒体已被删除"); }
+    if db.media_row(media_id)?.is_none() || db.trash_reg(media_id)?.state != crate::rules::LIVE { bail!(tr!("repair.deleted")); }
     if sha == media_id {
         let dst = lib.dir.join(&cur_rel);
         std::fs::create_dir_all(dst.parent().unwrap())?;
@@ -300,23 +310,26 @@ pub async fn repair(lib: &Library, media_id: &str) -> anyhow::Result<Repair> {
         for m in db.tag_sources(media_id, &label)? { db.set_tag_source(&sha, &label, &m, true)?; }
     }
     for m in db.ai_models_for(media_id)? { db.mark_ai_done(&sha, &m)?; }
+    // where the old one was shown, the new one is shown
+    let folders = db.folders_of(media_id)?;
+    for f in &folders { db.add_to_folder(f, std::slice::from_ref(&sha))?; }
     db.trash_action(media_id, crate::rules::TrashAction::Trash)?;
     tx.commit()?;
     Ok(Repair::ReplacedNew)
 }
 
 /// Streams a URL into the blob store, hashing as it goes. Only MP4 is accepted for video.
-async fn fetch_blob(lib: &Library, url: &str, kind: &MediaKind, headers: &[(String, String)], epoch: u64) -> anyhow::Result<(String, String, MediaKind)> {
+async fn fetch_blob(lib: &Library, url: &str, kind: &MediaKind, headers: &[(String, String)], epoch: u64, queue_cancel: bool) -> anyhow::Result<(String, String, MediaKind)> {
     let mut last = None;
     for attempt in 0..3u32 {
         if attempt > 0 { tokio::time::sleep(std::time::Duration::from_millis(800 * 2u64.pow(attempt))).await; }
-        match fetch_once(lib, url, kind, headers, epoch).await { Ok(v) => return Ok(v), Err(e) => last = Some(e) }
+        match fetch_once(lib, url, kind, headers, epoch, queue_cancel).await { Ok(v) => return Ok(v), Err(e) => last = Some(e) }
     }
     Err(last.unwrap())
 }
 
-async fn fetch_once(lib: &Library, url: &str, kind: &MediaKind, headers: &[(String, String)], epoch: u64) -> anyhow::Result<(String, String, MediaKind)> {
-    let (tmp, sha, ext) = fetch_tmp(lib, url, kind, headers, true).await?;
+async fn fetch_once(lib: &Library, url: &str, kind: &MediaKind, headers: &[(String, String)], epoch: u64, queue_cancel: bool) -> anyhow::Result<(String, String, MediaKind)> {
+    let (tmp, sha, ext) = fetch_tmp(lib, url, kind, headers, queue_cancel).await?;
     let _cleanup = crate::library::TempFile(tmp.clone());
     let db = lib.db_at(epoch)?;
     let rel = lib.commit_tmp_locked(&db, &tmp, &sha, ext)?;
@@ -327,7 +340,7 @@ async fn fetch_once(lib: &Library, url: &str, kind: &MediaKind, headers: &[(Stri
 async fn fetch_tmp(lib: &Library, url: &str, kind: &MediaKind, headers: &[(String, String)], queue_cancel: bool) -> anyhow::Result<(std::path::PathBuf, String, &'static str)> {
     // media come from X's media servers only: a wrong or tampered answer cannot make this
     // device fetch from the local network or anywhere else
-    if !crate::rules::media_url_ok(url) { bail!("媒体地址不在 X 的媒体服务器上"); }
+    if !crate::rules::media_url_ok(url) { bail!(tr!("download.notXMedia")); }
     let mut rq = net::client().get(url);
     for (k, v) in headers { rq = rq.header(k.as_str(), v.as_str()); }
     let resp = rq.send().await?.error_for_status()?;
@@ -346,8 +359,8 @@ async fn fetch_tmp(lib: &Library, url: &str, kind: &MediaKind, headers: &[(Strin
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             total += chunk.len() as u64;
-            if total > MAX_MEDIA_BYTES { bail!("文件过大（超过 {} GB）", MAX_MEDIA_BYTES >> 30); }
-            if queue_cancel && CANCEL.load(Ordering::SeqCst) { bail!("已取消"); }
+            if total > MAX_MEDIA_BYTES { bail!(tr!("download.tooLarge", gb = MAX_MEDIA_BYTES >> 30)); }
+            if queue_cancel && CANCEL.load(Ordering::SeqCst) { bail!(tr!("common.cancelled")); }
             if head.len() < 16 { head.extend_from_slice(&chunk[..chunk.len().min(16 - head.len())]); }
             hasher.update(&chunk);
             f.write_all(&chunk).await?;
@@ -355,7 +368,7 @@ async fn fetch_tmp(lib: &Library, url: &str, kind: &MediaKind, headers: &[(Strin
         f.sync_all().await?;
         let photo = *kind == MediaKind::Photo;
         let sn = crate::rules::sniff(&head);
-        if !crate::rules::sniff_ok(sn, photo) { bail!("{}", Library::not_media_reason(sn, photo)); }
+        if !crate::rules::sniff_ok(sn, photo) { bail!(crate::library::NotMedia(Library::not_media_reason(sn, photo))); }
         Ok(())
     }.await;
     if let Err(e) = result { let _ = tokio::fs::remove_file(&tmp).await; return Err(e); }

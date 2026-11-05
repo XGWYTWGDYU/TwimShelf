@@ -1,6 +1,6 @@
 [package]
 name = "tl-core"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 
 [lib]
@@ -9,31 +9,37 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 thiserror = "1"
 anyhow = "1"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip", "blocking"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "io-util"] }
 futures-util = "0.3"
 regex = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 encoding_rs = "0.8"
 libc = "0.2"
+# LAN discovery for every front end (Bonjour-compatible mDNS, no runtime dependency)
+mdns-sd = "0.21"
 chacha20poly1305 = "0.10"
 hkdf = "0.12"
 hmac = "0.12"
 spake2 = "0.4"
-# Protected (locked) accounts: fetched by the separate module `tl-protected` through the types
-# of `tl-protected-api`, compiled into this library (plain function calls, no extra process).
-tl-protected-api = { path = "protected-api" }
-tl-protected = { path = "protected" }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+kamadak-exif = "0.6"
+moxcms = "0.8"
+# protected accounts (src/protected): X's URLs, blocking requests on worker threads
+url = "2"
 
-# One workspace, so `cargo test --workspace` here also runs the protected module's own tests.
-[workspace]
-members = [".", "protected", "protected-api"]
+[features]
+# HEIC and AVIF through libheif, for the Flutter app (scripts/flutter/build_core.sh, build.ps1)
+heif = ["dep:cmake"]
+
+[build-dependencies]
+cmake = { version = "0.1", optional = true }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }

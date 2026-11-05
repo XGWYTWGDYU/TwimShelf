@@ -167,6 +167,26 @@ proptest! {
     }
 }
 
+/// 按添加时间: the post added last comes first, whole, its media in their order.
+#[test]
+fn feed_can_be_ordered_by_when_things_were_added() {
+    let d = tmp("added");
+    let lib = Library::open(d.join("lib")).unwrap();
+    for (i, id) in ["201", "202", "203"].iter().enumerate() {
+        let src = d.join(format!("src{i}"));
+        post(&src, &format!("p{i}"), id, &[("1.jpg", format!("{id}a").as_bytes()), ("2.jpg", format!("{id}b").as_bytes())]);
+        lib.import_legacy_dir(&src).unwrap();
+    }
+    let req = tl_core::library::FeedRequest { newest_first: true, terms: vec![], scope: tl_core::model::SearchScope::Both, seed: Some(9), fuzzy: false, term_vectors: vec![], embed_model: None,
+        threshold: 0.5, fields: Default::default(), filter: Default::default() };
+    let got: Vec<(String, i64)> = lib.feed(&req).unwrap().into_iter().map(|i| (i.post_id, i.ordinal)).collect();
+    let want: Vec<(String, i64)> = ["203", "203", "202", "202", "201", "201"].iter().enumerate().map(|(i, p)| (p.to_string(), (i % 2) as i64)).collect();
+    assert_eq!(got, want);
+    let packed = serde_json::to_value(lib.feed_packed(&req).unwrap()).unwrap();
+    let posts: Vec<String> = packed["posts"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap_or_default().to_string()).collect();
+    assert_eq!(posts.first().map(String::as_str), Some("203"), "the packed form the apps read keeps the order");
+}
+
 /// Loose media: every file its own loose post; a file that belongs to a real post stays there;
 /// identical loose files are stored once; HTML pages are refused; nested folders don't matter.
 #[test]
@@ -204,6 +224,28 @@ fn loose_media_import() {
     assert_eq!(lib.db().media_row(&shared).unwrap().unwrap().0, "77", "real post keeps its file");
     // the folder holds the loose media and (as a touched post's media) the shared file
     assert_eq!(lib.db().folders().unwrap(), vec![("散图".to_string(), 3)]);
+}
+
+/// A loose ZIP may hold post folders too (a 推文内容.txt beside the media): those become posts
+/// with their text, the rest loose media, and the sidecars are never reported as unsupported.
+#[test]
+fn loose_zip_keeps_post_folders_as_posts() {
+    let d = tmp("loose-posts");
+    let lib = Library::open(d.join("lib")).unwrap();
+    let src = d.join("src");
+    post(&src.join("posts"), "post-0", "90", &[("1.jpg", b"p0")]);
+    post(&src.join("posts"), "post-1", "91", &[("1.jpg", b"p1"), ("2.jpg", b"p1b")]);
+    std::fs::create_dir_all(src.join("loose")).unwrap();
+    std::fs::write(src.join("loose/x.jpg"), jpg(b"loose")).unwrap();
+    let zp = d.join("mixed.zip");
+    zip_dir(&src, &zp);
+    let r = tl_core::import::import_loose_zip(&lib, &zp, None).unwrap();
+    assert!(r.issues.iter().all(|i| i.category != "unsupported"), "{:?}", r.issues);
+    assert_eq!((r.folders, r.sidecars, r.new_media), (2, 2, 4));
+    let st = lib.db().stats().unwrap();
+    assert_eq!((st.posts, st.photos), (3, 4));
+    assert_eq!(lib.db().media_row(&sha(&jpg(b"p1b"))).unwrap().unwrap().0, "91", "post folder's media stay with its post");
+    assert!(lib.db().media_row(&sha(&jpg(b"loose"))).unwrap().unwrap().0.starts_with("loose:"));
 }
 
 /// "全部加入文件夹" from the tag list: exactly the live media carrying the tag (under its

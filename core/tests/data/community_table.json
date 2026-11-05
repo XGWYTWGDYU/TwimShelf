@@ -1,0 +1,31 @@
+{
+  "TweetDetail": {
+    "@path": "/i/api/graphql/ROTATEDdetail12345/TweetDetail",
+    "@method": "GET",
+    "queryId": "ROTATEDdetail12345",
+    "variables": {
+      "focalTweetId": "1349129669258448897"
+    },
+    "features": {
+      "longform_notetweets_consumption_enabled": true,
+      "responsive_web_twitter_article_tweet_consumption_enabled": true
+    },
+    "fieldToggles": {
+      "withArticleRichContentState": true
+    }
+  },
+  "TweetResultByRestId": {
+    "@path": "/i/api/graphql/ROTATEDbyid12345/TweetResultByRestId",
+    "@method": "GET",
+    "queryId": "ROTATEDbyid12345",
+    "variables": {
+      "tweetId": "1349129669258448897"
+    },
+    "features": {
+      "longform_notetweets_consumption_enabled": true
+    },
+    "fieldToggles": {
+      "withArticleRichContentState": true
+    }
+  }
+}

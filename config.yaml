@@ -1,0 +1,37 @@
+# 每个版本 App 的身份：名称、图标、版本号、包名 / Bundle ID、分享扩展、签名。
+# 这里是唯一的来源。改完之后不用手动做什么：./build.sh、build.ps1 和 Xcode 的构建按钮
+# 都会先按这里重新生成配置（scripts/apply.py）。只有开关原生版的分享扩展时，原生
+# Xcode 工程需要重新生成一次：运行 ./build.sh --configure（需要 XcodeGen）。
+
+version: 1.1.0                # 所有平台共用的版本号；提高它并推送到 main，GitHub Actions 就会发布新版本
+build_number: 5               # 每次发布递增（iOS 的 CFBundleVersion、Android 的 versionCode 都用它）
+icon: icon.png                # 唯一的图标来源，正方形 PNG，自带圆角和透明边；各平台的图标都由它生成
+
+build:
+  # 所有构建缓存和构建产物的位置：相对路径以项目根目录为准，也可以是任意绝对路径。
+  # 不论用脚本、Xcode 还是 Flutter 构建：
+  #   <dir>/cache  构建缓存（Rust、Xcode、Flutter、Gradle、CocoaPods、Dart 包、下载的 SDK、日志）
+  #   <dir>/apps   安装包（dmg、ipa、apk、setup.exe、AppImage）
+  dir: build
+
+native:                       # 原生 iOS / iPadOS / macOS（native/Shared、native/iOS、native/macOS）
+  name: TwimShelf             # 主屏幕、Dock、菜单里显示的名字
+  bundle_id: org.twimshelf.release.b82168e857475   # iOS 用 <bundle_id>.ios，Mac 用 <bundle_id>.mac
+  share_extension_ios: false  # iOS「分享到」：需要 development_team，且必须是付费开发者账号
+  share_extension_mac: false  # Mac「分享」菜单：需要 development_team，免费账号也可以
+  app_group_ios: ""           # 留空：group.<bundle_id>
+  app_group_mac: ""           # 留空：<你的 Team ID>.<bundle_id>
+  development_team: ""        # 留空：在 Xcode 里选自己的团队，或者写在这里（10 位 Team ID）
+  mac_signing_identity: ""    # 留空：有团队时自动签名，没有团队时用临时签名（ad-hoc）
+  url_scheme: twimshelf
+
+flutter:                      # Flutter 版（flutter/app）：Android、Windows、Linux、iOS、macOS
+  name: TwimShelf             # Android、Windows、Linux 上显示的名字
+  apple_name: TwimShelf       # iOS / macOS 上显示的名字
+  apple_bundle_id: org.twimshelf.flutter.a426e3d2bf2bc7   # Flutter 的 iOS / macOS 版
+  android_package: org.twimshelf.android.a2024d4b106801   # Android 的 applicationId
+  desktop_id: org.twimshelf.desktop.a394128ded6644        # Linux 的应用 ID（菜单项、图标名）
+  share_extension: true       # Android「分享到」、Windows「发送到」、Linux「打开方式」
+  share_extension_ios: false  # iOS「分享到」：需要 development_team，且必须是付费开发者账号
+  share_extension_mac: false  # Mac「分享」菜单：需要 development_team，免费账号也可以
+  development_team: ""        # 留空：在 Xcode 里选自己的团队，或者写在这里（10 位 Team ID）

@@ -1,7 +1,8 @@
-core/target/
 *.xcodeproj/xcuserdata/
 build/
 .DS_Store
+.swiftpm/
+__pycache__/
 .claude/
 *.xcresult
 # personal files that sit in the project folder (diagnostics exports, screenshots, stray output)
@@ -9,15 +10,32 @@ build/
 /*.heic
 /1
 *.xcodeproj/project.xcworkspace/xcuserdata/
-core/protected/target/
 /*.mov
 
-# Generated projects and builder-specific configuration
-*.xcodeproj/
-.generated/
-project.generated.yml
-build-config.json
-**/fixtures/
-**/Fixtures/
-*.proptest-regressions
-__pycache__/
+# Builds: everything goes to build.dir of config.yaml (<dir>/cache, <dir>/apps; default build/).
+# These are links from the Flutter projects into that cache, made by scripts/apply.py.
+/flutter/*/.dart_tool
+/flutter/app/build
+/flutter/installer/build
+/flutter/app/android/.gradle
+/flutter/app/ios/Pods
+/flutter/app/macos/Pods
+/flutter/tl_llama/android/.cxx
+/flutter/tl_core/apple
+/flutter/tl_core/android/src/main/jniLibs
+/flutter/tl_core/windows/lib
+/flutter/tl_core/linux/lib
+/flutter/tl_*/pubspec.lock
+/flutter/installer/pubspec.lock
+/flutter/app/android/local.properties
+# generated per checkout by scripts/apply.py: where builds go, what was last applied
+**/BuildLocation.xcconfig
+/native/.applied.json
+
+
+# icons: made from native/Resources/Assets.xcassets/AppIcon.appiconset by scripts/flutter/make_icons.py
+/flutter/app/android/app/src/main/res/mipmap-*/*.png
+/flutter/app/ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png
+/flutter/app/macos/Runner/Assets.xcassets/AppIcon.appiconset/*.png
+/flutter/app/assets/app_icon.png
+/flutter/installer/assets/app_icon.png

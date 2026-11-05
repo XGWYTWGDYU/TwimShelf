@@ -41,7 +41,8 @@ pub fn merge_bits(a: TagBits, b: TagBits) -> TagBits {
     TagBits { origin: (u.0 as u8) | ((i.0 as u8) << 1), h_user: u.1, h_ai: i.1 }
 }
 
-/// Next clock value: strictly greater than `last`, and tracks wall time when it is ahead.
+/// Next clock value: strictly greater than `last` unless saturated at u64::MAX;
+/// tracks wall time when it is ahead. Callers must not assume strict progress at exhaustion.
 pub fn next_hlc(last: Hlc, now_ms: u64) -> Hlc {
     let wall = now_ms.saturating_mul(1 << 16);
     if wall > last { wall } else { last.saturating_add(1) }

@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 156b172bc39e969eb7702f3bd8e9fb801f8982fd02015798cca73c22e965cffe # shrinks to edits = [(0, ImportPost { post: 1, text: Some(1), url: None, author: None }), (1, ImportPost { post: 1, text: Some(0), url: None, author: None })], order = [(0, 0)]
+cc 5cbcdfacbbbf7509bb8eb8384503e1e7664ebfe047ec03590bfdd4c66974cd63 # shrinks to edits = [(2, Bin { media: 1, action: 0 }), (0, Bin { media: 1, action: 0 }), (2, ImportPost { post: 1, text: None, url: Some(0), author: Some(1) }), (0, Tag { media: 2, label: 3, ai: true }), (1, Untag { media: 0, label: 1 }), (2, Bin { media: 2, action: 0 }), (0, ClaimMedia { media: 0, post: 2, ordinal: 0 }), (0, Tag { media: 1, label: 1, ai: true }), (0, ImportPost { post: 0, text: None, url: None, author: Some(0) }), (0, ImportPost { post: 2, text: None, url: Some(1), author: None })], order = [(0, 1), (1, 1), (2, 1), (0, 2)]
+cc 1092804292e8b2c0f69ec1c04de0385894033f5b91a5345c7b552f2c3292d637 # shrinks to pre = [Rename { from: 0, to: 2 }, Rename { from: 2, to: 0 }], labels = [2], replace = false
+cc fb0ee3e0a30e8560f78f02f3a9ee18d2a2950c3b0ce2514d83f99552a4b29a26 # shrinks to edits = [(1, Tag { media: 0, label: 2, ai: false }), (0, Rename { from: 0, to: 2 }), (1, Rename { from: 2, to: 0 }), (0, Rename { from: 2, to: 0 })], order = [(0, 0)]
+cc 2b2b42083fe35dd0b370f506ed4ddf23edc2973ee70c4845c2894f20ffdfe7eb # shrinks to edits = [(0, FolderAdd { f: 1, media: 1 }), (2, UndoRename { label: 2 }), (2, Rename { from: 1, to: 1 }), (0, FolderDelete { f: 1 }), (1, Tag { media: 2, label: 2, ai: false }), (2, FolderAdd { f: 1, media: 1 }), (1, Reimport { media: 0 }), (1, ImportPost { post: 0, text: Some(0), url: Some(1), author: None }), (2, ImportPost { post: 1, text: Some(0), url: None, author: None }), (1, FolderAdd { f: 1, media: 2 }), (1, Tag { media: 1, label: 0, ai: false }), (1, FolderAdd { f: 1, media: 0 }), (1, ClaimMedia { media: 1, post: 1, ordinal: 0 }), (0, ImportPost { post: 2, text: Some(2), url: Some(2), author: Some(1) })], order = [(2, 2), (0, 2), (2, 1), (0, 2), (1, 0), (2, 2), (0, 2), (1, 1)]

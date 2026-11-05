@@ -1,0 +1,23 @@
+name: tl_llama
+description: "llama.cpp for the Flutter app on Android, Windows and Linux: vision tags and embeddings, CPU and Vulkan."
+publish_to: 'none'
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.7
+  flutter: '>=3.35.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.4
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true

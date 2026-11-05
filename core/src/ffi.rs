@@ -23,8 +23,17 @@ fn with<T: serde::Serialize>(f: impl FnOnce(Arc<Library>) -> anyhow::Result<T>) 
     // A Rust panic must never unwind into Swift (that aborts the app): report it as an error.
     let r = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lib().and_then(f))) {
         Ok(r) => r,
-        Err(p) => Err(anyhow::anyhow!("内部错误：{}", p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default())),
+        Err(p) => Err(anyhow::anyhow!(tr!("ffi.internal", msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default()))),
     };
+    out(match r {
+        Ok(v) => serde_json::json!({ "ok": v }).to_string(),
+        Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
+    })
+}
+
+/// `with` for functions that need no open library.
+fn respond<T: serde::Serialize>(f: impl FnOnce() -> anyhow::Result<T>) -> *mut c_char {
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| Err(anyhow::anyhow!(tr!("ffi.internal", msg = ""))));
     out(match r {
         Ok(v) => serde_json::json!({ "ok": v }).to_string(),
         Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
@@ -39,9 +48,18 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 fn guard_ptr(f: impl FnOnce() -> *mut c_char) -> *mut c_char {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|p| {
         let m = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
-        out(serde_json::json!({ "error": format!("内部错误：{m}") }).to_string())
+        out(serde_json::json!({ "error": tr!("ffi.internal", msg = m) }).to_string())
     })
 }
+
+/// The app's language for the core's messages (errors, reports): a language tag such as
+/// "en", "zh-Hans" or "ja". Called once at launch, before anything else.
+#[no_mangle]
+pub extern "C" fn tl_set_language(tag: *const c_char) { guard((), || crate::i18n::set_language(&s(tag))) }
+
+/// This build's name, for the core's messages. Called once at launch.
+#[no_mangle]
+pub extern "C" fn tl_set_app_name(name: *const c_char) { guard((), || crate::i18n::set_app_name(&s(name))) }
 
 /// A setting shared by every device (`null` = the default).
 #[no_mangle]
@@ -71,9 +89,35 @@ pub extern "C" fn tl_open(dir: *const c_char) -> bool { guard(false, || {
 }) }
 
 #[no_mangle]
+pub extern "C" fn tl_thumbnail_items() -> *mut c_char {
+    with(|l| {
+        let db = l.db();
+        let mut st = db.conn().prepare("SELECT m.id,m.path,m.kind FROM media m WHERE NOT EXISTS(SELECT 1 FROM trash x WHERE x.media_id=m.id AND x.state!=0)")?;
+        let items = st.query_map([], |r| Ok(serde_json::json!({"media_id": r.get::<_, String>(0)?, "path": l.dir.join(r.get::<_, String>(1)?).to_string_lossy(), "kind": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(items)
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn tl_feed(request_json: *const c_char) -> *mut c_char {
     with(|l| { let req: FeedRequest = serde_json::from_str(&s(request_json))?; l.feed(&req) })
 }
+
+/// The same feed in the compact form (`PackedFeed`: each post and tag list once, relative
+/// paths): what the apps use, a fraction of the size for a large library.
+#[no_mangle]
+pub extern "C" fn tl_feed_packed(request_json: *const c_char) -> *mut c_char {
+    with(|l| {
+        let req: FeedRequest = serde_json::from_str(&s(request_json))?;
+        let feed = l.feed_packed(&req)?;
+        crate::media_size::fill_in_background(l);
+        Ok(feed)
+    })
+}
+
+/// Whether media sizes are still being read in the background (the next feed has more of them).
+#[no_mangle]
+pub extern "C" fn tl_media_sizes_filling() -> bool { guard(false, crate::media_size::filling) }
 
 #[no_mangle]
 pub extern "C" fn tl_import_legacy_dir(dir: *const c_char) -> *mut c_char {
@@ -145,7 +189,7 @@ pub extern "C" fn tl_untag(media_id: *const c_char, label: *const c_char) -> *mu
     with(|l| l.untag(&s(media_id), &s(label)))
 }
 
-/// Renames (or merges) a tag everywhere; synced, works during AI tagging, can be undone.
+/// Renames (or merges) a tag everywhere; synced, works during AI tagging.
 /// Returns the new name.
 #[no_mangle]
 pub extern "C" fn tl_rename_tag(from: *const c_char, to: *const c_char) -> *mut c_char { with(|l| l.rename_tag(&s(from), &s(to))) }
@@ -158,13 +202,6 @@ pub extern "C" fn tl_delete_tag(label: *const c_char) -> *mut c_char { with(|l| 
 #[no_mangle]
 pub extern "C" fn tl_remove_ai_tags() -> *mut c_char { with(|l| Ok(l.db().remove_ai_tags()?)) }
 
-/// Active renames: [[old, current], …].
-#[no_mangle]
-pub extern "C" fn tl_tag_renames() -> *mut c_char { with(|l| Ok(l.db().renames()?)) }
-
-#[no_mangle]
-pub extern "C" fn tl_undo_rename(old: *const c_char) -> *mut c_char { with(|l| Ok(l.db().undo_rename(&s(old))?)) }
-
 /// Current tags of one media (names after renames), live only: [[label, origin], …].
 #[no_mangle]
 pub extern "C" fn tl_media_tags(media_id: *const c_char) -> *mut c_char {
@@ -176,6 +213,76 @@ pub extern "C" fn tl_all_tags() -> *mut c_char { with(|l| Ok(l.db().all_tags()?)
 
 #[no_mangle]
 pub extern "C" fn tl_stats() -> *mut c_char { with(|l| Ok(l.db().stats()?)) }
+
+/// 检查更新: the newer release for this build (null when current). `query_json` is an
+/// `update::UpdateQuery`. Blocks on the network: call it off the main thread. Needs no library.
+#[no_mangle]
+pub extern "C" fn tl_update_check(query_json: *const c_char) -> *mut c_char {
+    respond(|| { let q: crate::update::UpdateQuery = serde_json::from_str(&s(query_json))?; crate::update::check(&q) })
+}
+
+/// Downloads the installer of `info_json` (what `tl_update_check` returned) into `dir`; the
+/// file's path. Blocks: call it off the main thread.
+#[no_mangle]
+pub extern "C" fn tl_update_download(info_json: *const c_char, dir: *const c_char) -> *mut c_char {
+    respond(|| {
+        let v: serde_json::Value = serde_json::from_str(&s(info_json))?;
+        let info = crate::update::UpdateInfo {
+            version: v["version"].as_str().unwrap_or_default().into(), page_url: v["page_url"].as_str().unwrap_or_default().into(),
+            notes: String::new(), asset_name: v["asset_name"].as_str().map(Into::into), asset_url: v["asset_url"].as_str().map(Into::into),
+            asset_size: v["asset_size"].as_u64().unwrap_or(0), asset_digest: v["asset_digest"].as_str().map(Into::into),
+        };
+        Ok(crate::update::download(&info, std::path::Path::new(&s(dir)))?.to_string_lossy().into_owned())
+    })
+}
+
+/// Windows / Linux secrets (`sealed.rs`): a new key, and values sealed / opened with one.
+#[no_mangle]
+pub extern "C" fn tl_secret_key() -> *mut c_char { respond(|| Ok(crate::sealed::new_key())) }
+#[no_mangle]
+pub extern "C" fn tl_secret_seal(key: *const c_char, text: *const c_char) -> *mut c_char { respond(|| crate::sealed::seal(&s(key), &s(text))) }
+#[no_mangle]
+pub extern "C" fn tl_secret_open(key: *const c_char, blob: *const c_char) -> *mut c_char { respond(|| crate::sealed::open(&s(key), &s(blob))) }
+
+/// 存储空间: sizes by group. `extra_json` lists the front end's own places
+/// (`[{"key":"app","path":…}]`); reading a large library's sizes takes a moment, so call it off
+/// the main thread.
+#[no_mangle]
+pub extern "C" fn tl_storage_usage(extra_json: *const c_char) -> *mut c_char {
+    with(|l| {
+        let extra: Vec<crate::storage::ExtraPlace> = serde_json::from_str(&s(extra_json)).unwrap_or_default();
+        crate::storage::usage(&l, &extra)
+    })
+}
+
+/// A shared link: downloads into the staging folder `dir`, which is not the library (`share`).
+/// `urls_json` is a list of links, `route` "auto", "fx" or "cookie". Blocks: off the main thread.
+#[no_mangle]
+pub extern "C" fn tl_share_stage(dir: *const c_char, urls_json: *const c_char, route: *const c_char) -> *mut c_char {
+    let (dir, urls, route) = (s(dir), s(urls_json), s(route));
+    respond(|| {
+        let urls: Vec<String> = serde_json::from_str(&urls)?;
+        let route = serde_json::from_value(serde_json::json!(route)).unwrap_or_default();
+        crate::share::stage(Path::new(&dir), &urls, route)
+    })
+}
+
+/// The staging folder `dir` as a `.tlpack` at `out_path`, to import when the person says so.
+#[no_mangle]
+pub extern "C" fn tl_share_pack(dir: *const c_char, out_path: *const c_char) -> *mut c_char {
+    let (dir, out_path) = (s(dir), s(out_path));
+    respond(|| crate::share::pack(Path::new(&dir), Path::new(&out_path)))
+}
+
+/// Stops a running import after the current post; what came in stays, the report says so.
+#[no_mangle]
+pub extern "C" fn tl_import_cancel() { guard((), crate::import::cancel) }
+
+/// Free bytes on the volume of `path`, or null when the system does not say.
+#[no_mangle]
+pub extern "C" fn tl_free_space(path: *const c_char) -> *mut c_char {
+    guard_ptr(|| out(serde_json::json!({ "ok": crate::storage::free_space(std::path::Path::new(&s(path))) }).to_string()))
+}
 
 /// Deletes all local data (AI models only when `include_models`). Never synced.
 #[no_mangle]
@@ -244,45 +351,6 @@ pub extern "C" fn tl_folder_remove(json: *const c_char) -> *mut c_char {
         tx.commit()?; Ok(n)
     })
 }
-
-// ---------- Triage mode (local only) ----------
-
-#[derive(Deserialize)]
-struct TriageArgs { post: String, decision: crate::triage::Decision, #[serde(default)] folder: Option<String>, expected: Option<Vec<String>> }
-
-/// Posts still to triage under a filter, each with its live media (absolute paths).
-#[no_mangle]
-pub extern "C" fn tl_triage_queue(filter_json: *const c_char) -> *mut c_char {
-    with(|l| {
-        let f: crate::triage::TriageFilter = serde_json::from_str(&s(filter_json))?;
-        let mut q = l.db().triage_queue(&f)?;
-        for u in &mut q { for it in &mut u.items { it.path = l.dir.join(&it.path).to_string_lossy().into_owned(); } }
-        Ok(q)
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn tl_triage_counts(filter_json: *const c_char) -> *mut c_char {
-    with(|l| { let f: crate::triage::TriageFilter = serde_json::from_str(&s(filter_json))?; Ok(l.db().triage_counts(&f)?) })
-}
-
-/// Keep / delete (whole post to the bin) / folder; atomic. Returns whether it applied.
-#[no_mangle]
-pub extern "C" fn tl_triage_decide(json: *const c_char) -> *mut c_char {
-    with(|l| {
-        let a: TriageArgs = serde_json::from_str(&s(json))?;
-        l.triage_decide_checked(&a.post, a.decision, a.folder.as_deref(), a.expected.as_deref())
-    })
-}
-
-#[no_mangle]
-pub extern "C" fn tl_triage_undo(post: *const c_char) -> *mut c_char {
-    with(|l| { let db = l.db(); let tx = db.conn().unchecked_transaction()?; let ok = db.triage_undo(&s(post))?; tx.commit()?; Ok(ok) })
-}
-
-/// Forgets every triage decision on this device.
-#[no_mangle]
-pub extern "C" fn tl_triage_clear() -> *mut c_char { with(|l| Ok(l.db().triage_clear()?)) }
 
 // ---------- Recycle bin ----------
 
@@ -363,13 +431,24 @@ pub extern "C" fn tl_verify_cancel() { guard((), || { crate::verify::cancel() })
 #[no_mangle]
 pub extern "C" fn tl_report_bad(media_id: *const c_char) -> *mut c_char { with(|l| l.report_bad(&s(media_id))) }
 
+#[no_mangle]
+pub extern "C" fn tl_report_thumbnail_failed(media_id: *const c_char) -> *mut c_char { with(|l| l.report_thumbnail_failed(&s(media_id))) }
+
+/// A consistent copy of the database at `out_path`, whatever is being written: moving the data
+/// folder of the running app copies this instead of the live files.
+#[no_mangle]
+pub extern "C" fn tl_db_snapshot(out_path: *const c_char) -> *mut c_char {
+    let out = s(out_path);
+    with(|l| { l.db().conn().execute("VACUUM INTO ?1", [&out])?; Ok(()) })
+}
+
 /// Downloads a damaged media again (blocking; call off the main thread).
 #[no_mangle]
 pub extern "C" fn tl_repair(media_id: *const c_char) -> *mut c_char {
     with(|l| {
         let id = s(media_id);
         download::runtime().block_on(async { tokio::time::timeout(std::time::Duration::from_secs(300), download::repair(&l, &id)).await })
-            .map_err(|_| anyhow::anyhow!("下载超时"))?
+            .map_err(|_| anyhow::anyhow!(tr!("ffi.downloadTimeout")))?
     })
 }
 
@@ -380,7 +459,50 @@ pub extern "C" fn tl_set_models_dir(dir: *const c_char) -> *mut c_char { with(|l
 
 #[no_mangle]
 pub extern "C" fn tl_model_download(repo: *const c_char) -> *mut c_char {
-    with(|l| crate::models::start_download(s(repo), l.models_dir()))
+    with(|l| crate::models::start_download(s(repo), None, l.models_dir()))
+}
+
+/// The models offered for download in `format` (`mlx` or `gguf`), with the folder each installs into.
+#[no_mangle]
+pub extern "C" fn tl_model_catalog(format: *const c_char) -> *mut c_char {
+    // read once at launch, possibly before a library is open
+    let d = crate::hub::memory_profile();
+    respond(|| Ok(crate::catalog::for_format(&s(format)).into_iter().map(|m| {
+        let folder = crate::catalog::folder(&m);
+        let tier = crate::hub::tier(m.bytes, &d);
+        let mut v = serde_json::to_value(&m).unwrap(); v["folder"] = folder.into(); v["tier"] = tier.into(); v
+    }).collect::<Vec<_>>()))
+}
+
+/// This device as the model store sees it.
+#[no_mangle]
+pub extern "C" fn tl_hub_device() -> *mut c_char { with(|l| Ok(crate::hub::device(&l.models_dir()))) }
+
+/// The model store's results. Network: call off the main thread. `json` =
+/// `{"format","query","uncensored","next"}`.
+#[no_mangle]
+pub extern "C" fn tl_hub_search(json: *const c_char) -> *mut c_char {
+    #[derive(Deserialize)] struct A { format: String, #[serde(default)] query: String, #[serde(default)] uncensored: bool, #[serde(default)] next: Option<String> }
+    with(|l| { let a: A = serde_json::from_str(&s(json))?; crate::hub::search(&l.models_dir(), &a.format, &a.query, a.uncensored, a.next.as_deref()) })
+}
+
+/// One repo's real files and sizes, as what can be installed. Network: off the main thread.
+#[no_mangle]
+pub extern "C" fn tl_hub_repo(format: *const c_char, repo: *const c_char) -> *mut c_char {
+    with(|l| crate::hub::detail(&l.models_dir(), &s(format), &s(repo)))
+}
+
+/// Starts a model's download from the store; progress via `tl_model_status`.
+#[no_mangle]
+pub extern "C" fn tl_hub_install(json: *const c_char) -> *mut c_char {
+    with(|l| crate::hub::install(&l.models_dir(), serde_json::from_str(&s(json))?))
+}
+
+/// llama.cpp models (Flutter on Android, Windows, Linux): `json` = `{"repo","weights","projector"}`.
+#[no_mangle]
+pub extern "C" fn tl_model_download_gguf(json: *const c_char) -> *mut c_char {
+    #[derive(Deserialize)] struct A { repo: String, weights: String, #[serde(default)] projector: Option<String> }
+    with(|l| { let a: A = serde_json::from_str(&s(json))?; crate::models::start_download_gguf(a.repo, None, a.weights, a.projector, l.models_dir()) })
 }
 
 #[no_mangle]
@@ -521,6 +643,11 @@ pub extern "C" fn tl_sync_start(account_key_hex: *const c_char, device_name: *co
 }
 
 #[no_mangle]
+pub extern "C" fn tl_sync_restart_listener() -> *mut c_char {
+    with(|_| { let n = node()?; download::runtime().block_on(n.restart_listener()) })
+}
+
+#[no_mangle]
 pub extern "C" fn tl_sync_status() -> *mut c_char { with(|_| Ok(node()?.status())) }
 
 #[no_mangle]
@@ -552,7 +679,7 @@ pub extern "C" fn tl_sync_peer_models(host: *const c_char, port: u16) -> *mut c_
         let n = node()?;
         let host = s(host);
         download::runtime().block_on(async { tokio::time::timeout(std::time::Duration::from_secs(10), n.peer_models(&host, port)).await })
-            .map_err(|_| anyhow::anyhow!("连接超时"))?
+            .map_err(|_| anyhow::anyhow!(tr!("sync.timeout")))?
     })
 }
 
@@ -562,7 +689,7 @@ pub extern "C" fn tl_sync_pull_model(host: *const c_char, port: u16, id: *const 
     with(|_| {
         let n = node()?;
         let (host, id, label) = (s(host), s(id), s(label));
-        if crate::models::status().map_or(false, |st| st.running) { anyhow::bail!("已有模型正在下载"); }
+        if crate::models::status().map_or(false, |st| st.running) { anyhow::bail!(tr!("models.busy")); }
         download::runtime().spawn(async move { let _ = n.pull_model(&host, port, &id, &label, total).await; });
         Ok(())
     })
@@ -579,7 +706,7 @@ pub extern "C" fn tl_string_free(p: *mut c_char) {
 
 // ---------- Backup, share inbox, import records ----------
 
-/// Whole-library cold backup into a `.tlpack` (everything but AI models and triage records).
+/// Whole-library cold backup into a `.tlpack` (everything but AI models).
 #[no_mangle]
 pub extern "C" fn tl_export_backup(out_path: *const c_char) -> *mut c_char {
     with(|l| archive::export_backup(&l, Path::new(&s(out_path))))
@@ -591,8 +718,10 @@ pub extern "C" fn tl_export_status() -> *mut c_char { guard_ptr(|| { out(serde_j
 #[no_mangle]
 pub extern "C" fn tl_export_cancel() -> *mut c_char { guard_ptr(|| { archive::cancel_export(); out(serde_json::json!({ "ok": true }).to_string()) }) }
 
+fn yes() -> bool { true }
+
 #[derive(Deserialize)]
-struct LooseDirArgs { dir: String, #[serde(default)] folder: Option<String>, #[serde(default)] consume: bool, #[serde(default)] keep_to: Option<String> }
+struct LooseDirArgs { dir: String, #[serde(default)] folder: Option<String>, #[serde(default)] consume: bool, #[serde(default)] keep_to: Option<String>, #[serde(default = "yes")] album: bool }
 
 /// Imports a folder of loose media (a share from Photos / Files); with `consume`, imported files
 /// are removed from it afterwards and only problem files stay.
@@ -600,7 +729,7 @@ struct LooseDirArgs { dir: String, #[serde(default)] folder: Option<String>, #[s
 pub extern "C" fn tl_import_loose_dir(json: *const c_char) -> *mut c_char {
     with(|l| {
         let a: LooseDirArgs = serde_json::from_str(&s(json))?;
-        crate::import::import_loose_dir_keep(&l, Path::new(&a.dir), a.folder.as_deref().filter(|f| !f.trim().is_empty()), a.consume, a.keep_to.as_deref().map(Path::new))
+        crate::import::import_loose_dir_keep(&l, Path::new(&a.dir), a.folder.as_deref().filter(|f| !f.trim().is_empty()), a.consume, a.keep_to.as_deref().map(Path::new), a.album)
     })
 }
 
@@ -644,14 +773,13 @@ pub extern "C" fn tl_tag_to_folder(json: *const c_char) -> *mut c_char {
     })
 }
 
-/// Checks the stored cookies through the protected-post module: {"available", "screen_name"?, "error"?}.
+/// Checks the stored cookies (Settings → 检查 Cookie): {"screen_name", "name"?} or {"error"}.
 #[no_mangle]
 pub extern "C" fn tl_check_cookies(auth_token: *const c_char, ct0: *const c_char) -> *mut c_char { guard_ptr(|| {
     let c = crate::protected::Credentials { auth_token: s(auth_token), ct0: s(ct0) };
     let v = match crate::protected::check(&c) {
-        Ok(a) => serde_json::json!({ "available": true, "screen_name": a.screen_name, "name": a.name }),
-        Err(crate::protected::ProtectedError::NotAvailable) => serde_json::json!({ "available": false }),
-        Err(e) => serde_json::json!({ "available": true, "error": e.to_string() }),
+        Ok(a) => serde_json::json!({ "screen_name": a.screen_name, "name": a.name }),
+        Err(e) => serde_json::json!({ "error": e.to_string() }),
     };
     out(serde_json::json!({ "ok": v }).to_string())
 }) }
@@ -668,3 +796,323 @@ pub extern "C" fn tl_action_undo(json: *const c_char) -> *mut c_char { with(|l| 
 
 #[no_mangle]
 pub extern "C" fn tl_integrity_summary() -> *mut c_char { with(|l| crate::verify::summary(&l)) }
+
+// ---------- photo grid zoom (shared by every front end) ----------
+//
+// The engine lives behind an opaque pointer owned by the caller (`tl_grid_new` … `tl_grid_free`)
+// and is driven every frame, so nothing here allocates per frame or goes through JSON: tiles are
+// written into the caller's buffer as 9 doubles each — x, y, side, alpha, index, then the corner
+// radii top-left, top-right, bottom-right, bottom-left (screen points). Not thread-safe: one
+// engine per grid, used from the thread that draws it.
+
+use crate::grid::{GridConfig, RestState, ZoomEngine};
+
+fn grid<'a>(p: *mut ZoomEngine) -> Option<&'a mut ZoomEngine> { unsafe { p.as_mut() } }
+
+/// A grid of `count` items in a view of the given size; `phase` < 0 = the phase that fills the
+/// last row (the library opens at its bottom).
+#[no_mangle]
+pub extern "C" fn tl_grid_new(width: f64, height: f64, scale: f64, inset_top: f64, inset_bottom: f64, count: u64, level: u32, phase: i32, offset: f64) -> *mut ZoomEngine {
+    guard(std::ptr::null_mut(), || {
+        let cfg = GridConfig::new(width, height, scale.max(1.0), inset_top, inset_bottom, count as usize);
+        let level = (level as usize).min(cfg.levels() - 1);
+        let phase = if phase < 0 { cfg.bottom_phase(level) } else { phase as usize % cfg.columns[level] };
+        let offset = offset.clamp(0.0, cfg.max_offset(level, phase));
+        Box::into_raw(Box::new(ZoomEngine::new(cfg, RestState { level, phase, offset })))
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn tl_grid_free(p: *mut ZoomEngine) { if !p.is_null() { guard((), || drop(unsafe { Box::from_raw(p) })) } }
+
+/// New view size or item count. A zoom in progress is finished first; the level is kept and the
+/// offset kept within the content.
+#[no_mangle]
+pub extern "C" fn tl_grid_configure(p: *mut ZoomEngine, width: f64, height: f64, scale: f64, inset_top: f64, inset_bottom: f64, count: u64) {
+    guard((), || if let Some(e) = grid(p) {
+        e.release(0.0, 1.0);
+        e.finish_now();
+        let cfg = GridConfig::new(width, height, scale.max(1.0), inset_top, inset_bottom, count as usize);
+        let level = e.rest.level.min(cfg.levels() - 1);
+        let phase = e.rest.phase % cfg.columns[level];
+        let offset = e.rest.offset.clamp(0.0, cfg.max_offset(level, phase));
+        e.cfg = cfg;
+        e.rest = RestState { level, phase, offset };
+    })
+}
+
+/// The resting layout into `out`: level, phase, offset.
+#[no_mangle]
+pub extern "C" fn tl_grid_rest(p: *mut ZoomEngine, out: *mut f64) {
+    guard((), || if let (Some(e), false) = (grid(p), out.is_null()) {
+        let o = unsafe { std::slice::from_raw_parts_mut(out, 3) };
+        o.copy_from_slice(&[e.rest.level as f64, e.rest.phase as f64, e.rest.offset]);
+    })
+}
+
+/// Scrolling: the front end owns the scroll physics and sets the offset (clamped here).
+#[no_mangle]
+pub extern "C" fn tl_grid_set_offset(p: *mut ZoomEngine, offset: f64) {
+    guard((), || if let Some(e) = grid(p) { e.rest.offset = offset.clamp(0.0, e.cfg.max_offset(e.rest.level, e.rest.phase)); })
+}
+
+#[no_mangle]
+pub extern "C" fn tl_grid_max_offset(p: *mut ZoomEngine) -> f64 {
+    guard(0.0, || grid(p).map_or(0.0, |e| e.cfg.max_offset(e.rest.level, e.rest.phase)))
+}
+
+/// How many zoom levels the grid has at this width (level 0 is the densest).
+#[no_mangle]
+pub extern "C" fn tl_grid_levels(p: *mut ZoomEngine) -> u64 { guard(0, || grid(p).map_or(0, |e| e.cfg.levels() as u64)) }
+
+/// The side of a tile at `level`.
+#[no_mangle]
+pub extern "C" fn tl_grid_side(p: *mut ZoomEngine, level: u64) -> f64 { guard(0.0, || grid(p).map_or(0.0, |e| if (level as usize) < e.cfg.levels() { e.cfg.side(level as usize) } else { 0.0 })) }
+
+#[no_mangle]
+pub extern "C" fn tl_grid_begin_pinch(p: *mut ZoomEngine, x: f64, y: f64, time: f64) { guard((), || if let Some(e) = grid(p) { e.begin_pinch((x, y), time) }) }
+
+#[no_mangle]
+pub extern "C" fn tl_grid_pinch_changed(p: *mut ZoomEngine, scale: f64, x: f64, y: f64) { guard((), || if let Some(e) = grid(p) { e.pinch_changed(scale, (x, y)) }) }
+
+/// `velocity` in scale per second, as gesture recognisers report it.
+#[no_mangle]
+pub extern "C" fn tl_grid_release(p: *mut ZoomEngine, velocity: f64, scale: f64) { guard((), || if let Some(e) = grid(p) { e.release(velocity, scale) }) }
+
+/// Advances a zoom to `time` (seconds, any monotonic clock): -1 nothing zooming, 0 still
+/// zooming, 1 the zoom came to rest in this frame.
+#[no_mangle]
+pub extern "C" fn tl_grid_tick(p: *mut ZoomEngine, time: f64) -> i32 {
+    guard(-1, || match grid(p) { Some(e) if e.is_zooming() => i32::from(e.tick(time).is_some()), _ => -1 })
+}
+
+/// Ends a settling zoom at once (the user started scrolling); false while fingers are down.
+#[no_mangle]
+pub extern "C" fn tl_grid_finish_now(p: *mut ZoomEngine) -> bool { guard(false, || grid(p).is_some_and(|e| e.finish_now().is_some())) }
+
+/// Drops a leftover phase when the first row is within `rows` rows of the screen (see
+/// `ZoomEngine::realign_near_top`); true when the layout changed.
+#[no_mangle]
+pub extern "C" fn tl_grid_realign_top(p: *mut ZoomEngine, rows: f64) -> bool { guard(false, || grid(p).is_some_and(|e| e.realign_near_top(rows))) }
+
+/// The frame's side, cross-fade level, latched level and column count into `out` (4 doubles).
+#[no_mangle]
+pub extern "C" fn tl_grid_info(p: *mut ZoomEngine, out: *mut f64) {
+    guard((), || if let (Some(e), false) = (grid(p), out.is_null()) {
+        let i = e.info();
+        unsafe { std::slice::from_raw_parts_mut(out, 4) }.copy_from_slice(&[i.side, i.level, i.target as f64, i.columns as f64]);
+    })
+}
+
+/// Writes up to `capacity` tiles of the current frame (9 doubles each, back to front) and
+/// returns how many there are; call again with a larger buffer if that is more than `capacity`.
+#[no_mangle]
+pub extern "C" fn tl_grid_tiles(p: *mut ZoomEngine, buffer: *mut f64, capacity: u64) -> u64 {
+    guard(0, || {
+        let Some(e) = grid(p) else { return 0 };
+        let mut tiles = Vec::with_capacity(256);
+        e.tiles(&mut tiles);
+        if !buffer.is_null() {
+            let n = tiles.len().min(capacity as usize);
+            let b = unsafe { std::slice::from_raw_parts_mut(buffer, n * 9) };
+            for (t, o) in tiles.iter().zip(b.chunks_exact_mut(9)) {
+                o.copy_from_slice(&[t.x, t.y, t.side, t.alpha, t.index as f64, t.radii[0], t.radii[1], t.radii[2], t.radii[3]]);
+            }
+        }
+        tiles.len() as u64
+    })
+}
+
+/// The item under a screen point at rest, or -1.
+#[no_mangle]
+pub extern "C" fn tl_grid_index_at(p: *mut ZoomEngine, x: f64, y: f64) -> i64 {
+    guard(-1, || grid(p).and_then(|e| e.rest_index((x, y))).map_or(-1, |i| i as i64))
+}
+
+/// An item's resting frame into `out`: x, y, side (screen points).
+#[no_mangle]
+pub extern "C" fn tl_grid_frame(p: *mut ZoomEngine, index: u64, out: *mut f64) {
+    guard((), || if let (Some(e), false) = (grid(p), out.is_null()) {
+        let (x, y, s) = e.rest_frame(index as usize, e.rest);
+        unsafe { std::slice::from_raw_parts_mut(out, 3) }.copy_from_slice(&[x, y, s]);
+    })
+}
+
+/// An item not drawn (lifted out by a context menu), or -1 for none.
+#[no_mangle]
+pub extern "C" fn tl_grid_set_hidden(p: *mut ZoomEngine, index: i64) {
+    guard((), || if let Some(e) = grid(p) { e.hidden = (index >= 0).then_some(index as usize) })
+}
+
+// Portable grid thumbnails. One coordinator coalesces queued generations, so
+// rapid requests do not create a backlog of threads waiting for the warm lock.
+struct ThumbWarmJob {
+    lib: Arc<Library>,
+    ids: Vec<String>,
+    side: u32,
+    directory: std::path::PathBuf,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+}
+#[derive(Default)]
+struct ThumbWarmState {
+    pending: Option<ThumbWarmJob>,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+}
+#[derive(Default)]
+struct ThumbWarmQueue {
+    state: Mutex<ThumbWarmState>,
+    ready: std::sync::Condvar,
+}
+static THUMB_WARM_QUEUE: Mutex<Option<Arc<ThumbWarmQueue>>> = Mutex::new(None);
+
+fn thumb_warm_queue() -> anyhow::Result<Arc<ThumbWarmQueue>> {
+    let mut initialized = THUMB_WARM_QUEUE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(queue) = initialized.as_ref() { return Ok(queue.clone()); }
+    let queue = Arc::new(ThumbWarmQueue::default());
+    let worker = queue.clone();
+    std::thread::Builder::new().name("tl-thumbnails-warm".into()).spawn(move || loop {
+        let job = {
+            let mut state = worker.state.lock().unwrap_or_else(|e| e.into_inner());
+            while state.pending.is_none() {
+                state = worker.ready.wait(state).unwrap_or_else(|e| e.into_inner());
+            }
+            state.pending.take().unwrap()
+        };
+        guard((), || {
+            crate::thumbs::warm(&job.lib, &job.ids, job.side, &job.directory, &job.cancel);
+        });
+    })?;
+    *initialized = Some(queue.clone());
+    Ok(queue)
+}
+
+#[no_mangle]
+pub extern "C" fn tl_thumbnail(media_id: *const c_char, side: u32, cache_dir: *const c_char) -> *mut c_char {
+    with(|l| crate::thumbs::thumbnail(&l, &s(media_id), side, Path::new(&s(cache_dir))))
+}
+
+/// A HEIC or AVIF file as a JPEG the front end can show; needs no open library.
+#[no_mangle]
+pub extern "C" fn tl_display_image(path: *const c_char, max_side: u32, cache_dir: *const c_char) -> *mut c_char {
+    respond(|| crate::thumbs::display_image(Path::new(&s(path)), max_side, Path::new(&s(cache_dir))))
+}
+
+#[no_mangle]
+pub extern "C" fn tl_thumbnails_warm(ids_json: *const c_char, side: u32, cache_dir: *const c_char) -> *mut c_char {
+    with(|l| {
+        crate::thumbs::check_side(side)?;
+        let ids: Vec<String> = serde_json::from_str(&s(ids_json))?;
+        let directory = std::path::PathBuf::from(s(cache_dir));
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let queue = thumb_warm_queue()?;
+        let mut state = queue.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(previous) = state.cancel.replace(cancel.clone()) {
+            previous.store(true, std::sync::atomic::Ordering::Release);
+        }
+        state.pending = Some(ThumbWarmJob { lib: l, ids, side, directory, cancel });
+        queue.ready.notify_one();
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn tl_thumbnails_warm_cancel() {
+    guard((), || {
+        let queue = THUMB_WARM_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(queue) = queue {
+            let mut state = queue.state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cancel) = state.cancel.as_ref() {
+                cancel.store(true, std::sync::atomic::Ordering::Release);
+            }
+            state.pending = None;
+        }
+    })
+}
+
+// ---------- LAN discovery and sync scheduling (shared by every front end) ----------
+
+static DISCOVERY: Mutex<Option<Arc<crate::discovery::Discovery>>> = Mutex::new(None);
+
+/// Starts advertising this device and finding the account's others, and syncing with them on
+/// its own (after `tl_sync_start`: the listener's port is advertised). `service_type` like
+/// `_twlib._tcp`. Restarting replaces a running discovery.
+#[no_mangle]
+pub extern "C" fn tl_discovery_start(service_type: *const c_char, device_name: *const c_char, device_kind: *const c_char) -> *mut c_char {
+    with(|_| {
+        let kind = if device_kind.is_null() { String::new() } else { s(device_kind) };
+        let d = crate::discovery::Discovery::start_as(node()?, &s(service_type), &s(device_name), &kind).map_err(|_| anyhow::anyhow!("sync.err.paused"))?;
+        if let Some(old) = DISCOVERY.lock().unwrap().replace(d) { old.stop(); }
+        Ok(())
+    })
+}
+
+/// The devices found, and whether discovery runs (`{"running":false,…}` before it started).
+#[no_mangle]
+pub extern "C" fn tl_discovery_status() -> *mut c_char {
+    with(|_| Ok(match DISCOVERY.lock().unwrap().as_ref() {
+        Some(d) => d.status(),
+        None => crate::discovery::DiscoveryStatus { running: false, network_ok: false, peers: vec![], error: None },
+    }))
+}
+
+/// The library changed here: sync in a few seconds.
+#[no_mangle]
+pub extern "C" fn tl_discovery_changed() { guard((), || if let Some(d) = DISCOVERY.lock().unwrap().as_ref() { d.changed() }) }
+
+/// 立即同步: look every device up again and sync with each.
+#[no_mangle]
+pub extern "C" fn tl_discovery_sync_now() { guard((), || if let Some(d) = DISCOVERY.lock().unwrap().as_ref() { d.sync_now() }) }
+
+/// The network may have changed (wake, back to the foreground): advertise and look up again.
+#[no_mangle]
+pub extern "C" fn tl_discovery_rediscover() { guard((), || if let Some(d) = DISCOVERY.lock().unwrap().as_ref() { d.rediscover() }) }
+
+#[no_mangle]
+pub extern "C" fn tl_discovery_stop() { guard((), || if let Some(d) = DISCOVERY.lock().unwrap().take() { d.stop() }) }
+
+// ---------- the mascot (see pet.rs) ----------
+
+fn pet<'a>(p: *mut crate::pet::Pet) -> Option<&'a mut crate::pet::Pet> { unsafe { p.as_mut() } }
+
+#[no_mangle]
+pub extern "C" fn tl_pet_new(seed: u64) -> *mut crate::pet::Pet { Box::into_raw(Box::new(crate::pet::Pet::new(seed))) }
+
+#[no_mangle]
+pub extern "C" fn tl_pet_free(p: *mut crate::pet::Pet) { if !p.is_null() { guard((), || drop(unsafe { Box::from_raw(p) })) } }
+
+#[no_mangle]
+pub extern "C" fn tl_pet_set_bounds(p: *mut crate::pet::Pet, width: f64, height: f64, margin_right: f64, margin_bottom: f64) {
+    guard((), || if let Some(e) = pet(p) { e.set_bounds(width, height, margin_right, margin_bottom) })
+}
+
+#[no_mangle]
+pub extern "C" fn tl_pet_pointer(p: *mut crate::pet::Pet, x: f64, y: f64) { guard((), || if let Some(e) = pet(p) { e.pointer_moved(x, y) }) }
+
+#[no_mangle]
+pub extern "C" fn tl_pet_pointer_gone(p: *mut crate::pet::Pet) { guard((), || if let Some(e) = pet(p) { e.pointer_gone() }) }
+
+/// Whether a point is on it (a front end takes the tap there, and lets others through).
+#[no_mangle]
+pub extern "C" fn tl_pet_hit(p: *mut crate::pet::Pet, x: f64, y: f64) -> bool { guard(false, || pet(p).map_or(false, |e| e.hit(x, y))) }
+
+#[no_mangle]
+pub extern "C" fn tl_pet_tap(p: *mut crate::pet::Pet, x: f64, y: f64) -> bool { guard(false, || pet(p).map_or(false, |e| e.tap(x, y))) }
+
+/// Advances `dt` seconds and writes the picture: x, y, w, h, ARGB (five doubles per rectangle,
+/// back to front), at most `capacity` rectangles. Returns how many there are.
+#[no_mangle]
+pub extern "C" fn tl_pet_tick(p: *mut crate::pet::Pet, dt: f64, buffer: *mut f64, capacity: u64) -> u64 {
+    guard(0, || {
+        let Some(e) = pet(p) else { return 0 };
+        e.tick(dt);
+        let mut rects = Vec::with_capacity(64);
+        e.draw(&mut rects);
+        if !buffer.is_null() {
+            let out = unsafe { std::slice::from_raw_parts_mut(buffer, capacity as usize * 5) };
+            for (i, r) in rects.iter().take(capacity as usize).enumerate() {
+                out[i * 5..i * 5 + 5].copy_from_slice(&[r.x, r.y, r.w, r.h, r.color as f64]);
+            }
+        }
+        rects.len() as u64
+    })
+}

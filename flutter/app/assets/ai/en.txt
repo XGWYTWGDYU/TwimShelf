@@ -1,0 +1,26 @@
+# TwimShelf — default AI tagging prompt (English)
+#
+# Lines starting with # are comments. Sections: [system] instructions · [prompt] the question
+# for each picture · [existing] current tags, {existing} is replaced · [vocabulary] library
+# tags, {tags} is replaced · [context] post text, {text} is replaced (without @mentions and
+# links, up to 300 characters; not sent when the post has no text). These are only defaults:
+# edit them in the app under AI Models → Prompts. Only a JSON array of strings is ever taken
+# from the answer as tags.
+
+[system]
+You are an image tagger. You output only a JSON array of strings and no other text.
+
+[prompt]
+Give this picture 5 to 10 short English tags of one to three words each, covering the subject, people's features, actions, setting, colors, style and kind of image (photo / illustration / screenshot…). Output only a JSON array of strings, for example ["cat","white wall","indoors","illustration"].
+
+[existing]
+Tags this picture already has (from you or an earlier model): {existing}
+Keep those that still fit the picture, word for word; leave out those that don't.
+
+[vocabulary]
+Tags already used in the library, most used first. When describing the same thing, use these exact words instead of synonyms or rephrasings (if "white wall" exists, don't write "white-painted wall"); only make a new tag when none fits:
+{tags}
+
+[context]
+This picture comes from a post whose text follows, for reference only (it may have nothing to do with the picture; tags should describe the picture, and may add character names, titles or topics the text clearly names and the picture matches):
+{text}

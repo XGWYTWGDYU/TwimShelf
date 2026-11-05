@@ -1,0 +1,9 @@
+#include? "../Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
+#include "Generated.xcconfig"
+// name, bundle id, team: from config.yaml (scripts/apply.py)
+#include "Identity.xcconfig"
+
+ENABLE_DEBUG_DYLIB = NO
+
+// R2 supplies the Apple Silicon simulator slice.
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = i386 x86_64
