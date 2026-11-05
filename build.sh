@@ -147,7 +147,7 @@ need_linux_desktop() {
   pkg-config --exists mpv || pkg_install "libmpv (video)" - libmpv-dev mpv-libs-devel mpv || true
   pkg-config --exists libsecret-1 || pkg_install "libsecret (where the app keeps its keys)" - libsecret-1-dev libsecret-devel libsecret || true
   pkg-config --exists alsa || pkg_install "ALSA headers (the volume)" - libasound2-dev alsa-lib-devel alsa-lib || true
-  pkg-config --exists vulkan || pkg_install "Vulkan headers and shader compiler (GPU AI)" - "libvulkan-dev glslc" "vulkan-loader-devel glslc" "vulkan-headers vulkan-icd-loader shaderc" || true
+  { pkg-config --exists vulkan && have glslc; } || pkg_install "Vulkan headers and shader compiler (GPU AI)" - "libvulkan-dev glslc" "vulkan-loader-devel glslc" "vulkan-headers vulkan-icd-loader shaderc" || true
   pkg-config --exists SPIRV-Headers || pkg_install "SPIR-V headers (GPU AI)" - spirv-headers spirv-headers-devel spirv-headers || true
   have file || need_tool file file - file file file
 }
@@ -195,7 +195,8 @@ build_target() {
       core_for "${t#flutter-}"
       # without a fresh pod install, the pods' frameworks come out without their Info.plist
       # (signing or installing then refuses them)
-      (cd "$ROOT/flutter/app" && "$FLUTTER" pub get && cd "${t#flutter-}" && pod install)
+      # and CocoaPods reads the engine's files: a fresh Flutter SDK has to fetch them first
+      (cd "$ROOT/flutter/app" && "$FLUTTER" precache --"${t#flutter-}" && "$FLUTTER" pub get && cd "${t#flutter-}" && pod install)
       (cd "$ROOT/flutter/app" && "$FLUTTER" build "${t#flutter-}" --release $( [[ $t == flutter-ios ]] && echo --no-codesign ) $(flutter_defines))
       if [[ $t == flutter-macos ]]; then
         "$ROOT/scripts/package_dmg.sh" "$(ls -d "$ROOT"/flutter/app/build/macos/Build/Products/Release/*.app | head -1)" "$DIST/TwimShelf-Flutter-$v-macOS.dmg"

@@ -163,7 +163,12 @@ def paths(c):
     for pkg in ('app', 'installer', 'tl_core', 'tl_native', 'tl_llama'):
         link(f'flutter/{pkg}/.dart_tool', flutter / pkg / 'dart_tool')
         if pkg in ('app', 'installer'):
-            link(f'flutter/{pkg}/build', flutter / pkg / 'build')
+            # not on Windows: CMake refuses to unpack archives (llama.cpp) through a link, so
+            # there the Flutter build stays a real folder beside its project (ignored by Git)
+            if sys.platform == 'win32':
+                unlink(f'flutter/{pkg}/build')
+            else:
+                link(f'flutter/{pkg}/build', flutter / pkg / 'build')
     link('flutter/app/android/.gradle', flutter / 'app' / 'gradle-project')
     # not Pods: CocoaPods finds the Flutter files relative to where Pods really is, so it stays
     # beside its project (it is the installed dependency project, not build output)

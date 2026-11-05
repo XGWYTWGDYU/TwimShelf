@@ -60,6 +60,8 @@ fi
 # CocoaPods (the plugins that are not Swift packages yet)
 if [[ -f "$ROOT/flutter/app/$platform/Podfile" ]]; then
   command -v pod >/dev/null || { command -v brew >/dev/null && brew install cocoapods; } || fail "CocoaPods is needed: brew install cocoapods"
+  # CocoaPods reads the engine's files: a fresh Flutter SDK has to fetch them first
+  "$FLUTTER" precache --"$platform" || fail "Could not download the Flutter engine"
   (cd "$ROOT/flutter/app/$platform" && pod install) || fail "pod install failed"
 fi
 echo "Prepared $platform"
