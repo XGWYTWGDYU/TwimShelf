@@ -55,7 +55,7 @@ def generate(output, app_id=None, app_name=None, icon_name=None):
     ET.SubElement(component, 'id').text = app_id
     ET.SubElement(component, 'metadata_license').text = 'CC0-1.0'
     for language in ('en', 'ja', 'zh-Hans', 'zh-Hant'):
-        catalog = json.loads((ROOT / f'flutter/app/assets/l10n/{language}.json').read_text())
+        catalog = json.loads((ROOT / f'flutter/app/assets/l10n/{language}.json').read_text(encoding='utf-8'))
         attrs = {} if language == 'en' else {'{http://www.w3.org/XML/1998/namespace}lang': language}
         ET.SubElement(component, 'name', attrs).text = catalog['share.title'].replace('{app}', app_name)
         ET.SubElement(component, 'summary', attrs).text = catalog['share.subtitle']
