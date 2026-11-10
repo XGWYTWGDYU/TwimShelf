@@ -22,6 +22,8 @@ Windows and Linux make theirs at build time from the same set (desktop_assets.py
       one source file: square, with its own corners and transparent margin. The Mac icons are that
       file scaled; the iOS icon is its artwork alone, cut to the edges and opaque (iOS masks it).
   python3 scripts/flutter/make_icons.py --check    names what is missing; exit 1 if anything is
+  python3 scripts/flutter/make_icons.py --in-app   only assets/app_icon.png (the web build in Docker,
+      which has neither the platform folders nor the need for their icons)
 """
 import json
 import subprocess
@@ -120,6 +122,13 @@ def main():
 
     def resized(source, size):
         return source.resize((size, size), Image.Resampling.LANCZOS)
+
+    if "--in-app" in sys.argv:
+        for path in IN_APP[:1]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            resized(image, 512).save(path)
+        print("config: the in-app icon made from the AppIcon set")
+        return
 
     def on_white(size):
         canvas = Image.new("RGBA", (size, size), WHITE)

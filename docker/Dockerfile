@@ -23,12 +23,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ---- the web app: the Flutter app built for browsers ----
 FROM debian:bookworm-slim AS web
 ARG FLUTTER_VERSION
-RUN apt-get update && apt-get install -y --no-install-recommends git curl unzip xz-utils ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git curl unzip xz-utils ca-certificates python3 python3-pil && rm -rf /var/lib/apt/lists/*
 RUN git clone --depth 1 --branch ${FLUTTER_VERSION} https://github.com/flutter/flutter.git /flutter
 ENV PATH=/flutter/bin:$PATH FLUTTER_SUPPRESS_ANALYTICS=true
 RUN flutter config --no-analytics --enable-web >/dev/null && flutter precache --web
 WORKDIR /src
 COPY flutter flutter
+# the app's icons are made from the AppIcon set (not in git), as every build does
+COPY config.yaml config.yaml
+COPY scripts/flutter/make_icons.py scripts/flutter/make_icons.py
+COPY native/Resources/Assets.xcassets/AppIcon.appiconset native/Resources/Assets.xcassets/AppIcon.appiconset
+RUN python3 scripts/flutter/make_icons.py --in-app
 RUN cd flutter/app && flutter pub get && flutter build web --release --no-wasm-dry-run --no-web-resources-cdn
 
 # ---- what runs ----

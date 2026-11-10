@@ -278,7 +278,8 @@ jobs:
           echo "Published $image:$VERSION and :latest" >> "$GITHUB_STEP_SUMMARY"
 
   release:
-    needs: [plan, test-core, apple, android, linux, windows]
+    # after the image is published too: a release without it would leave the version's image unmade
+    needs: [plan, test-core, apple, android, linux, windows, docker-publish]
     if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-24.04
     permissions:

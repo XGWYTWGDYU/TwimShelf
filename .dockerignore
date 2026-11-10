@@ -3,7 +3,12 @@
 **/.dart_tool
 **/node_modules
 .git
-native
+native/*
+!native/Resources
+native/Resources/*
+!native/Resources/Assets.xcassets
+native/Resources/Assets.xcassets/*
+!native/Resources/Assets.xcassets/AppIcon.appiconset
 TwimShelf.xcodeproj
 flutter/app/android
 flutter/app/ios
