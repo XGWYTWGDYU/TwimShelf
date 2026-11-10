@@ -4,6 +4,8 @@
 
 <p align="center">把 X 上的帖子保存到本地</p>
 
+<p align="center"><img src="docs/images/devices.webp" alt="TwimShelf 在 Mac、iPad、Android 和 iPhone 上"></p>
+
 TwimShelf  能把你喜欢的帖子、图片和视频保存到自己的设备上，不必担心作者删帖或注销。资料库存储在本地，多台设备之间通过局域网直接同步
 
 后端用 Rust 编写，苹果平台有原生界面版本，其他平台使用 Flutter 版本，两者共用同一个核心和资料库格式。
