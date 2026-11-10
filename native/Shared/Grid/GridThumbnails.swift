@@ -33,9 +33,15 @@ final class GridThumbnails {
     private(set) var largeSide = 1280
     private var cacheDir: URL
 
-    private struct Entry { var small: MTLTexture?; var large: MTLTexture?; var used: UInt64 }
+    /// `frame` is the last frame the media was drawn in: what the current frame drew is on screen
+    /// and is never dropped to make room (dropping it is a blank tile, then the same decode again).
+    private struct Entry { var small: MTLTexture?; var large: MTLTexture?; var used: UInt64; var frame: UInt64 = 0 }
     private var entries: [String: Entry] = [:]
     private var clock: UInt64 = 0
+    private var frame: UInt64 = 1
+    /// Media that may hold a large texture in this frame (`grantLarge`), and what those cost.
+    private var granted = Set<String>()
+    private var grantedBytes = 0
     private var bytes = 0
     private var budget: Int
     private var generation = 0
@@ -62,7 +68,7 @@ final class GridThumbnails {
         pressureObserver = NotificationCenter.default.addObserver(forName: MemoryPressure.changed, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.budget = min(self.budget, 64 * 1024 * 1024)
-            self.forgetAll()
+            self.shed()
             self.onLoaded?()
         }
     }
@@ -99,20 +105,45 @@ final class GridThumbnails {
     func beginFrame() {
         wanted.removeAll(keepingCapacity: true)
         wantedKeys.removeAll(keepingCapacity: true)
+        granted.removeAll(keepingCapacity: true)
+        grantedBytes = 0
+        frame &+= 1
+        // media drawn once and never decoded leave an empty entry; a long scroll must not keep them all
+        if entries.count > 8192 {
+            let now = frame
+            entries = entries.filter { $0.value.small != nil || $0.value.large != nil || $0.value.frame &+ 1 >= now }
+        }
+    }
+
+    /// Whether a tile this wide is shown with the large texture.
+    func isLarge(pixels: CGFloat) -> Bool { pixels > CGFloat(smallSide) * 1.3 }
+
+    private var largeBytes: Int { largeSide * largeSide * 4 }
+    /// Large textures a frame may hold: a part of the budget, never fewer than a screen at the
+    /// biggest level needs. A zoom draws every layer's tiles at the size of the biggest, several
+    /// times more than fit; the rest stay on their small texture until they are in front.
+    private var largeAllowance: Int { max(budget * 3 / 5, 4 * largeBytes) }
+
+    /// Called for the tiles of a frame front-most first, before they are drawn: this tile's media
+    /// may hold a large texture in this frame, while the frame's allowance lasts.
+    func grantLarge(_ item: FeedItem, pixels: CGFloat) {
+        guard isLarge(pixels: pixels), grantedBytes + largeBytes <= largeAllowance else { return }
+        if granted.insert(item.mediaId).inserted { grantedBytes += largeBytes }
     }
 
     /// The best texture at hand for a tile `pixels` wide; asks for what is missing.
     func texture(for item: FeedItem, pixels: CGFloat) -> MTLTexture? {
         let id = item.mediaId
         clock &+= 1
-        var e = entries[id]
-        e?.used = clock
-        if let e { entries[id] = e }
-        let wantsLarge = pixels > CGFloat(smallSide) * 1.3
-        if wantsLarge, let l = e?.large { return l }
-        if e?.small == nil { want(item, large: false) }
-        if wantsLarge { want(item, large: true) }
-        return e?.small ?? e?.large
+        var e = entries[id] ?? Entry(used: clock)
+        e.used = clock
+        e.frame = frame
+        entries[id] = e
+        let wantsLarge = isLarge(pixels: pixels)
+        if wantsLarge, let l = e.large { return l }
+        if e.small == nil { want(item, large: false) }
+        if wantsLarge, granted.contains(id) { want(item, large: true) }
+        return e.small ?? e.large
     }
 
     private func want(_ item: FeedItem, large: Bool) {
@@ -212,7 +243,21 @@ final class GridThumbnails {
         generation &+= 1
         entries = [:]; bytes = 0; failed = []
         wanted = []; wantedKeys = []; ahead = []
+        granted = []; grantedBytes = 0
     }
+
+    /// Memory is short: everything goes except the small textures of what is on screen (dropping
+    /// those too would blank the whole grid and decode it again at once).
+    private func shed() {
+        ahead = []
+        for (k, v) in entries {
+            if v.frame != frame { entries[k] = nil; continue }
+            entries[k]?.large = nil
+        }
+        bytes = entries.values.reduce(0) { $0 + ($1.small.map(Self.size) ?? 0) }
+    }
+
+    private static func size(_ t: MTLTexture) -> Int { t.width * t.height * 4 }
 
     // MARK: Decoding
 
@@ -247,18 +292,39 @@ final class GridThumbnails {
     }
 
     private func store(_ t: MTLTexture, id: String, large: Bool) {
+        // one made ahead of the scroll was never drawn: newer than what scrolled away, and (by
+        // its frame) never taken for something on screen
         var e = entries[id] ?? Entry(used: clock)
         if large { if e.large != nil { return }; e.large = t } else { if e.small != nil { return }; e.small = t }
-        e.used = clock
         entries[id] = e
-        bytes += t.width * t.height * 4
+        bytes += Self.size(t)
         guard bytes > budget else { return }
-        // over budget: drop the least recently drawn quarter (rare, so a sort is fine)
-        let old = entries.sorted { $0.value.used < $1.value.used }
+        trim()
+        // no room even for this one: making more ahead of the scroll would only push each other out
+        if entries[id]?.small == nil && entries[id]?.large == nil { ahead.removeAll() }
+    }
+
+    /// Over budget: room is made from what is not on screen, least recently drawn first — the
+    /// large textures before any small one (a small is a fifteenth of a large, and a tile without
+    /// it is blank), down to three quarters so this stays rare. What the current frame drew keeps
+    /// its small texture whatever the budget; of its large ones, only those the frame did not
+    /// grant go, and only when nothing else is left.
+    private func trim() {
+        let goal = budget * 3 / 4
+        let old = entries.filter { $0.value.frame != frame }.sorted { $0.value.used < $1.value.used }
         for (k, v) in old {
-            if bytes <= budget * 3 / 4 { break }
-            for t in [v.small, v.large].compactMap({ $0 }) { bytes -= t.width * t.height * 4 }
+            if bytes <= goal { break }
+            if let l = v.large { bytes -= Self.size(l); entries[k]?.large = nil }
+        }
+        for (k, v) in old {
+            if bytes <= goal { break }
+            if let s = v.small { bytes -= Self.size(s) }
+            if entries[k]?.large != nil, let l = v.large { bytes -= Self.size(l) }
             entries[k] = nil
+        }
+        guard bytes > budget else { return }
+        for (k, v) in entries where v.frame == frame && !granted.contains(k) {
+            if let l = v.large { bytes -= Self.size(l); entries[k]?.large = nil }
         }
     }
 

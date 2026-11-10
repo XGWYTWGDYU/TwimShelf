@@ -5,8 +5,8 @@
 # （scripts/apply.py）。只有开关原生版的分享扩展时，原生 Xcode 工程需要重新生成一次：
 # 运行 ./build.sh --configure（需要 XcodeGen）。
 
-version: 1.5.0                # 所有平台共用的版本号；提高它并推送到 main，GitHub Actions 就会发布新版本
-build_number: 6               # 每次发布递增（iOS 的 CFBundleVersion、Android 的 versionCode 都用它）
+version: 1.5.1                # 所有平台共用的版本号；提高它并推送到 main，GitHub Actions 就会发布新版本
+build_number: 7               # 每次发布递增（iOS 的 CFBundleVersion、Android 的 versionCode 都用它）
 
 build:
   # 所有构建缓存和构建产物的位置：相对路径以项目根目录为准，也可以是任意绝对路径。

@@ -148,17 +148,30 @@ final class GridScene {
     /// left with a phase by a zoom re-aligns once the first row is within three rows of the screen.
     func realignBeforeTopShows() {
         let cfg = engine.cfg, r = engine.rest
+        let now = CACurrentMediaTime()
+        // how fast the grid is moving, from the last two offsets the view reported
+        var speed: CGFloat = 0
+        if let last = lastScroll, now - last.time > 0, now - last.time < 0.1 { speed = abs(r.offset - last.offset) / CGFloat(now - last.time) }
+        lastScroll = (r.offset, now)
         guard r.phase != 0, reflow == nil else { return }
-        if r.offset < cfg.insetTop + 3 * cfg.pitch(r.level) { realignToTop() }
+        if r.offset < cfg.insetTop + 3 * cfg.pitch(r.level) { realignToTop(animated: speed < Self.glideBelow) }
     }
+    private var lastScroll: (offset: CGFloat, time: CFTimeInterval)?
+    /// Points per second under which a re-align glides; a faster grid re-aligns at once.
+    static let glideBelow: CGFloat = 300
 
-    /// The grid re-aligns so its first row is full. The glide runs in content space with the
-    /// live offset, so it never interrupts scrolling.
-    func realignToTop() {
+    /// The grid re-aligns so its first row is full. On a grid that stands still the tiles glide
+    /// to their places (in content space with the live offset, so a scroll starting meanwhile is
+    /// not interrupted). On one that is flying past, a glide is what the eye follows — the first
+    /// column's tiles travelling to the last column across the scroll — so there the change is
+    /// made at once, between two frames of the scroll.
+    func realignToTop(animated: Bool = true) {
         guard !engine.isZooming, reflow == nil, deletion == nil else { return }
         let r = engine.rest
         guard r.phase != 0 else { return }
-        reflow = Reflow(from: r, to: RestState(level: r.level, phase: 0, offset: r.offset), start: CACurrentMediaTime())
+        if animated {
+            reflow = Reflow(from: r, to: RestState(level: r.level, phase: 0, offset: r.offset), start: CACurrentMediaTime())
+        }
         engine.rest.phase = 0
         onContentHeightChanged?()
     }
@@ -181,6 +194,9 @@ final class GridScene {
     /// The zoom ended in a new resting layout.
     private func zoomEnded() {
         let r = engine.rest
+        // a re-align the zoom began in the middle of is over: left behind, it would be drawn for a
+        // frame in its old level's layout, and would keep the re-align below from starting
+        reflow = nil
         onRestChanged?()
         // a resting grid never shows a partial first row
         if r.phase != 0, r.offset < engine.cfg.insetTop + engine.cfg.side(r.level) { realignToTop() }
@@ -197,7 +213,13 @@ final class GridScene {
     /// Tiles to draw at this time, back to front (advances the zoom and the animations).
     func frame(at now: CFTimeInterval, into out: inout [Tile]) {
         out.removeAll(keepingCapacity: true)
-        if engine.isZooming, engine.tick(time: now) != nil { zoomEnded() }
+        if engine.isZooming {
+            // A pinch that begins during a removal takes over from where the removal was heading
+            // (the engine already has the new list); kept, the removal would be drawn after the
+            // zoom in the layout it started in — another level by then.
+            if deletion != nil { finishDeletion() }
+            if engine.tick(time: now) != nil { zoomEnded() }
+        }
         if engine.isZooming {
             engine.zoomTiles(into: &out)
         } else if let d = deletion {
@@ -218,13 +240,15 @@ final class GridScene {
         let cfg = engine.cfg
         let l = rf.to.level, n = cfg.columns[l]
         let p = cfg.pitch(l), side = cfg.side(l)
-        var delta = posmod(rf.to.phase - rf.from.phase, n)
-        if delta * 2 > n { delta -= n }
+        // Always back to the target phase itself. The shorter way round for a phase over half a
+        // row ends one whole row lower than the resting layout it hands over to: every tile
+        // jumped up a row when the glide finished.
+        let delta = rf.to.phase - rf.from.phase
         let phase = CGFloat(rf.from.phase) + CGFloat(delta) * e
         let offset = engine.rest.offset
         let rowMin = Int(floor((offset - cfg.insetTop) / p)) - 1
         let rowMax = Int(floor((offset - cfg.insetTop + cfg.height) / p)) + 1
-        let iMin = max(0, rowMin * n - Int(ceil(phase)) - 1)
+        let iMin = max(0, rowMin * n - rf.from.phase - 1)
         let iMax = min(cfg.count - 1, (rowMax + 1) * n)
         if t >= 1 { reflow = nil }
         guard iMin <= iMax else { return }

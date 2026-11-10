@@ -144,6 +144,96 @@ void main() {
     expect((scroll.position.pixels - state.rest!.offset).abs(), lessThan(1));
   });
 
+  // The scroll view only gets the engine's offset a frame after a zoom ends, and not at all
+  // while one settles: a pinch beginning then must not take the scroll view's old offset (that
+  // threw the grid most of the way to the top after a zoom in).
+  testWidgets('a pinch that goes on or starts again during the settle keeps its place', (tester) async {
+    await tester.pumpWidget(MaterialApp(home: GridPage(key: UniqueKey(), library: library, place: Place.photos)));
+    for (var i = 0; i < 50 && find.byType(ZoomGrid).evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final grid = find.byType(ZoomGrid);
+    final state = tester.state<ZoomGridState>(grid);
+    final c = tester.getCenter(grid);
+    final local = tester.getRect(grid).size.center(Offset.zero);
+    ScrollableState scrollable() => tester.state<ScrollableState>(find.descendant(of: grid, matching: find.byType(Scrollable)).first);
+    Future<void> frames(int n) async {
+      for (var i = 0; i < n; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+    Future<void> move(TestGesture a, TestGesture b, double from, double to) async {
+      for (var i = 1; i <= 20; i++) {
+        final d = from + (to - from) * i / 20;
+        await a.moveTo(c - Offset(d, 0));
+        await b.moveTo(c + Offset(d, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+    Future<int> startFarDown() async {
+      await frames(120);
+      final position = scrollable().position;
+      position.jumpTo(position.maxScrollExtent * 0.7);
+      await frames(3);
+      final index = state.indexAt(local) ?? state.indexAt(local + const Offset(0, 12));
+      expect(index, isNotNull);
+      expect(index!, greaterThan(200), reason: 'the seeded library is long enough to tell');
+      return index;
+    }
+    Future<void> expectStillThere(int before, String what) async {
+      await frames(120);
+      final after = state.indexAt(local) ?? state.indexAt(local + const Offset(0, 12));
+      expect(after, isNotNull, reason: what);
+      expect((after! - before).abs(), lessThan(before ~/ 4), reason: '$what: item $before was under the fingers, now $after');
+      final r = state.rest!;
+      expect((scrollable().position.pixels - r.offset).abs(), lessThan(1.0), reason: what);
+    }
+
+    // one finger lifts and comes back while the zoom in settles, then both pinch back
+    var before = await startFarDown();
+    var a = await tester.startGesture(c - const Offset(40, 0), pointer: 11);
+    var b = await tester.startGesture(c + const Offset(40, 0), pointer: 12);
+    await move(a, b, 40, 160);
+    await b.up();
+    await frames(2);
+    b = await tester.startGesture(c + const Offset(160, 0), pointer: 13);
+    await move(a, b, 160, 55);
+    await a.up();
+    await b.up();
+    await expectStillThere(before, 'a finger back during the settle');
+
+    // both lift after the zoom in and are back at once, before the settle has ended
+    before = await startFarDown();
+    a = await tester.startGesture(c - const Offset(40, 0), pointer: 14);
+    b = await tester.startGesture(c + const Offset(40, 0), pointer: 15);
+    await move(a, b, 40, 160);
+    await a.up();
+    await b.up();
+    await frames(2);
+    a = await tester.startGesture(c - const Offset(160, 0), pointer: 16);
+    b = await tester.startGesture(c + const Offset(160, 0), pointer: 17);
+    await move(a, b, 160, 55);
+    await a.up();
+    await b.up();
+    await expectStillThere(before, 'a new pinch during the settle');
+
+    // a button's step right after a touch ended a settle
+    before = await startFarDown();
+    a = await tester.startGesture(c - const Offset(40, 0), pointer: 18);
+    b = await tester.startGesture(c + const Offset(40, 0), pointer: 19);
+    await move(a, b, 40, 160);
+    await a.up();
+    await b.up();
+    await frames(2);
+    final level = state.rest!.level;
+    a = await tester.startGesture(c, pointer: 20);
+    state.step(1);
+    await a.up();
+    await frames(120);
+    if (state.rest!.level == level) state.step(1);
+    await expectStillThere(before, 'a step during the handover');
+  });
+
   testWidgets('synthetic thumbnails retain scroll-back images and video posters', (tester) async {
     tester.view.devicePixelRatio = 3;
     tester.view.physicalSize = const Size(1179, 2556);

@@ -72,6 +72,10 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
   @visibleForTesting
   GridRest? get rest => _engine?.rest;
 
+  /// The item under a point of the resting grid (tests follow one through a zoom).
+  @visibleForTesting
+  int? indexAt(Offset p) => _indexAt(p);
+
   double get _now => SchedulerBinding.instance.currentSystemFrameTimeStamp.inMicroseconds / 1e6;
 
   @override
@@ -193,12 +197,17 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
   void _beginPinch(Offset focal) {
     final e = _engine;
     if (e == null || widget.items.isEmpty) return;
+    // The scroll view only has the engine's offset at rest. While a zoom still runs (a settle
+    // taken over) and between a zoom's end and its handover (the scroll view is moved a frame
+    // later) it is still where the last zoom began, in that zoom's layout: reading it then would
+    // throw the grid back there — after a zoom in, most of the way to the top.
+    final scrollIsCurrent = !_zooming && !_syncingScroll;
     // the engine takes the offset: any fling or bounce stops where it is, a pending handover is
     // void, and the scroll view holds still (its physics) until the zoom has been handed back
     _syncGeneration++;
     if (_scroll.hasClients) {
       _scroll.jumpTo(_scroll.offset.clamp(0.0, _scroll.position.maxScrollExtent));
-      e.offset = _scroll.offset;
+      if (scrollIsCurrent) e.offset = _scroll.offset;
     }
     e.beginPinch(focal.dx, focal.dy, _now);
     setState(() {
@@ -238,7 +247,9 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
 
   void _pointerDown(PointerDownEvent ev) {
     _endStepNow();
-    _interruptSettle();
+    // A finger of the pinch stayed down and the other is back: the pinch goes on from where the
+    // settle is (the engine keeps the picture still). Any other touch ends the settle, to scroll.
+    if (!(_settling && _pointers.length == 1)) _interruptSettle();
     _pointers[ev.pointer] = ev.localPosition;
     if (_pointers.length == 2) {
       final p = _pointers.values.toList();

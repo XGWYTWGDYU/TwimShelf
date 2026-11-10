@@ -241,10 +241,13 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
     func scrollViewWillEndDragging(_ sv: UIScrollView, withVelocity v: CGPoint, targetContentOffset target: UnsafeMutablePointer<CGPoint>) {
         // a fling that will land near the top re-aligns now, while the content is flying
         guard let scene else { return }
-        if target.pointee.y + scene.engine.cfg.insetTop < scene.engine.cfg.height { scene.realignToTop() }
+        // (a fling re-aligns at once; only a grid let go almost at rest glides — `realignToTop`)
+        if target.pointee.y + scene.engine.cfg.insetTop < scene.engine.cfg.height {
+            scene.realignToTop(animated: abs(v.y) * 1000 < GridScene.glideBelow)
+        }
     }
 
-    func scrollViewShouldScrollToTop(_ sv: UIScrollView) -> Bool { scene?.realignToTop(); return true }
+    func scrollViewShouldScrollToTop(_ sv: UIScrollView) -> Bool { scene?.realignToTop(animated: false); return true }
     func scrollViewDidEndDecelerating(_ sv: UIScrollView) { if (scene?.engine.rest.offset ?? 1) <= 0.5 { scene?.realignToTop() }; updateAccessibility() }
     func scrollViewDidEndDragging(_ sv: UIScrollView, willDecelerate d: Bool) { if !d { if (scene?.engine.rest.offset ?? 1) <= 0.5 { scene?.realignToTop() }; updateAccessibility() } }
 
@@ -311,6 +314,7 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
     private func zoomDidEnd() {
         wasZooming = false
         scrollView.isScrollEnabled = true
+        setNeedsLayout()        // a size or inset change during the zoom was not taken (the scene was busy)
         UIView.animate(withDuration: 0.2) { self.footerLabel.alpha = 1 }
         updateAccessibility()
         delegate?.mediaGrid(self, didSettleAt: level)

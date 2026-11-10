@@ -93,6 +93,13 @@ final class GridRenderer {
         // frame in this CPU scratch array after cache eviction or memory pressure.
         defer { textures.removeAll(keepingCapacity: true) }
         thumbnails.beginFrame()
+        // Tiles come back to front. When they are big enough for the large texture, the front-most
+        // are offered it first: a zoom draws several layers at that size, more than can have one.
+        if let side = tiles.last?.side, thumbnails.isLarge(pixels: side * scale) {
+            for t in tiles.reversed() where t.alpha > 0.02 {
+                if let i = info(t.photo) { thumbnails.grantLarge(i.item, pixels: t.side * scale) }
+            }
+        }
         var blankCount = 0
         defer { lastBlank = blankCount; lastTileCount = tiles.count }
         for (k, t) in tiles.enumerated() {

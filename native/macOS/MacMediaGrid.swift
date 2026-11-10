@@ -273,6 +273,7 @@ final class MacMediaGridView: NSView {
 
     private func zoomDidEnd() {
         scrollView.isZooming = false
+        needsLayout = true      // a size or inset change during the zoom was not taken (the scene was busy)
         footerLabel.animator().alphaValue = 1
         delegate?.mediaGrid(self, didSettleAt: level)
     }
