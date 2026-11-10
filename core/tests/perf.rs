@@ -4,7 +4,7 @@ use tl_core::library::{FeedRequest, Library};
 use tl_core::model::{MediaKind, Origin, PostMeta, SearchScope};
 
 fn req(terms: &[&str], fuzzy: bool) -> FeedRequest {
-    FeedRequest { newest_first: false, terms: terms.iter().map(|s| s.to_string()).collect(), scope: SearchScope::Both, seed: Some(7), fuzzy, term_vectors: vec![], embed_model: None, threshold: 0.72, fields: Default::default(), filter: Default::default() }
+    FeedRequest { whole_posts: false, newest_first: false, terms: terms.iter().map(|s| s.to_string()).collect(), scope: SearchScope::Both, seed: Some(7), fuzzy, term_vectors: vec![], embed_model: None, threshold: 0.72, fields: Default::default(), filter: Default::default() }
 }
 
 #[test]

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -11,6 +10,8 @@ import '../platform/secrets.dart' as secrets;
 import '../platform/share_inbox.dart';
 import '../platform/background_work.dart';
 import '../platform/system_random.dart';
+import '../platform/os.dart';
+import '../platform/files.dart' as files;
 
 abstract interface class DownloadCore {
   Future<int> start(DownloadRequest request);
@@ -34,7 +35,7 @@ class NativeDownloadCore implements DownloadCore {
   Future<DownloadStatus?> status() => Core.downloadStatusAsync();
   @override
   Future<List<String>> bookmarks(String path) =>
-      Isolate.run(() => Core.bookmarkURLs(path));
+      coreRunAsync(() => Core.bookmarkURLs(path));
   @override
   Future<void> applyCookies(DownloadRoute route) async {
     final result = await secrets.Session.applyStoredCookies();
@@ -73,7 +74,7 @@ class FileDownloadQueueStore implements DownloadQueueStore {
   @override
   Future<void> write(Map<String, dynamic> value) async {
     await file.parent.create(recursive: true);
-    final random = const SystemRandom().nextInt(1 << 32);
+    final random = const SystemRandom().nextInt(0x100000000);
     final temporary = File(
       '${file.path}.${DateTime.now().microsecondsSinceEpoch}.$random.partial',
     );
@@ -85,6 +86,28 @@ class FileDownloadQueueStore implements DownloadQueueStore {
       if (await temporary.exists()) await temporary.delete();
     }
   }
+}
+
+/// The queue in a text file through the platform's file access (the server's, in the web build).
+class TextFileDownloadQueueStore implements DownloadQueueStore {
+  TextFileDownloadQueueStore(this.path);
+  final String path;
+  @override
+  Future<Map<String, dynamic>?> read() async {
+    final t = await files.readText(path);
+    return t == null ? null : jsonDecode(t) as Map<String, dynamic>;
+  }
+
+  @override
+  Future<String?> setAside() async {
+    if (await files.readText(path) == null) return null;
+    final kept = '$path.damaged-${DateTime.now().millisecondsSinceEpoch}';
+    await files.movePath(path, kept);
+    return kept;
+  }
+
+  @override
+  Future<void> write(Map<String, dynamic> value) => files.writeText(path, jsonEncode(value));
 }
 
 class DownloadServiceException implements Exception {
@@ -185,12 +208,18 @@ class DownloadService extends ChangeNotifier {
   void Function(DownloadStatus)? onFinished;
   static Future<DownloadService> create({
     Directory? libraryDirectory,
+    String? libraryPath,
     void Function(DownloadStatus)? onFinished,
   }) async {
+    if (OS.isWeb) {
+      final service = DownloadService(core: NativeDownloadCore(), store: TextFileDownloadQueueStore('$libraryPath/downloads.queue.json'), onFinished: onFinished);
+      await service.initialize();
+      return service;
+    }
     final root =
         libraryDirectory ??
         Directory(
-          Platform.environment['TL_LIBRARY_DIR'] ??
+          OS.environment['TL_LIBRARY_DIR'] ??
               (await getApplicationSupportDirectory()).path,
         );
     final service = DownloadService(
@@ -275,7 +304,17 @@ class DownloadService extends ChangeNotifier {
     return next;
   }
 
-  Future<void> initialize() => _serial(() async {
+  Future<void> initialize() => _serial(_load);
+
+  /// The web build: other windows may have changed the queue file since; read it again before
+  /// changing it (the last window to write would otherwise drop the others' links).
+  Future<void> _fresh() async {
+    if (!OS.isWeb) return;
+    _initialized = false;
+    await _load();
+  }
+
+  Future<void> _load() async {
     if (_initialized) return;
     Map<String, dynamic>? saved;
     try {
@@ -327,7 +366,7 @@ class DownloadService extends ChangeNotifier {
     }
     _initialized = true;
     await _refresh();
-  });
+  }
   Future<void> _commit({
     List<QueuedDownload>? queue,
     Set<String>? shares,
@@ -392,6 +431,7 @@ class DownloadService extends ChangeNotifier {
 
   Future<void> enqueueLinks(List<String> links, {String? source}) =>
       _serial(() async {
+        await _fresh();
         _ready();
         await _commit(
           queue: _adding(links, source: source),
@@ -406,6 +446,7 @@ class DownloadService extends ChangeNotifier {
   }
 
   Future<void> importBookmarks(String path) => _serial(() async {
+    await _fresh();
     _ready();
     final urls = await core.bookmarks(path);
     await _commit(
@@ -444,6 +485,7 @@ class DownloadService extends ChangeNotifier {
   }
 
   Future<void> start() => _serial(() async {
+    await _fresh();
     _ready();
     if (_queue.isEmpty && (_mode == 'paused' || (_status?.paused ?? 0) > 0)) {
       throw const DownloadServiceException('settings.resume');
@@ -463,12 +505,14 @@ class DownloadService extends ChangeNotifier {
     }
   });
   Future<void> pause() => _serial(() async {
+    await _fresh();
     _ready();
     await _commit(mode: 'paused');
     await core.stop(true);
     await _refresh();
   });
   Future<void> resume() => _serial(() async {
+    await _fresh();
     _ready();
     await core.applyCookies(_route);
     _backgroundExpired = false;
@@ -484,6 +528,7 @@ class DownloadService extends ChangeNotifier {
   });
   /// The data folder is about to move: what runs stops, and goes on from the new place.
   Future<void> pauseForMove() => _serial(() async {
+    await _fresh();
     _ready();
     await core.stop(true);
     await _refresh();
@@ -491,6 +536,7 @@ class DownloadService extends ChangeNotifier {
 
   /// 清除所有数据: nothing left to send, the record of accepted shares gone, the file too.
   Future<void> discardAll() => _serial(() async {
+    await _fresh();
     _ready();
     await _commit(queue: [], shares: {}, mode: 'active');
     await core.stop(false);
@@ -501,6 +547,7 @@ class DownloadService extends ChangeNotifier {
   String? damagedQueue;
 
   Future<void> cancel() => _serial(() async {
+    await _fresh();
     _ready();
     // Explicit cancellation intentionally discards unsent links. Persist that
     // intent before the stop, so a crash cannot start them on the next launch.
@@ -509,6 +556,7 @@ class DownloadService extends ChangeNotifier {
     await _refresh();
   });
   Future<void> poll() => _serial(() async {
+    await _fresh();
     _ready();
     await _refresh();
   });

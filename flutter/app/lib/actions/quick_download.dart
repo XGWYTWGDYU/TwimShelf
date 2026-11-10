@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -12,6 +11,7 @@ import '../platform/shared_links.dart';
 import '../screens/settings/downloads_page.dart';
 import '../services/downloads.dart';
 import '../widgets/text_menu.dart';
+import '../platform/os.dart';
 
 /// The links typed so far; they stay when the card closes without downloading, as native.
 String _draft = '';
@@ -147,7 +147,7 @@ class _QuickDownloadCardState extends State<QuickDownloadCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final desktop = Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+    final desktop = OS.isMacOS || OS.isWindows || OS.isLinux;
     return Material(
       elevation: 8,
       color: theme.colorScheme.surfaceContainerHigh,
@@ -156,7 +156,7 @@ class _QuickDownloadCardState extends State<QuickDownloadCard> {
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: CallbackShortcuts(
-          bindings: {SingleActivator(LogicalKeyboardKey.enter, meta: Platform.isMacOS, control: !Platform.isMacOS): _download},
+          bindings: {SingleActivator(LogicalKeyboardKey.enter, meta: OS.isMacOS, control: !OS.isMacOS): _download},
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text(L('common.downloadPosts'), style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),

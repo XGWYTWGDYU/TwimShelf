@@ -1,0 +1,29 @@
+# TwimShelf Linux server: the server and the web app in one container.
+#
+#   docker compose -f docker/compose.yaml up -d
+#
+# Then open http://<server>:2778 in a browser.
+services:
+  twimshelf:
+    # the published image; to build it yourself instead, comment this out and use `build:`
+    image: ghcr.io/xgwytwgdyu/twimshelf:latest
+    # build:
+    #   context: ..
+    #   dockerfile: docker/Dockerfile
+    container_name: twimshelf
+    restart: unless-stopped
+    # LAN sync with the phone/Mac apps finds devices by mDNS (multicast), which only reaches the
+    # container on the host's network. Without LAN sync, drop this and use `ports:` instead.
+    network_mode: host
+    # ports:
+    #   - "2778:2778"        # host:container — change the left side for another port
+    volumes:
+      - ./twimshelf-data:/data   # everything: library, thumbnails, models, exports, uploads
+    environment:
+      PUID: "1000"               # the owner of the data folder on the host (`id -u`)
+      PGID: "1000"               # (`id -g`)
+      TL_DEVICE_NAME: "TwimShelf Linux Server"      # the name other devices see in LAN sync
+      # TL_PASSWORD: "change-me" # the web password (otherwise one is made on the first start, see the log)
+      # TL_ALLOW_PUBLIC: "true"  # answer the internet too (local network only otherwise); put HTTPS in front
+      # TL_PORT: "2778"          # the port inside the container (with host networking: on the host)
+      TZ: "Asia/Shanghai"

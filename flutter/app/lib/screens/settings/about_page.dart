@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -59,7 +58,7 @@ class _AboutPageState extends State<AboutPage> {
   }
 
   Future<void> _loadIntegrity() async {
-    final s = await Isolate.run(Core.integritySummary);
+    final s = await coreRunAsync(Core.integritySummary);
     if (!mounted) return;
     setState(() => _integrity = s);
     final running = s.last?.running ?? false;

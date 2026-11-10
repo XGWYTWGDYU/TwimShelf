@@ -24,6 +24,8 @@ encoding_rs = "0.8"
 libc = "0.2"
 # LAN discovery for every front end (Bonjour-compatible mDNS, no runtime dependency)
 mdns-sd = "0.21"
+# this device's own subnets, to pick the address of a multi-homed peer that is reachable from here
+if-addrs = "0.15"
 chacha20poly1305 = "0.10"
 hkdf = "0.12"
 hmac = "0.12"

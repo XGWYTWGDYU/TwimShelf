@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
@@ -28,6 +27,8 @@ import '../app/feed_order.dart';
 import '../widgets/media_image.dart';
 import '../widgets/text_menu.dart';
 import '../widgets/wheel_pager.dart';
+import '../platform/os.dart';
+import '../platform/files.dart';
 
 /// 浏览: the library as cards — one per post (or one per media when not grouped) — in columns
 /// whose cards are as tall as their content (text shown in full, no gap where a link is
@@ -231,7 +232,7 @@ class _BrowsePageState extends State<BrowsePage> {
     ];
   }
 
-  static bool get _touchShuffle => Platform.isIOS || Platform.isAndroid;
+  static bool get _touchShuffle => OS.isIOS || OS.isAndroid;
 
   void _shuffle() {
     if (Prefs.instance.feedByAdded) return;
@@ -261,7 +262,7 @@ class _BrowsePageState extends State<BrowsePage> {
     _revision = widget.library.revision;
     final gen = ++_generation;
     // a contradiction (视频 -视频) finds nothing, as in the native apps, without asking the core
-    final items = _query.isContradictory ? const <FeedItem>[] : await widget.library.feed(_query.request(newestFirst: Prefs.instance.feedByAdded, over: _filter));
+    final items = _query.isContradictory ? const <FeedItem>[] : await widget.library.feed(_query.request(newestFirst: Prefs.instance.feedByAdded, over: _filter, wholePosts: _grouped));
     if (!mounted || gen != _generation) return;
     setState(() {
       _items = Prefs.instance.feedByAdded ? items : _order.apply(items);
@@ -296,12 +297,24 @@ class _BrowsePageState extends State<BrowsePage> {
 
   /// As native: every media in the order of the cards, so turning the page goes through a post's
   /// media and on into the next post's, photos and videos alike.
-  void _open(FeedItem item) {
+  bool _openingViewer = false;
+  Future<void> _open(FeedItem item) async {
+    if (_openingViewer) return;
+    _openingViewer = true;
     final (items, index) = viewerList(_cards ?? const [], item);
-    Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
-      fullscreenDialog: true,
-      builder: (_) => ViewerPage(library: widget.library, items: items, index: index),
-    ));
+    // Release inline decoders before the full-screen player starts, including those
+    // whose visibility callbacks would otherwise arrive during the route animation.
+    try {
+      await _FeedVideoState.suspendForViewer();
+      if (!mounted) return;
+      await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => ViewerPage(library: widget.library, items: items, index: index),
+      ));
+    } finally {
+      _openingViewer = false;
+      _FeedVideoState.resumeAfterViewer();
+    }
   }
 
   @override
@@ -361,11 +374,15 @@ class _BrowsePageState extends State<BrowsePage> {
                   icon: Icons.layers_outlined,
                   dense: dense,
                   selected: _grouped,
-                  onPressed: () => setState(() {
-                    _grouped = !_grouped;
-                    Prefs.instance.feedGrouped = _grouped;
-                    _cards = _group(_items);
-                  }),
+                  onPressed: () {
+                    setState(() {
+                      _grouped = !_grouped;
+                      Prefs.instance.feedGrouped = _grouped;
+                      _cards = _group(_items);
+                    });
+                    // a search finds whole posts only as post cards
+                    _load();
+                  },
                 ),
                 Builder(
                   key: _downloadButton,
@@ -459,7 +476,7 @@ class _BrowsePageState extends State<BrowsePage> {
     final Widget body = cards == null
             ? const Center(child: CircularProgressIndicator())
             : cards.isEmpty
-                ? Center(child: Padding(padding: const EdgeInsets.all(32), child: Text(_query.keys.isEmpty && _chips().isEmpty ? L('feed.empty.library') : L('feed.empty.noMatch'), textAlign: TextAlign.center)))
+                ? Center(child: Padding(padding: const EdgeInsets.all(32), child: Text(_query.keys.isEmpty && _chips().isEmpty ? L('feed.empty.library.app') : L('feed.empty.noMatch'), textAlign: TextAlign.center)))
                 : LayoutBuilder(builder: (context, c) {
                     final screen = MediaQuery.sizeOf(context);
                     final columns = Prefs.instance.feedColumns(c.maxWidth, screen.height);
@@ -618,7 +635,7 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
             // a mouse does not drag pages
-            if (widget.media.length > 1 && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) ...[
+            if (widget.media.length > 1 && (OS.isMacOS || OS.isWindows || OS.isLinux)) ...[
               if (_page > 0) _PageArrow(key: const ValueKey('cardPrev'), left: true, onTap: () => _turn(-1)),
               if (_page < widget.media.length - 1) _PageArrow(key: const ValueKey('cardNext'), left: false, onTap: () => _turn(1)),
             ],
@@ -759,6 +776,21 @@ class _FeedVideoState extends State<_FeedVideo> {
   static const _limit = 4;
   static final _playing = <_FeedVideoState>{};
   static final _waiting = <_FeedVideoState>[];
+  static final _instances = <_FeedVideoState>{};
+  static bool _viewerOpen = false;
+
+  static Future<void> suspendForViewer() async {
+    _viewerOpen = true;
+    _waiting.clear();
+    await Future.wait(_playing.toList().map((s) => s._stop()));
+  }
+
+  static void resumeAfterViewer() {
+    _viewerOpen = false;
+    for (final s in _instances.toList()) {
+      if (s.mounted && !s._gone) s._update();
+    }
+  }
 
   VideoPlayback? _video;
   String? _poster;
@@ -769,6 +801,7 @@ class _FeedVideoState extends State<_FeedVideo> {
   @override
   void initState() {
     super.initState();
+    _instances.add(this);
     _loadPoster();
   }
 
@@ -783,7 +816,7 @@ class _FeedVideoState extends State<_FeedVideo> {
     if (mounted && p != null) setState(() => _poster = p);
   }
 
-  bool get _wants => _visible && widget.current;
+  bool get _wants => !_viewerOpen && !_gone && _visible && widget.current;
 
   void _update() {
     if (_wants) {
@@ -817,7 +850,7 @@ class _FeedVideoState extends State<_FeedVideo> {
     }
   }
 
-  void _stop() {
+  Future<void> _stop() async {
     final v = _video;
     if (v == null) return;
     _position?.cancel();
@@ -826,7 +859,7 @@ class _FeedVideoState extends State<_FeedVideo> {
     _video = null;
     _firstFrame = false;
     if (mounted && !_gone) setState(() {});
-    unawaited(v.dispose());
+    await v.dispose();
     // the next card waiting for a player gets this one's place
     while (_waiting.isNotEmpty && _playing.length < _limit) {
       final next = _waiting.removeAt(0);
@@ -839,6 +872,7 @@ class _FeedVideoState extends State<_FeedVideo> {
   @override
   void dispose() {
     _gone = true;
+    _instances.remove(this);
     _waiting.remove(this);
     _stop();
     super.dispose();
@@ -858,7 +892,7 @@ class _FeedVideoState extends State<_FeedVideo> {
       child: Stack(fit: StackFit.expand, children: [
         if (v != null) VideoSurface(controller: v.surfaceController, controls: NoVideoControls, fill: Colors.transparent),
         if (v == null || !_firstFrame)
-          _poster == null ? const SizedBox.expand() : Image.file(File(_poster!), fit: BoxFit.contain, gaplessPlayback: true),
+          _poster == null ? const SizedBox.expand() : Image(image: localFileImage(_poster!), fit: BoxFit.contain, gaplessPlayback: true),
         if (v == null) const Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 56)),
       ]),
     );

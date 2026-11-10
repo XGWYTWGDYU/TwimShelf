@@ -7,6 +7,10 @@
 #
 # So releasing is: raise `version` and `build_number` in config.yaml, push to main.
 #
+# The Linux server (Docker) is built for amd64 and arm64 on every run; with a release it is also
+# published as ghcr.io/<owner>/twimshelf:<version> and :latest (a new package on GitHub starts
+# private: make it public once in the package's settings).
+#
 # Optional repository secrets, for an Android package that can update itself across releases.
 # Without them each build is signed with that machine's throwaway debug key:
 #   ANDROID_KEYSTORE_BASE64   the release keystore, base64
@@ -214,6 +218,64 @@ jobs:
           path: build/apps/*
           if-no-files-found: error
           retention-days: 30
+
+  docker:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      RELEASE: ${{ needs.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - if: env.RELEASE == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          output=--load
+          [[ "$RELEASE" == true ]] && output=--push
+          docker buildx build -f docker/Dockerfile --build-arg VERSION="$VERSION" \
+            --cache-from "type=gha,scope=docker-${{ matrix.arch }}" \
+            --cache-to "type=gha,mode=max,scope=docker-${{ matrix.arch }}" \
+            -t "$image:$VERSION-${{ matrix.arch }}" $output .
+          echo "Docker image $image:$VERSION-${{ matrix.arch }} ($output)" >> "$GITHUB_STEP_SUMMARY"
+
+  docker-publish:
+    needs: [plan, docker]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: One image for both architectures
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx imagetools create -t "$image:$VERSION" -t "$image:latest" "$image:$VERSION-amd64" "$image:$VERSION-arm64"
+          echo "Published $image:$VERSION and :latest" >> "$GITHUB_STEP_SUMMARY"
 
   release:
     needs: [plan, test-core, apple, android, linux, windows]

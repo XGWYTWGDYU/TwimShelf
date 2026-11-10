@@ -15,6 +15,8 @@ TwimShelf  能把你喜欢的帖子、图片和视频保存到自己的设备上
 - **AI 标记**：根据媒体和帖子内容自动打标签。可以从内置的模型商店下载本地模型，也可以接入外部 AI 服务，例如 Grok
 - **设备间同步**：在局域网内配对设备后去中心化同步，不需要 iCloud，也不需要付费开发者账号
 - **备份与维护**：可导出媒体，也可以导出完整包做冷备份
+- **Linux 服务器**：Docker 镜像里是服务器和网页版，功能与 App 相同，用浏览器访问，也是一台始终在线的同步设备
+- **浏览器扩展**：在 X 的每条帖子旁加一个下载按钮，一键交给已绑定的电脑或服务器下载，并跟踪到完成
 
 ## 注意
 
@@ -31,6 +33,8 @@ TwimShelf  能把你喜欢的帖子、图片和视频保存到自己的设备上
 | Windows | Flutter | Windows 10 1803 | `setup.exe` |
 | Linux | Flutter | 见[构建指南](BUILDING.md) | `.AppImage` |
 | macOS、iPhone、iPad | Flutter | macOS 14、iOS 17 | `.dmg`、未签名 `.ipa` |
+| Linux 服务器 | 服务器 + 网页版 | Docker（x86_64、arm64） | Docker 镜像 `ghcr.io/xgwytwgdyu/twimshelf` |
+| Chrome、Edge 等 | 浏览器扩展 | Chromium 116 | 仓库里的 `extension` 目录 |
 
 苹果平台上推荐使用原生版。Flutter 版主要面向其他平台，同样提供苹果平台的安装包。
 
@@ -43,8 +47,36 @@ TwimShelf  能把你喜欢的帖子、图片和视频保存到自己的设备上
 - **Android**：大多数手机选择 `arm64-v8a`
 - **Windows**：安装程序没有代码签名，SmartScreen 提示时选择「更多信息 › 仍要运行」
 - **Linux**：`chmod +x` 之后直接运行 `.AppImage`
+- **Linux 服务器**：Docker 镜像发布在 GitHub Container Registry，见下文
+- **浏览器扩展**：直接加载仓库里的 `extension` 目录，见下文
 
-从 1.0.x 升级原生版时，直接覆盖安装即可，资料库、模型和设置都会保留。
+从旧版本升级时直接覆盖安装即可，资料库、模型和设置都会保留。
+
+## Linux 服务器（Docker）
+
+适合放在一台常开的 Linux 机器上：用浏览器访问资料库，和其他设备局域网同步，接收浏览器扩展发来的下载。
+
+```bash
+docker run -d --name twimshelf --restart unless-stopped -p 2778:2778 -v /srv/twimshelf:/data ghcr.io/xgwytwgdyu/twimshelf:latest
+```
+
+1. 用浏览器打开 `http://<服务器地址>:2778`。
+2. 第一次的登录密码在 `docker logs twimshelf` 里。
+3. 用 `docker exec -it twimshelf twimshelf passwd` 改成自己的密码。
+
+程序在容器的 `/app`，数据都在 `/data`，端口和数据目录可以随意映射。默认只接受局域网访问；局域网同步需要 host 网络。更新时拉取新镜像、重建容器即可，数据不动。环境变量、公网访问、更新和 GPU 的说明见 [docker/README.md](docker/README.md)。
+
+## 浏览器扩展
+
+在 X 的每条帖子旁加一个下载按钮，点一下就交给已绑定的设备下载，并一直跟踪到完成。可以绑定 Windows、Linux、macOS 上的 App（Flutter 版和原生版）和 Linux 服务器；绑定了多台时，点按钮会让你选择发给哪一台，也可以设一台默认设备。
+
+1. **安装**：在 Chrome 或 Edge 打开 `chrome://extensions`，打开「开发者模式」，点「加载已解压的扩展程序」，选择仓库里的 `extension` 目录。不需要构建。
+2. **绑定**：在 TwimShelf 里打开「设置 → 浏览器扩展 → 绑定浏览器」。
+   - 同一台电脑上的 App：在扩展里输入 6 位绑定码。
+   - 其他电脑或 Linux 服务器：复制「绑定文本」，粘贴到扩展里。
+3. **使用**：打开 X，点帖子操作栏里的下载按钮。按钮会显示排队、下载中、完成或失败；设备离线时会等它回来再发送。
+
+桌面版 App 打开时才能接收（端口 27800 起，只接受本机和局域网），Linux 服务器随时接收。详见 [extension/README.md](extension/README.md)。
 
 ## 从源码构建
 
@@ -75,6 +107,9 @@ Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都�
 | `flutter/app` | Flutter 版应用 |
 | `flutter/installer` | Windows 安装程序 |
 | `flutter/tl_core`、`tl_native`、`tl_llama` | Flutter 插件：Rust 核心绑定、平台能力、llama.cpp 推理 |
+| `server` | Linux 服务器：把核心通过 HTTP 提供给网页版，以及登录、文件、视频封面 |
+| `docker` | Docker 镜像和 compose 示例 |
+| `extension` | Chromium 浏览器扩展（独立项目，构建脚本不处理它） |
 | `scripts` | 配置生成、图标、打包和检查脚本 |
 | `.github/workflows` | 自动构建和发布 |
 

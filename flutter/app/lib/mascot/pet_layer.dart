@@ -36,7 +36,7 @@ class _Pet extends StatefulWidget {
 }
 
 class _PetState extends State<_Pet> with WidgetsBindingObserver {
-  final _engine = PetEngine(const SystemRandom().nextInt(1 << 31) + 1);
+  final _engine = PetEngine(const SystemRandom().nextInt(0x80000000) + 1);
   final _picture = ValueNotifier<List<double>>(const []);
   final _clock = Stopwatch()..start();
   Timer? _timer;

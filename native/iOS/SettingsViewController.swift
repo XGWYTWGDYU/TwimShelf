@@ -103,7 +103,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
             Section(id: "stats", header: L("common.library"), footer: L("settings.stats.footer"), rows: [.custom("stats", stats)]),
         ]
         if !acts.isEmpty {
-            var rows: [Row] = acts.map { .custom("act-\($0.kind.rawValue)", card($0)) }
+            var rows: [Row] = acts.map { .banner("act-\($0.kind.rawValue)", card($0)) }
             if Core.downloadStatus()?.running == true {
                 rows.append(.button(L("settings.cancelDownload"), icon: .init("xmark", .systemRed), destructive: true) { [weak self] in do { try Core.stopDownload(pause: false) } catch { self?.alert(L("common.couldNotCancel"), error.localizedDescription) } })
             }

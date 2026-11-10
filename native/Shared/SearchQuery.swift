@@ -494,7 +494,7 @@ struct QuickDownloadCard: View {
     /// The text box against the card behind it.
     private static var fieldFill: Color {
         #if os(iOS)
-        Color(uiColor: .secondarySystemBackground)
+        Color(uiColor: .systemBackground)
         #else
         Color(nsColor: .textBackgroundColor)
         #endif
@@ -518,7 +518,17 @@ struct QuickDownloadCard: View {
                 .background(Self.fieldFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     if links.isEmpty {
-                        Text(L("mac.quick.placeholder")).foregroundStyle(.tertiary).padding(.horizontal, 12).padding(.vertical, 14).allowsHitTesting(false)
+                        Text(L("mac.quick.placeholder"))
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 11)
+                            #if os(macOS)
+                            .padding(.top, 6)
+                            #else
+                            .padding(.top, 14)
+                            #endif
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
                 .accessibilityLabel(L("mac.quick.placeholder"))

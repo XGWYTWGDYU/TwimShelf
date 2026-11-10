@@ -13,6 +13,7 @@ enum MacSettingsPages {
     static func modelHub() -> SettingsHost { SettingsHost { ModelHubPageView() } }
     static func modelHubRepo(_ repo: String) -> SettingsHost { SettingsHost { ModelHubRepoPageView(repo: repo) } }
     static func sync() -> SettingsHost { SettingsHost { SyncPageView() } }
+    static func browserExtension() -> SettingsHost { SettingsHost { ExtensionPageView() } }
     static func problems() -> SettingsHost { SettingsHost { ProblemsPageView() } }
     static func about() -> SettingsHost { SettingsHost { AboutPageView() } }
     static func storage() -> SettingsHost { SettingsHost { StoragePageView() } }
@@ -48,6 +49,7 @@ struct SettingsRootView: View {
                             symbol: "sparkles", color: .purple, mascot: AutoTagger.shared.running ? "camera" : nil, progress: counts.total > 0 ? Double(counts.done) / Double(counts.total) : nil, id: "nav-models") { env.open(L("common.aiModels"), MacSettingsPages.models()) }
                     NavTile(title: L("mac.sync"), detail: svc.hasAccount ? (online > 0 ? L("mac.sync.online", online) : L("mac.sync.noneOnline")) : L("mac.sync.noAccount"), symbol: "arrow.triangle.2.circlepath", color: .green,
                             badge: (svc.status?.syncing ?? 0) > 0 ? L("mac.sync.syncing") : nil, badgeColor: .blue, id: "nav-sync") { env.open(L("mac.sync"), MacSettingsPages.sync()) }
+                    NavTile(title: L("ext.title"), detail: ExtensionReceiver.summary, symbol: "puzzlepiece.extension.fill", color: .indigo, id: "nav-extension") { env.open(L("ext.title"), MacSettingsPages.browserExtension()) }
                 }
             }
 

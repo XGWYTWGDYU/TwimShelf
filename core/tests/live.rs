@@ -16,7 +16,7 @@ fn downloads_public_post_via_fxtwitter() {
     while download::status().running { std::thread::sleep(std::time::Duration::from_millis(100)); }
     let s = download::status();
     assert_eq!(s.failed, 0, "{:?}", s.errors);
-    let items = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+    let items = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
     assert_eq!(items.len(), 1);
     assert!(items[0].screen_name.is_some());
     let bytes = std::fs::metadata(&items[0].path).unwrap().len();

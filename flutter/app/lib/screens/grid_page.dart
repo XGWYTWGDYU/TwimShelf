@@ -4,7 +4,6 @@ import 'package:tl_core/tl_core.dart';
 
 import '../app/library.dart';
 import '../app/places.dart';
-import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 
@@ -100,7 +99,7 @@ class _GridPageState extends State<GridPage> {
     );
     if (days == null || days == now) return;
     Core.setTrashKeepDays(days);
-    await Isolate.run(Core.expireTrash);
+    await coreRunAsync(Core.expireTrash);
     await widget.library.refresh();
     _load();
   }

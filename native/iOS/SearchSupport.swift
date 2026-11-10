@@ -50,7 +50,20 @@ final class SearchSuggestionsView: UIView, UITableViewDataSource, UITableViewDel
     required init?(coder: NSCoder) { fatalError() }
 
     /// Room for the search bar floating above the list.
-    var topInset: CGFloat = 0 { didSet { if table.contentInset.top != topInset { table.contentInset.top = topInset; table.verticalScrollIndicatorInsets.top = topInset } } }
+    /// Where the list starts (under the search field). A list resting at its top stays there when
+    /// this moves (the bars around it settling after the field opened), instead of sliding under it.
+    var topInset: CGFloat = 0 {
+        didSet {
+            guard table.contentInset.top != topInset else { return }
+            let atTop = table.contentOffset.y <= -oldValue + 1
+            table.contentInset.top = topInset
+            table.verticalScrollIndicatorInsets.top = topInset
+            if atTop { table.contentOffset.y = -topInset }
+        }
+    }
+
+    /// The list from its top (each time it opens).
+    func scrollToTop() { table.contentOffset.y = -table.contentInset.top }
 
     func setFooter(_ text: String) {
         footer.text = text

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../app/identity.g.dart';
+import 'os.dart';
 
 /// Labels are supplied from assets/l10n catalogs by the packager or runtime.
 String desktopEntry(
@@ -74,15 +75,15 @@ Future<Map<String, String>> _labels(Directory catalogs, String app) async {
 
 Future<void> installDesktopEntry() async {
   // an AppImage runs from a mount that changes every start: the entry starts the AppImage file
-  final appImage = Platform.environment['APPIMAGE'];
-  final program = File(Platform.resolvedExecutable).absolute.path;
+  final appImage = OS.environment['APPIMAGE'];
+  final program = File(OS.resolvedExecutable).absolute.path;
   final executable = appImage ?? program;
   final catalogs = Directory(
     '${File(program).parent.path}/data/flutter_assets/assets/l10n',
   );
-  final home = Platform.environment['HOME'];
+  final home = OS.environment['HOME'];
   final data =
-      Platform.environment['XDG_DATA_HOME'] ??
+      OS.environment['XDG_DATA_HOME'] ??
       (home == null ? null : '$home/.local/share');
   if (data == null) return;
   const release =
@@ -119,8 +120,8 @@ Future<void> installDesktopEntry() async {
 
 /// "Uninstalling" an AppImage is deleting the file; this takes its menu entry and icon away too.
 Future<void> removeDesktopEntry() async {
-  final home = Platform.environment['HOME'];
-  final data = Platform.environment['XDG_DATA_HOME'] ?? (home == null ? null : '$home/.local/share');
+  final home = OS.environment['HOME'];
+  final data = OS.environment['XDG_DATA_HOME'] ?? (home == null ? null : '$home/.local/share');
   if (data == null) return;
   for (final id in [desktopId, '$desktopId.debug']) {
     for (final f in [File('$data/applications/$id.desktop'), File('$data/icons/hicolor/512x512/apps/$id.png')]) {

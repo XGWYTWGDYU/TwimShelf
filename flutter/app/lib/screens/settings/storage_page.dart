@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -12,6 +11,7 @@ import '../../l10n/l10n.dart';
 import '../settings_page.dart';
 import 'ai_page.dart';
 import '../../widgets/text_menu.dart';
+import '../../platform/os.dart';
 
 /// 设置 → 存储空间: what the app takes on this device, as a bar of its parts and a list that says
 /// what each part holds. The same groups and the same actions as the native apps': how it compares
@@ -29,14 +29,14 @@ Future<Map<String, List<String>>> storagePlaces(String thumbnails) async {
   final app = await TlNative.appPaths();
   final places = <String, List<String>>{
     // desktops: the folder the program was installed into
-    'app': app.isNotEmpty ? app : [File(Platform.resolvedExecutable).parent.path],
+    'app': app.isNotEmpty ? app : [File(OS.resolvedExecutable).parent.path],
     'thumbnails': [thumbnails],
     'cache': [],
   };
-  final sep = Platform.pathSeparator;
+  final sep = OS.pathSeparator;
   final thumbPath = Directory(thumbnails).absolute.path;
   // on a desktop the temporary folder is shared with every other program of this user: not ours to count
-  final phone = Platform.isIOS || Platform.isAndroid;
+  final phone = OS.isIOS || OS.isAndroid;
   for (final dir in [await getApplicationCacheDirectory(), if (phone) await getTemporaryDirectory()]) {
     if (!dir.existsSync()) continue;
     // a cache folder holding the thumbnails: its other entries, so nothing counts twice
@@ -63,7 +63,7 @@ typedef StorageSkip = ({String path, String reason});
 /// Thumbnails: the files only, the running grid keeps writing into its folders. The cache: files
 /// touched in the last hour stay, a share or an export may be using them. The bin is the core's
 /// (the caller's) to empty. [recentReason] is the wording for those left because they are recent.
-Future<List<StorageSkip>> clearStorageFiles(Set<String> keys, Map<String, List<String>> places, {required String recentReason}) => Isolate.run(() {
+Future<List<StorageSkip>> clearStorageFiles(Set<String> keys, Map<String, List<String>> places, {required String recentReason}) => coreRunAsync(() {
       final skipped = <StorageSkip>[];
       final recent = DateTime.now().subtract(const Duration(hours: 1));
       void remove(FileSystemEntity e, {bool keepRecent = false}) {

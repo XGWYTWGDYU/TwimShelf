@@ -159,6 +159,8 @@ struct FeedRequest: Encodable {
     var threshold: Float = 0.55
     var fields = SearchFields.saved
     var filter = FeedFilter()
+    /// Post cards: a post found through any of its media comes with all of them.
+    var wholePosts = false
 }
 
 /// Which parts of a post a search term may match (any enabled field counts).
@@ -405,6 +407,29 @@ enum Core {
         if let e = env.error { throw CoreError(message: e) }
     }
 
+    // MARK: the browser extension's receiver (core/src/extension.rs)
+
+    struct ExtensionClient: Decodable, Identifiable { let id: String; let name: String; let added: Int; let seen: Int }
+    struct ExtensionPairing: Decodable { let code: String; let link: String; let expiresIn: Int }
+    struct ExtensionState: Decodable { let clients: [ExtensionClient]; let pairing: ExtensionPairing?; let port: Int? }
+
+    /// This device for the browser extension (name, platform, download settings); with `listen`
+    /// the listener starts once. Its port.
+    @discardableResult static func extensionServe(name: String, platform: String, route: String, concurrency: Int, intervalMs: Int, folder: String?, listen: Bool) throws -> Int? {
+        struct O: Encodable { let name: String; let platform: String; let flavor: String; let route: String; let concurrency: Int; let intervalMs: Int; let folder: String?; let listen: Bool }
+        let json = String(decoding: try encoder.encode(O(name: name, platform: platform, flavor: "native", route: route, concurrency: concurrency, intervalMs: intervalMs, folder: folder, listen: listen)), as: UTF8.self)
+        return try decodeOk(tl_ext_serve(json), as: Int?.self)
+    }
+    /// A new binding code, with this device's own LAN addresses in its binding text.
+    static func extensionPairBegin() throws -> ExtensionPairing {
+        struct P: Decodable { let code: String; let link: String; let expiresIn: Int }
+        let p = try call(tl_ext_pair_begin("null"), as: P.self)
+        return ExtensionPairing(code: p.code, link: p.link, expiresIn: p.expiresIn)
+    }
+    static func extensionPairCancel() { tl_ext_pair_cancel() }
+    static func extensionState() throws -> ExtensionState { try call(tl_ext_clients(), as: ExtensionState.self) }
+    @discardableResult static func extensionRemove(_ id: String) throws -> Bool { try call(tl_ext_remove(id), as: Bool.self) }
+
     static var libraryDirectory: URL {
         #if DEBUG
         if let d = ProcessInfo.processInfo.environment["TL_LIBRARY_DIR"] { return URL(fileURLWithPath: d, isDirectory: true) }
@@ -542,7 +567,7 @@ enum Core {
     enum ActionKind: String, Codable { case trash, restore, purge, folderAdd = "folder_add", folderRemove = "folder_remove", tag }
     struct ActionStamp: Codable { let id: String; let hlc: UInt64; let inc: UInt32; let state: UInt8 }
     struct ActionReceipt: Codable {
-        let kind: ActionKind; let folder: String?; let folderHlc: UInt64?; let epoch: UInt64; let changes: [ActionStamp]
+        let kind: ActionKind; let label: String?; let folder: String?; let folderHlc: UInt64?; let epoch: UInt64; let changes: [ActionStamp]
         var count: Int { changes.count }
     }
     struct BinSnapshot: Codable {

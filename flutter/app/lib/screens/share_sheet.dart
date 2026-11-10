@@ -10,6 +10,7 @@ import '../platform/share_inbox.dart';
 import '../widgets/media_image.dart';
 import 'settings_page.dart' show SettingsIcon, SettingsSection;
 import '../widgets/text_menu.dart';
+import '../platform/os.dart';
 
 /// The share page where the system has no share page of its own for an app (Android, Linux), and
 /// for what is dropped on a window: a sheet as tall as what it shows, with what was shared on a
@@ -175,7 +176,7 @@ class _ShareSheetState extends State<ShareSheet> {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     status,
                     const SizedBox(height: 6),
-                    Text(media.first.path.split(Platform.pathSeparator).last.replaceFirst(RegExp(r'^\d+[-_]'), ''), maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
+                    Text(media.first.path.split(OS.pathSeparator).last.replaceFirst(RegExp(r'^\d+[-_]'), ''), maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall),
                     const SizedBox(height: 2),
                     hint,
                   ]),

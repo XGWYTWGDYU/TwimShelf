@@ -146,16 +146,26 @@ final class SyncViewController: FormViewController {
         } else {
             s.append(Section(id: "create", header: L("sync.first"), footer: L("sync.first.footer"), rows: [
                 .button(L("sync.create"), icon: .init("person.crop.circle.badge.plus", .systemBlue)) { svc.createAccount() }]))
-            let joinable = svc.peers.values.filter { $0.account != nil }.sorted { $0.name < $1.name }
-            var rows: [Row] = joinable.map { p in
-                .navigation(p.name, detail: p.host == nil ? L("sync.resolving") : L("sync.join"), icon: .init(p.typeSymbol, .systemIndigo, mascot: Mascot.name(forDevice: p.typeSymbol)), id: "join-\(p.device)") { [weak self] in self?.promptCode(p) }
+            // one group per account: the devices of one account are one choice, not strangers
+            let groups = svc.joinableAccounts
+            var status: [Row] = []
+            if joining { status.append(.value(L("sync.pairing"), nil, icon: .init("hourglass", .systemOrange), id: "joining")) }
+            if groups.isEmpty { status.append(.value(L("sync.searching"), nil, icon: .init("dot.radiowaves.left.and.right", .systemTeal))) }
+            if groups.count == 1, let g = groups.first {
+                s.append(Section(id: "join", header: L("sync.joinExisting") + " · " + g.title, footer: L("sync.joinExisting.footer"), rows: status + g.peers.map(joinRow)))
+            } else {
+                s.append(Section(id: "join", header: L("sync.joinExisting"), footer: groups.isEmpty ? L("sync.joinExisting.footer") : nil, rows: status))
+                for (i, g) in groups.enumerated() {
+                    s.append(Section(id: "join-\(g.account)", header: g.title, footer: i == groups.count - 1 ? L("sync.joinExisting.footer") : nil, rows: g.peers.map(joinRow)))
+                }
             }
-            if joining { rows.insert(.value(L("sync.pairing"), nil, icon: .init("hourglass", .systemOrange), id: "joining"), at: 0) }
-            if rows.isEmpty { rows = [.value(L("sync.searching"), nil, icon: .init("dot.radiowaves.left.and.right", .systemTeal))] }
-            s.append(Section(id: "join", header: L("sync.joinExisting"), footer: L("sync.joinExisting.footer"), rows: rows))
         }
         sections = s
         reloadForm()
+    }
+
+    private func joinRow(_ p: SyncService.Peer) -> Row {
+        .navigation(p.name, detail: p.host == nil ? L("sync.resolving") : L("sync.join"), icon: .init(p.typeSymbol, .systemIndigo, mascot: Mascot.name(forDevice: p.typeSymbol)), id: "join-\(p.device)") { [weak self] in self?.promptCode(p) }
     }
 
     private func promptCode(_ p: SyncService.Peer) {

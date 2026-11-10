@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:tl_native/tl_native.dart';
 
 import '../l10n/l10n.dart';
 import '../platform/share_inbox.dart';
+import '../platform/os.dart';
 
 /// Media dragged onto the window, from another app or the file manager: the share page offers
 /// them (`ShareInbox.importDropped`). iOS has no plugin for it: its own runner hands them over
@@ -26,12 +26,12 @@ class _DropImportState extends State<DropImport> {
   @override
   void initState() {
     super.initState();
-    if (Platform.isIOS) TlNative.onDropped = _dropped;
+    if (OS.isIOS) TlNative.onDropped = _dropped;
   }
 
   @override
   void dispose() {
-    if (Platform.isIOS) TlNative.onDropped = null;
+    if (OS.isIOS) TlNative.onDropped = null;
     super.dispose();
   }
 
@@ -73,7 +73,7 @@ class _DropImportState extends State<DropImport> {
         ),
       ),
     ]);
-    if (Platform.isIOS) return page;
+    if (OS.isIOS) return page;
     return DropTarget(
       onDragEntered: (_) => setState(() => _over = true),
       onDragExited: (_) => setState(() => _over = false),

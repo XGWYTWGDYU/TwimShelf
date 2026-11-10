@@ -1,4 +1,3 @@
-import 'dart:isolate';
 import 'dart:async';
 import 'dart:io';
 
@@ -9,6 +8,8 @@ import 'package:tl_core/tl_core.dart';
 import '../dev/seed.dart';
 import '../grid/thumb_store.dart';
 import '../platform/secrets.dart';
+import '../platform/lease.dart';
+import '../services/extension_receiver.dart';
 import 'prefs.dart';
 import '../platform/quick_action.dart';
 import '../platform/share_inbox.dart';
@@ -19,6 +20,7 @@ import '../ai/external_models.dart';
 import '../services/downloads.dart';
 import 'jobs.dart';
 import 'sync_model.dart';
+import '../platform/os.dart';
 
 /// The open library, shared by every screen: opening it, its counts and folders, and a
 /// `revision` that moves whenever its content changed (an action here, an import, a sync from
@@ -64,9 +66,15 @@ class LibraryModel extends ChangeNotifier {
   static LibraryModel forTest(String dir) => LibraryModel._(dir);
 
   static Future<LibraryModel> open() async {
-    final override = Platform.environment['TL_LIBRARY_DIR'];
-    final dir = override ?? '${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}Library';
-    await Directory(dir).create(recursive: true);
+    final String dir;
+    if (OS.isWeb) {
+      // the web build: the library is the server's (it opened it already)
+      dir = (await loadServerInfo()).library;
+    } else {
+      final override = OS.environment['TL_LIBRARY_DIR'];
+      dir = override ?? '${(await getApplicationSupportDirectory()).path}${OS.pathSeparator}Library';
+      await Directory(dir).create(recursive: true);
+    }
     final language = L10n.languageTag;
     final ok = await openLibrary(language, dir);
     if (!ok) throw CoreError(L('app.openFailed'));
@@ -78,17 +86,17 @@ class LibraryModel extends ChangeNotifier {
     m.thumbs = await ThumbStore.create();
     // what cannot be decoded joins 只看损坏 and the check's count (a format this core has no decoder
     // for only has its file checked)
-    m.thumbs.onFailed = (id) => unawaited(Isolate.run(() => Core.reportThumbnailFailed(id)).catchError((Object _) {}));
+    m.thumbs.onFailed = (id) => unawaited(coreRunAsync(() => Core.reportThumbnailFailed(id)).catchError((Object _) {}));
     // shares from other apps (Android today): files are imported, links wait in the queue for
     // the download flow (they are acknowledged there, so none is lost)
-    m.shares = ShareInbox(asks: !Platform.isIOS && !Platform.isMacOS);
+    m.shares = ShareInbox(asks: !OS.isIOS && !OS.isMacOS);
     m._shareEvents = m.shares.events.listen((e) {
       if (e is ShareQuickDownload) QuickAction.request();
       if (e is ShareFilesImported) m.refresh();
     });
     m.aiModels = await ExternalModels.create();
     m.ai = ExternalAI(m.aiModels);
-    m.tagger = AutoTagger(models: m.aiModels, ai: m.ai, cacheDirectory: '$dir${Platform.pathSeparator}.ai',
+    m.tagger = AutoTagger(models: m.aiModels, ai: m.ai, cacheDirectory: '$dir${OS.pathSeparator}.ai',
         // the tags it wrote show, and reach the other devices; tagging itself is already going
         onChanged: () => unawaited(m.refresh(startTagging: false)));
     // on-device models (MLX on Apple devices, llama.cpp elsewhere): a missing engine only hides them
@@ -101,7 +109,9 @@ class LibraryModel extends ChangeNotifier {
     } catch (_) {}
     // the first counts (opening is no change to announce)
     await m.refresh(local: false);
-    m.downloads = await DownloadService.create(libraryDirectory: Directory(dir), onFinished: (_) => m.refresh());
+    m.downloads = await DownloadService.create(libraryDirectory: OS.isWeb ? null : Directory(dir), libraryPath: dir, onFinished: (_) => m.refresh());
+    // the browser extension sends links here (the desktop apps; the server listens on its own)
+    ExtensionReceiver.instance.start(m.downloads);
     // shared links go into the download queue durably before the share is acknowledged
     await m.downloads.attachShareInbox(m.shares);
     unawaited(m.shares.start());
@@ -109,8 +119,13 @@ class LibraryModel extends ChangeNotifier {
     m._poll = Timer.periodic(const Duration(seconds: 1), (_) => m._checkEpoch());
     // another device's changes: reload, without announcing them as this device's
     m.sync.remoteChanges.addListener(() => m.refresh(local: false));
-    // LAN sync with the account's other devices (off in test runs that ask for it)
-    if (Platform.environment['TL_SYNC_OFF'] == null) unawaited(m.sync.start());
+    // the web app open in several windows: one runs the background work, the next takes over
+    BackgroundLease.instance.addListener(() {
+      if (BackgroundLease.instance.holder) unawaited(m.tagger.startIfEnabled().catchError((Object _) {}));
+    });
+    unawaited(BackgroundLease.instance.start());
+        // LAN sync with the account's other devices (off in test runs that ask for it)
+    if (OS.environment['TL_SYNC_OFF'] == null) unawaited(m.sync.start());
     return m;
   }
 

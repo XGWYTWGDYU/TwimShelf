@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-import '../tl_core.dart' show openCoreLibrary;
+import 'native_io.dart' show openCoreLibrary;
 import 'bindings.dart';
 
 /// The mascot's little Clawd, shared with the native apps (core/src/pet.rs): what it does and how

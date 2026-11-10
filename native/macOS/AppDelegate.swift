@@ -208,10 +208,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         if let out = ProcessInfo.processInfo.environment["TL_GRID_BENCH"] { runGridBench(out) }
         if let base = ProcessInfo.processInfo.environment["TL_EXTERNAL_TEST"] { runExternalTest(base) }
         if let out = ProcessInfo.processInfo.environment["TL_VIEWER_SNAP"] { snapViewer(out) }
+        if let out = ProcessInfo.processInfo.environment["TL_VIEWER_STRESS"] { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in runViewerStress(out) } }
         if let out = ProcessInfo.processInfo.environment["TL_SWIPE_TEST"] { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [self] in
             try? feed.debugSwipeTest().write(toFile: out, atomically: true, encoding: .utf8); NSApp.terminate(nil) } }
         #endif
         SyncService.shared.start()
+        // the browser extension sends links here while the app is open
+        ExtensionReceiver.shared.start()
         // Recycle bin: delete what stayed longer than the retention period.
         DispatchQueue.global(qos: .utility).async { if Core.expireTrash() > 0 { DispatchQueue.main.async { NotificationCenter.default.post(name: .libraryChanged, object: nil) } } }
         if ProcessInfo.processInfo.environment["TL_SELFTEST"] == nil { AutoTagger.shared.startIfEnabled() }
@@ -410,6 +413,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
 
     /// Walks the main screens and saves a picture of each (synthetic library only).
     static func allViews(in v: NSView) -> [NSView] { [v] + v.subviews.flatMap { allViews(in: $0) } }
+    /// The viewer under a storm of trackpad swipes (TL_VIEWER_STRESS = report file): quick and
+    /// slow ones, flicks with momentum, swipes that catch the strip mid-way, past both ends, and
+    /// arrow keys between them, over every media of the library (TL_TOUR_POSTS imported first).
+    /// After each step the window must still be on screen with the viewer in it, the strip
+    /// settled on a page; the first failure is reported, then the app quits.
+    private func runViewerStress(_ out: String) {
+        if let posts = ProcessInfo.processInfo.environment["TL_TOUR_POSTS"] {
+            _ = try? Core.importLegacyDirectory(URL(fileURLWithPath: posts))
+            NotificationCenter.default.post(name: .libraryChanged, object: nil)
+        }
+        let rounds = Int(ProcessInfo.processInfo.environment["TL_VIEWER_STRESS_ROUNDS"] ?? "") ?? 300
+        var log: [String] = []
+        var rng = SystemRandomNumberGenerator()
+        // large imports finish in the background: wait until the library stops growing
+        func settledItems(_ last: Int = -1, _ done: @escaping ([FeedItem]) -> Void) {
+            let now = (try? Core.feed(FeedRequest())) ?? []
+            if now.count == last { return done(now) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { settledItems(now.count, done) }
+        }
+        settledItems { [self] all in
+            let items = all.sorted { ($0.postId, $0.ordinal) < ($1.postId, $1.ordinal) }
+            guard let first = items.first else { try? "no media".write(toFile: out, atomically: true, encoding: .utf8); NSApp.terminate(nil); return }
+            feed.openMedia(first, in: items)
+            log.append("media=\(items.count) videos=\(items.filter { $0.kind == .video }.count)")
+            var failures = 0
+            func check(_ step: Int, _ what: String, settled: Bool = false) {
+                guard let w = window, let content = w.contentView else { failures += 1; log.append("\(step) \(what): NO WINDOW"); return }
+                let v = Self.firstView(MacPhotoView.self, in: content)
+                var problems: [String] = []
+                if !w.isVisible { problems.append("window not visible") }
+                if w.alphaValue < 0.99 { problems.append("window alpha \(w.alphaValue)") }
+                if NSApp.windows.first(where: { $0.isVisible && $0 === w }) == nil { problems.append("window not in app's visible windows") }
+                if let s = w.screen, !s.frame.intersects(w.frame) { problems.append("window off screen \(w.frame)") }
+                if v == nil { problems.append("viewer gone") }
+                if let v, v.alphaValue < 0.99 { problems.append("viewer alpha \(v.alphaValue)") }
+                if let v, v.isHiddenOrHasHiddenAncestor { problems.append("viewer hidden") }
+                if let v, v.debugPageCount == 0 || v.debugPageCount > 3 { problems.append("pages \(v.debugPageCount)") }
+                // after a pause the strip rests on a page (no swipe holds it)
+                if settled, let v, abs(v.debugOffset) > 0.5 { problems.append("strip left between pages at \(Int(v.debugOffset))") }
+                if !problems.isEmpty { failures += 1; log.append("\(step) \(what): " + problems.joined(separator: ", ")) }
+            }
+            func step(_ i: Int) {
+                guard i < rounds, failures < 5 else {
+                    if let v = Self.firstView(MacPhotoView.self, in: self.window.contentView!) { log.append("end index=\(v.index) offset=\(Int(v.debugOffset)) pages=\(v.debugPageCount)") }
+                    log.append("rounds=\(min(i, rounds)) failures=\(failures)")
+                    try? log.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
+                    NSApp.terminate(nil); return
+                }
+                guard let v = Self.firstView(MacPhotoView.self, in: self.window.contentView!) else { check(i, "lookup"); return step(rounds) }
+                let kind = Int.random(in: 0..<10, using: &rng)
+                let sign: CGFloat = Bool.random(using: &rng) ? 1 : -1
+                var what = ""
+                switch kind {
+                case 0...4: what = "swipe"; _ = v.debugSwipe(dx: sign * CGFloat.random(in: 120...900, using: &rng), steps: Int.random(in: 2...10, using: &rng), end: true, momentum: Int.random(in: 0...12, using: &rng))
+                case 5: what = "tiny"; _ = v.debugSwipe(dx: sign * CGFloat.random(in: 5...60, using: &rng), steps: 2, end: true)
+                case 6: what = "vertical"; _ = v.debugSwipe(dx: 0, dy: sign * 300, steps: 5, end: true, momentum: 5)
+                case 7: what = "key"; v.keyDown(with: NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: self.window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: sign > 0 ? 124 : 123)!)
+                case 8: what = "held"; _ = v.debugSwipe(dx: sign * 400, steps: 6, end: false); _ = v.debugSwipe(dx: -sign * 200, steps: 3, end: true)
+                default: what = "flick"; _ = v.debugSwipe(dx: sign * 1600, steps: 3, end: true, momentum: 20)
+                }
+                // sometimes the next one comes while the strip still moves
+                let wait = Bool.random(using: &rng) ? Double.random(in: 0.01...0.12, using: &rng) : Double.random(in: 0.7...0.9, using: &rng)
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { check(i, what, settled: wait > 0.65); step(i + 1) }
+            }
+            // a quick short flick released as a real trackpad releases (the last event moves
+            // nothing) must still turn the page: its speed counts, not where the strip stands
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                check(-1, "open")
+                guard let v = Self.firstView(MacPhotoView.self, in: self.window.contentView!) else { return step(0) }
+                let before = v.index
+                _ = v.debugSwipe(dx: 150, steps: 3, end: false)
+                _ = v.debugSwipe(dx: 0, steps: 1, end: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    let ok = v.index == before + 1 && abs(v.debugOffset) < 0.5
+                    if !ok { failures += 1 }
+                    log.append("short flick released with no movement: index \(before) -> \(v.index) offset \(Int(v.debugOffset)) \(ok ? "OK" : "FAILED")")
+                    step(0)
+                }
+            }
+        }
+    }
+
     static func firstView<T: NSView>(_ t: T.Type, in v: NSView) -> T? {
         if let m = v as? T { return m }
         for s in v.subviews { if let m = firstView(t, in: s) { return m } }

@@ -362,7 +362,8 @@ class FeedRequest implements JsonModel {
       this.embed_model,
       this.threshold = 0.55,
       SearchFields? fields,
-      FeedFilter? filter})
+      FeedFilter? filter,
+      this.whole_posts = false})
       : terms = List<String>.unmodifiable(terms.map((v) => v)),
         term_vectors = List<List<double>?>.unmodifiable(term_vectors.map((v) =>
             v == null ? null : List<double>.unmodifiable(v.map((v) => v)))),
@@ -378,6 +379,8 @@ class FeedRequest implements JsonModel {
   final double threshold;
   final SearchFields fields;
   final FeedFilter filter;
+  /// Post cards: a post found through any of its media comes with all of them.
+  final bool whole_posts;
   factory FeedRequest.fromJson(Map<String, dynamic> json) => FeedRequest(
         terms: json['terms'] == null
             ? const []
@@ -407,6 +410,7 @@ class FeedRequest implements JsonModel {
         filter: json['filter'] == null
             ? FeedFilter()
             : FeedFilter.fromJson(json['filter'] as Map<String, dynamic>),
+        whole_posts: json['whole_posts'] == null ? false : json['whole_posts'] as bool,
       );
   @override
   Map<String, dynamic> toJson() => {
@@ -422,6 +426,7 @@ class FeedRequest implements JsonModel {
         'threshold': threshold,
         'fields': fields.toJson(),
         'filter': filter.toJson(),
+        'whole_posts': whole_posts,
       };
 }
 
@@ -1248,18 +1253,21 @@ class ActionStamp implements JsonModel {
 class ActionReceipt implements JsonModel {
   ActionReceipt(
       {required this.kind,
+      this.label,
       this.folder,
       this.folder_hlc,
       required this.epoch,
       required List<ActionStamp> changes})
       : changes = List<ActionStamp>.unmodifiable(changes.map((v) => v));
   final ActionKind kind;
+  final String? label;
   final String? folder;
   final int? folder_hlc;
   final int epoch;
   final List<ActionStamp> changes;
   factory ActionReceipt.fromJson(Map<String, dynamic> json) => ActionReceipt(
         kind: ActionKind.values.firstWhere((v) => v.wireValue == json['kind']),
+        label: json['label'] as String?,
         folder: json['folder'] == null ? null : json['folder'] as String,
         folder_hlc: json['folder_hlc'] == null
             ? null
@@ -1272,6 +1280,7 @@ class ActionReceipt implements JsonModel {
   @override
   Map<String, dynamic> toJson() => {
         'kind': kind.wireValue,
+        'label': label,
         'folder': folder == null ? null : folder!,
         'folder_hlc': folder_hlc == null ? null : folder_hlc!,
         'epoch': epoch,
@@ -1617,8 +1626,10 @@ class SyncStatus implements JsonModel {
       required this.changes,
       required this.join,
       this.receiving,
-      required Map<String, String> failed})
-      : peers = List<PeerInfo>.unmodifiable(peers.map((v) => v)),
+      required Map<String, String> failed,
+      List<String> in_session = const []})
+      : in_session = List<String>.unmodifiable(in_session),
+        peers = List<PeerInfo>.unmodifiable(peers.map((v) => v)),
         failed = Map<String, String>.unmodifiable(
             failed.map((k, v) => MapEntry(k, v)));
   final String? account_id;
@@ -1633,6 +1644,8 @@ class SyncStatus implements JsonModel {
   final JoinState join;
   final Transfer? receiving;
   final Map<String, String> failed;
+  /// Devices with a session running now.
+  final List<String> in_session;
   factory SyncStatus.fromJson(Map<String, dynamic> json) => SyncStatus(
         account_id:
             json['account_id'] == null ? null : json['account_id'] as String,
@@ -1656,6 +1669,9 @@ class SyncStatus implements JsonModel {
             : Transfer.fromJson(json['receiving'] as Map<String, dynamic>),
         failed: (json['failed'] as Map<String, dynamic>)
             .map((k, v) => MapEntry(k, v as String)),
+        in_session: ((json['in_session'] as List?) ?? const [])
+            .map((v) => v as String)
+            .toList(),
       );
   @override
   Map<String, dynamic> toJson() => {
@@ -1672,6 +1688,7 @@ class SyncStatus implements JsonModel {
         'join': join.toJson(),
         'receiving': receiving == null ? null : receiving!.toJson(),
         'failed': failed.map((k, v) => MapEntry(k, v)),
+        'in_session': in_session,
       };
 }
 

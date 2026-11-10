@@ -49,18 +49,13 @@ class _ViewerPageState extends State<ViewerPage> {
 
   GlobalKey<VideoPageState> _videoKey(FeedItem i) => _videos.putIfAbsent(i.media_id, GlobalKey<VideoPageState>.new);
 
-  /// The orientation the viewer opened in; a turn inside the viewer (a video's rotate button,
-  /// auto-landscape) is the viewer's only: closing goes back to this.
-  bool? _openedLandscape;
+  /// A video on screen turned on its own (its rotate button, auto-landscape): no paging while it
+  /// is (a swipe would cross the turned picture). The app's orientation is never changed.
   bool _turned = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_openedLandscape == null) {
-      final s = MediaQuery.sizeOf(context);
-      _openedLandscape = s.width > s.height;
-    }
     _prepareNeighbours();
   }
 
@@ -74,34 +69,14 @@ class _ViewerPageState extends State<ViewerPage> {
     }
   }
 
-  void _turn(bool landscape) {
-    if (!_turned) setState(() => _turned = true);
-    SystemChrome.setPreferredOrientations(
-        landscape ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight] : const [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+  void _turn(bool turned) {
+    if (turned != _turned && mounted) setState(() => _turned = turned);
   }
 
   @override
   void dispose() {
     _pages.dispose();
-    // closed some other way than [_close] (a route above popped it): free the orientation
-    if (_turned) SystemChrome.setPreferredOrientations(const []);
     super.dispose();
-  }
-
-  /// Leaving: back to the orientation the viewer opened in *before* the page goes, as the native
-  /// player does. Nothing turns when the screen is already that way (two turns cancel out); the
-  /// lock is only freed then, so the library never turns on its own as the viewer closes.
-  Future<void> _restoreOrientation() async {
-    if (!_turned) return;
-    final s = MediaQuery.sizeOf(context);
-    if ((s.width > s.height) != _openedLandscape) {
-      await SystemChrome.setPreferredOrientations(_openedLandscape == true
-          ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
-          : const [DeviceOrientation.portraitUp]);
-      await Future<void>.delayed(const Duration(milliseconds: 350));
-    }
-    await SystemChrome.setPreferredOrientations(const []);
-    _turned = false;
   }
 
   bool _closing = false;
@@ -122,7 +97,6 @@ class _ViewerPageState extends State<ViewerPage> {
   Future<void> _close() async {
     if (_closing) return;
     _closing = true;
-    await _restoreOrientation();
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -164,12 +138,8 @@ class _ViewerPageState extends State<ViewerPage> {
         const SingleActivator(LogicalKeyboardKey.arrowDown): () => _video?.stepVolume(-1),
         const SingleActivator(LogicalKeyboardKey.keyF): _fullScreen,
       },
-      // the system back gesture / button closes through [_close] too, so the turn back comes first
       child: PopScope(
-        canPop: !_turned,
-        onPopInvokedWithResult: (didPop, _) {
-          if (!didPop) _close();
-        },
+        canPop: true,
         child: Focus(
         autofocus: true,
         child: Scaffold(
@@ -188,12 +158,13 @@ class _ViewerPageState extends State<ViewerPage> {
                 key: const ValueKey('viewerPages'),
                 controller: _pages,
                 scrollBehavior: pageBehavior(context),
-                physics: _pagingLocked ? const NeverScrollableScrollPhysics() : const PageScrollPhysics(),
+                physics: _pagingLocked || _turned ? const NeverScrollableScrollPhysics() : const PageScrollPhysics(),
                 itemCount: widget.items.length,
                 onPageChanged: (i) {
                   setState(() {
                     _index = i;
                     _zoomed = false;
+                    _turned = false;
                   });
                   _prepareNeighbours();
                 },
@@ -358,7 +329,13 @@ class _PhotoPageState extends State<_PhotoPage> with SingleTickerProviderStateMi
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_keys);
-    _transform.addListener(() => widget.onZoomed(_transform.value.getMaxScaleOnAxis() > 1.01));
+    _transform.addListener(() {
+      final zoomed = _zoomed;
+      if (zoomed != _wasZoomed) {
+        setState(() => _wasZoomed = zoomed);
+        widget.onZoomed(zoomed);
+      }
+    });
     _anim.addListener(() {
       final a = _zoomAnim;
       if (a != null) _transform.value = a.value;
@@ -372,6 +349,8 @@ class _PhotoPageState extends State<_PhotoPage> with SingleTickerProviderStateMi
     _transform.dispose();
     super.dispose();
   }
+
+  bool _wasZoomed = false;
 
   bool get _zoomed => _transform.value.getMaxScaleOnAxis() > 1.01;
 
@@ -406,15 +385,16 @@ class _PhotoPageState extends State<_PhotoPage> with SingleTickerProviderStateMi
       // fingers only: a mouse's drag or a trackpad's swipe must not close the viewer
       child: GestureDetector(
         supportedDevices: const {PointerDeviceKind.touch, PointerDeviceKind.stylus, PointerDeviceKind.invertedStylus},
-        onVerticalDragUpdate: (d) => _down += d.delta.dy,
-        onVerticalDragStart: (_) => _down = 0,
-        onVerticalDragEnd: (d) {
+        onVerticalDragUpdate: _zoomed ? null : (d) => _down += d.delta.dy,
+        onVerticalDragStart: _zoomed ? null : (_) => _down = 0,
+        onVerticalDragEnd: _zoomed ? null : (d) {
           if (!_zoomed && (_down > 120 || (d.primaryVelocity ?? 0) > 700)) widget.onClose();
         },
         child: MouseRegion(
           cursor: _zoomed ? SystemMouseCursors.grab : MouseCursor.defer,
           child: InteractiveViewer(
             transformationController: _transform,
+            onInteractionStart: (_) => _anim.stop(),
             maxScale: 6,
             scaleFactor: photoScaleFactor(zoomed: _zoomed, ctrl: _ctrl),
             child: WheelGuard(

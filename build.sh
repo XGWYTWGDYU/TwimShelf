@@ -3,6 +3,7 @@
 #
 #   ./build.sh                 everything this computer can build
 #   ./build.sh flutter-android native-macos …
+#   ./build.sh docker          the Linux server with the web app, as a Docker image
 #   ./build.sh --list          the targets and where each can be built
 #   ./build.sh --check         only check the tools; install nothing, build nothing
 #   ./build.sh --configure     only apply config.yaml (names, ids, icons, share extension)
@@ -218,6 +219,13 @@ build_target() {
       (cd "$ROOT/flutter/app" && "$FLUTTER" pub get && "$FLUTTER" build linux --release $(flutter_defines))
       local arch; arch=$(uname -m); [[ $arch == aarch64 ]] && arch=arm64 || arch=x64
       "$ROOT/scripts/flutter/package_appimage.sh" "$ROOT/flutter/app/build/linux/$arch/release/bundle" "$DIST" "$v" ;;
+    docker)
+      # the Linux server and the web app; everything is compiled inside the image, so this
+      # computer needs only Docker (its own build cache stays in Docker's storage)
+      have docker || fail "Docker is needed: https://docs.docker.com/get-docker/ (or OrbStack, Colima)"
+      docker build -f "$ROOT/docker/Dockerfile" --build-arg VERSION="$v" -t "twimshelf:$v" -t twimshelf:latest "$ROOT"
+      local arch; arch=$(docker image inspect --format '{{.Architecture}}' "twimshelf:$v")
+      docker save "twimshelf:$v" | gzip > "$DIST/TwimShelf-$v-docker-linux-$arch.tar.gz" ;;
     flutter-windows) fail "flutter-windows builds on Windows: build.ps1" ;;
     *) fail "Unknown target: $t (see --list)" ;;
   esac
@@ -237,6 +245,7 @@ flutter-ios      the Flutter iPhone/iPad app (.ipa)        macOS with Xcode
 flutter-android  the Flutter Android app (.apk per ABI)    macOS or Linux (Windows: build.ps1)
 flutter-linux    the Flutter Linux app (.AppImage)         Linux
 flutter-windows  the Flutter Windows app (setup .exe)      Windows: build.ps1
+docker           the Linux server + web app (image, .tar.gz) any computer with Docker (not built by default)
 This computer builds by default: $(all_targets)
 EOF
       exit 0 ;;
@@ -256,6 +265,7 @@ if [[ $CHECK == 1 ]]; then
       flutter-macos|flutter-ios) need_xcode; need_rust; need_flutter; need_flutter_apple ;;
       flutter-android) need_rust; need_flutter; need_android ;;
       flutter-linux) need_rust; need_flutter; need_linux_desktop ;;
+      docker) have docker || MISSING+=(Docker) ;;
     esac
   done
   (( ${#MISSING[@]} )) && { say "Missing: ${MISSING[*]}"; exit 1; }

@@ -1,4 +1,3 @@
-import 'dart:isolate';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +11,7 @@ import 'settings_page.dart';
 import '../app/library.dart';
 import 'package:tl_core/tl_core.dart';
 import '../widgets/text_menu.dart';
+import '../platform/os.dart';
 
 /// First start on Windows and Linux: where the data folder goes.
 class DataHomeSetupPage extends StatefulWidget {
@@ -104,8 +104,8 @@ class _DataHomeSectionState extends State<DataHomeSection> {
       await widget.library.stopWriting();
       await DataHome.moveTo(
         target,
-        databaseFile: '${widget.library.directory}${Platform.pathSeparator}library.sqlite',
-        snapshot: (out) => Isolate.run(() => Core.dbSnapshot(out)),
+        databaseFile: '${widget.library.directory}${OS.pathSeparator}library.sqlite',
+        snapshot: (out) => coreRunAsync(() => Core.dbSnapshot(out)),
         progress: (d, n) => mounted ? setState(() => _progress = (d, n)) : null,
       );
     } catch (e) {
@@ -134,7 +134,7 @@ class _DataHomeSectionState extends State<DataHomeSection> {
 
   /// Deleted at the next start, from the new folder (the running app still has files open in it).
   static Future<void> _rememberDelete(String target, String old) async {
-    final f = File('$target${Platform.pathSeparator}delete-after-move.json');
+    final f = File('$target${OS.pathSeparator}delete-after-move.json');
     await f.writeAsString(jsonEncode({'path': old}));
   }
 
@@ -148,7 +148,7 @@ class _DataHomeSectionState extends State<DataHomeSection> {
       else
         ListTile(key: const ValueKey('datahome-move'), leading: const Icon(Icons.drive_file_move_outline), title: Text(L('datahome.move')), onTap: _move),
       // an AppImage: uninstalling is deleting the file; its menu entry goes here
-      if (Platform.isLinux && Platform.environment['APPIMAGE'] != null)
+      if (OS.isLinux && OS.environment['APPIMAGE'] != null)
         ListTile(
           leading: const Icon(Icons.playlist_remove),
           title: Text(L('linux.removeEntry')),
@@ -166,7 +166,7 @@ class _DataHomeSectionState extends State<DataHomeSection> {
 class StartupChecks {
   static Future<void> run(BuildContext context) async {
     if (DataHome.path == null) return;
-    final f = File('${DataHome.path}${Platform.pathSeparator}delete-after-move.json');
+    final f = File('${DataHome.path}${OS.pathSeparator}delete-after-move.json');
     if (!f.existsSync()) return;
     try {
       await DataHome.deleteOld((jsonDecode(f.readAsStringSync()) as Map)['path'] as String);

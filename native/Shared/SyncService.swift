@@ -95,6 +95,8 @@ final class SyncService: NSObject, NetServiceDelegate {
         let receiving: Transfer?
         /// "host:port" → reason, for addresses whose last attempt failed.
         var failed: [String: String]? = nil
+        /// Devices with a session running now (not started again until it ends).
+        var inSession: [String]? = nil
     }
 
     private(set) var peers: [String: Peer] = [:]     // by device id
@@ -261,6 +263,17 @@ final class SyncService: NSObject, NetServiceDelegate {
         return peers.values.filter { $0.account == acct }.sorted { $0.name < $1.name }
     }
 
+    /// Devices of other accounts this device could join, one group per account (devices that
+    /// sync with each other are one account, and are shown together).
+    struct AccountGroup { let account: String; let peers: [Peer]
+        var title: String { L("sync.accountId", String(account.prefix(8)).uppercased()) + " · " + peers.map(\.name).joined(separator: L("list.separator")) }
+    }
+    var joinableAccounts: [AccountGroup] {
+        Dictionary(grouping: peers.values.filter { $0.account != nil }, by: { $0.account! })
+            .map { AccountGroup(account: $0.key, peers: $0.value.sorted { $0.name < $1.name }) }
+            .sorted { ($0.peers.count, $1.peers.first?.name ?? "") > ($1.peers.count, $0.peers.first?.name ?? "") }
+    }
+
     func connectionDetail(_ peer: Peer) -> String? {
         if let error = resolveErrors[peer.device] { return L("sync.err.connect") + error }
         return peer.host == nil ? L("sync.found.confirming") : nil
@@ -349,8 +362,11 @@ final class SyncService: NSObject, NetServiceDelegate {
     func syncAll() {
         guard hasAccount, let mine = status?.accountId, let me = status?.deviceId else { return }
         let now = UInt64(Date().timeIntervalSince1970)
+        let busy = Set(status?.inSession ?? [])
         for p in peers.values where p.account == mine {
             if p.host == nil, let endpoint = endpoints[p.device] { resolve(endpoint, device: p.device) }
+            // a long first sync is running: it is not a pair that "has not synced for a minute"
+            guard !busy.contains(p.device) else { continue }
             let last = status?.peers.first { $0.device == p.device }?.lastSync ?? 0
             guard me < p.device || now &- last > 60 else { continue }
             if let h = p.host, let port = p.port { Core.syncWith(host: h, port: port) }
@@ -514,12 +530,35 @@ final class SyncService: NSObject, NetServiceDelegate {
         browser = b
     }
 
+    /// A device on several networks, or seen over several interfaces of this one (Wi-Fi and
+    /// Ethernet, a VPN), is one browse result per interface. One endpoint per device is used:
+    /// the current one while it is still announced (switching would cancel its lookup), else
+    /// the first by interface type; the others are tried when it cannot be reached.
+    private var alternateEndpoints: [String: [NWEndpoint]] = [:]
+    /// Endpoints of a device tried in a row without reaching it (each is tried once per lookup).
+    private var alternatesTried: [String: Int] = [:]
+
+    private static func interfaceRank(_ r: NWBrowser.Result) -> Int {
+        let types = r.interfaces.map(\.type)
+        if types.contains(.wiredEthernet) { return 0 }
+        if types.contains(.wifi) { return 1 }
+        if types.contains(.other) { return 3 }   // VPN, bridges
+        return 2
+    }
+
     private func apply(_ results: Set<NWBrowser.Result>) {
         let me = status?.deviceId
         var seen = Set<String>()
+        var byDevice: [String: [NWBrowser.Result]] = [:]
         for r in results {
-            guard case let .service(name, _, _, _) = r.endpoint, case let .bonjour(txt) = r.metadata,
-                  let dev = txt["dev"], dev != me else { continue }
+            guard case .service = r.endpoint, case let .bonjour(txt) = r.metadata, let dev = txt["dev"], dev != me else { continue }
+            byDevice[dev, default: []].append(r)
+        }
+        for (dev, all) in byDevice {
+            let sorted = all.sorted { Self.interfaceRank($0) < Self.interfaceRank($1) }
+            guard let r = sorted.first(where: { $0.endpoint == endpoints[dev] }) ?? sorted.first,
+                  case let .service(name, _, _, _) = r.endpoint, case let .bonjour(txt) = r.metadata else { continue }
+            alternateEndpoints[dev] = sorted.map(\.endpoint).filter { $0 != r.endpoint }
             seen.insert(dev)
             let old = peers[dev]
             // a re-published service (the other app restarted) may have a new port: look it up again
@@ -532,7 +571,7 @@ final class SyncService: NSObject, NetServiceDelegate {
             advertisementRevisions[dev] = txt["rev"]
             if peer.host == nil { resolve(r.endpoint, device: dev) }
         }
-        for k in Array(peers.keys) where !seen.contains(k) { cancelResolver(k); peers.removeValue(forKey: k); endpoints.removeValue(forKey: k); advertisementRevisions.removeValue(forKey: k); syncWhenResolved.remove(k) }
+        for k in Array(peers.keys) where !seen.contains(k) { cancelResolver(k); peers.removeValue(forKey: k); endpoints.removeValue(forKey: k); alternateEndpoints.removeValue(forKey: k); advertisementRevisions.removeValue(forKey: k); syncWhenResolved.remove(k) }
         post()
     }
 
@@ -571,6 +610,7 @@ final class SyncService: NSObject, NetServiceDelegate {
                     if !h.contains(":"), let pct = h.firstIndex(of: "%") { h = String(h[..<pct]) }
                     self.cancelResolver(device)
                     self.resolveErrors[device] = nil
+                    self.alternatesTried[device] = nil
                     peer.host = h; peer.port = port.rawValue; self.peers[device] = peer
                     self.post()
                     if self.syncWhenResolved.remove(device) != nil { Core.syncWith(host: h, port: port.rawValue) }
@@ -590,6 +630,17 @@ final class SyncService: NSObject, NetServiceDelegate {
         cancelResolver(device)
         peers[device]?.host = nil; peers[device]?.port = nil
         resolveErrors[device] = message
+        // the same device over another interface (it is on several networks)
+        if attempt == 1, endpoints[device] == endpoint, var others = alternateEndpoints[device], !others.isEmpty,
+           alternatesTried[device, default: 0] < others.count {
+            alternatesTried[device, default: 0] += 1
+            let next = others.removeFirst()
+            alternateEndpoints[device] = others + [endpoint]
+            endpoints[device] = next
+            resolve(next, device: device)
+            post()
+            return
+        }
         if attempt == 0, endpoints[device] == endpoint {
             let retry = DispatchWorkItem { [weak self] in
                 guard let self else { return }
@@ -600,6 +651,7 @@ final class SyncService: NSObject, NetServiceDelegate {
             resolveRetries[device] = retry
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: retry)
         } else {
+            alternatesTried[device] = nil
             syncWhenResolved.remove(device)
             AppLog.warn("sync", L("sync.err.connectPeer") + message)
             if let status { updateNote(status) }

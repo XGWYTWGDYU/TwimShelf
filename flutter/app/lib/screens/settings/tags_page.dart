@@ -1,4 +1,3 @@
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
@@ -30,7 +29,7 @@ class _TagsPageState extends State<TagsPage> {
   }
 
   Future<void> _load() async {
-    final t = await Isolate.run(Core.allTags);
+    final t = await coreRunAsync(Core.allTags);
     t.sort((a, b) => b.count.compareTo(a.count));
     if (mounted) setState(() => _tags = t);
   }
@@ -97,7 +96,7 @@ class _TagsPageState extends State<TagsPage> {
   Future<void> _deleteAI() async {
     final ai = _tags?.where((t) => t.ai > 0).length ?? 0;
     if (!await _confirm(L('tags.deleteAI.title', [ai]), L('tags.deleteAI.message'), L('tags.deleteAI.confirm'))) return;
-    await Isolate.run(Core.removeAITags);
+    await coreRunAsync(Core.removeAITags);
     await _changed();
   }
 

@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:tl_core/tl_core.dart';
+import '../platform/files.dart';
+import '../platform/os.dart';
 
 /// Flutter's own decoder leaves HEIC and AVIF to the device, if it has one: these go through the
 /// core's, on every platform.
@@ -17,7 +19,7 @@ bool isHeifPath(String path) {
 ImageProvider mediaImage(String path, {required int cacheWidth, required int maxSide}) => ResizeImage.resizeIfNeeded(
       cacheWidth,
       null,
-      isHeifPath(path) ? HeifFileImage(path, maxSide) : FileImage(File(path)),
+      isHeifPath(path) ? HeifFileImage(path, maxSide) : localFileImage(path),
     );
 
 class HeifFileImage extends ImageProvider<HeifFileImage> {
@@ -36,8 +38,8 @@ class HeifFileImage extends ImageProvider<HeifFileImage> {
       MultiFrameImageStreamCompleter(codec: _load(decode), scale: 1, debugLabel: path);
 
   Future<ui.Codec> _load(ImageDecoderCallback decode) async {
-    final jpeg = await Core.displayImageAsync(path, maxSide, cacheDir ?? Directory.systemTemp.path);
-    return decode(await ui.ImmutableBuffer.fromUint8List(await File(jpeg).readAsBytes()));
+    final jpeg = await Core.displayImageAsync(path, maxSide, cacheDir ?? (OS.isWeb ? serverInfo.cache : Directory.systemTemp.path));
+    return decode(await ui.ImmutableBuffer.fromUint8List(await readFileBytes(jpeg)));
   }
 
   @override

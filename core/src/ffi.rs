@@ -31,6 +31,9 @@ fn with<T: serde::Serialize>(f: impl FnOnce(Arc<Library>) -> anyhow::Result<T>) 
     })
 }
 
+/// The open library, for the core's own listeners (the browser extension's).
+pub(crate) fn current_library() -> Option<Arc<Library>> { LIB.lock().ok()?.clone() }
+
 /// `with` for functions that need no open library.
 fn respond<T: serde::Serialize>(f: impl FnOnce() -> anyhow::Result<T>) -> *mut c_char {
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| Err(anyhow::anyhow!(tr!("ffi.internal", msg = ""))));
@@ -1116,3 +1119,32 @@ pub extern "C" fn tl_pet_tick(p: *mut crate::pet::Pet, dt: f64, buffer: *mut f64
         rects.len() as u64
     })
 }
+
+
+// ---------------------------------------------------------------------------------------------
+// the browser extension (see extension.rs)
+
+/// This device for the browser extension: its name, platform and download settings, and with
+/// `"listen": true` the listener (started once). `{"ok": port or null}`.
+#[no_mangle]
+pub extern "C" fn tl_ext_serve(options_json: *const c_char) -> *mut c_char {
+    respond(|| crate::extension::serve(serde_json::from_str(&s(options_json))?))
+}
+
+/// A new binding code: `{code, link, addresses, expires_in}`. `addresses_json`: a JSON array of
+/// "host:port" the browser reaches this device at, or null for this device's own LAN addresses.
+#[no_mangle]
+pub extern "C" fn tl_ext_pair_begin(addresses_json: *const c_char) -> *mut c_char {
+    with(|l| crate::extension::pair_begin(&l, serde_json::from_str::<Option<Vec<String>>>(&s(addresses_json)).unwrap_or(None)))
+}
+
+#[no_mangle]
+pub extern "C" fn tl_ext_pair_cancel() { guard((), crate::extension::pair_cancel) }
+
+/// `{clients: [{id, name, added, seen}], pairing: {code, link, expires_in} | null, port}`
+#[no_mangle]
+pub extern "C" fn tl_ext_clients() -> *mut c_char { with(|l| Ok(crate::extension::clients(&l))) }
+
+/// Unbinds a browser. `{"ok": whether it was bound}`
+#[no_mangle]
+pub extern "C" fn tl_ext_remove(id: *const c_char) -> *mut c_char { with(|l| crate::extension::remove(&l, &s(id))) }

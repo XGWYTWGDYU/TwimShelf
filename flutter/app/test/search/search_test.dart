@@ -45,6 +45,7 @@ Map<String, Object?> expected(
     'exclude_loose': false,
     ...filter,
   },
+  'whole_posts': false,
 };
 
 void main() {

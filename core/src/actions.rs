@@ -13,7 +13,7 @@ impl Stamp {
     fn member(db: &Store, folder: &str, id: &str) -> rusqlite::Result<Self> { let r = db.member_reg(folder, id)?; Ok(Self { id: id.into(), hlc: r.map_or(0, |r| r.hlc), inc: 0, state: r.map_or(0, |r| r.origin) }) }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Receipt { pub kind: ActionKind, pub folder: Option<String>, pub folder_hlc: Option<u64>, pub epoch: u64, pub changes: Vec<Stamp> }
+pub struct Receipt { #[serde(default)] pub label: Option<String>, pub kind: ActionKind, pub folder: Option<String>, pub folder_hlc: Option<u64>, pub epoch: u64, pub changes: Vec<Stamp> }
 #[derive(Debug, Deserialize)]
 pub struct ActionRequest {
     pub kind: ActionKind,
@@ -59,7 +59,7 @@ impl Library {
         }
     }
     fn apply_action_once(&self, a: &ActionRequest) -> anyhow::Result<Receipt> {
-        let mut receipt = Receipt { kind: a.kind, folder: a.folder.as_ref().map(|f| f.trim().to_string()), folder_hlc: None, epoch: self.epoch(), changes: vec![] };
+        let mut receipt = Receipt { label: None, kind: a.kind, folder: a.folder.as_ref().map(|f| f.trim().to_string()), folder_hlc: None, epoch: self.epoch(), changes: vec![] };
         {
             let db = self.db_at(a.epoch.unwrap_or(receipt.epoch))?;
             let tx = db.conn().unchecked_transaction()?;
@@ -67,6 +67,7 @@ impl Library {
             let folder = receipt.folder.as_deref().unwrap_or("");
             if matches!(a.kind, ActionKind::FolderAdd | ActionKind::FolderRemove) && folder.is_empty() { anyhow::bail!(tr!("action.folderEmpty")); }
             if a.kind == ActionKind::Tag && a.label.as_deref().unwrap_or("").trim().is_empty() { anyhow::bail!(tr!("action.tagEmpty")); }
+            if a.kind == ActionKind::Tag { receipt.label = Some(db.canonical(a.label.as_deref().unwrap())?); }
             for id in ids {
                 if let Some(expected) = &a.expected { if !expected.contains(&Stamp::trash(&db, &id)?) { continue; } }
                 let changed = match a.kind {
@@ -77,7 +78,13 @@ impl Library {
                     ActionKind::FolderRemove => db.remove_from_folder(folder, &[id.clone()])? > 0,
                     ActionKind::Tag => {
                         if db.trash_reg(&id)?.state != rules::LIVE { continue; }
-                        db.tag_media(&id, a.label.as_deref().unwrap(), Origin::USER)?; true
+                        let label = receipt.label.as_deref().unwrap();
+                        if db.media_tags(&id)?.iter().any(|(l, o)| l == label && o & 1 != 0) { continue; }
+                        db.tag_media(&id, label, Origin::USER)?;
+                        if let Some(hlc) = db.user_tag_stamp(&id, label)? {
+                            receipt.changes.push(Stamp { id, hlc, inc: 0, state: 1 });
+                        }
+                        continue;
                     }
                 };
                 if changed { receipt.changes.push(if matches!(a.kind, ActionKind::FolderAdd | ActionKind::FolderRemove) { Stamp::member(&db, folder, &id)? } else { Stamp::trash(&db, &id)? }); }
@@ -106,6 +113,11 @@ impl Library {
                     let f = receipt.folder.as_deref().unwrap_or("");
                     if Stamp::member(&db, f, &stamp.id)? == *stamp {
                         n += if receipt.kind == ActionKind::FolderAdd { db.remove_from_folder(f, &[stamp.id.clone()])? } else { db.add_to_folder(f, &[stamp.id.clone()])? };
+                    }
+                }
+                ActionKind::Tag => {
+                    if let Some(label) = &receipt.label {
+                        if db.undo_user_tag(&stamp.id, label, stamp.hlc)? { n += 1; }
                     }
                 }
                 _ => {}

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -8,6 +7,7 @@ import 'package:tl_core/tl_core.dart';
 import '../platform/secrets.dart';
 import '../platform/apple_platform.dart';
 import '../platform/multicast.dart';
+import '../platform/os.dart';
 
 /// LAN sync for the Flutter app: the account key (in the platform's secret store, as the native
 /// apps keep it in the Keychain), the core's listener, and the core's discovery, which finds the
@@ -35,18 +35,18 @@ class SyncModel extends ChangeNotifier {
   /// The name the others show; on Apple platforms the native apps' (the runner knows it).
   static String deviceName = _hostName();
   static String _hostName() {
-    final h = Platform.localHostname;
+    final h = OS.localHostname;
     return h.endsWith('.local') ? h.substring(0, h.length - 6) : h;
   }
 
   /// What this device is, announced with its name so the others show the right type.
   static String deviceKind = '';
   static Future<String> _kind() async {
-    if (Platform.isMacOS) return 'mac';
-    if (Platform.isWindows) return 'windows';
-    if (Platform.isLinux) return 'linux';
-    if (Platform.isIOS) return await ApplePlatform.instance.deviceKind() ?? 'iphone';
-    if (Platform.isAndroid) {
+    if (OS.isMacOS) return 'mac';
+    if (OS.isWindows) return 'windows';
+    if (OS.isLinux) return 'linux';
+    if (OS.isIOS) return await ApplePlatform.instance.deviceKind() ?? 'iphone';
+    if (OS.isAndroid) {
       final view = WidgetsBinding.instance.platformDispatcher.views.first;
       final shortest = view.physicalSize.shortestSide / view.devicePixelRatio;
       return shortest >= 600 ? 'android-tablet' : 'android-phone';
@@ -60,6 +60,11 @@ class SyncModel extends ChangeNotifier {
   Future<void> start() async {
     deviceName = await ApplePlatform.instance.deviceName() ?? deviceName;
     deviceKind = await _kind();
+    // the web build: the device is the server (its name and kind, as it syncs on its own too)
+    if (OS.isWeb) {
+      deviceName = serverInfo.json['device_name'] as String? ?? 'TwimShelf Linux Server';
+      deviceKind = 'linux';
+    }
     await Multicast.acquire();
     final r = await Secrets.read(_keyName);
     accountKey = r is SecretValue<String?> ? r.value : null;
@@ -77,7 +82,7 @@ class SyncModel extends ChangeNotifier {
   /// find this device and not get in. A new listener first, then the announcement with its port.
   Future<void> _foreground() async {
     try {
-      if (Platform.isIOS) await Core.syncRestartListenerAsync();
+      if (OS.isIOS) await Core.syncRestartListenerAsync();
       Core.discoveryRediscover();
     } catch (e) {
       note = '$e';
@@ -88,7 +93,7 @@ class SyncModel extends ChangeNotifier {
   void _startCore() {
     try {
       Core.syncStart(accountKey ?? '', deviceName);
-      Core.discoveryStart(serviceType, deviceName, deviceKind);
+      Core.discoveryStart(OS.isWeb ? serverInfo.json['sync_service'] as String? ?? serviceType : serviceType, deviceName, deviceKind);
     } catch (e) {
       note = '$e';
     }
@@ -128,6 +133,20 @@ class SyncModel extends ChangeNotifier {
 
   /// Devices that could be joined (other accounts, or none yet): the joining side picks one.
   List<DiscoveredPeer> get joinablePeers => (discovery?.peers ?? const []).where((p) => p.account != null && p.reachable).toList();
+
+  /// The joinable devices, one group per account (devices that sync with each other are one
+  /// account, shown together), largest group first.
+  List<(String, List<DiscoveredPeer>)> get joinableAccounts {
+    final groups = <String, List<DiscoveredPeer>>{};
+    for (final p in joinablePeers) {
+      (groups[p.account!] ??= []).add(p);
+    }
+    for (final g in groups.values) {
+      g.sort((a, b) => a.name.compareTo(b.name));
+    }
+    return groups.entries.map((e) => (e.key, e.value)).toList()
+      ..sort((a, b) => b.$2.length != a.$2.length ? b.$2.length - a.$2.length : a.$2.first.name.compareTo(b.$2.first.name));
+  }
 
   Future<void> createAccount() async {
     final key = Core.syncNewAccount();

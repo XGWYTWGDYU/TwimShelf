@@ -355,7 +355,7 @@ fn search_term_matches_tags_that_contain_it_without_semantic_search() {
         db.tag_media(&id, "棒球服", Origin::AI).unwrap();
     }
     let run = |term: &str, fuzzy: bool| l.feed(&FeedRequest {
-        newest_first: false, terms: vec![term.into()], scope: SearchScope::Both, seed: Some(0), fuzzy, term_vectors: vec![], embed_model: None, threshold: 0.7,
+        whole_posts: false, newest_first: false, terms: vec![term.into()], scope: SearchScope::Both, seed: Some(0), fuzzy, term_vectors: vec![], embed_model: None, threshold: 0.7,
         fields: SearchFields { tags: true, text: true, author: true }, filter: Default::default(),
     }).unwrap().len();
     assert_eq!(run("棒球", false), 1, "no embedding model: still a containing match");

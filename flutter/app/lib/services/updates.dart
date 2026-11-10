@@ -1,6 +1,4 @@
-import 'dart:ffi' show Abi;
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -11,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app/prefs.dart';
 import '../l10n/l10n.dart';
+import '../platform/arch.dart';
+import '../platform/os.dart';
 
 /// 检查更新, in GitHub builds only: they are built with `--dart-define=TL_UPDATE_REPO=owner/name`;
 /// every other build has none and never looks. At most once a day when the app opens, or when
@@ -25,19 +25,15 @@ class Updates {
 
   /// Installer endings for this platform, preferred first; empty: the release page.
   static List<String> get _suffixes {
-    if (Platform.isMacOS) return const ['.dmg'];
-    if (Platform.isAndroid) return const ['.apk'];
-    if (Platform.isWindows) return const ['.msix', '.exe'];
+    if (OS.isMacOS) return const ['.dmg'];
+    if (OS.isAndroid) return const ['.apk'];
+    if (OS.isWindows) return const ['.msix', '.exe'];
     // an AppImage replaces itself; installed any other way, the release page
-    if (Platform.isLinux && Platform.environment['APPIMAGE'] != null) return const ['.AppImage'];
+    if (OS.isLinux && OS.environment['APPIMAGE'] != null) return const ['.AppImage'];
     return const [];
   }
 
-  static String? get _arch => switch (Abi.current()) {
-        Abi.windowsArm64 || Abi.linuxArm64 || Abi.macosArm64 || Abi.androidArm64 => 'arm64',
-        Abi.windowsX64 || Abi.linuxX64 || Abi.macosX64 || Abi.androidX64 => 'x64',
-        _ => null,
-      };
+  static String? get _arch => currentArch();
 
   /// Checks off the UI isolate; null when current (or a skipped version, unless [manual]).
   static Future<UpdateInfo?> check({bool manual = false}) async {
@@ -46,7 +42,7 @@ class Updates {
     if (!manual && now - p.updateLastCheck < const Duration(days: 1).inMilliseconds) return null;
     final version = await current();
     final suffixes = _suffixes, arch = _arch;
-    final info = await Isolate.run(() => Core.checkUpdate(repo: repo, current: version, suffixes: suffixes, arch: arch));
+    final info = await coreRunAsync(() => Core.checkUpdate(repo: repo, current: version, suffixes: suffixes, arch: arch));
     p.updateLastCheck = now;
     if (info != null && !manual && p.updateSkipped == info.version) return null;
     return info;
@@ -130,20 +126,20 @@ class Updates {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(SnackBar(content: Text(L('update.downloading')), duration: const Duration(minutes: 10)));
     try {
-      final dir = await TlNative.updatesDir() ?? '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}updates';
-      final file = await Isolate.run(() => Core.downloadUpdate(info, dir));
+      final dir = await TlNative.updatesDir() ?? '${(await getTemporaryDirectory()).path}${OS.pathSeparator}updates';
+      final file = await coreRunAsync(() => Core.downloadUpdate(info, dir));
       messenger.hideCurrentSnackBar();
-      if (Platform.isAndroid) {
+      if (OS.isAndroid) {
         await TlNative.installApk(file);
-      } else if (Platform.isMacOS) {
+      } else if (OS.isMacOS) {
         await Process.run('open', [file]);
         messenger.showSnackBar(SnackBar(content: Text(L('update.opened.mac'))));
-      } else if (Platform.isWindows) {
+      } else if (OS.isWindows) {
         // the installer (MSIX: App Installer) takes over and replaces this version
         await Process.start('explorer.exe', [file], mode: ProcessStartMode.detached);
-      } else if (Platform.isLinux) {
+      } else if (OS.isLinux) {
         // an AppImage is the app: the new one takes the old one's place, then starts
-        final self = Platform.environment['APPIMAGE']!;
+        final self = OS.environment['APPIMAGE']!;
         await replaceAppImage(file, self);
         await Process.start(self, const [], mode: ProcessStartMode.detached);
         exit(0);

@@ -98,6 +98,8 @@ class FormViewController: UIViewController, UICollectionViewDelegate {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.keyboardDismissMode = .interactive
+        // Progress cards update their labels in place; let their constraints grow the row.
+        collectionView.selfSizingInvalidation = .enabledIncludingConstraints
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
         collectionView.delegate = self

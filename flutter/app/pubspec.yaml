@@ -1,7 +1,7 @@
 name: twimshelf
 description: "The Flutter app."
 publish_to: 'none'
-version: 1.1.0+5
+version: 1.5.0+6
 
 environment:
   sdk: ^3.13.7
@@ -30,6 +30,7 @@ dependencies:
   ffi: ^2.1.4
   win32: ^6.4.0
   http: ^1.6.0
+  web: ^1.1.1
   path: ^1.9.1
   mime: ^2.0.0
   flutter_staggered_grid_view: ^0.7.0

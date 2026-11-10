@@ -11,6 +11,7 @@ import '../../mascot/mascot.dart';
 import '../../services/downloads.dart';
 import '../settings_page.dart';
 import '../../widgets/text_menu.dart';
+import '../../platform/files.dart';
 
 /// 下载帖子: links pasted one per line, a bookmarks JSON (Twitter Web Exporter), the download
 /// method, and the running job with pause / resume / cancel — the native 下载 page.
@@ -69,9 +70,10 @@ class _DownloadsPageState extends State<DownloadsPage> {
     final f = await openFile(acceptedTypeGroups: const [_json]);
     if (f == null) return;
     try {
-      final urls = await loadBookmarkURLs(f.path);
+      final path = await pickedPath(f);
+      final urls = await loadBookmarkURLs(path);
       setState(() {
-        _batchPath = f.path;
+        _batchPath = path;
         _batchName = f.name;
         _batchCount = urls.length;
       });

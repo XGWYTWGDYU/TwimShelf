@@ -435,4 +435,17 @@ class CoreBindings {
       library.lookupFunction<Void Function(), void Function()>('tl_discovery_rediscover');
   late final tl_discovery_stop =
       library.lookupFunction<Void Function(), void Function()>('tl_discovery_stop');
+  late final tl_ext_serve = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ext_serve');
+  late final tl_ext_pair_begin = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ext_pair_begin');
+  late final tl_ext_pair_cancel =
+      library.lookupFunction<Void Function(), void Function()>('tl_ext_pair_cancel');
+  late final tl_ext_clients = library.lookupFunction<
+      Pointer<Utf8> Function(), Pointer<Utf8> Function()>('tl_ext_clients');
+  late final tl_ext_remove = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ext_remove');
 }

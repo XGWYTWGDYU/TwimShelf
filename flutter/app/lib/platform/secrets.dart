@@ -1,11 +1,12 @@
 import 'dart:convert';
-import 'dart:io';
 
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tl_core/tl_core.dart';
+import 'os.dart';
+import 'files.dart' as files;
 
 /// No backend error text is exposed: native errors can include sensitive data.
 sealed class SecretResult<T> {
@@ -90,30 +91,32 @@ class DataFolderSecretBackend implements SecretBackend {
     return r;
   }
 
-  Future<(File, String)> _open() async {
+  // (through files.dart: the data folder on this device, or the server's in the web build)
+  Future<(String, String)> _open() async {
     final dir = await directory();
-    await Directory(dir).create(recursive: true);
-    final keyFile = File('$dir${Platform.pathSeparator}secrets.key');
-    if (!await keyFile.exists()) await keyFile.writeAsString(Core.secretKey(), flush: true);
-    return (File('$dir${Platform.pathSeparator}secrets.json'), (await keyFile.readAsString()).trim());
+    await files.ensureDirectory(dir);
+    final keyPath = '$dir${OS.pathSeparator}secrets.key';
+    var key = await files.readText(keyPath);
+    if (key == null) {
+      key = Core.secretKey();
+      await files.writeText(keyPath, key);
+    }
+    return ('$dir${OS.pathSeparator}secrets.json', key.trim());
   }
 
-  Future<Map<String, dynamic>> _read(File f) async {
-    if (!await f.exists()) return {};
+  Future<Map<String, dynamic>> _read(String f) async {
+    final text = await files.readText(f);
+    if (text == null) return {};
     try {
-      return jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      return jsonDecode(text) as Map<String, dynamic>;
     } catch (_) {
       // damaged: kept aside, never silently dropped (the app reports secrets as unavailable)
-      await f.rename('${f.path}.damaged-${DateTime.now().millisecondsSinceEpoch}');
+      await files.movePath(f, '$f.damaged-${DateTime.now().millisecondsSinceEpoch}');
       throw const _Unavailable();
     }
   }
 
-  Future<void> _write(File f, Map<String, dynamic> m) async {
-    final tmp = File('${f.path}.partial');
-    await tmp.writeAsString(jsonEncode(m), flush: true);
-    await tmp.rename(f.path);
-  }
+  Future<void> _write(String f, Map<String, dynamic> m) => files.writeText(f, jsonEncode(m));
 
   @override
   Future<String?> read(String key) => _serial(() async {
@@ -177,10 +180,11 @@ class Secrets {
   Secrets._();
   /// A debug run on a synthetic library (TL_LIBRARY_DIR) keeps its secrets in memory: test runs
   /// never read or write the user's Keychain or secret service.
-  static final SecretStore store = SecretStore(kDebugMode && Platform.environment['TL_LIBRARY_DIR'] != null
+  static final SecretStore store = SecretStore(kDebugMode && OS.environment['TL_LIBRARY_DIR'] != null
       ? MemorySecretBackend()
       // Windows, Linux: in the data folder; Apple: Keychain; Android: Keystore
-      : Platform.isWindows || Platform.isLinux
+      // the web build: on the server, beside the library (the server itself syncs with them)
+      : OS.isWindows || OS.isLinux || OS.isWeb
           ? DataFolderSecretBackend(() async => (await getApplicationSupportDirectory()).path)
           : PlatformSecretBackend());
   static Future<SecretResult<String?>> read(String key) => store.read(key);

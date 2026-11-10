@@ -94,6 +94,74 @@ open flutter/app/macos/Runner.xcworkspace
 
 把 10 位的 Team ID 写进 `config.yaml` 的 `native.development_team` 和 `flutter.development_team`。Team ID 可以在 [Apple Developer 账号页面](https://developer.apple.com/account)或 Xcode 的账号设置里查到。这是个人信息，**不要提交这个改动**。
 
+### 安装到真机和本机（命令行）
+
+先在 `config.yaml` 里填好 `development_team`。产物放进构建目录，要给 `xcodebuild` 指定 `-derivedDataPath`，否则会落到 Xcode 默认的 DerivedData：
+
+```bash
+C=$(python3 scripts/apply.py where cache)
+```
+
+```bash
+xcodebuild -project TwimShelf.xcodeproj -scheme TwimShelf-iOS -configuration Release -destination generic/platform=iOS -derivedDataPath "$C/xcode/TwimShelf" -allowProvisioningUpdates build
+```
+
+```bash
+xcrun devicectl list devices
+```
+
+```bash
+xcrun devicectl device install app --device <设备 UDID> "$C/xcode/TwimShelf/Build/Products/Release-iphoneos/TwimShelf.app"
+```
+
+Mac 版把 scheme 换成 `TwimShelf-macOS`、destination 换成 `'platform=macOS,arch=arm64'`，产物在 `Release/TwimShelf.app`，拷到「应用程序」即可。Flutter 版用 `flutter install -d <设备 UDID> --release`（在 `flutter/app` 里运行；`flutter/app/build` 是指向构建目录的链接）。
+
+## 服务器、网页版和 Docker
+
+### Docker 镜像（Linux 服务器）
+
+```bash
+./build.sh docker
+```
+
+和其他平台一样遵循 `config.yaml`：
+
+- **版本号**：取自 `version`，写进镜像标签 `twimshelf:<version>`、镜像元数据和服务器报告的版本。
+- **构建目录**：镜像另外打包成 `<build.dir>/apps/TwimShelf-<version>-docker-linux-<架构>.tar.gz`，可以拷到别的机器上 `docker load`。
+- **Bundle ID、签名、分享扩展**：服务器用不到，不受影响。
+
+全部编译都在镜像里完成（Rust 服务器和 Flutter 网页版），本机只需要 Docker，不需要 Rust 或 Flutter。Docker 自己的构建缓存放在 Docker（或 OrbStack）的磁盘镜像里，不受 `build.dir` 控制，要换磁盘请在 Docker 的设置里移动它的数据位置。不用脚本时也可以直接构建：
+
+```bash
+docker build -f docker/Dockerfile --build-arg VERSION=1.5.0 -t twimshelf .
+```
+
+运行、登录、更新和公网访问见 [docker/README.md](docker/README.md)。
+
+### 不用 Docker 开发
+
+网页版（构建到 `flutter/app/build/web`，即构建目录里）：
+
+```bash
+cd flutter/app && flutter build web --release --no-web-resources-cdn
+```
+
+服务器（Rust 产物放进构建目录）：
+
+```bash
+cd server && CARGO_TARGET_DIR="$(python3 ../scripts/apply.py where cache)/cargo-server" cargo build --release
+```
+
+```bash
+TL_DATA=/某个测试目录 TL_WEB=../flutter/app/build/web TL_PORT=2778 "$(python3 ../scripts/apply.py where cache)/cargo-server/release/twimshelf-server"
+```
+
+服务器报告的版本取自环境变量 `TL_VERSION`（镜像构建时从 `config.yaml` 读取），不设时用 `server/Cargo.toml` 的版本。`--no-web-resources-cdn` 让 CanvasKit 跟网页版一起打包，局域网里没有外网也能打开。网页版的远程调用（`flutter/tl_core/lib/src/bindings_web.dart`）和服务器的分发表（`server/src/dispatch.rs`）由 `scripts/gen_web_bindings.py` 从 `bindings.dart` 生成，给核心加了新函数后运行一次。
+
+## 浏览器扩展
+
+`extension` 目录是独立的 Chromium 扩展（Manifest V3），和主项目没有关联：没有构建步骤，构建脚本和 `config.yaml` 都不处理它，版本号写在它自己的 `manifest.json` 里。在 `chrome://extensions` 打开开发者模式，选择「加载已解压的扩展程序」并选中这个目录；改了代码后在同一页面点刷新。扩展和 App 之间的接口在 `core/src/extension.rs`：桌面版 App 监听 27800–27809 端口（仅本机和局域网），服务器在自己的端口下提供 `/ext/`。
+
 ## 其他平台
 
 ### Android
@@ -160,7 +228,7 @@ Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都�
 | `build/cache` | 所有缓存：Rust、Xcode Derived Data、Flutter、Gradle、Dart 依赖、下载的 SDK、日志 |
 | `build/apps` | 安装包 |
 
-完整构建所有平台大约需要几十 GB。空间不够时可以把 `build.dir` 改成其他磁盘上的绝对路径，或者直接删除 `build` 目录来清理。CocoaPods 的 `Pods` 是个例外，它必须留在工程目录里（同样被 Git 忽略）。
+完整构建所有平台大约需要几十 GB。空间不够时可以把 `build.dir` 改成其他磁盘上的绝对路径，改完运行一次 `./build.sh --configure`，各个构建目录的链接会指向新位置；或者直接删除 `build` 目录来清理。直接用 `cargo` 构建服务器时请设置 `CARGO_TARGET_DIR`（见上文），Docker 的构建缓存不在这里。CocoaPods 的 `Pods` 是个例外，它必须留在工程目录里（同样被 Git 忽略）。
 
 ## 开启苹果平台的分享扩展
 
@@ -207,6 +275,12 @@ Flutter 版：
 cd flutter/app && flutter test
 ```
 
+服务器：
+
+```bash
+cd server && cargo test
+```
+
 网格缩放回放测试在 Xcode 里运行 `GridTests` scheme。标记为 `#[ignore]` 的 Rust 测试要联网或者要真实账号，运行前先看一下源码，需要的帖子链接和 Cookie 通过环境变量传入。
 
 调试时请使用合成资料库，不要指向真实数据：[docs/testdata.md](docs/testdata.md) 说明了如何生成，以及如何用 `TL_LIBRARY_DIR` 隔离。Mac 的 Debug 版是独立的应用，有自己的 Bundle ID 和数据目录，不会碰到已安装的正式版。
@@ -226,6 +300,8 @@ cd flutter/app && flutter test
 **发布新版本**：提高 `config.yaml` 里的 `version` 和 `build_number`，推送到 `main`。
 
 Release 页面没有说明文字，只包含所有安装包、`SHA256SUMS.txt`、`BUILD-INFO.json` 和 `THIRD-PARTY-NOTICES.txt`。
+
+**Linux 服务器的镜像**：每次运行都分别在 x86_64 和 arm64 的机器上构建 Docker 镜像；发布新版本时推送到 GitHub Container Registry，标签是 `ghcr.io/<owner>/twimshelf:<version>` 和 `:latest`，一个标签同时包含两种架构。新建的包默认是私有的，第一次发布后到仓库所有者的 Packages 页面把它设为公开。
 
 **Fork 之后**：工作流可以直接运行，不需要配置任何密钥，「检查更新」会自动指向你的仓库。如果要发布，请先把 Bundle ID 和包名改成自己的。
 

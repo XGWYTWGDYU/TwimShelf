@@ -49,6 +49,11 @@ pub struct FeedRequest {
     /// Where each term may match (any enabled field counts). Default: tags only.
     #[serde(default)] pub fields: SearchFields,
     #[serde(default)] pub filter: FeedFilter,
+    /// Post cards: a post matches when any of its media does (a tag on one photo finds the post),
+    /// and then comes with all its media — the ones the media filters (kind, folder, damaged,
+    /// album, loose, recent) let through — so the card is the whole post, from its first media.
+    /// Without it (the photo grid) only the matching media themselves.
+    #[serde(default)] pub whole_posts: bool,
 }
 
 /// Extra feed filters (all must hold).
@@ -85,6 +90,18 @@ pub struct FeedFilter {
     #[serde(default)] pub exclude_recent: bool,
     /// No loose media ("-外部导入").
     #[serde(default)] pub exclude_loose: bool,
+}
+
+impl FeedFilter {
+    /// Whether anything here picks media by what they are about (rather than where they are).
+    fn content(&self) -> bool {
+        self.author.as_ref().is_some_and(|a| !a.trim().is_empty()) || !self.labels.is_empty() || self.review != crate::rules::Review::Any
+            || self.exclude_terms.iter().any(|t| !t.trim().is_empty()) || self.origins.is_some()
+    }
+    /// Only the filters on the media themselves (type, place, state), not the search.
+    fn media_filters(&self) -> FeedFilter {
+        FeedFilter { author: None, labels: vec![], review: crate::rules::Review::Any, exclude_terms: vec![], origins: None, ..self.clone() }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -574,6 +591,12 @@ impl Library {
             }).collect()
         };
         let mut items = self.db().feed_filtered(&sets, &terms, req.scope, req.fields, &req.filter)?;
+        if req.whole_posts && (!terms.is_empty() || req.filter.content()) {
+            let matched: std::collections::HashSet<String> = items.iter().map(|i| i.post_id.clone()).collect();
+            let media_only = req.filter.media_filters();
+            items = self.db().feed_filtered(&[], &[], req.scope, req.fields, &media_only)?;
+            items.retain(|i| matched.contains(&i.post_id));
+        }
         if req.newest_first {
             let added = self.db().posts_added()?;
             let at = |post: &str| added.get(post).copied().unwrap_or(0);
@@ -828,6 +851,38 @@ mod tests {
 
     use super::*;
     use crate::legacy::SIDECAR_NAME;
+
+    /// A post with four photos, only the second tagged 猫: a search for 猫 shows the whole post
+    /// (from its first photo) on a card, but only the tagged photo in the grid.
+    #[test]
+    fn a_match_on_one_media_finds_the_whole_post() {
+        let tmp = std::env::temp_dir().join(format!("tl-whole-{}", rand::random::<u64>()));
+        for i in 1..=4 {
+            fs::create_dir_all(tmp.join("src/帖子")).unwrap();
+            fs::write(tmp.join(format!("src/帖子/{i}.jpg")), crate::testutil::jpg(format!("a{i}").as_bytes())).unwrap();
+        }
+        fs::create_dir_all(tmp.join("src/别的")).unwrap();
+        fs::write(tmp.join("src/别的/1.jpg"), crate::testutil::jpg(b"other")).unwrap();
+        let lib = Library::open(tmp.join("lib")).unwrap();
+        lib.import_legacy_dir(&tmp.join("src")).unwrap();
+        let a2 = hex::encode(Sha256::digest(crate::testutil::jpg(b"a2")));
+        lib.db().tag_media(&a2, "猫", crate::model::Origin::USER).unwrap();
+        let req = |whole: bool, kind: Option<MediaKind>| FeedRequest { terms: vec!["猫".into()], scope: SearchScope::Both, seed: None, newest_first: false, fuzzy: false,
+            term_vectors: vec![], embed_model: None, threshold: 0.5, fields: SearchFields::default(),
+            filter: FeedFilter { kind, ..Default::default() }, whole_posts: whole };
+        let grid = lib.feed(&req(false, None)).unwrap();
+        assert_eq!(grid.iter().map(|i| i.media_id.clone()).collect::<Vec<_>>(), vec![a2.clone()]);
+        let mut cards = lib.feed(&req(true, None)).unwrap();
+        cards.sort_by_key(|i| i.ordinal);
+        assert_eq!(cards.len(), 4, "the whole post, not the other one");
+        assert!(cards.iter().all(|i| i.post_id == grid[0].post_id));
+        assert_eq!(cards[0].ordinal, grid[0].ordinal - 1, "starts at the post's first photo");
+        assert!(lib.feed(&req(true, Some(MediaKind::Video))).unwrap().is_empty(), "media filters still apply");
+        // no search: the plain feed, unchanged
+        let mut all = req(true, None); all.terms.clear();
+        assert_eq!(lib.feed(&all).unwrap().len(), 5);
+        let _ = fs::remove_dir_all(&tmp);
+    }
     /// A permanent deletion and a restore arriving in the same sync batch: the file of the
     /// (restored) live media must survive the clean-up of the deletion.
     #[test]
@@ -922,19 +977,19 @@ mod tests {
         fs::write(src.join("帖子C/fake.mp4"), b"not a video").unwrap();
         let rep2 = lib.import_legacy_dir(&src).unwrap();
         assert!(rep2.skipped.iter().any(|s| s.contains("fake.mp4")));
-        let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(1), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let all = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(1), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert_eq!(all.len(), 3);
         let b = all.iter().find(|i| i.post_id == "42").unwrap();
         assert_eq!(b.text.as_deref(), Some("hi"));
         lib.tag(&b.media_id, "白墙", Origin::AI).unwrap();
-        let q = |t: &str, s| lib.feed(&FeedRequest { newest_first: false, terms: vec![t.into()], scope: s, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap().len();
+        let q = |t: &str, s| lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec![t.into()], scope: s, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap().len();
         assert_eq!(q("墙", SearchScope::Both), 1);
         assert_eq!(q("墙", SearchScope::Mine), 0);
         assert_eq!(q("墙", SearchScope::Common), 0, "an AI-only tag is not common");
         lib.tag(&b.media_id, "白墙", Origin::USER).unwrap();
         assert_eq!(q("墙", SearchScope::Mine), 1);
         // text / author search
-        let f = |t: &str, fields: SearchFields| lib.feed(&FeedRequest { newest_first: false, terms: vec![t.into()], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields, filter: Default::default() }).unwrap().len();
+        let f = |t: &str, fields: SearchFields| lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec![t.into()], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields, filter: Default::default() }).unwrap().len();
         let text = SearchFields { tags: false, text: true, author: false };
         let author = SearchFields { tags: false, text: false, author: true };
         assert_eq!(f("hi", text), 1, "post text");
@@ -946,9 +1001,9 @@ mod tests {
         assert_eq!(q("墙", SearchScope::Ai), 1);
         // "common": only where the tag is both mine and the AI's
         assert_eq!(q("墙", SearchScope::Common), 1, "the AI tag I also added is common");
-        let exact = lib.feed(&FeedRequest { newest_first: false, terms: vec!["墙".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let exact = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec!["墙".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert!(!exact.is_empty(), "without fuzzy a term still matches the tags that contain it");
-        let none = lib.feed(&FeedRequest { newest_first: false, terms: vec!["不存在的词".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let none = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec!["不存在的词".into()], scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert!(none.is_empty());
         fs::remove_dir_all(&tmp).unwrap();
     }
@@ -967,7 +1022,7 @@ mod tests {
         }
         let lib = Library::open(tmp.join("lib")).unwrap();
         lib.import_legacy_dir(&src).unwrap();
-        let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let all = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         let media = |post: &str| all.iter().find(|i| i.post_id == post).unwrap().media_id.clone();
         lib.tag(&media("2"), "小猫咪", Origin::AI).unwrap();
         lib.tag(&media("3"), "风景", Origin::USER).unwrap();
@@ -975,7 +1030,7 @@ mod tests {
         lib.db().set_vector("m", "风景", &[0.0, 1.0]).unwrap();
         // "喵" means 小猫咪 (by vectors), and is written nowhere
         let run = |terms: &[&str], vecs: Vec<Option<Vec<f32>>>, fuzzy: bool, tags: bool, text: bool, author: bool| -> Vec<String> {
-            let mut v: Vec<String> = lib.feed(&FeedRequest { newest_first: false, terms: terms.iter().map(|t| t.to_string()).collect(), scope: SearchScope::Both, seed: None, fuzzy,
+            let mut v: Vec<String> = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: terms.iter().map(|t| t.to_string()).collect(), scope: SearchScope::Both, seed: None, fuzzy,
                 term_vectors: vecs, embed_model: Some("m".into()), threshold: 0.7, fields: SearchFields { tags, text, author }, filter: Default::default() }).unwrap()
                 .into_iter().map(|i| i.post_id).collect();
             v.sort(); v

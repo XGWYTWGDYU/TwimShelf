@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:tl_core/tl_core.dart';
 
 import '../l10n/l10n.dart';
+import 'os.dart';
 
 abstract interface class BackgroundWork {
   void Function()? get onTimeout;
@@ -29,7 +29,7 @@ class NoBackgroundWork implements BackgroundWork {
 }
 
 BackgroundWork platformBackgroundWork() =>
-    Platform.isAndroid ? AndroidBackgroundWork() : NoBackgroundWork();
+    OS.isAndroid ? AndroidBackgroundWork() : NoBackgroundWork();
 
 class BackgroundWorkUnavailable implements Exception {
   const BackgroundWorkUnavailable();

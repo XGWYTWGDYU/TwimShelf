@@ -261,7 +261,7 @@ mod tests {
         std::fs::write(src.join("1.png"), &png).unwrap();
         let lib = Arc::new(Library::open(d.join("lib")).unwrap());
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let req = crate::library::FeedRequest { newest_first: false, terms: vec![], scope: crate::model::SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
+        let req = crate::library::FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: crate::model::SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
         let items = lib.feed(&req).unwrap();
         assert_eq!(items[0].size, Some((30, 20)));
         let packed = lib.feed_packed(&req).unwrap();
@@ -284,7 +284,7 @@ mod tests {
         }
         let lib = Arc::new(Library::open(d.join("lib")).unwrap());
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let req = crate::library::FeedRequest { newest_first: false, terms: vec![], scope: crate::model::SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
+        let req = crate::library::FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: crate::model::SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
         // too many to read while answering
         assert_eq!(lib.db().media_without_size(1000).unwrap().len(), READ_IN_FEED + 5);
         lib.feed(&req).unwrap();

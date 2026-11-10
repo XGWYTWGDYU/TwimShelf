@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -13,6 +12,7 @@ import '../l10n/l10n.dart';
 import 'desktop_inbox.dart';
 import 'desktop_entry.dart';
 import 'shared_links.dart';
+import 'os.dart';
 export 'shared_links.dart';
 
 sealed class ShareInboxEvent {
@@ -97,7 +97,7 @@ class ShareInbox with WidgetsBindingObserver {
     _started = true;
     WidgetsBinding.instance.addObserver(this);
     final shares = await _shares();
-    if (shares != null && (Platform.isWindows || Platform.isLinux)) {
+    if (shares != null && (OS.isWindows || OS.isLinux)) {
       for (final name in ['Requests', 'Inbox']) {
         final directory = await Directory('${shares.path}/$name')
             .create(recursive: true);
@@ -117,12 +117,12 @@ class ShareInbox with WidgetsBindingObserver {
       try {
         // Registration labels come from the same initialized catalog as the UI.
         // what an earlier version left in Explorer's Send to
-        if (root == null && Platform.isWindows) {
+        if (root == null && OS.isWindows) {
           await _channel.invokeMethod<void>('removeSendTo', L('share.title'));
-        } else if (root == null && Platform.isLinux) {
+        } else if (root == null && OS.isLinux) {
           await installDesktopEntry();
         }
-        if (root == null && Platform.isWindows) await _channel.invokeMethod<void>('installJumpList', L('shortcut.downloadPosts'));
+        if (root == null && OS.isWindows) await _channel.invokeMethod<void>('installJumpList', L('shortcut.downloadPosts'));
       } catch (_) {
         // Registration is recoverable and must not prevent a pending import.
         _emit(const ShareInboxFailure(0));
@@ -156,7 +156,7 @@ class ShareInbox with WidgetsBindingObserver {
   Future<Directory?> _shares() async {
     if (root != null) return root;
     if (_root != null) return _root;
-    final path = Platform.isIOS || Platform.isMacOS
+    final path = OS.isIOS || OS.isMacOS
         ? await TlNative.sharesRoot()
         : await _channel.invokeMethod<String>('getSharesRoot');
     if (path != null) _root = Directory(path);
@@ -328,7 +328,7 @@ class ShareInbox with WidgetsBindingObserver {
     final partial = await Directory('${inbox.path}/$id.partial').create();
     var n = 0;
     Future<void> place(String path) async {
-      final name = path.split(Platform.pathSeparator).last;
+      final name = path.split(OS.pathSeparator).last;
       if (await FileSystemEntity.isDirectory(path)) {
         await for (final e in Directory(path).list(recursive: true, followLinks: false)) {
           if (e is File) await e.copy('${partial.path}/${n++}_${e.uri.pathSegments.last}');
@@ -421,7 +421,7 @@ class ShareInbox with WidgetsBindingObserver {
   Future<ShareStaged> stage(String id, List<String> links) async {
     final dir = await Directory(await _stagingOf(id)).create(recursive: true);
     final path = dir.path;
-    return Isolate.run(() => Core.shareStage(path, links));
+    return coreRunAsync(() => Core.shareStage(path, links));
   }
 
   /// The person chose: what was shared goes into the library, in [folder] (or none). Links that
@@ -435,7 +435,7 @@ class ShareInbox with WidgetsBindingObserver {
   Future<void> _writeChoice(ShareNeedsChoice batch, {String? folder, bool staged = false}) async {
     final staging = await _stagingOf(batch.id);
     final out = '${batch.directory}/post.tlpack';
-    if (staged) await Isolate.run(() => Core.sharePack(staging, out));
+    if (staged) await coreRunAsync(() => Core.sharePack(staging, out));
     final links = File('${batch.directory}/_links.json');
     if (await links.exists()) await links.delete();
     await File('${batch.directory}/_share.json').writeAsString(jsonEncode({'version': 1, 'folder': folder ?? '', 'dropped': _alwaysAsk.remove(batch.id), 'links': const <String>[]}));
@@ -473,7 +473,7 @@ class ShareInbox with WidgetsBindingObserver {
 
   /// The library's folders for the share pages that do not open the library.
   Future<void> publishFolders(List<String> names) async {
-    if (!Platform.isIOS && !Platform.isMacOS && !Platform.isAndroid) return;
+    if (!OS.isIOS && !OS.isMacOS && !OS.isAndroid) return;
     final root = await _shares();
     if (root == null) return;
     await root.create(recursive: true);

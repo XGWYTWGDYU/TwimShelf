@@ -1,26 +1,26 @@
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'apple_platform.dart';
+import 'os.dart';
 
 /// Desktop windows without the system's title bar: the app's own content reaches the top edge.
 /// macOS keeps its traffic lights over the content (the window's corner); Windows and Linux get
 /// the caption buttons drawn here. A drag on the top strip moves the window.
 class DesktopWindow {
-  static bool get isDesktop => !kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
-  static bool get drawsCaption => !kIsWeb && (Platform.isWindows || Platform.isLinux);
+  static bool get isDesktop => !kIsWeb && (OS.isMacOS || OS.isWindows || OS.isLinux);
+  static bool get drawsCaption => !kIsWeb && (OS.isWindows || OS.isLinux);
 
   /// The height of the strip that stands in for the title bar.
-  static double get stripHeight => !isDesktop ? 0 : (Platform.isMacOS ? 28 : 36);
+  static double get stripHeight => !isDesktop ? 0 : (OS.isMacOS ? 28 : 36);
 
   static Future<void> setUp() async {
     if (!isDesktop) return;
     try {
       await windowManager.ensureInitialized();
-      await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: Platform.isMacOS);
+      await windowManager.setTitleBarStyle(TitleBarStyle.hidden, windowButtonVisibility: OS.isMacOS);
     } catch (_) {}
   }
 
@@ -34,7 +34,7 @@ class DesktopWindow {
 /// Windows and Linux). Both empty where there are none.
 class WindowChrome {
   static Rect leading(BuildContext context) {
-    if (!kIsWeb && Platform.isMacOS) return const Rect.fromLTWH(0, 0, 76, 28);
+    if (!kIsWeb && OS.isMacOS) return const Rect.fromLTWH(0, 0, 76, 28);
     return ApplePlatform.instance.windowControls.value;
   }
 

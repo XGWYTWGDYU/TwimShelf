@@ -9,10 +9,11 @@ import SwiftUI
 final class TagPickerModel: ObservableObject {
     let media: FeedItem
     @Published private(set) var scope: Core.MediaScope
-    @Published var wholePost: Bool { didSet { if wholePost != oldValue { added = [] } } }
+    @Published var wholePost: Bool
     @Published var query = ""
     @Published private(set) var all: [TagCount] = []
     @Published private(set) var added: [String] = []
+    private var receipts: [String: [Core.ActionReceipt]] = [:]
     @Published var error: String?
     /// After every added tag (the page refreshes its cards).
     var onChange: () -> Void = {}
@@ -42,14 +43,30 @@ final class TagPickerModel: ObservableObject {
     func add(_ label: String) -> Bool {
         let l = label.trimmingCharacters(in: .whitespaces).lowercased()
         guard !l.isEmpty, !existing.contains(l) else { return false }
-        do { try Core.action(.tag, media: wholePost ? [] : [media.mediaId], posts: wholePost ? [media.postId] : [], label: l) }
+        do {
+            let receipt = try Core.action(.tag, media: wholePost ? [] : [media.mediaId], posts: wholePost ? [media.postId] : [], label: l)
+            receipts[l, default: []].append(receipt)
+        }
         catch { self.error = error.localizedDescription; return false }
         if let refreshed = try? Core.postScope(media.postId) { scope = refreshed }
-        added.append(l)
+        if !added.contains(l) { added.append(l) }
         query = ""
         onChange()
         NotificationCenter.default.post(name: .libraryChanged, object: nil)
         return true
+    }
+    func undoAddition(_ label: String) {
+        do {
+            while let receipt = receipts[label]?.last {
+                _ = try Core.undo(receipt)
+                receipts[label]?.removeLast()
+            }
+            receipts.removeValue(forKey: label)
+            added.removeAll { $0 == label }
+            scope = try Core.postScope(media.postId)
+            onChange()
+            NotificationCenter.default.post(name: .libraryChanged, object: nil)
+        } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -168,7 +185,13 @@ struct TagPickerView: View {
             }
             if !model.added.isEmpty {
                 Section(L("tagPicker.justAdded")) {
-                    ForEach(model.added, id: \.self) { a in row(icon: "checkmark.circle.fill", tint: .green, title: a) }
+                    ForEach(model.added, id: \.self) { a in
+                        Button { model.undoAddition(a) } label: {
+                            row(icon: "checkmark.circle.fill", tint: .green, title: a, detail: L("common.undo"))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("tagPickerUndo-" + a)
+                    }
                 }
             }
             if !model.suggestions.isEmpty {

@@ -1,4 +1,3 @@
-import 'dart:isolate';
 import 'dart:async';
 import 'dart:io';
 
@@ -11,6 +10,7 @@ import 'package:tl_native/tl_native.dart';
 
 import '../l10n/l10n.dart';
 import 'external_models.dart';
+import '../platform/os.dart';
 
 /// A model the app offers to download (the core's catalog, the same list as the native apps').
 extension CatalogNames on CatalogEntry {
@@ -31,7 +31,7 @@ class LocalModels extends ChangeNotifier {
     catalog = entries;
   }
 
-  static bool get apple => !kIsWeb && (Platform.isIOS || Platform.isMacOS);
+  static bool get apple => !kIsWeb && (OS.isIOS || OS.isMacOS);
   static const _native = MethodChannel('tl/native');
 
   String get format => apple ? 'mlx' : 'gguf';
@@ -51,7 +51,7 @@ class LocalModels extends ChangeNotifier {
   Future<void> start() async {
     if (_started) return;
     _started = true;
-    final dir = Platform.environment['TL_MODELS_DIR'] ?? '${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}Models';
+    final dir = OS.environment['TL_MODELS_DIR'] ?? '${(await getApplicationSupportDirectory()).path}${OS.pathSeparator}Models';
     await Directory(dir).create(recursive: true);
     Core.setModelsDirectory(dir);
     if (apple) {
@@ -62,7 +62,7 @@ class LocalModels extends ChangeNotifier {
       }
     } else if (LlamaEngine.isSupported) {
       try {
-        devices = await LlamaEngine.instance.init(Platform.isAndroid ? await _androidLibDir() : null);
+        devices = await LlamaEngine.instance.init(OS.isAndroid ? await _androidLibDir() : null);
         supported = true;
       } catch (_) {
         supported = false;
@@ -79,7 +79,7 @@ class LocalModels extends ChangeNotifier {
   /// Reads the models folder (their files are looked at) off the drawing thread.
   Future<void> refresh() async {
     final wanted = format;
-    final found = await Isolate.run(() => Core.installedModels().where((m) => m.format == wanted).toList());
+    final found = await coreRunAsync(() => Core.installedModels().where((m) => m.format == wanted).toList());
     installed = found;
     download = Core.modelStatus();
     notifyListeners();
@@ -121,7 +121,7 @@ class LocalModels extends ChangeNotifier {
 
   Future<void> delete(String id) async {
     await unload();
-    await Isolate.run(() => Core.deleteModel(id));
+    await coreRunAsync(() => Core.deleteModel(id));
     await refresh();
   }
 
@@ -147,7 +147,7 @@ class LocalModels extends ChangeNotifier {
   Future<List<String>> tags(String id, {required Uint8List jpeg, required String system, required String question}) async {
     final m = find(id);
     if (m == null) throw const ExternalFailure(ExternalFailureKind.noModel);
-    final sep = Platform.pathSeparator;
+    final sep = OS.pathSeparator;
     final tmp = File('${(await getTemporaryDirectory()).path}${sep}tl-tag-${DateTime.now().microsecondsSinceEpoch}.jpg');
     await tmp.writeAsBytes(jpeg, flush: true);
     try {

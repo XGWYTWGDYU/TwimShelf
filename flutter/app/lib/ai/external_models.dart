@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:characters/characters.dart';
@@ -14,6 +13,7 @@ import 'package:tl_core/tl_core.dart';
 import 'local_models.dart';
 import '../l10n/l10n.dart';
 import '../platform/secrets.dart';
+import '../platform/proxy_client.dart';
 import '../platform/system_random.dart';
 
 enum ExternalFailureKind {
@@ -472,7 +472,7 @@ class ExternalAI {
     this.models, {
     http.Client? client,
     this.timeout = const Duration(seconds: 120),
-  }) : _client = client ?? http.Client(),
+  }) : _client = client ?? externalClient(),
        _ownsClient = client == null;
   final ExternalModels models;
   final http.Client _client;
@@ -764,7 +764,7 @@ class ExternalAI {
   }
 }
 
-Future<Uint8List> _grayJpeg() => Isolate.run(() {
+Future<Uint8List> _grayJpeg() => coreRunAsync(() {
   final picture = image.Image(width: 64, height: 64, numChannels: 3);
   image.fill(picture, color: image.ColorRgb8(128, 128, 128));
   return Uint8List.fromList(image.encodeJpg(picture, quality: 80));

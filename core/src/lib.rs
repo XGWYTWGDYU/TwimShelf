@@ -15,6 +15,7 @@ pub mod library;
 pub mod actions;
 pub mod net;
 pub mod download;
+pub mod extension;
 pub mod share;
 pub mod archive;
 pub mod models;

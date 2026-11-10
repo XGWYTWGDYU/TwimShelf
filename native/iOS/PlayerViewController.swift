@@ -24,6 +24,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         var shown: () -> Void
         /// The controls came or went (the viewer's caption follows them).
         var controlsVisible: (Bool) -> Void = { _ in }
+        var mediaGeometryChanged: () -> Void = {}
+        /// The video was turned on its own (the viewer hides its bar and caption and stops paging).
+        var turned: (Bool) -> Void = { _ in }
     }
     var embedding: Embedding?
     var viewerIndex: Int { embedding?.index ?? 0 }
@@ -34,6 +37,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     private let player: AVPlayer
     private let startAt: CMTime
     private let playerLayer = AVPlayerLayer()
+    func displayedMediaRect(in host: UIView) -> CGRect {
+        stage.convert(playerLayer.videoRect, to: host)
+    }
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var playbackVisible = false
@@ -47,10 +53,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     private let barStack = UIStackView()
     private let buttonRow = UIStackView()
     private let barSpacer = UIView()
-    /// Orientation chosen with the rotate button / auto-landscape (nil = follow the device).
-    /// Inside the viewer, the viewer asks for it (only what is presented decides the orientation).
-    private(set) var forcedMask: UIInterfaceOrientationMask?
-    private weak var openedScene: UIWindowScene?
+    /// Everything the player shows (the video, its controls, gestures) lives on this stage. The
+    /// rotate button turns only the stage a quarter turn: the app's own orientation is never
+    /// changed, so nothing behind the player (the feed, the viewer) ever turns with it, nothing
+    /// has to be turned back on the way out, and it works where the system does not let an app
+    /// choose its orientation (an iPad with multitasking, the orientation lock).
+    private let stage = UIView()
+    /// The stage's safe area: the screen's, turned with the stage.
+    private let safe = UILayoutGuide()
+    private var safeTop: NSLayoutConstraint!, safeBottom: NSLayoutConstraint!, safeLeft: NSLayoutConstraint!, safeRight: NSLayoutConstraint!
+    /// Quarter turns of the stage: 0 none, 1 clockwise, -1 counter-clockwise.
+    private(set) var quarterTurns = 0
     private let url: URL
     private let lockButton = UIButton(type: .system)
     private let lockSlot = UIView()
@@ -89,31 +102,40 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { forcedMask ?? .all }
     /// While locked, system edge swipes need a second swipe (no accidental exits).
     override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { locked ? .all : [] }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        view.accessibilityIdentifier = "player"
+        stage.backgroundColor = .black
+        stage.accessibilityIdentifier = "player"
+        view.addSubview(stage)
+        stage.addLayoutGuide(safe)
+        safeTop = safe.topAnchor.constraint(equalTo: stage.topAnchor)
+        safeBottom = stage.bottomAnchor.constraint(equalTo: safe.bottomAnchor)
+        safeLeft = safe.leadingAnchor.constraint(equalTo: stage.leadingAnchor)
+        safeRight = stage.trailingAnchor.constraint(equalTo: safe.trailingAnchor)
+        NSLayoutConstraint.activate([safeTop, safeBottom, safeLeft, safeRight])
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
 
         playerLayer.player = player
         playerLayer.videoGravity = .resizeAspect
-        view.layer.addSublayer(playerLayer)
-        view.addSubview(volumeView)
+        stage.layer.addSublayer(playerLayer)
+        stage.addSubview(volumeView)
         buildControls()
         buildGestures()
 
         hud.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(hud)
-        NSLayoutConstraint.activate([hud.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                                     hud.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 40)])
+        stage.addSubview(hud)
+        NSLayoutConstraint.activate([hud.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+                                     hud.topAnchor.constraint(equalTo: safe.topAnchor, constant: 40)])
 
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
             self?.syncProgress()
+            self?.layoutMediaShade()
+            self?.embedding?.mediaGeometryChanged()
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { [weak self] _ in
             guard let self else { return }
@@ -144,47 +166,83 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     // MARK: Rotation
 
-    private var isLandscape: Bool { view.bounds.width > view.bounds.height }
-    /// The screen's orientation when the player (or its viewer) opened: leaving goes back to it,
-    /// whatever was turned inside (a turn in the viewer is the viewer's only).
-    private var openedLandscape: Bool?
+    /// Whether the stage (what the player shows) is wider than tall.
+    private var isLandscape: Bool { stage.bounds.width > stage.bounds.height }
 
-    /// Turns the screen between portrait and landscape (the video's own button, bottom right).
+    /// Portrait ⇄ landscape for the video alone (the button at the bottom right).
     @objc private func rotate() {
         guard !locked else { return }
-        setOrientation(isLandscape ? .portrait : .landscapeRight)
-        rotateButton.accessibilityValue = isLandscape ? L("viewer.portrait") : L("viewer.landscape")
+        setQuarterTurns(quarterTurns != 0 ? 0 : Self.turnTowardsHolding(screenLandscape: view.bounds.width > view.bounds.height, scene: view.window?.windowScene), animated: true)
     }
 
-    /// What decides the orientation: this player, or the viewer it is a page of.
-    private var orientationOwner: UIViewController {
-        var v: UIViewController = self
-        while let p = v.parent { v = p }
-        return v
+    /// Which way to turn: towards how the device is held when that is known (lying flat or with
+    /// the orientation lock on it may not be), else clockwise.
+    static func turnTowardsHolding(screenLandscape: Bool, scene: UIWindowScene?) -> Int {
+        if !screenLandscape {
+            switch UIDevice.current.orientation {
+            case .landscapeRight: return -1   // turned clockwise: the top of the video at the left edge
+            default: return 1                 // turned counter-clockwise, or not known
+            }
+        }
+        // a landscape screen back to portrait, the way the device turns back upright
+        return scene?.effectiveGeometry.interfaceOrientation == .landscapeLeft ? 1 : -1
     }
 
-    private func setOrientation(_ mask: UIInterfaceOrientationMask) {
-        forcedMask = mask
-        ViewerOrientation.turned = true
-        orientationOwner.setNeedsUpdateOfSupportedInterfaceOrientations()
-        view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+    func setQuarterTurns(_ turns: Int, animated: Bool) {
+        guard turns != quarterTurns else { return }
+        quarterTurns = turns
+        rotateButton.accessibilityValue = (turns != 0) != (view.bounds.width > view.bounds.height) ? L("viewer.landscape") : L("viewer.portrait")
+        embedding?.turned(turns != 0)
+        let apply = { self.layoutStage(); self.layoutBar(); self.stage.layoutIfNeeded() }
+        if animated, view.window != nil {
+            UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0, options: [.beginFromCurrentState], animations: apply)
+        } else { apply() }
+        setControls(visible: true)
     }
 
-    /// "自动横屏播放横屏视频": a video wider than tall opens in landscape.
+    /// Places the stage over the whole view, turned by `quarterTurns`, with the screen's safe
+    /// area turned along (the notch of a portrait iPhone is at the side of a turned video).
+    private func layoutStage() {
+        let b = view.bounds
+        let turned = quarterTurns != 0
+        stage.transform = .identity
+        stage.bounds = CGRect(origin: .zero, size: turned ? CGSize(width: b.height, height: b.width) : b.size)
+        stage.center = CGPoint(x: b.midX, y: b.midY)
+        stage.transform = CGAffineTransform(rotationAngle: CGFloat(quarterTurns) * .pi / 2)
+        let i = view.safeAreaInsets
+        let (t, l, bo, r): (CGFloat, CGFloat, CGFloat, CGFloat) = switch quarterTurns {
+        case 1: (i.right, i.top, i.left, i.bottom)     // clockwise: the stage's top is the screen's right
+        case -1: (i.left, i.bottom, i.right, i.top)    // counter-clockwise: its top is the screen's left
+        default: (i.top, i.left, i.bottom, i.right)
+        }
+        safeTop.constant = t; safeLeft.constant = l; safeBottom.constant = bo; safeRight.constant = r
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        layoutStage()
+    }
+
+    /// "自动横屏播放横屏视频": a video wider than tall, opened on a portrait screen, is turned.
     private func autoLandscapeIfWanted() {
-        guard LibraryPrefs.autoLandscape, UIDevice.current.userInterfaceIdiom == .phone, !isLandscape else { return }
+        guard LibraryPrefs.autoLandscape, quarterTurns == 0, view.bounds.height > view.bounds.width else { return }
         let asset = AVURLAsset(url: url)
         Task { [weak self] in
             guard let track = try? await asset.loadTracks(withMediaType: .video).first,
                   let (size, t) = try? await track.load(.naturalSize, .preferredTransform) else { return }
             let s = size.applying(t)
-            if abs(s.width) > abs(s.height) { await MainActor.run { self?.setOrientation(.landscapeRight) } }
+            guard abs(s.width) > abs(s.height) else { return }
+            await MainActor.run {
+                guard let self, self.playbackVisible, self.quarterTurns == 0, self.view.bounds.height > self.view.bounds.width else { return }
+                self.setQuarterTurns(Self.turnTowardsHolding(screenLandscape: false, scene: self.view.window?.windowScene), animated: true)
+            }
         }
     }
 
+    private var autoTurnChecked = false
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if openedLandscape == nil { openedLandscape = isLandscape; openedScene = view.window?.windowScene }
         playbackVisible = true
         if let e = embedding {
             resumePlayback()
@@ -192,7 +250,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
             setControls(visible: true)
             e.shown()
         }
-        autoLandscapeIfWanted()
+        if !autoTurnChecked { autoTurnChecked = true; autoLandscapeIfWanted() }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -202,33 +260,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         if embedding != nil, pip?.isPictureInPictureActive != true { player.pause() }
     }
 
-    /// Closing after we turned the screen to landscape: turn back to portrait first, then close.
-    /// (Asking only while the player goes away was too late: the feed also allows landscape, so
-    /// it simply stayed in landscape.) Every way out comes through here: the close button and
-    /// picture in picture.
-    override func dismiss(animated: Bool, completion: (() -> Void)? = nil) {
-        // closing something the player shows (an alert, a menu) also comes here: leave those alone
-        guard presentedViewController == nil else { return super.dismiss(animated: animated, completion: completion) }
-        restorePortrait { [weak self] in self?.superDismiss(animated: animated, completion: completion) }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // a page left in the viewer comes back upright
+        if embedding != nil { setQuarterTurns(0, animated: false) }
+        // A pager may reuse this controller. Keep its observers until deallocation.
+        if pip?.isPictureInPictureActive == true || Self.inPiP === self { return }
+        player.pause()
     }
 
-    /// Turns the screen back to how it was when the player opened (portrait or landscape) if
-    /// this player turned it, then `done` (closing the player, or the viewer it is a page of).
-    func restorePortrait(then done: @escaping () -> Void) {
-        guard forcedMask != nil, let opened = openedLandscape, opened != isLandscape, let scene = view.window?.windowScene else {
-            forcedMask = nil
-            return done()
-        }
-        let back: UIInterfaceOrientationMask = opened ? .landscapeRight : .portrait
-        forcedMask = back
-        orientationOwner.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: back)) { _ in }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            self?.forcedMask = nil
-            done()
-        }
-    }
-    private func superDismiss(animated: Bool, completion: (() -> Void)?) { super.dismiss(animated: animated, completion: completion) }
 
     // MARK: Picture in picture
 
@@ -284,22 +324,25 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     @objc private func toggleLock() {
         locked.toggle()
+        // the hidden controls must not take the touches meant for the lock (a turned stage still
+        // hit-tested them at alpha 0, over the lock)
+        controls.isUserInteractionEnabled = !locked
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         updateLockButton()
         setNeedsUpdateOfScreenEdgesDeferringSystemGestures()
         if locked {
             hideTimer?.invalidate()
-            view.layoutIfNeeded()
+            stage.layoutIfNeeded()
             NSLayoutConstraint.deactivate(lockAtSlot)
             NSLayoutConstraint.activate(lockAtCenter)
             UIView.animate(withDuration: 0.2, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { self.controls.alpha = 0 }
-            UIView.animate(withDuration: 0.55, delay: 0, usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3) { self.view.layoutIfNeeded() }
+            UIView.animate(withDuration: 0.55, delay: 0, usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3) { self.stage.layoutIfNeeded() }
             hud.show(symbol: "lock.fill", text: L("viewer.locked"))
             flashLockButton()
         } else {
             NSLayoutConstraint.deactivate(lockAtCenter)
             NSLayoutConstraint.activate(lockAtSlot)
-            UIView.performWithoutAnimation { view.layoutIfNeeded() }
+            UIView.performWithoutAnimation { stage.layoutIfNeeded() }
             hud.show(symbol: "lock.open.fill", text: L("viewer.unlocked"))
             setControls(visible: true)
         }
@@ -373,9 +416,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
             UIView.animate(withDuration: 0.2, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, animations: { box?.alpha = 0 }) { _ in box?.removeFromSuperview() }
         }, for: .touchUpInside)
         box.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(box)
-        NSLayoutConstraint.activate([box.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                                     box.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 60)])
+        stage.addSubview(box)
+        NSLayoutConstraint.activate([box.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+                                     box.topAnchor.constraint(equalTo: safe.topAnchor, constant: 60)])
         soundPrompt = box
         box.alpha = 0
         UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { box.alpha = 1 }
@@ -399,10 +442,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         label.textAlignment = .center
         label.accessibilityIdentifier = "audioBanner"
         label.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(label)
-        NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-                                     label.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 60),
-                                     label.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -40)])
+        stage.addSubview(label)
+        NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+                                     label.topAnchor.constraint(equalTo: safe.topAnchor, constant: 60),
+                                     label.widthAnchor.constraint(lessThanOrEqualTo: stage.widthAnchor, constant: -40)])
         label.alpha = 0
         UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { label.alpha = 1 }
         UIView.animate(withDuration: 0.4, delay: 4, options: []) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
@@ -410,18 +453,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        layoutStage()
+        // the bar follows the stage's shape (known only once it has a size)
+        if stage.bounds.width > 0, barLandscape != isLandscape { layoutBar() }
+        stage.layoutIfNeeded()
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        playerLayer.frame = view.bounds
+        playerLayer.frame = stage.bounds
         CATransaction.commit()
+        layoutMediaShade()
+        embedding?.mediaGeometryChanged()
     }
 
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        if embedding == nil, isBeingDismissed { ViewerOrientation.settle(scene: openedScene, landscape: openedLandscape ?? false) }
-        // A pager may reuse this controller. Keep its observers until deallocation.
-        if pip?.isPictureInPictureActive == true || Self.inPiP === self { return }
-        player.pause()
-    }
 
     deinit {
         if let t = timeObserver { player.removeTimeObserver(t); timeObserver = nil }
@@ -443,7 +485,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     private func buildControls() {
         controls.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(controls)
+        stage.addSubview(controls)
 
         let top = GradientView(colors: [UIColor.black.withAlphaComponent(0.6), .clear])
         let bottom = bottomShade
@@ -507,12 +549,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         let bar = barStack
         [bar].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; controls.addSubview($0) }
         lockButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(lockButton)
+        stage.addSubview(lockButton)
 
-        let g = view.safeAreaLayoutGuide
+        let g = safe
         NSLayoutConstraint.activate([
-            controls.topAnchor.constraint(equalTo: view.topAnchor), controls.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            controls.leadingAnchor.constraint(equalTo: view.leadingAnchor), controls.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            controls.topAnchor.constraint(equalTo: stage.topAnchor), controls.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+            controls.leadingAnchor.constraint(equalTo: stage.leadingAnchor), controls.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
             top.topAnchor.constraint(equalTo: controls.topAnchor), top.leadingAnchor.constraint(equalTo: controls.leadingAnchor),
             top.trailingAnchor.constraint(equalTo: controls.trailingAnchor), top.heightAnchor.constraint(equalToConstant: 140),
             bottom.bottomAnchor.constraint(equalTo: controls.bottomAnchor), bottom.leadingAnchor.constraint(equalTo: controls.leadingAnchor),
@@ -529,7 +571,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
             shareButton.widthAnchor.constraint(equalToConstant: 36), shareButton.heightAnchor.constraint(equalToConstant: 44),
         ])
         lockAtSlot = [lockButton.centerXAnchor.constraint(equalTo: lockSlot.centerXAnchor), lockButton.centerYAnchor.constraint(equalTo: lockSlot.centerYAnchor)]
-        lockAtCenter = [lockButton.centerXAnchor.constraint(equalTo: view.centerXAnchor), lockButton.centerYAnchor.constraint(equalTo: lockSlot.centerYAnchor)]
+        lockAtCenter = [lockButton.centerXAnchor.constraint(equalTo: stage.centerXAnchor), lockButton.centerYAnchor.constraint(equalTo: lockSlot.centerYAnchor)]
         NSLayoutConstraint.activate(lockAtSlot)
         // in the viewer, with the drags on (a sideways swipe seeks): arrows to the neighbours
         if let e = embedding, dragGestures {
@@ -547,7 +589,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
                 controls.addSubview(b)
                 NSLayoutConstraint.activate([
                     b.widthAnchor.constraint(equalToConstant: 44), b.heightAnchor.constraint(equalToConstant: 44),
-                    b.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                    b.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
                     left ? b.leadingAnchor.constraint(equalTo: g.leadingAnchor, constant: 12) : b.trailingAnchor.constraint(equalTo: g.trailingAnchor, constant: -12),
                 ])
             }
@@ -560,8 +602,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     /// narrow screen. Landscape: progress bar, then the buttons, on one row.
     private let sliderRow = UIStackView()
 
+    private var barLandscape: Bool?
+
     private func layoutBar() {
         let landscape = isLandscape
+        barLandscape = landscape
         barStack.axis = landscape ? .horizontal : .vertical
         barStack.alignment = landscape ? .center : .fill
         barStack.spacing = landscape ? 16 : 4
@@ -588,7 +633,9 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
-        coordinator.animate(alongsideTransition: { _ in self.layoutBar(); self.view.layoutIfNeeded() })
+        // the screen itself turned (the device was turned): it now fits by itself
+        if quarterTurns != 0 { quarterTurns = 0; embedding?.turned(false) }
+        coordinator.animate(alongsideTransition: { _ in self.layoutStage(); self.layoutBar(); self.stage.layoutIfNeeded() })
     }
 
     /// Share the video file (to other apps, Files, AirDrop…).
@@ -635,23 +682,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     private let bottomShade = GradientView(colors: [.clear, UIColor.black.withAlphaComponent(0.7)])
     private lazy var bottomShadeHeight = bottomShade.heightAnchor.constraint(equalToConstant: 160)
 
-    /// The viewer's caption (`height` points, 0 for none) sits above the controls: the controls'
-    /// shade grows to take it in, one shade from the caption down to the bottom edge, coming and
-    /// going with the controls (the caption draws none of its own over a video).
-    func shadeCaption(height: CGFloat) {
-        guard isViewLoaded else { return }
-        let g = bottomShade.layer as! CAGradientLayer
-        guard height > 0 else {
-            bottomShadeHeight.constant = 160
-            g.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.7).cgColor]
-            g.locations = nil
-            return
-        }
-        let total = max(160, controlsClearance + height)
-        bottomShadeHeight.constant = total
-        // clear over the caption's empty top padding, then as dark as the caption's own shade
-        g.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.6).cgColor, UIColor.black.withAlphaComponent(0.7).cgColor]
-        g.locations = [0, NSNumber(value: Double(min(0.5, 40 / total))), 1]
+    private func layoutMediaShade() {
+        bottomShade.isHidden = embedding != nil
+        let rect = playerLayer.videoRect
+        bottomShadeHeight.constant = rect.isEmpty ? 0 : max(0, stage.bounds.maxY - rect.maxY)
     }
 
     /// Whether the controls are showing (the viewer's caption shows with them).
@@ -659,8 +693,8 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     /// How far up from the bottom the controls reach (the viewer's caption sits above them).
     var controlsClearance: CGFloat {
         guard isViewLoaded else { return 120 }
-        view.layoutIfNeeded()
-        return view.bounds.height - barStack.convert(barStack.bounds, to: view).minY + 6
+        stage.layoutIfNeeded()
+        return stage.bounds.height - barStack.convert(barStack.bounds, to: stage).minY + 6
     }
 
     private func scheduleHide() {
@@ -708,25 +742,27 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         single.require(toFail: double)
         let long = UILongPressGestureRecognizer(target: self, action: #selector(longPress(_:)))
         long.minimumPressDuration = 0.25
-        [double, single, long].forEach { $0.delegate = self; view.addGestureRecognizer($0) }
+        [double, single, long].forEach { $0.delegate = self; stage.addGestureRecognizer($0) }
         if dragGestures {
             let pan = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
             // a finger or the Pencil: a trackpad's or a mouse's drag does not seek or set volume / brightness
             pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue), NSNumber(value: UITouch.TouchType.pencil.rawValue)]
             pan.maximumNumberOfTouches = 1
             pan.delegate = self
-            view.addGestureRecognizer(pan)
+            stage.addGestureRecognizer(pan)
         } else {
             // without the drags, dragging down closes the player (or the viewer it is a page of),
             // as in the photo viewer
             let down = UISwipeGestureRecognizer(target: self, action: #selector(close))
             down.direction = .down
             down.delegate = self
-            view.addGestureRecognizer(down)
+            stage.addGestureRecognizer(down)
         }
     }
 
+    private var singleTapPoint = CGPoint.zero
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        singleTapPoint = touch.location(in: stage)
         if let v = touch.view, v === lockButton || v.isDescendant(of: lockButton) { return false }
         // Locked: nothing but a single tap, which only reveals the lock button.
         if locked { return g is UITapGestureRecognizer && (g as! UITapGestureRecognizer).numberOfTapsRequired == 1 }
@@ -741,7 +777,11 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     }
 
     @objc private func singleTap() {
-        if locked { flashLockButton(); return }
+        if locked {
+            // a tap on the lock's place unlocks even when the lock itself missed it
+            if lockButton.alpha > 0.5, lockButton.frame.insetBy(dx: -16, dy: -16).contains(singleTapPoint) { toggleLock(); return }
+            flashLockButton(); return
+        }
         setControls(visible: controls.alpha < 0.5)
     }
 
@@ -759,15 +799,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     }
 
     @objc private func pan(_ g: UIPanGestureRecognizer) {
-        let tr = g.translation(in: view)
+        let tr = g.translation(in: stage)
         switch g.state {
         case .began:
-            let v = g.velocity(in: view)
+            let v = g.velocity(in: stage)
             if abs(v.x) > abs(v.y) {
                 panMode = .seek
                 panStartValue = player.currentTime().seconds
                 isScrubbing = true
-            } else if g.location(in: view).x < view.bounds.midX {
+            } else if g.location(in: stage).x < stage.bounds.midX {
                 panMode = .brightness
                 panStartValue = Double(view.window?.windowScene?.screen.brightness ?? UIScreen.main.brightness)
             } else {
@@ -779,17 +819,17 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
             case .seek:
                 // A full-width drag covers min(duration, 120 s); feels precise on short clips and still fast on long ones.
                 let span = min(max(duration, 1), 120)
-                let target = min(max(panStartValue + Double(tr.x / view.bounds.width) * span, 0), duration)
+                let target = min(max(panStartValue + Double(tr.x / stage.bounds.width) * span, 0), duration)
                 player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 if duration > 0 { slider.value = Float(target / duration) }
                 let delta = target - panStartValue
                 hud.show(symbol: delta >= 0 ? "goforward" : "gobackward", text: "\(Self.fmt(target)) / \(Self.fmt(duration))", sticky: true)
             case .brightness:
-                let v = clamp(panStartValue - Double(tr.y / (view.bounds.height * 0.7)))
+                let v = clamp(panStartValue - Double(tr.y / (stage.bounds.height * 0.7)))
                 (view.window?.windowScene?.screen ?? UIScreen.main).brightness = CGFloat(v)
                 hud.show(symbol: "sun.max.fill", progress: v)
             case .volume:
-                let v = clamp(panStartValue - Double(tr.y / (view.bounds.height * 0.7)))
+                let v = clamp(panStartValue - Double(tr.y / (stage.bounds.height * 0.7)))
                 if let s = volumeSlider { s.value = Float(v); s.sendActions(for: .valueChanged) } else { player.volume = Float(v) }
                 hud.show(symbol: v == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", progress: v)
             case .none: break
@@ -803,27 +843,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     private func clamp(_ v: Double) -> Double { min(max(v, 0), 1) }
     private var volumeSlider: UISlider? { volumeView.subviews.compactMap { $0 as? UISlider }.first }
-}
-
-/// A video's rotate button asks the scene for one orientation, and the scene keeps to that even after
-/// the player has gone: the app stayed turned and no longer followed the device. When the player or
-/// the viewer has gone: back to how the screen was, then the device decides again.
-enum ViewerOrientation {
-    static var turned = false
-
-    static func settle(scene: UIWindowScene?, landscape: Bool) {
-        guard turned, let scene else { return }
-        turned = false
-        func refresh() { scene.windows.forEach { $0.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations() } }
-        refresh()
-        if scene.effectiveGeometry.interfaceOrientation.isLandscape != landscape {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: landscape ? .landscape : .portrait)) { _ in }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .all)) { _ in }
-            refresh()
-        }
-    }
 }
 
 /// Centered pill that reports gesture feedback (speed, seek target, brightness/volume level).
@@ -923,8 +942,6 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
     override var prefersStatusBarHidden: Bool { true }
     private var currentPlayer: PlayerViewController? { pages.viewControllers?.first as? PlayerViewController }
     override var prefersHomeIndicatorAutoHidden: Bool { currentPlayer != nil }
-    /// A video on screen may have turned the screen (its rotate button, auto-landscape).
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { currentPlayer?.forcedMask ?? .all }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -1012,6 +1029,10 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
                             controlsVisible: { [weak self, weak p] on in
                                 guard let self, let p, self.currentPlayer === p else { return }
                                 UIView.animate(withDuration: 0.2) { self.captionHost.alpha = on ? 1 : 0 }
+                            },
+                            turned: { [weak self, weak p] _ in
+                                guard let self, let p, self.currentPlayer === p else { return }
+                                self.pageChanged()
                             })
         return p
     }
@@ -1028,12 +1049,16 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
     /// The page on screen changed: the viewer's own bar is for photos (a video has its own
     /// controls), and while a video with the seek / volume / brightness drags is on screen, a
     /// sideways swipe belongs to it (its arrows turn the page instead).
+    /// A video turned on its own fills the screen alone: no caption, no paging (a swipe would
+    /// cross the turned picture) until it is turned back or left with its arrows.
     private func pageChanged() {
         let video = currentPlayer
+        let turned = (video?.quarterTurns ?? 0) != 0
         bar.isHidden = video != nil
         updateCaption()
+        if turned { captionHost.isHidden = true }
         let scroll = pages.view.subviews.compactMap { $0 as? UIScrollView }.first
-        scroll?.isScrollEnabled = items.count > 1 && (video?.dragGestures != true)
+        scroll?.isScrollEnabled = items.count > 1 && (video?.dragGestures != true) && !turned
         setNeedsUpdateOfHomeIndicatorAutoHidden()
     }
 
@@ -1056,23 +1081,13 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
         captionAboveBar.isActive = video == nil
         captionAboveVideo.isActive = video != nil
         if let video { captionAboveVideo.constant = -video.controlsClearance }
-        // a photo's shade goes on under the bar past the bottom edge and out past the sides (the
-        // screen cuts it); a fixed reach, not one measured from frames, which change while the
-        // viewer opens and turns and made the shade jump. A video's shade is the controls' own,
-        // grown to take the caption in.
-        let below: CGFloat = video == nil ? 1200 : 0
-        let sides: CGFloat = 600
         let shows = PostCaptionView.shows(it)
         caption.rootView = PostCaptionView(item: it, maxExpandedHeight: view.bounds.height * 0.45,
-                                           onHeight: { [weak self, weak video] h in
-                                               self?.captionHost.activeHeight = h
-                                               video?.shadeCaption(height: shows ? h : 0)
-                                           },
-                                           shaded: video == nil, shadeBelow: below, shadeSides: sides)
-        if !shows { video?.shadeCaption(height: 0) }
+                                           onHeight: { [weak self] h in self?.captionHost.activeHeight = h })
         captionHost.alpha = video.map { $0.controlsShown ? 1 : 0 } ?? 1
         captionHost.isHidden = !shows
     }
+
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
@@ -1116,24 +1131,8 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
         vc.popoverPresentationController?.sourceView = shareButton
         present(vc, animated: true)
     }
-    private var openedLandscape: Bool?
-    private weak var openedScene: UIWindowScene?
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if openedLandscape == nil { openedLandscape = view.bounds.width > view.bounds.height; openedScene = view.window?.windowScene }
-    }
-
-    /// However it closed, from whichever page (the video that turned the screen may be pages away).
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        if isBeingDismissed { ViewerOrientation.settle(scene: openedScene, landscape: openedLandscape ?? false) }
-    }
-
-    /// A video that turned the screen to landscape turns it back first.
-    @objc private func close() {
-        if let p = currentPlayer { p.restorePortrait { [weak self] in self?.dismiss(animated: true) } } else { dismiss(animated: true) }
-    }
+    /// (A turned video turned only itself: nothing to turn back.)
+    @objc private func close() { dismiss(animated: true) }
 }
 
 /// Takes touches only in its bottom `activeHeight` points (the caption); above, they reach what
@@ -1162,6 +1161,18 @@ final class ZoomPage: UIViewController, UIScrollViewDelegate, ViewerPage {
     }
     private let scroll = UIScrollView()
     private let imageView = UIImageView()
+    var onMediaGeometryChanged: (() -> Void)?
+    func displayedMediaRect(in host: UIView) -> CGRect {
+        let size = imageView.image?.size ?? CGSize(width: item.width, height: item.height)
+        guard size.width > 0, size.height > 0 else { return .zero }
+        return imageView.convert(AVMakeRect(aspectRatio: size, insideRect: imageView.bounds), to: host)
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        onMediaGeometryChanged?()
+    }
+    func scrollViewDidZoom(_ scrollView: UIScrollView) { onMediaGeometryChanged?() }
+    func scrollViewDidScroll(_ scrollView: UIScrollView) { onMediaGeometryChanged?() }
 
     init(item: FeedItem, index: Int) { self.item = item; self.index = index; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError() }
@@ -1197,6 +1208,7 @@ final class ZoomPage: UIViewController, UIScrollViewDelegate, ViewerPage {
             guard let self else { return }
             if let img { self.imageView.image = img }
             else { self.loadedPixels = 0 }
+            self.onMediaGeometryChanged?()
         }
     }
     override func viewDidDisappear(_ animated: Bool) {

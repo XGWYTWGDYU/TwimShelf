@@ -1,4 +1,3 @@
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
@@ -12,7 +11,7 @@ import '../widgets/text_menu.dart';
 /// the picker stays open for more; for a media of a post a switch chooses this media or the
 /// whole post. A sheet on a narrow window, a dialog on a wide one.
 Future<void> showTagPicker(BuildContext context, LibraryModel library, FeedItem media, {bool wholePost = false}) async {
-  final all = await Isolate.run(Core.allTags);
+  final all = await coreRunAsync(Core.allTags);
   final scope = Core.postScope(media.post_id);
   if (!context.mounted) return;
   final picker = _TagPicker(library: library, media: media, scope: scope, all: all, wholePost: wholePost && !media.post_id.startsWith('loose:'));
@@ -39,6 +38,7 @@ class _TagPickerState extends State<_TagPicker> {
   late MediaScope _scope = widget.scope;
   late bool _wholePost = widget.wholePost;
   final List<String> _added = [];
+  final Map<String, List<ActionReceipt>> _receipts = {};
   final _query = TextEditingController();
   String? _error;
 
@@ -76,19 +76,45 @@ class _TagPickerState extends State<_TagPicker> {
     final l = label.trim().toLowerCase();
     if (l.isEmpty || _existing.contains(l)) return;
     try {
-      Core.action(ActionKind.tag,
+      final receipt = Core.action(ActionKind.tag,
           media: _wholePost ? const [] : [widget.media.media_id], posts: _wholePost ? [widget.media.post_id] : const [], label: l);
+      (_receipts[l] ??= []).add(receipt);
     } catch (e) {
       setState(() => _error = '$e');
       return;
     }
     setState(() {
       _scope = Core.postScope(widget.media.post_id);
-      _added.add(l);
+      if (!_added.contains(l)) _added.add(l);
       _query.clear();
       _error = null;
     });
     widget.library.refresh();
+  }
+
+  void _undoAddition(String label) {
+    try {
+      final receipts = _receipts[label]!;
+      while (receipts.isNotEmpty) {
+        Core.undo(receipts.last);
+        receipts.removeLast();
+      }
+      setState(() {
+        _receipts.remove(label);
+        _added.remove(label);
+        _scope = Core.postScope(widget.media.post_id);
+        _error = null;
+      });
+      widget.library.refresh();
+    } catch (e) {
+      setState(() => _error = '$e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
   }
 
   @override
@@ -113,7 +139,7 @@ class _TagPickerState extends State<_TagPicker> {
               selected: {_wholePost},
               onSelectionChanged: (s) => setState(() {
                 _wholePost = s.first;
-                _added.clear();
+
               }),
             ),
           const Spacer(),
@@ -143,7 +169,7 @@ class _TagPickerState extends State<_TagPicker> {
               ),
             if (_added.isNotEmpty) ...[
               _Header(L('tagPicker.justAdded')),
-              for (final t in _added) ListTile(dense: true, leading: Icon(Icons.check_circle, color: theme.colorScheme.primary), title: Text(t)),
+              for (final t in _added) ListTile(key: ValueKey('tagPickerUndo-$t'), dense: true, leading: Icon(Icons.check_circle, color: theme.colorScheme.primary), title: Text(t), trailing: Text(L('common.undo')), onTap: () => _undoAddition(t)),
             ],
             _Header(_trimmed.isEmpty ? L('tagPicker.frequent') : L('tagPicker.matching')),
             for (final t in suggestions)

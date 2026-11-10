@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -12,6 +11,7 @@ import '../../l10n/l10n.dart';
 import '../../mascot/mascot.dart';
 import '../settings_page.dart';
 import '../../widgets/text_menu.dart';
+import '../../platform/os.dart';
 
 /// 局域网同步: the account, the account's devices, pairing — the native apps' 同步 page.
 class SyncPage extends StatefulWidget {
@@ -161,8 +161,8 @@ class _SyncPageState extends State<SyncPage> {
   Widget? _networkProblem(DiscoveryStatus? d) {
     if (d == null || !d.running || (d.network_ok && d.error == null)) return null;
     // the system's permission: a button to where it is switched on (iOS, macOS)
-    final settings = d.error == 'sync.err.noLocalNetwork' && (Platform.isIOS || Platform.isMacOS)
-        ? Uri.parse(Platform.isIOS ? 'app-settings:' : 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork')
+    final settings = d.error == 'sync.err.noLocalNetwork' && (OS.isIOS || OS.isMacOS)
+        ? Uri.parse(OS.isIOS ? 'app-settings:' : 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork')
         : null;
     return ListTile(
       key: const ValueKey('sync-no-network'),
@@ -183,25 +183,34 @@ class _SyncPageState extends State<SyncPage> {
           if (s == null) {
             children.add(SettingsSection(children: [ListTile(title: Text(L('sync.state.reading')))]));
           } else if (!sync.joined) {
-            final joinable = sync.joinablePeers;
+            // one group per account: the devices of one account are one choice, not strangers
+            final groups = sync.joinableAccounts;
+            String groupTitle((String, List<DiscoveredPeer>) g) =>
+                [L('sync.accountId', [g.$1.substring(0, g.$1.length.clamp(0, 8)).toUpperCase()]), g.$2.map((p) => p.name).join(L('list.separator'))].join(' · ');
+            Widget joinTile(DiscoveredPeer p) => ListTile(
+                  leading: deviceIcon(p.kind),
+                  title: Text(p.name),
+                  subtitle: deviceType(p.kind).$2 == null ? null : Text(deviceType(p.kind).$2!),
+                  trailing: Text(L('sync.joinEllipsis')),
+                  onTap: () => _join(p),
+                );
             children.addAll([
               SettingsSection(title: L('sync.first'), footer: L('sync.first.footer'), children: [
                 ListTile(key: const ValueKey('sync-create'), leading: const Icon(Icons.add_circle_outline), title: Text(L('sync.create')), onTap: sync.createAccount),
               ]),
-              SettingsSection(title: L('sync.joinExisting'), footer: L('sync.joinExisting.footer'), children: [
-                ?_networkProblem(d),
-                if (joinable.isEmpty && _networkProblem(d) == null) ListTile(leading: const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)), title: Text(L('sync.searching'))),
-                for (final p in joinable)
-                  ListTile(
-                    leading: deviceIcon(p.kind),
-                    title: Text(p.name),
-                    subtitle: deviceType(p.kind).$2 == null ? null : Text(deviceType(p.kind).$2!),
-                    trailing: Text(L('sync.joinEllipsis')),
-                    onTap: () => _join(p),
-                  ),
-                if (s.join.running) ListTile(title: Text(L('sync.pairing'))),
-                if (s.join.error != null) ListTile(title: Text(L('sync.joinFailed')), subtitle: Text(s.join.error!)),
-              ]),
+              SettingsSection(
+                  title: groups.length == 1 ? '${L('sync.joinExisting')} · ${groupTitle(groups.first)}' : L('sync.joinExisting'),
+                  footer: groups.length > 1 ? null : L('sync.joinExisting.footer'),
+                  children: [
+                    ?_networkProblem(d),
+                    if (groups.isEmpty && _networkProblem(d) == null) ListTile(leading: const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)), title: Text(L('sync.searching'))),
+                    if (groups.length == 1) for (final p in groups.first.$2) joinTile(p),
+                    if (s.join.running) ListTile(title: Text(L('sync.pairing'))),
+                    if (s.join.error != null) ListTile(title: Text(L('sync.joinFailed')), subtitle: Text(s.join.error!)),
+                  ]),
+              if (groups.length > 1)
+                for (final (i, g) in groups.indexed)
+                  SettingsSection(title: groupTitle(g), footer: i == groups.length - 1 ? L('sync.joinExisting.footer') : null, children: [for (final p in g.$2) joinTile(p)]),
             ]);
           } else {
             final peers = sync.accountPeers;

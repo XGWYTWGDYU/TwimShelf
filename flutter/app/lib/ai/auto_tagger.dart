@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +11,9 @@ import '../platform/video.dart';
 import 'external_models.dart';
 import 'local_models.dart';
 import '../widgets/media_image.dart';
+import '../platform/os.dart';
+import '../platform/files.dart';
+import '../platform/lease.dart';
 
 abstract interface class TaggingCore {
   Future<int> epoch();
@@ -37,23 +39,23 @@ abstract interface class TaggingCore {
 }
 
 // Top-level helpers capture only sendable values, never a ChangeNotifier/client.
-Future<int> _epoch() => Isolate.run(Core.epoch);
-Future<({int done, int total})> _counts() => Isolate.run(Core.aiCounts);
-Future<int> _failures() => Isolate.run(() => Core.aiFailures().length);
+Future<int> _epoch() => coreRunAsync(Core.epoch);
+Future<({int done, int total})> _counts() => coreRunAsync(Core.aiCounts);
+Future<int> _failures() => coreRunAsync(() => Core.aiFailures().length);
 Future<List<MediaRef>> _pending(String model, int since, int limit) =>
-    Isolate.run(() => Core.aiPendingFor(model, since, limit));
+    coreRunAsync(() => Core.aiPendingFor(model, since, limit));
 Future<List<MediaRef>> _page(String after, int limit) =>
-    Isolate.run(() => Core.mediaPage(after, limit));
+    coreRunAsync(() => Core.mediaPage(after, limit));
 Future<List<String>> _vocabulary() =>
-    Isolate.run(() => Core.allTags().take(150).map((t) => t.label).toList());
+    coreRunAsync(() => Core.allTags().take(150).map((t) => t.label).toList());
 Future<List<String>> _existing(String media) =>
-    Isolate.run(() => Core.mediaTags(media));
+    coreRunAsync(() => Core.mediaTags(media));
 Future<void> _attempt(
   AiAttemptStep step,
   String media,
   String model,
   String reason,
-) => Isolate.run(
+) => coreRunAsync(
   () => Core.aiAttempt(step, mediaId: media, model: model, reason: reason),
 );
 Future<void> _apply(
@@ -62,7 +64,7 @@ Future<void> _apply(
   List<String> labels,
   bool replace,
   int epoch,
-) => Isolate.run(
+) => coreRunAsync(
   () => Core.aiApply(
     mediaId: media,
     model: model,
@@ -109,7 +111,15 @@ class NativeTaggingCore implements TaggingCore {
 /// Decode/orientation/downsampling/encoding never run on the UI isolate.
 Uint8List? _jpeg(String path) {
   try {
-    final decoded = image.decodeImage(File(path).readAsBytesSync());
+    return _jpegOf(File(path).readAsBytesSync());
+  } catch (_) {
+    return null;
+  }
+}
+
+Uint8List? _jpegOf(Uint8List bytes) {
+  try {
+    final decoded = image.decodeImage(bytes);
     if (decoded == null) return null;
     var picture = image.bakeOrientation(decoded);
     if (picture.width > 896 || picture.height > 896) {
@@ -184,7 +194,13 @@ Future<Uint8List?> prepareTaggingJpeg(
       return null;
     }
   }
-  return Isolate.run(() => _jpeg(path));
+  // the web build: the server sends it upright and already small (decoding the original in
+  // the page would hold up the screen)
+  if (OS.isWeb) {
+    final small = await scaledImageBytes(path, 896);
+    return small == null ? null : _jpegOf(small);
+  }
+  return coreRunAsync(() => _jpeg(path));
 }
 
 enum TaggingScope { untagged, media, all }
@@ -265,7 +281,7 @@ class AutoTagger extends ChangeNotifier {
                : _local(models, model.id, jpeg, existing, vocabulary, text)),
        _now = now ?? DateTime.now {
     // iOS ends an app that keeps the GPU busy in the background, as the native apps know
-    if (!kIsWeb && Platform.isIOS) {
+    if (!kIsWeb && OS.isIOS) {
       _lifecycle = AppLifecycleListener(
         onHide: () {
           if (_paused || !running) return;
@@ -346,6 +362,8 @@ class AutoTagger extends ChangeNotifier {
   Future<void> startIfEnabled({bool asked = false}) async {
     if (asked) _stopped = false;
     if (_stopped) return;
+    // with the web app open in several windows, one of them tags (see BackgroundLease)
+    if (!asked && !BackgroundLease.instance.holder) return;
     final id = models.activeTaggerId;
     if (_closed ||
         _paused ||
@@ -550,7 +568,7 @@ class AutoTagger extends ChangeNotifier {
         if (counted) {
           final c = await core.counts();
           final skipped = await core.failures();
-          total = done + (c.total - c.done - skipped).clamp(0, 1 << 53);
+          total = done + (c.total - c.done - skipped).clamp(0, 9007199254740991);
           _post();
         }
         for (final media in batch) {

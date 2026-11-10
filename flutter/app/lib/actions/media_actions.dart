@@ -1,4 +1,3 @@
-import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
 
@@ -37,7 +36,7 @@ Future<void> showMediaMenu(
       );
   final chosen = await showMenu<VoidCallback>(
     context: context,
-    position: RelativeRect.fromRect(position & const Size(1, 1), Offset.zero & overlay.size),
+    position: RelativeRect.fromRect(overlay.globalToLocal(position) & const Size(1, 1), Offset.zero & overlay.size),
     popUpAnimationStyle: menuAnimation,
     items: [
       if (inBin) ...[
@@ -67,7 +66,7 @@ Future<void> runMediaAction(BuildContext context, LibraryModel library, ActionKi
   final ActionReceipt receipt;
   try {
     // a large selection takes a while: never on the thread that draws
-    receipt = await Isolate.run(() => Core.action(kind, media: media, posts: posts, folder: folder));
+    receipt = await Core.actionAsync(kind, media: media, posts: posts, folder: folder);
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text('$e')));
     return;
@@ -91,7 +90,7 @@ Future<void> runMediaAction(BuildContext context, LibraryModel library, ActionKi
 Future<void> purgeMedia(BuildContext context, LibraryModel library, List<String> media) async {
   // what the person sees now is what the confirmation is about: a media restored and binned again
   // on another device meanwhile is a new one, and the core leaves it alone
-  final snapshot = await Isolate.run(() => Core.binSnapshot(media: media));
+  final snapshot = await Core.binSnapshotAsync(media: media);
   if (!context.mounted) return;
   final ok = await showDialog<bool>(
     context: context,
@@ -109,7 +108,7 @@ Future<void> purgeMedia(BuildContext context, LibraryModel library, List<String>
     ),
   );
   if (ok != true || !context.mounted) return;
-  final n = (await Isolate.run(() => Core.action(ActionKind.purge, media: media, snapshot: snapshot))).changes.length;
+  final n = (await Core.actionAsync(ActionKind.purge, media: media, snapshot: snapshot)).changes.length;
   await library.refresh();
   if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(L('trash.purged', [n]))));
 }

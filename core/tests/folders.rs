@@ -177,7 +177,7 @@ fn feed_can_be_ordered_by_when_things_were_added() {
         post(&src, &format!("p{i}"), id, &[("1.jpg", format!("{id}a").as_bytes()), ("2.jpg", format!("{id}b").as_bytes())]);
         lib.import_legacy_dir(&src).unwrap();
     }
-    let req = tl_core::library::FeedRequest { newest_first: true, terms: vec![], scope: tl_core::model::SearchScope::Both, seed: Some(9), fuzzy: false, term_vectors: vec![], embed_model: None,
+    let req = tl_core::library::FeedRequest { whole_posts: false, newest_first: true, terms: vec![], scope: tl_core::model::SearchScope::Both, seed: Some(9), fuzzy: false, term_vectors: vec![], embed_model: None,
         threshold: 0.5, fields: Default::default(), filter: Default::default() };
     let got: Vec<(String, i64)> = lib.feed(&req).unwrap().into_iter().map(|i| (i.post_id, i.ordinal)).collect();
     let want: Vec<(String, i64)> = ["203", "203", "202", "202", "201", "201"].iter().enumerate().map(|(i, p)| (p.to_string(), (i % 2) as i64)).collect();

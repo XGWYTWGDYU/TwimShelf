@@ -47,7 +47,10 @@ class TlNative {
   }
 
   /// iOS, macOS: the shares folder in the app group, shared with the share extension.
-  static Future<String?> sharesRoot() => _channel.invokeMethod<String>('sharesRoot');
+  static Future<String?> sharesRoot() async {
+    if (kIsWeb) return null;
+    return _channel.invokeMethod<String>('sharesRoot');
+  }
 
   /// Android: the folder an update's APK must be downloaded into (the installer reads it there).
   static Future<String?> updatesDir() async {

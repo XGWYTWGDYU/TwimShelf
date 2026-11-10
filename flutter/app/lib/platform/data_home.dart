@@ -8,6 +8,7 @@ import 'package:path_provider_windows/path_provider_windows.dart';
 import 'package:shared_preferences_linux/shared_preferences_linux.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:shared_preferences_windows/shared_preferences_windows.dart';
+import 'os.dart';
 
 /// The data folder on Windows and Linux: everything the app keeps — the library, its models,
 /// settings, secrets, logs, caches — lives in one folder the person chose, so it can be backed
@@ -24,25 +25,25 @@ class DataHome {
   DataHome._();
 
   static bool get applies =>
-      !kIsWeb && (Platform.isWindows || Platform.isLinux) && Platform.environment['TL_LIBRARY_DIR'] == null;
+      !kIsWeb && (OS.isWindows || OS.isLinux) && OS.environment['TL_LIBRARY_DIR'] == null;
 
   static String? _path;
   static String? get path => _path;
 
-  static String get _sep => Platform.pathSeparator;
+  static String get _sep => OS.pathSeparator;
 
   /// The pointer: `%APPDATA%\TwimShelf\location.json`, `$XDG_CONFIG_HOME/twimshelf/location.json`.
   static File get _pointer {
-    if (Platform.isWindows) {
-      return File('${Platform.environment['APPDATA']}\\TwimShelf\\location.json');
+    if (OS.isWindows) {
+      return File('${OS.environment['APPDATA']}\\TwimShelf\\location.json');
     }
-    final config = Platform.environment['XDG_CONFIG_HOME'] ?? '${Platform.environment['HOME']}/.config';
+    final config = OS.environment['XDG_CONFIG_HOME'] ?? '${OS.environment['HOME']}/.config';
     return File('$config/twimshelf/location.json');
   }
 
   /// A sensible first suggestion: a folder in Documents.
   static String get suggested {
-    final home = Platform.isWindows ? Platform.environment['USERPROFILE']! : Platform.environment['HOME']!;
+    final home = OS.isWindows ? OS.environment['USERPROFILE']! : OS.environment['HOME']!;
     final docs = Directory('$home${_sep}Documents');
     return '${docs.existsSync() ? docs.path : home}${_sep}TwimShelf Data';
   }
@@ -140,7 +141,7 @@ class DataHome {
 
   /// Starts this program again (after a move).
   static Future<Never> restart() async {
-    await Process.start(restartTarget(Platform.environment, Platform.resolvedExecutable), const [], mode: ProcessStartMode.detached);
+    await Process.start(restartTarget(OS.environment, OS.resolvedExecutable), const [], mode: ProcessStartMode.detached);
     exit(0);
   }
 }
@@ -149,7 +150,7 @@ class _DataFolderPaths extends PathProviderPlatform {
   _DataFolderPaths(this.root, this.system);
   final String root;
   final PathProviderPlatform system;
-  String get _s => Platform.pathSeparator;
+  String get _s => OS.pathSeparator;
 
   @override
   Future<String?> getApplicationSupportPath() async => '$root${_s}App';

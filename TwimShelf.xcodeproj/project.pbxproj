@@ -27,6 +27,7 @@
 		1B3D608AC0F4C4684F503403 /* ModelsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C38B47BACB9B86C4D6084AE /* ModelsViewController.swift */; };
 		1C34658E51BF85AECA61BEAA /* MediaLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D381A43D05066F6CF43E4E25 /* MediaLoader.swift */; };
 		1EA6ABAA46CB5A5C381D6696 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 43E753DE9DF99F7B52A83DCA /* InfoPlist.xcstrings */; };
+		1EFB62C7C51A4F9435EE4C32 /* MacSettingsExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27885F89587360F4C41B6EB2 /* MacSettingsExtension.swift */; };
 		1F2A88B8A9392614001B2FDD /* MacSettingsPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEC6CB8A4128DAAE5BB1928 /* MacSettingsPages.swift */; };
 		25C8C9AF6C8E642B29CC9248 /* FeedOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C74990BF1654DF6419AE4C1 /* FeedOrder.swift */; };
 		29088869596A049C9EC9E220 /* Mascot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12971AC0A6163C377C4A599D /* Mascot.swift */; };
@@ -219,6 +220,7 @@
 		25ED0D9F9B3145C09F2F7B06 /* MacMediaGridPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMediaGridPage.swift; sourceTree = "<group>"; };
 		264802E208CE9E3A8889BD87 /* MacPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacPanel.swift; sourceTree = "<group>"; };
 		2651438060C51C135C969676 /* mobile.svg */ = {isa = PBXFileReference; path = mobile.svg; sourceTree = "<group>"; };
+		27885F89587360F4C41B6EB2 /* MacSettingsExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSettingsExtension.swift; sourceTree = "<group>"; };
 		293527E2FBFA2768E6030EE9 /* ClawdIconData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClawdIconData.swift; sourceTree = "<group>"; };
 		2A7B29D1F49702E3DD49CEE0 /* shield.svg */ = {isa = PBXFileReference; path = shield.svg; sourceTree = "<group>"; };
 		2B3E065AA6175329968F4F3A /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
@@ -457,6 +459,7 @@
 				264802E208CE9E3A8889BD87 /* MacPanel.swift */,
 				B76A037976B334820321B051 /* MacPlayer.swift */,
 				A906C2045C37BDEBF2413B5D /* MacSearch.swift */,
+				27885F89587360F4C41B6EB2 /* MacSettingsExtension.swift */,
 				2E4BA5233DFB2EB76D216EAE /* MacSettingsKit.swift */,
 				EBBCAD566A7F484EFAD138A0 /* MacSettingsModels.swift */,
 				4FEC6CB8A4128DAAE5BB1928 /* MacSettingsPages.swift */,
@@ -1111,6 +1114,7 @@
 				E37E2D9F2FCFDA6C664BECA3 /* MacPanel.swift in Sources */,
 				883CE9E5A10B63AE464C975C /* MacPlayer.swift in Sources */,
 				9B25BA549F569A4A834094A9 /* MacSearch.swift in Sources */,
+				1EFB62C7C51A4F9435EE4C32 /* MacSettingsExtension.swift in Sources */,
 				6998D26A7787A2250BC28479 /* MacSettingsKit.swift in Sources */,
 				B6C069B8DE99F47347A91DB1 /* MacSettingsModels.swift in Sources */,
 				1F2A88B8A9392614001B2FDD /* MacSettingsPages.swift in Sources */,

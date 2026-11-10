@@ -42,7 +42,7 @@ void main() {
   });
   test('FeedRequest wire round trip', () {
     final json = jsonDecode(
-            r'''{"terms": ["sample"], "scope": "mine", "seed": null, "newest_first": true, "fuzzy": true, "term_vectors": [null], "embed_model": null, "threshold": 0.55, "fields": {"tags": true, "text": true, "author": true}, "filter": {"author": null, "labels": ["sample"], "review": "any", "bad_only": true, "folder": null, "loose_only": true, "album_only": true, "recent_only": true, "kind": null, "exclude_terms": ["sample"], "origins": null, "exclude_folders": ["sample"], "exclude_recent": true, "exclude_loose": true}}''')
+            r'''{"terms": ["sample"], "scope": "mine", "seed": null, "newest_first": true, "fuzzy": true, "term_vectors": [null], "embed_model": null, "threshold": 0.55, "fields": {"tags": true, "text": true, "author": true}, "filter": {"author": null, "labels": ["sample"], "review": "any", "bad_only": true, "folder": null, "loose_only": true, "album_only": true, "recent_only": true, "kind": null, "exclude_terms": ["sample"], "origins": null, "exclude_folders": ["sample"], "exclude_recent": true, "exclude_loose": true}, "whole_posts": true}''')
         as Map<String, dynamic>;
     expect(FeedRequest.fromJson(json).toJson(), json);
   });
@@ -143,7 +143,7 @@ void main() {
   });
   test('ActionReceipt wire round trip', () {
     final json = jsonDecode(
-            r'''{"kind": "trash", "folder": null, "folder_hlc": null, "epoch": 7, "changes": [{"id": "sample", "hlc": 7, "inc": 7, "state": 7}]}''')
+            r'''{"kind": "tag", "label": "sample-tag", "folder": null, "folder_hlc": null, "epoch": 7, "changes": [{"id": "sample", "hlc": 7, "inc": 7, "state": 7}]}''')
         as Map<String, dynamic>;
     expect(ActionReceipt.fromJson(json).toJson(), json);
   });
@@ -214,7 +214,7 @@ void main() {
   });
   test('SyncStatus wire round trip', () {
     final json = jsonDecode(
-            r'''{"account_id": null, "device_id": "sample", "device_name": "sample", "port": null, "pairing_code": null, "pairing_seconds_left": null, "peers": [{"device": "sample", "name": "sample", "last_sync": 7, "last_error": null, "addr": "sample", "clock_skew_ms": null, "clock_warning": true}], "syncing": 7, "changes": 7, "join": {"running": true, "account_key": null, "error": null}, "receiving": null, "failed": {"sample": "sample"}}''')
+            r'''{"account_id": null, "device_id": "sample", "device_name": "sample", "port": null, "pairing_code": null, "pairing_seconds_left": null, "peers": [{"device": "sample", "name": "sample", "last_sync": 7, "last_error": null, "addr": "sample", "clock_skew_ms": null, "clock_warning": true}], "syncing": 7, "changes": 7, "join": {"running": true, "account_key": null, "error": null}, "receiving": null, "failed": {"sample": "sample"}, "in_session": ["sample"]}''')
         as Map<String, dynamic>;
     expect(SyncStatus.fromJson(json).toJson(), json);
   });

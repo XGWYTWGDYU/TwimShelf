@@ -1,0 +1,16 @@
+**/target
+**/build
+**/.dart_tool
+**/node_modules
+.git
+native
+TwimShelf.xcodeproj
+flutter/app/android
+flutter/app/ios
+flutter/app/macos
+flutter/app/windows
+flutter/app/linux
+flutter/installer
+**/*.xcresult
+**/.DS_Store
+1

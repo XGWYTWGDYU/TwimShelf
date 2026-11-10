@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -21,12 +20,15 @@ import 'data_home_page.dart';
 import 'settings/about_page.dart';
 import 'settings/ai_page.dart';
 import 'settings/downloads_page.dart';
+import 'settings/extension_page.dart';
+import '../services/extension_receiver.dart';
 import 'settings/storage_page.dart';
 import 'settings/sync_page.dart';
 import 'settings/tags_page.dart';
 import 'settings/transfer_page.dart';
 import '../app/jobs.dart';
 import '../widgets/text_menu.dart';
+import '../platform/os.dart';
 
 /// 设置, in the native app's sections: the library's counts, content (import and backup, tags,
 /// the account cookies) and clearing everything. Checking the media and the diagnostics are on
@@ -56,8 +58,8 @@ class _SettingsPageState extends State<SettingsPage> {
     messenger.showSnackBar(SnackBar(content: Text(L('settings.diagnostics.collecting'))));
     try {
       await Core.exportDiagnosticsAsync(out, {
-        'platform': Platform.operatingSystem,
-        'os_version': Platform.operatingSystemVersion,
+        'platform': OS.operatingSystem,
+        'os_version': OS.operatingSystemVersion,
         'flutter': true,
         'exported_at': now.toUtc().toIso8601String(),
         'prefs': {'headphones_only': Prefs.instance.headphonesOnly, 'auto_tag': library.aiModels.autoTag, 'has_tagger': library.aiModels.activeTaggerId != null},
@@ -147,7 +149,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 nav(null, Icons.inventory_2, L('common.importAndBackup'), L('settings.import.detail'), () => TransferPage(library: library)),
                 nav(const ValueKey('settings-tags'), Icons.sell, L('common.tags'), s == null ? null : L('common.count', [s.tags]), () => TagsPage(library: library)),
               ]),
-              _Section(title: L('appearance.title'), footer: Platform.isAndroid ? L('appearance.footer') : null, children: [
+              _Section(title: L('appearance.title'), footer: OS.isAndroid ? L('appearance.footer') : null, children: [
                 const _ColorChoice(),
                 ListTile(
                   leading: const SettingsIcon(Icons.contrast),
@@ -183,7 +185,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onChanged: (v) => prefs.badOnly = v,
                   ),
                 // the Mac and phones and tablets: not Windows and Linux
-                if (!Platform.isWindows && !Platform.isLinux) SwitchListTile(
+                if (!OS.isWindows && !OS.isLinux) SwitchListTile(
                   secondary: const SettingsIcon(Icons.headphones),
                   title: Text(L('settings.headphonesOnly')),
                   value: prefs.headphonesOnly,
@@ -195,7 +197,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   value: prefs.playerGesturesOff,
                   onChanged: (v) => prefs.playerGesturesOff = v,
                 ),
-                if (!kIsWeb && (Platform.isIOS || Platform.isAndroid))
+                if (!kIsWeb && (OS.isIOS || OS.isAndroid))
                   SwitchListTile(
                     secondary: const SettingsIcon(Icons.screen_rotation),
                     title: Text(L('settings.autoLandscape')),
@@ -220,6 +222,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     mascot: library.tagger.running ? 'camera' : null),
                 nav(const ValueKey('settings-sync'), Icons.sync, L('common.lanSync'),
                     library.sync.joined ? L('sync.state.on') : L('sync.state.notJoined'), () => SyncPage(sync: library.sync, onDeleteEverything: _wipe)),
+                if (ExtensionReceiver.offered)
+                  nav(const ValueKey('settings-extension'), Icons.extension, L('ext.title'), extensionSummary(), () => const ExtensionPage()),
               ]),
               // Windows, Linux: where everything is kept
               if (DataHome.path != null) DataHomeSection(library: library),
@@ -236,8 +240,13 @@ class _SettingsPageState extends State<SettingsPage> {
               // last: what the app takes on this device, the app itself, and clearing everything
               _Section(children: [
                 nav(const ValueKey('settings-storage'), Icons.storage, L('storage.title'), null, () => StoragePage(library: library)),
-                nav(const ValueKey('settings-about'), Icons.info_outline, L('settings.about'), null, () => AboutPage(onExportDiagnostics: _exportDiagnostics, logFile: '${library.directory}${Platform.pathSeparator}logs${Platform.pathSeparator}diagnostics.log')),
+                nav(const ValueKey('settings-about'), Icons.info_outline, L('settings.about'), null, () => AboutPage(onExportDiagnostics: _exportDiagnostics, logFile: '${library.directory}${OS.pathSeparator}logs${OS.pathSeparator}diagnostics.log')),
               ]),
+              // the web build: this browser's sign-in
+              if (OS.isWeb)
+                _Section(footer: L('settings.signOut.footer'), children: [
+                  ListTile(key: const ValueKey('settings-signout'), leading: const SettingsIcon(Icons.logout), title: Text(L('settings.signOut')), onTap: signOut),
+                ]),
               _Section(footer: L('settings.wipe.footer'), children: [
                 ListTile(
                   leading: const SettingsIcon(Icons.delete_forever, danger: true),
@@ -338,7 +347,7 @@ class _Stat extends StatelessWidget {
 /// A tablet's or a desktop's screen, whatever size the window has now (a narrowed iPad window
 /// still has the setting: it is for the screen, and the window may widen again).
 bool _largeScreen(BuildContext context) {
-  if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) return true;
+  if (OS.isMacOS || OS.isWindows || OS.isLinux) return true;
   final display = View.of(context).display;
   return display.size.shortestSide / display.devicePixelRatio >= 600;
 }
@@ -395,7 +404,7 @@ class _ColorChoice extends StatelessWidget {
   Widget build(BuildContext context) {
     final prefs = Prefs.instance;
     // only Android has a system colour (the wallpaper's); elsewhere no choice is the default colour
-    final android = Platform.isAndroid;
+    final android = OS.isAndroid;
     final current = prefs.seedColor ?? (android ? null : defaultSeed.toARGB32());
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),

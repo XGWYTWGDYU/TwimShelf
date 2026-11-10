@@ -10,6 +10,10 @@
 //!   for a minute (discovery can be one-sided); two sessions at once are refused by the node.
 //! * An address whose last attempt failed is dropped and the device looked up again (an app that
 //!   restarted listens on a new port).
+//! * A device on several networks at once (Wi-Fi and Ethernet on different LANs, a VPN, a VM
+//!   bridge) announces several addresses, and only some are reachable from here. Every address is
+//!   kept; those on one of this device's own subnets come first, then the one that worked last,
+//!   and a round tries them in that order until one connects.
 //!
 //! Sessions themselves (protocol, crypto, merging) are `sync::SyncNode`'s.
 //!
@@ -63,6 +67,9 @@ pub struct Peer {
     pub kind: Option<String>,
     pub host: Option<String>,
     pub port: Option<u16>,
+    /// Every IPv4 address announced for it, best first (`host` is the first).
+    #[serde(skip)]
+    addrs: Vec<Ipv4Addr>,
     #[serde(skip)]
     fullname: String,
     #[serde(skip)]
@@ -94,6 +101,8 @@ pub struct Discovery {
     /// "立即同步": sync with everyone at the next tick, whichever side would normally start.
     force: AtomicBool,
     handled_failures: Mutex<Vec<String>>,
+    /// The address each device was last reached at (tried first next time).
+    reached: Mutex<HashMap<String, Ipv4Addr>>,
 }
 
 fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64) }
@@ -121,6 +130,7 @@ impl Discovery {
             change_at: AtomicU64::new(0),
             force: AtomicBool::new(false),
             handled_failures: Mutex::new(Vec::new()),
+            reached: Mutex::new(HashMap::new()),
         });
         let me = d.clone();
         std::thread::Builder::new().name("tl-discovery-found".into()).spawn(move || {
@@ -164,15 +174,22 @@ impl Discovery {
         self.mdns.register(&instance, &dev, port, &props)
     }
 
-    fn resolved(&self, key: String, port: u16, txt: &HashMap<String, String>, mut v4: Vec<Ipv4Addr>) {
+    fn resolved(&self, key: String, port: u16, txt: &HashMap<String, String>, v4: Vec<Ipv4Addr>) {
         let Some(dev) = txt.get("dev").filter(|d| !d.is_empty()).cloned() else { return };
         if dev == self.node.status().device_id { return; }
-        // an IPv4 address (link-local IPv6 needs a scope id the sync client does not keep): a
-        // LAN address first, loopback last (another device's 127.0.0.1 would be this device —
-        // it only works when both run on one machine, as in the tests)
-        v4.sort_by_key(|a| (a.is_loopback(), a.is_link_local(), !a.is_private(), *a));
-        v4.dedup();
-        let Some(host) = v4.first().map(|a| a.to_string()) else { return };
+        let rev = txt.get("rev").cloned().unwrap_or_default();
+        let mut peers = self.peers.lock().unwrap();
+        // the same publication seen on another interface (or again): add its addresses; a new
+        // publication (the app restarted, the network changed) starts over
+        let mut addrs = match peers.get(&dev) {
+            Some(old) if old.rev == rev && old.port == Some(port) => old.addrs.clone(),
+            _ => vec![],
+        };
+        addrs.extend(v4);
+        let reached = self.reached.lock().unwrap().get(&dev).copied();
+        let addrs = rank_addresses(addrs, &local_v4_nets(), reached);
+        // IPv4 only (link-local IPv6 needs a scope id the sync client does not keep)
+        let Some(host) = addrs.first().map(|a| a.to_string()) else { return };
         let peer = Peer {
             device: dev.clone(),
             name: txt.get("name").filter(|n| !n.is_empty()).cloned().unwrap_or_else(|| key.clone()),
@@ -180,21 +197,16 @@ impl Discovery {
             kind: txt.get("kind").filter(|k| !k.is_empty()).cloned(),
             host: Some(host),
             port: Some(port),
+            addrs,
             fullname: key,
-            rev: txt.get("rev").cloned().unwrap_or_default(),
+            rev,
         };
-        let mut peers = self.peers.lock().unwrap();
-        // a resolution over a worse interface (link-local, loopback) never replaces a LAN address
-        if let Some(old) = peers.get(&dev) {
-            let rank = |h: &Option<String>| h.as_deref().and_then(|h| h.parse::<Ipv4Addr>().ok()).map(|a| (a.is_loopback(), a.is_link_local(), !a.is_private()));
-            if old.rev == peer.rev && old.port == peer.port && rank(&old.host) < rank(&peer.host) && old.host.is_some() { return; }
-        }
         peers.insert(dev, peer);
     }
 
     fn removed(&self, key: &str) {
         for p in self.peers.lock().unwrap().values_mut() {
-            if p.fullname == key { p.host = None; p.port = None; }
+            if p.fullname == key { p.host = None; p.port = None; p.addrs.clear(); }
         }
     }
 
@@ -210,7 +222,7 @@ impl Discovery {
 
     /// The network changed (wake from sleep, back to the foreground): advertise and look up again.
     pub fn rediscover(self: &Arc<Self>) {
-        for p in self.peers.lock().unwrap().values_mut() { p.host = None; p.port = None; }
+        for p in self.peers.lock().unwrap().values_mut() { p.host = None; p.port = None; p.addrs.clear(); }
         if self.advertise().is_err() { *self.error.lock().unwrap() = Some("sync.err.paused".into()); }
         self.sync_now();
     }
@@ -229,6 +241,7 @@ impl Discovery {
     fn schedule(self: Arc<Self>) {
         let mut last_round = Instant::now() - Duration::from_secs(20);
         let mut last_retry = Instant::now();
+        let mut last_browse = Instant::now();
         while !self.stop.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(500));
             // the system's mDNS connection can go (iOS cuts a suspended app's): announce and look
@@ -238,6 +251,16 @@ impl Discovery {
                 if self.advertise().is_ok() { let _ = self.browse(); }
             }
             self.drop_failed();
+            // a device that joined or left an account announces itself again under the same name:
+            // a browse alone may never report it anew, so its old TXT (no account) would stay.
+            // Look everyone up again every minute (one mDNS query), sooner while a device is seen
+            // without an account (it may be about to join this one).
+            let unknown = self.peers.lock().unwrap().values().any(|p| p.account.is_none());
+            let every = Duration::from_secs(if unknown { 15 } else { 60 });
+            if last_browse.elapsed() >= every {
+                last_browse = Instant::now();
+                let _ = self.browse();
+            }
             let change = self.change_at.load(Ordering::Relaxed);
             let due_change = change != 0 && now_ms() >= change;
             let forced = self.force.swap(false, Ordering::Relaxed);
@@ -249,22 +272,47 @@ impl Discovery {
         }
     }
 
-    /// One round: the account's reachable peers, by the rule of who starts.
-    fn sync_all(&self, forced: bool) {
+    /// One round: the account's reachable peers, by the rule of who starts. A device with a
+    /// session running already is left alone (a long first sync is not a pair that "has not
+    /// synced for a minute").
+    fn sync_all(self: &Arc<Self>, forced: bool) {
         let st = self.node.status();
         let Some(mine) = st.account_id.clone() else { return };
         let now = now_ms() / 1000;
-        let targets: Vec<(String, u16)> = self.peers.lock().unwrap().values()
+        let targets: Vec<(String, Vec<Ipv4Addr>, u16)> = self.peers.lock().unwrap().values()
             .filter(|p| p.account.as_deref() == Some(mine.as_str()))
+            .filter(|p| !st.in_session.contains(&p.device))
             .filter(|p| {
                 let last = st.peers.iter().find(|x| x.device == p.device).map_or(0, |x| x.last_sync);
                 forced || st.device_id < p.device || now.saturating_sub(last) > 60
             })
-            .filter_map(|p| Some((p.host.clone()?, p.port?)))
+            .filter(|p| p.host.is_some() && !p.addrs.is_empty())
+            .filter_map(|p| Some((p.device.clone(), p.addrs.clone(), p.port?)))
             .collect();
-        for (host, port) in targets {
-            let node = self.node.clone();
-            crate::download::runtime().spawn(async move { let _ = node.sync_with(&host, port).await; });
+        for (device, addrs, port) in targets {
+            let me = self.clone();
+            crate::download::runtime().spawn(async move {
+                // one address: as before (its failure is reported). Several: the first that
+                // accepts a connection is used, and remembered.
+                let host = if addrs.len() == 1 { addrs[0] } else {
+                    match first_reachable(&addrs, port).await { Some(a) => a, None => addrs[0] }
+                };
+                if me.node.sync_with(&host.to_string(), port).await.is_ok() || addrs.len() > 1 {
+                    me.reached_at(&device, host);
+                }
+            });
+        }
+    }
+
+    /// `device` answered at `addr`: try it first from now on.
+    fn reached_at(&self, device: &str, addr: Ipv4Addr) {
+        self.reached.lock().unwrap().insert(device.to_string(), addr);
+        if let Some(p) = self.peers.lock().unwrap().get_mut(device) {
+            if let Some(i) = p.addrs.iter().position(|a| *a == addr) {
+                let a = p.addrs.remove(i);
+                p.addrs.insert(0, a);
+                p.host = Some(a.to_string());
+            }
         }
     }
 
@@ -274,14 +322,58 @@ impl Discovery {
         let stale = new_failures(&mut self.handled_failures.lock().unwrap(), &st.failed);
         if stale.is_empty() { return; }
         let mut peers = self.peers.lock().unwrap();
+        let mut lookup = false;
         for p in peers.values_mut() {
-            if let (Some(h), Some(port)) = (&p.host, p.port) {
-                if stale.contains(&format!("{h}:{port}")) { p.host = None; p.port = None; }
-            }
+            let Some(port) = p.port else { continue };
+            let before = p.addrs.len();
+            p.addrs.retain(|a| !stale.contains(&format!("{a}:{port}")));
+            if p.addrs.len() == before { continue; }
+            // another address of the device may still work; none left: look it up again
+            p.host = p.addrs.first().map(|a| a.to_string());
+            if p.host.is_none() { p.port = None; lookup = true; }
         }
         drop(peers);
-        let _ = self.browse();
+        if lookup { let _ = self.browse(); }
     }
+}
+
+/// This device's IPv4 networks (address, netmask), loopback excluded.
+fn local_v4_nets() -> Vec<(Ipv4Addr, Ipv4Addr)> {
+    if_addrs::get_if_addrs().unwrap_or_default().into_iter().filter_map(|i| match i.addr {
+        if_addrs::IfAddr::V4(v4) if !v4.ip.is_loopback() => Some((v4.ip, v4.netmask)),
+        _ => None,
+    }).collect()
+}
+
+fn same_subnet(a: Ipv4Addr, (ip, mask): (Ipv4Addr, Ipv4Addr)) -> bool {
+    let m = u32::from(mask);
+    m != 0 && u32::from(a) & m == u32::from(ip) & m
+}
+
+/// A peer's addresses, best first: on a subnet of this device (directly reachable), the one it
+/// was reached at last, a private LAN address, link-local, anything else, loopback last
+/// (another device's 127.0.0.1 is this device — it only works when both run on one machine, as
+/// in the tests). Otherwise the order they were announced in.
+fn rank_addresses(mut addrs: Vec<Ipv4Addr>, local: &[(Ipv4Addr, Ipv4Addr)], reached: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
+    let mut seen = std::collections::HashSet::new();
+    addrs.retain(|a| !a.is_unspecified() && !a.is_multicast() && seen.insert(*a));
+    addrs.sort_by_key(|a| (
+        a.is_loopback(),
+        !local.iter().any(|n| same_subnet(*a, *n)),
+        Some(*a) != reached,
+        a.is_link_local(),
+        !a.is_private(),
+    ));
+    addrs
+}
+
+/// The first of `addrs` (in order) that accepts a TCP connection within a short time.
+async fn first_reachable(addrs: &[Ipv4Addr], port: u16) -> Option<Ipv4Addr> {
+    for a in addrs {
+        let c = tokio::time::timeout(Duration::from_millis(1500), tokio::net::TcpStream::connect((*a, port))).await;
+        if matches!(c, Ok(Ok(_))) { return Some(*a); }
+    }
+    None
 }
 
 /// The addresses whose failure has not been acted on yet. A failure that is gone (the address
@@ -318,12 +410,38 @@ mod tests {
         assert_eq!(json["error"], "sync.err.paused");
     }
 
+    fn ips(v: &[&str]) -> Vec<Ipv4Addr> { v.iter().map(|s| s.parse().unwrap()).collect() }
+
     #[test]
     fn a_lan_address_beats_loopback_and_link_local() {
-        let mut v: Vec<std::net::Ipv4Addr> = ["127.0.0.1", "169.254.3.4", "8.8.8.8", "192.168.1.20", "10.0.0.5"].iter().map(|s| s.parse().unwrap()).collect();
-        v.sort_by_key(|a| (a.is_loopback(), a.is_link_local(), !a.is_private(), *a));
-        assert_eq!(v[0].to_string(), "10.0.0.5");
-        assert_eq!(v[1].to_string(), "192.168.1.20");
-        assert_eq!(v.last().unwrap().to_string(), "127.0.0.1");
+        let v = rank_addresses(ips(&["127.0.0.1", "169.254.3.4", "8.8.8.8", "192.168.1.20", "10.0.0.5", "192.168.1.20"]), &[], None);
+        assert_eq!(v, ips(&["192.168.1.20", "10.0.0.5", "8.8.8.8", "169.254.3.4", "127.0.0.1"]), "announced order among equals, duplicates once");
+    }
+
+    #[test]
+    fn a_multi_homed_peer_is_reached_on_this_devices_subnet() {
+        // the peer is on Ethernet 10.0.0.0/24 and Wi-Fi 192.168.1.0/24; this device on Wi-Fi only
+        let local = [("192.168.1.7".parse().unwrap(), "255.255.255.0".parse().unwrap())];
+        let v = rank_addresses(ips(&["10.0.0.5", "192.168.1.20"]), &local, None);
+        assert_eq!(v[0].to_string(), "192.168.1.20");
+        // a VPN / bridge address is never preferred over the shared LAN
+        let v = rank_addresses(ips(&["172.17.0.1", "100.100.1.2", "192.168.1.20"]), &local, None);
+        assert_eq!(v[0].to_string(), "192.168.1.20");
+        // no shared subnet (routed networks): the address that worked last comes first
+        let v = rank_addresses(ips(&["10.0.0.5", "10.8.0.9"]), &[], Some("10.8.0.9".parse().unwrap()));
+        assert_eq!(v[0].to_string(), "10.8.0.9");
+        // but a directly reachable address still beats it
+        let v = rank_addresses(ips(&["10.8.0.9", "192.168.1.20"]), &local, Some("10.8.0.9".parse().unwrap()));
+        assert_eq!(v[0].to_string(), "192.168.1.20");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_first_address_that_answers_is_used() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        // 192.0.2.1 (TEST-NET-1) never answers
+        let got = first_reachable(&ips(&["192.0.2.1", "127.0.0.1"]), port).await;
+        assert_eq!(got, Some("127.0.0.1".parse().unwrap()));
+        assert_eq!(first_reachable(&ips(&["192.0.2.1"]), port).await, None);
     }
 }

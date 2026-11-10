@@ -1,9 +1,9 @@
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../platform/secrets.dart';
+import '../platform/os.dart';
 
 /// Reserved synthetic key only; never reads or changes the user's cookies.
 Future<void> main() async {
@@ -11,7 +11,7 @@ Future<void> main() async {
   if (!kDebugMode) return;
   const key = 'f6.synthetic.persistence';
   const value = 'synthetic-f6-value';
-  final action = Platform.environment['TL_SECRETS_SMOKE_ACTION'];
+  final action = OS.environment['TL_SECRETS_SMOKE_ACTION'];
   if (action == 'write') {
     final result = await Secrets.write(key, value);
     debugPrint('secrets-smoke write=${result is SecretValue<void>}');

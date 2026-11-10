@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -15,6 +14,8 @@ import '../l10n/l10n.dart';
 import 'audio_routes.dart';
 import 'system_random.dart';
 import '../app/prefs.dart';
+import 'os.dart';
+import 'files.dart';
 
 export 'package:media_kit_video/media_kit_video.dart'
     show Video, VideoController, NoVideoControls;
@@ -72,7 +73,8 @@ class MediaKitVideoEngine implements VideoEngine {
   @override
   Future<void> open(String path) async {
     await controller.platform.future.timeout(const Duration(seconds: 10));
-    await player.open(Media(File(path).absolute.uri.toString()), play: false);
+    // the web build plays the server's file by its address (ranges let it seek)
+    await player.open(Media(OS.isWeb ? Uri.base.resolve(fileUrl(path)).toString() : File(path).absolute.uri.toString()), play: false);
     if (player.state.duration == Duration.zero) {
       await player.stream.duration
           .firstWhere((d) => d > Duration.zero)
@@ -164,7 +166,7 @@ class VideoPlayback {
 
   Future<void> open(String path, {bool autoplay = true}) async {
     _check();
-    if (!await File(path).exists()) {
+    if (!await fileExists(path)) {
       throw const FileSystemException('video.fileMissing');
     }
     final generation = ++_generation;
@@ -195,7 +197,7 @@ class VideoPlayback {
       if (_closed) return;
       try {
         // not offered on Windows and Linux: a value set earlier must not keep them muted
-        _headphonesOnly = !Platform.isWindows && !Platform.isLinux && headphonesOnlySetting(
+        _headphonesOnly = !OS.isWindows && !OS.isLinux && headphonesOnlySetting(
           _readSetting('audio.headphonesOnly'),
         );
       } catch (_) {
@@ -389,7 +391,7 @@ class VideoPosters {
       final target = File(destination);
       await target.parent.create(recursive: true);
       final temporary = File(
-        '$destination.${DateTime.now().microsecondsSinceEpoch}.${const SystemRandom().nextInt(1 << 32)}.partial',
+        '$destination.${DateTime.now().microsecondsSinceEpoch}.${const SystemRandom().nextInt(0x100000000)}.partial',
       );
       await temporary.create(exclusive: true);
       try {
@@ -466,9 +468,9 @@ int? jpegSide(File f) {
 }
 
 /// At the top level: a closure inside a method would carry that method's scope to the isolate.
-Future<Uint8List?> _squareJpegOff(Uint8List bytes, int side) => Isolate.run(() => _squareJpeg(bytes, side));
+Future<Uint8List?> _squareJpegOff(Uint8List bytes, int side) => coreRunAsync(() => _squareJpeg(bytes, side));
 
-Future<Uint8List?> _wholeJpegOff(Uint8List bytes, int longSide) => Isolate.run(() => _wholeJpeg(bytes, longSide));
+Future<Uint8List?> _wholeJpegOff(Uint8List bytes, int longSide) => coreRunAsync(() => _wholeJpeg(bytes, longSide));
 
 Uint8List? _wholeJpeg(Uint8List bytes, int longSide) {
   final decoded = image.decodeImage(bytes);
@@ -496,6 +498,7 @@ Uint8List? _squareJpeg(Uint8List bytes, int side) {
 }
 
 final _posters = VideoPosters();
-Future<String?> videoCardPoster(FeedItem item, int longSide, String cacheDir) => _posters.whole(item, longSide, cacheDir);
+Future<String?> videoCardPoster(FeedItem item, int longSide, String cacheDir) =>
+    OS.isWeb ? serverPoster(item.path, longSide, whole: true) : _posters.whole(item, longSide, cacheDir);
 Future<String?> videoPoster(FeedItem item, int side, String cacheDir, {List<int> together = const []}) =>
-    _posters.poster(item, side, cacheDir, together: together);
+    OS.isWeb ? serverPoster(item.path, side, whole: false) : _posters.poster(item, side, cacheDir, together: together);

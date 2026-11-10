@@ -54,18 +54,15 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   Place _place = Place.browse;
   final _navigators = <String, GlobalKey<NavigatorState>>{};
-  ShellLayout? _layout;
   /// The sidebar's width while its edge is being dragged.
   double? _dragWidth;
 
   LibraryModel get library => widget.library;
   Prefs get prefs => Prefs.instance;
 
-  /// One per place. The phone's stacks and the wide ones are kept apart (their pages differ: the
-  /// folders page lists every kind); each set survives switching back and forth.
+  /// Share the browse navigator across layouts so resizing reparents its live search and feed.
   GlobalKey<NavigatorState> _navigator(Place p) {
-    final bar = _layout == ShellLayout.bar;
-    final id = '${bar ? 'bar' : 'wide'}:${p.id}';
+    final id = p.id;
     return _navigators.putIfAbsent(id, GlobalKey<NavigatorState>.new);
   }
 
@@ -172,13 +169,12 @@ class _ShellState extends State<Shell> {
   /// A place's page in its own navigator: its subpages open beside the navigation.
   Widget _stack(Place p, ShellLayout layout) => Navigator(
         key: _navigator(p),
-        onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => _page(p, layout)),
+        onGenerateRoute: (_) => MaterialPageRoute(builder: (context) => _page(p, ShellLayout.of(MediaQuery.sizeOf(context)))),
       );
 
   @override
   Widget build(BuildContext context) {
     final layout = ShellLayout.of(MediaQuery.sizeOf(context));
-    _layout = layout;
     return ShellBackHandler(
       navigator: () => _navigator(layout == ShellLayout.bar ? _primaryOf(_place, layout) : _place).currentState,
       child: DropImport(
@@ -210,7 +206,7 @@ class _ShellState extends State<Shell> {
   }
 
   Widget _primaryStacks(Place current, ShellLayout layout) {
-    final places = _primary(layout);
+    final places = [..._barPlaces, if (!_barPlaces.contains(current)) current];
     return IndexedStack(
       index: places.indexOf(current),
       children: [for (final p in places) _stack(p, layout)],
@@ -322,7 +318,7 @@ class _ShellState extends State<Shell> {
             // the caption buttons on Windows and Linux sit over the content's top end
             child: MediaQuery(
               data: mq.copyWith(padding: mq.padding.copyWith(top: mq.padding.top > trailingTop ? mq.padding.top : trailingTop)),
-              child: KeyedSubtree(key: ValueKey('page-${_place.id}'), child: _stack(_place, ShellLayout.sidebar)),
+              child: _primaryStacks(_place, ShellLayout.sidebar),
             ),
           ),
         ]),

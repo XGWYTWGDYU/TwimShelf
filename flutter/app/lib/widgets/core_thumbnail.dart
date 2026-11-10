@@ -1,15 +1,14 @@
-import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
 import '../platform/video.dart';
+import '../platform/files.dart';
 
 /// A media's square thumbnail outside the grids (folder covers, lists), made and cached by the
 /// core; videos and media without a picture show an icon instead.
 /// Off the UI isolate; a top-level function so the isolate gets only these values (a closure
 /// made inside a widget's state would try to send the state along).
-Future<ThumbnailResult> _thumbnail(String id, int side, String dir) => Isolate.run(() => Core.thumbnail(id, side, dir));
+Future<ThumbnailResult> _thumbnail(String id, int side, String dir) => coreRunAsync(() => Core.thumbnail(id, side, dir));
 
 class CoreThumbnail extends StatefulWidget {
   const CoreThumbnail({super.key, required this.mediaId, required this.cacheDir, this.size = 160, this.video = false, this.videoPath});
@@ -83,7 +82,7 @@ class _CoreThumbnailState extends State<CoreThumbnail> {
     final p = _path;
     if (p != null) {
       final px = (widget.size * MediaQuery.devicePixelRatioOf(context)).ceil();
-      return Image.file(File(p), fit: BoxFit.cover, cacheWidth: px, gaplessPlayback: true);
+      return Image(image: ResizeImage.resizeIfNeeded(px, null, localFileImage(p)), fit: BoxFit.cover, gaplessPlayback: true);
     }
     return ColoredBox(
       color: scheme.surfaceContainerHighest,

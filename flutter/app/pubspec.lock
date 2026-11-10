@@ -5,10 +5,10 @@ packages:
     dependency: transitive
     description:
       name: archive
-      sha256: "0d58d1fa1fddf6588251ccf2819f3fb3b6d0452c1b2813ac7413a05592bfbefe"
+      sha256: de5ac590b8155e4e676088d714bd41ea620449a6adc0f7950c5073874b287ddb
       url: "https://pub.dev"
     source: hosted
-    version: "4.5.2"
+    version: "4.6.0"
   args:
     dependency: transitive
     description:
@@ -376,10 +376,10 @@ packages:
     dependency: transitive
     description:
       name: jni
-      sha256: "6b9ca0602fef0230e83149afbe3f9f8227e94f2bbe84a1da4f14d699742f402d"
+      sha256: "2e91e6087291affd10b31b6c872f3e3ac7dc5d93b51b5ba485d930c8f08bde6c"
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.0"
+    version: "1.1.2"
   jni_flutter:
     dependency: transitive
     description:
@@ -696,10 +696,10 @@ packages:
     dependency: transitive
     description:
       name: posix
-      sha256: "6312deb534ce3812a1b454143740ffe721a17dc3a33bfc978f3a6d7bc5833edf"
+      sha256: "613646d076944f3acc125830af935b48d4b8a57a388691547bbfd25b434f4d63"
       url: "https://pub.dev"
     source: hosted
-    version: "6.5.3"
+    version: "6.5.4"
   process:
     dependency: transitive
     description:
@@ -896,10 +896,10 @@ packages:
     dependency: transitive
     description:
       name: shared_preferences_android
-      sha256: "593034a16e82953ca31145db6c85174286262715f9c5e6a9d8c65ffd9fcdce09"
+      sha256: "33b38b07d9ac7d16aff0426c61418752fd3e7a8c7dc8be786c875d6ce673b002"
       url: "https://pub.dev"
     source: hosted
-    version: "2.5.3"
+    version: "2.5.4"
   shared_preferences_foundation:
     dependency: transitive
     description:
@@ -989,10 +989,10 @@ packages:
     dependency: transitive
     description:
       name: synchronized
-      sha256: b3d516dbd3757ff2a458735e4f6cbac9ff261f576f6e87bcb17feabb39e657c5
+      sha256: a77637ebe1460f3b48cac89a790d2eb634f0a8593cab0d3f340c6db174ba9b94
       url: "https://pub.dev"
     source: hosted
-    version: "3.5.0"
+    version: "3.6.1+1"
   term_glyph:
     dependency: transitive
     description:
@@ -1175,7 +1175,7 @@ packages:
     source: hosted
     version: "1.7.0"
   web:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: web
       sha256: e119e82ac4795c7925103b7cf3768191f33941b99e7ccffbd6c645201d9f606b

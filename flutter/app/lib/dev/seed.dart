@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tl_core/tl_core.dart';
+import '../platform/os.dart';
 
 /// Call after Core.open, before the first feed/stats refresh. Entire body is
 /// eliminated in profile/release. Fixtures are external, never release assets.
@@ -14,11 +14,11 @@ Future<void> seedIfRequested() async {
       bool.fromEnvironment('TL_SEED') ||
       String.fromEnvironment('TL_SEED') == '1';
   final source =
-      Platform.environment['TL_IMPORT_DIR'] ??
+      OS.environment['TL_IMPORT_DIR'] ??
       const String.fromEnvironment('TL_IMPORT_DIR');
   if (source.isEmpty && !enabled) return;
   final support =
-      Platform.environment['TL_LIBRARY_DIR'] ??
+      OS.environment['TL_LIBRARY_DIR'] ??
       (await getApplicationSupportDirectory()).path;
   final input = source.isNotEmpty
       ? source
@@ -36,7 +36,7 @@ Future<void> seedIfRequested() async {
       .where((entry) => entry.key.endsWith('/damaged.png'))
       .map((entry) => entry.value as String)
       .toList();
-  await Isolate.run(() {
+  await coreRunAsync(() {
     // Never seed a pre-existing personal library, even if a test launch forgot
     // its directory override. A previous successful seed returns at the marker.
     final before = Core.stats();

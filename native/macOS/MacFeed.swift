@@ -400,7 +400,11 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     /// A media to show once the next result is on screen (`reveal`).
     private var pendingReveal: FeedItem?
     var grouped = UserDefaults.standard.object(forKey: "grouped") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(grouped, forKey: "grouped"); rebuildEntries(); masonry.invalidateHeights(); collection.reloadData(); updateInline() }
+        didSet {
+            UserDefaults.standard.set(grouped, forKey: "grouped"); rebuildEntries(); masonry.invalidateHeights(); collection.reloadData(); updateInline()
+            // a search finds whole posts only as post cards
+            if !terms.isEmpty || !currentFilter.isEmpty { reload(keepPosition: true) }
+        }
     }
     /// Random order from the system RNG; ranks survive reloads until the next reshuffle.
     private var order = FeedOrder()
@@ -417,7 +421,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     private var pipPlayer: MacPlayerView?
 
     private let scroll = NSScrollView()
-    private let collection = NSCollectionView()
+    private let collection = ResizingFeedCollectionView()
     private let chipBar = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: "")
     private let statsLabel = NSTextField(labelWithString: "")
@@ -633,7 +637,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         let f = currentFilter
         let activeFilter = f
         let fields = query.searchFields
-        var req = FeedRequest(terms: terms, scope: query.scope, newestFirst: LibraryPrefs.feedByAdded, fuzzy: fuzzy, fields: fields, filter: activeFilter)
+        var req = FeedRequest(terms: terms, scope: query.scope, newestFirst: LibraryPrefs.feedByAdded, fuzzy: fuzzy, fields: fields, filter: activeFilter, wholePosts: grouped)
         // a search that asks for something and its opposite finds nothing, without asking the core
         let contradictory = query.isContradictory
         let wantsVectors = !contradictory && fuzzy && (fields.tags || fields.text || !fields.author) && !terms.isEmpty && ModelStore.shared.activeEmbedderId != nil
@@ -1771,6 +1775,15 @@ final class ImageLayerView: NSView {
 /// The 浏览 grid on the Mac: cards as tall as their content in as many columns as fit (each card
 /// in the shortest column), one section per pass of the looping feed with its footer. The
 /// placement is `FeedMasonry` (shared with iOS).
+/// During a live resize only visible cells need to lay out text. Re-measure the full
+/// masonry once the drag ends, including a drag that leaves the column width unchanged.
+private final class ResizingFeedCollectionView: NSCollectionView {
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        (collectionViewLayout as? MacFeedMasonryLayout)?.invalidateHeights()
+    }
+}
+
 final class MacFeedMasonryLayout: NSCollectionViewLayout {
     /// The height of entry `i` at a column width.
     var height: ((Int, CGFloat) -> CGFloat)?
@@ -1801,7 +1814,14 @@ final class MacFeedMasonryLayout: NSCollectionViewLayout {
         let count = passes > 0 ? cv.numberOfItems(inSection: 0) : 0
         let m = metrics(cv)
         if dirty || plan?.metrics != m || plan?.frames.count != count {
-            plan = FeedMasonry(count: count, metrics: m) { [weak self] i, w in self?.height?(i, w) ?? w * FeedCard.mediaRatio }
+            let previous = plan
+            let approximate = cv.inLiveResize && previous?.frames.count == count
+            plan = FeedMasonry(count: count, metrics: m) { [weak self] i, w in
+                if approximate, let previous, previous.metrics.columnWidth > 0 {
+                    return previous.frames[i].height * w / previous.metrics.columnWidth
+                }
+                return self?.height?(i, w) ?? w * FeedCard.mediaRatio
+            }
             dirty = false
         }
     }

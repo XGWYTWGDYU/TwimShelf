@@ -1,0 +1,206 @@
+{
+  "extName": {
+    "message": "TwimShelf 下载器"
+  },
+  "extDescription": {
+    "message": "在 X 的每条帖子旁添加下载按钮，一键交给你的 TwimShelf 应用或服务器下载。"
+  },
+  "buttonIdle": {
+    "message": "用 TwimShelf 下载"
+  },
+  "stateSending": {
+    "message": "发送中…"
+  },
+  "stateQueued": {
+    "message": "排队中"
+  },
+  "stateDownloading": {
+    "message": "下载中"
+  },
+  "stateDone": {
+    "message": "已下载"
+  },
+  "stateFailed": {
+    "message": "失败"
+  },
+  "stateOffline": {
+    "message": "设备离线，稍后重试"
+  },
+  "statePaused": {
+    "message": "已在应用中暂停"
+  },
+  "stateCancelled": {
+    "message": "已在应用中取消"
+  },
+  "needsBinding": {
+    "message": "请先绑定一台 TwimShelf 设备。"
+  },
+  "openSetup": {
+    "message": "绑定设备"
+  },
+  "extensionReloaded": {
+    "message": "扩展已更新，请刷新此页面。"
+  },
+  "chooseDevice": {
+    "message": "下载到"
+  },
+  "platform_macos": {
+    "message": "macOS"
+  },
+  "platform_windows": {
+    "message": "Windows"
+  },
+  "platform_linux": {
+    "message": "Linux"
+  },
+  "platform_server": {
+    "message": "Linux 服务器"
+  },
+  "errorOffline": {
+    "message": "无法连接 $1（应用打开了吗？）"
+  },
+  "errorUnbound": {
+    "message": "该设备已不再信任这个浏览器，请重新绑定。"
+  },
+  "errorNotAPost": {
+    "message": "不是帖子链接"
+  },
+  "errorLost": {
+    "message": "设备上已没有这个下载任务"
+  },
+  "devicesTitle": {
+    "message": "设备"
+  },
+  "defaultDevice": {
+    "message": "下载按钮发送到"
+  },
+  "askEveryTime": {
+    "message": "每次询问"
+  },
+  "addDevice": {
+    "message": "添加设备"
+  },
+  "foundHere": {
+    "message": "这台电脑上打开的："
+  },
+  "manualTitle": {
+    "message": "通过地址连接设备"
+  },
+  "bind": {
+    "message": "绑定"
+  },
+  "bound": {
+    "message": "已绑定到 $1"
+  },
+  "tasksTitle": {
+    "message": "下载"
+  },
+  "clearFinished": {
+    "message": "清除已结束"
+  },
+  "noTasks": {
+    "message": "从 X 发送的下载会显示在这里。"
+  },
+  "deviceUnbound": {
+    "message": "需要重新绑定"
+  },
+  "deviceOnline": {
+    "message": "在线"
+  },
+  "deviceOffline": {
+    "message": "离线"
+  },
+  "checking": {
+    "message": "检查中…"
+  },
+  "unbind": {
+    "message": "解除"
+  },
+  "unbindTitle": {
+    "message": "解除绑定 $1"
+  },
+  "unbindConfirm": {
+    "message": "解除绑定 $1？之后这个浏览器不能再向它发送下载。"
+  },
+  "retry": {
+    "message": "重试"
+  },
+  "errorWrongCode": {
+    "message": "绑定码不对，请核对应用中显示的绑定码。"
+  },
+  "errorExpired": {
+    "message": "绑定码已过期，请在应用中重新生成。"
+  },
+  "errorNoCode": {
+    "message": "应用当前没有绑定码（或已用完）。请在应用中选择「绑定浏览器」。"
+  },
+  "errorUnreachable": {
+    "message": "无法通过该地址连接设备。"
+  },
+  "errorTooOld": {
+    "message": "该设备的 TwimShelf 版本过旧，不支持扩展，请更新。"
+  },
+  "errorTooNew": {
+    "message": "该设备需要更新版本的扩展。"
+  },
+  "errorBind": {
+    "message": "无法绑定（$1）"
+  },
+  "errorBadText": {
+    "message": "这既不是 6 位绑定码，也不是绑定文本。"
+  },
+  "errorNothing": {
+    "message": "请输入绑定码，或粘贴绑定文本。"
+  },
+  "connectTitle": {
+    "message": "连接 TwimShelf"
+  },
+  "stepOpen": {
+    "message": "在 TwimShelf 中打开 **设置 → 浏览器扩展 → 绑定浏览器**。"
+  },
+  "stepEnter": {
+    "message": "在这里输入 6 位绑定码。绑定其他电脑或 Linux 服务器时，改为粘贴绑定文本。"
+  },
+  "entryPlaceholder": {
+    "message": "绑定码或绑定文本"
+  },
+  "manualHint": {
+    "message": "只有绑定文本里的地址不可用时才需要（不同网络、VPN 等）。上面的绑定码会发给这个地址。"
+  },
+  "cancel": {
+    "message": "取消"
+  },
+  "binding": {
+    "message": "正在绑定…"
+  },
+  "errorNoCodeHere": {
+    "message": "这台电脑上没有 TwimShelf 正在显示绑定码。请先在应用中选择「绑定浏览器」；绑定其他电脑时请粘贴绑定文本。"
+  },
+  "errorNoLocal": {
+    "message": "这台电脑上没有打开的 TwimShelf。请打开它，或粘贴其他设备的绑定文本。"
+  },
+  "kindServer": {
+    "message": "Linux 服务器"
+  },
+  "kindNative": {
+    "message": "$1 应用"
+  },
+  "kindFlutter": {
+    "message": "Flutter · $1"
+  },
+  "summaryNone": {
+    "message": "未连接"
+  },
+  "howToUse": {
+    "message": "在 X 上，每条帖子的书签和分享按钮旁都有下载按钮。"
+  },
+  "oneDevice": {
+    "message": "已连接 1 台设备"
+  },
+  "nDevices": {
+    "message": "已连接 $1 台设备"
+  },
+  "nDownloading": {
+    "message": "$1 个下载中"
+  }
+}

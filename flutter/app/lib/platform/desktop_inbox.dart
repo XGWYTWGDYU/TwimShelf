@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'shared_links.dart';
 import 'system_random.dart';
+import 'os.dart';
 
 /// Desktop shells may pass several files after --import. Everything after --
 /// is literal, allowing a filename beginning with a dash.
@@ -38,7 +39,7 @@ List<String> parseDesktopImportArguments(List<String> arguments) {
 }
 
 String resolveDesktopPath(String value, String cwd, {bool? windows}) {
-  final win = windows ?? Platform.isWindows;
+  final win = windows ?? OS.isWindows;
   final context = p.Context(style: win ? p.Style.windows : p.Style.posix);
   final uri = Uri.tryParse(value);
   if (uri != null && uri.hasScheme) {
@@ -75,7 +76,7 @@ class DesktopInbox {
   final void Function()? quickDownload;
   static const _random = SystemRandom();
   static String newId() =>
-      '${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 32)}';
+      '${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(0x100000000)}';
   static bool _safe(String id) => RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(id);
 
   Future<void> enqueue(

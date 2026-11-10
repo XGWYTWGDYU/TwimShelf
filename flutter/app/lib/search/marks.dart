@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:characters/characters.dart';
 import 'package:tl_core/tl_core.dart';
 import 'package:unorm_dart/unorm_dart.dart' as unicode;
@@ -43,7 +44,26 @@ String _fold(String value) {
 
 /// Case/width/diacritic insensitive matches mapped back to original graphemes.
 /// Each term advances past its previous match, like NSString.range(of:).
+final _highlightCache = <String, List<HighlightRange>>{};
+
 List<HighlightRange> highlightRanges(List<String> terms, String text) {
+  if (terms.isEmpty || text.isEmpty) return const [];
+  final key = jsonEncode([terms, text]);
+  final cached = _highlightCache.remove(key);
+  if (cached != null) {
+    _highlightCache[key] = cached;
+    return cached;
+  }
+  final result = _calculateHighlightRanges(terms, text);
+  // Bound both entry count and retained text size for long posts.
+  if (key.length <= 16384) {
+    if (_highlightCache.length >= 256) _highlightCache.remove(_highlightCache.keys.first);
+    _highlightCache[key] = result;
+  }
+  return result;
+}
+
+List<HighlightRange> _calculateHighlightRanges(List<String> terms, String text) {
   final buffer = StringBuffer();
   final starts = <int>[], ends = <int>[];
   var offset = 0;

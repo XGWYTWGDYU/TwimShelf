@@ -1,10 +1,10 @@
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 
 import '../l10n/l10n.dart';
 import 'prefs.dart';
+import '../platform/os.dart';
 
 enum AppLockResult { passed, stayed, unavailable }
 
@@ -39,8 +39,8 @@ class LocalAuthSystem implements AppLockSystem {
 
   @override
   Future<String> methodName() async {
-    if (Platform.isWindows) return L('applock.method.hello');
-    if (Platform.isAndroid) return L('applock.method.android');
+    if (OS.isWindows) return L('applock.method.hello');
+    if (OS.isAndroid) return L('applock.method.android');
     final kinds = await _auth.getAvailableBiometrics();
     if (kinds.contains(BiometricType.face)) return L('applock.method.faceID');
     if (kinds.contains(BiometricType.fingerprint)) return L('applock.method.touchID');
@@ -55,8 +55,8 @@ class LocalAuthSystem implements AppLockSystem {
 class AppLock extends ChangeNotifier with WidgetsBindingObserver {
   AppLock({required this.system, required this.relocks});
 
-  static bool get offered => !Platform.isLinux;
-  static final instance = AppLock(system: LocalAuthSystem(), relocks: Platform.isIOS || Platform.isAndroid);
+  static bool get offered => !OS.isLinux;
+  static final instance = AppLock(system: LocalAuthSystem(), relocks: OS.isIOS || OS.isAndroid);
 
   final AppLockSystem system;
   /// Going to the background locks again.

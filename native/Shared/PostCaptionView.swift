@@ -17,13 +17,6 @@ struct PostCaptionView: View {
     var onHeight: (CGFloat) -> Void = { _ in }
     /// Opens already (the Mac tour pictures the open caption).
     var startsExpanded = false
-    /// The caption's shade behind its text. Off where the viewer shades the bottom itself (an iOS
-    /// video's controls). `below` carries it on, as dark, to the screen's bottom edge (under the
-    /// viewer's buttons) and `sides` out to the screen's side edges past the safe area, so the
-    /// shade never ends in a hard line across the media.
-    var shaded = true
-    var shadeBelow: CGFloat = 0
-    var shadeSides: CGFloat = 0
 
     static func shows(_ item: FeedItem?) -> Bool {
         guard let item, !item.isLoose else { return false }
@@ -32,15 +25,21 @@ struct PostCaptionView: View {
 
     /// Bottom-aligned in whatever height the host gives it (the host fills the viewer, so the
     /// caption can grow when opened without the host having to be measured again).
+    ///
+    /// No shade behind it: the text stands on the media with a soft shadow of its own. Moving to
+    /// another media of the same post keeps it as it is (still open if it was); another post's
+    /// caption fades in as the old one fades out, rather than jumping.
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
             if let item, Self.shows(item) {
-                PostCaptionContent(item: item, maxExpandedHeight: maxExpandedHeight, trailingInset: trailingInset, shaded: shaded, shadeBelow: shadeBelow, shadeSides: shadeSides, onExpandedChange: onExpandedChange, expanded: startsExpanded)
+                PostCaptionContent(item: item, maxExpandedHeight: maxExpandedHeight, trailingInset: trailingInset, onExpandedChange: onExpandedChange, expanded: startsExpanded)
                     .id(item.postId + (startsExpanded ? "#open" : ""))      // a new post starts closed
+                    .transition(.opacity)
                     .background(GeometryReader { g in Color.clear.preference(key: CaptionHeightKey.self, value: g.size.height) })
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: Self.shows(item) ? item?.postId : nil)
         .onPreferenceChange(CaptionHeightKey.self) { onHeight($0) }
     }
 }
@@ -54,9 +53,6 @@ private struct PostCaptionContent: View {
     let item: FeedItem
     let maxExpandedHeight: CGFloat
     let trailingInset: CGFloat
-    let shaded: Bool
-    let shadeBelow: CGFloat
-    let shadeSides: CGFloat
     let onExpandedChange: (Bool) -> Void
     @State var expanded = false
     @State private var cut = false
@@ -101,7 +97,9 @@ private struct PostCaptionContent: View {
                 }
             }
         }
-        .shadow(color: .black.opacity(0.55), radius: 3, y: 1)
+        // legible on any picture without a shade: a tight dark edge and a soft halo
+        .shadow(color: .black.opacity(0.7), radius: 1.5, y: 0.5)
+        .shadow(color: .black.opacity(0.5), radius: 6)
         // a comfortable line length on a wide window
         .frame(maxWidth: 680, alignment: .leading)
         .padding(.leading, 16)
@@ -109,19 +107,6 @@ private struct PostCaptionContent: View {
         .padding(.top, 28)
         .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(alignment: .top) {
-            if shaded {
-                let dark = Color.black.opacity(expanded ? 0.82 : 0.6)
-                // drawn past the caption's own frame (negative padding), down and out to the edges
-                VStack(spacing: 0) {
-                    LinearGradient(colors: [.black.opacity(0), dark], startPoint: .top, endPoint: .bottom)
-                    dark.frame(height: shadeBelow)
-                }
-                .padding(.bottom, -shadeBelow)
-                .padding(.horizontal, -shadeSides)
-                .allowsHitTesting(false)
-            }
-        }
         .contentShape(Rectangle())
         .onTapGesture {
             guard cut || expanded else { return }

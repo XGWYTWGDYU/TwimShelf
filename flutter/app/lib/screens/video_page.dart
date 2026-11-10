@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +9,7 @@ import 'package:screen_brightness/screen_brightness.dart';
 import '../app/prefs.dart';
 import '../l10n/l10n.dart';
 import '../platform/video.dart';
+import '../platform/os.dart';
 
 /// One video of the viewer, as the native player:
 ///  * double tap: play / pause · single tap: the controls (they hide after 3 s of playing)
@@ -37,8 +37,8 @@ class VideoPage extends StatefulWidget {
     this.onControlsChanged,
     this.onTurn,
   });
-  /// Turns the screen (true: landscape). The viewer owns it: leaving the viewer goes back to
-  /// the orientation it opened in.
+  /// The video was turned on its own, or back (the viewer stops paging while it is). Only the
+  /// video turns: the app's orientation is never changed, so nothing behind it ever turns.
   final ValueChanged<bool>? onTurn;
   final String path;
   final bool active;
@@ -67,7 +67,7 @@ class VideoPageState extends State<VideoPage> {
   Object? _error;
   Timer? _hide;
   double _volume = 100;
-  final _subs = <StreamSubscription<Duration>>[];
+  final _subs = <StreamSubscription<dynamic>>[];
 
   // the readout pill in the middle (speed, seek target, brightness, volume)
   IconData? _hudIcon;
@@ -75,18 +75,68 @@ class VideoPageState extends State<VideoPage> {
   double? _hudLevel;
   Timer? _hudTimer;
 
+  /// Quarter turns of the whole page (video, controls, gestures) inside the screen: 0 or 1.
+  int _turns = 0;
+  Orientation? _orientation;
+
   _Pan _pan = _Pan.none;
   double _panStart = 0;
   Offset _panOrigin = Offset.zero;
   bool _scrubbing = false;
+  Duration? _scrubPosition;
+  Duration? _pendingSeek;
+  Future<void>? _seekWork;
 
-  static bool get _mobile => !kIsWeb && (Platform.isIOS || Platform.isAndroid);
+  // Keep one decoder seek in flight; newer pointer positions replace stale work.
+  Future<void> _seek(Duration target) {
+    _pendingSeek = target;
+    return _seekWork ??= _drainSeeks().whenComplete(() => _seekWork = null);
+  }
+
+  Future<void> _drainSeeks() async {
+    while (mounted && _pendingSeek != null) {
+      final next = _pendingSeek!;
+      _pendingSeek = null;
+      await _video?.seek(next);
+    }
+  }
+
+  void _previewSeek(Duration target) {
+    setState(() => _scrubPosition = target);
+    unawaited(_seek(target));
+  }
+
+  Future<void> _finishSeek(Duration target) async {
+    await _seek(target);
+    if (!mounted) return;
+    setState(() {
+      _scrubbing = false;
+      _scrubPosition = null;
+    });
+    _scheduleHide();
+  }
+
+  static bool get _mobile => !kIsWeb && (OS.isIOS || OS.isAndroid);
   bool get gestures => !Prefs.instance.playerGesturesOff;
 
   @override
   void initState() {
     super.initState();
     if (widget.active) _open();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // the screen itself turned (the device was turned): it fits by itself now
+    final o = MediaQuery.orientationOf(context);
+    if (_orientation != null && o != _orientation && _turns != 0) {
+      _turns = 0;   // (a build follows anyway)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onTurn?.call(false);
+      });
+    }
+    _orientation = o;
   }
 
   @override
@@ -97,6 +147,8 @@ class VideoPageState extends State<VideoPage> {
       _video == null ? _open() : _setPlaying(true);
     } else if (!widget.active && old.active) {
       _setPlaying(false);
+      // a page left behind comes back upright (the viewer has already resumed paging)
+      _turns = 0;
     }
   }
 
@@ -108,9 +160,12 @@ class VideoPageState extends State<VideoPage> {
     }));
     try {
       await v.setLoop(true);
-      await v.open(widget.path, autoplay: widget.active);
+      await v.open(widget.path, autoplay: false);
       if (!mounted) return;
-      setState(() => _playing = widget.active);
+      _subs.add(v.surfaceController.player.stream.playing.listen((playing) {
+        if (mounted) setState(() => _playing = playing);
+      }));
+      await _setPlaying(widget.active);
       _scheduleHide();
       _autoLandscape();
     } catch (e) {
@@ -118,23 +173,32 @@ class VideoPageState extends State<VideoPage> {
     }
   }
 
-  /// 横屏视频自动横屏: a video wider than tall turns a phone or tablet sideways.
+  /// 横屏视频自动横屏: a video wider than tall, opened on a portrait screen, is turned.
   void _autoLandscape() {
-    if (!_mobile || !Prefs.instance.autoLandscape) return;
+    if (!_mobile || !Prefs.instance.autoLandscape || _turns != 0 || !widget.active) return;
     final size = MediaQuery.sizeOf(context);
     if (size.width >= size.height) return;
     // the video's own size is known once its first frame is decoded
     final c = _video?.surfaceController;
     final w = c?.player.state.width ?? 0, h = c?.player.state.height ?? 0;
-    if (w > h && h > 0) _setLandscape(true);
+    if (w > h && h > 0) _setTurned(true);
   }
 
-  void _setLandscape(bool on) => widget.onTurn?.call(on);
-
-  /// The opposite of how the screen is now: portrait turns to landscape, landscape to portrait.
+  /// Portrait ⇄ landscape for the video alone: whatever the screen is, the page turns a quarter
+  /// (clockwise) or back. Works where the system will not turn the app (an iPad that can
+  /// multitask, Android's split screen, the orientation lock).
   void _rotate() {
-    final size = MediaQuery.sizeOf(context);
-    _setLandscape(size.width < size.height);
+    if (_locked) return;
+    _setTurned(_turns == 0);
+  }
+
+  void _setTurned(bool on) {
+    final turns = on ? 1 : 0;
+    if (turns == _turns || !mounted) return;
+    setState(() => _turns = turns);
+    widget.onTurn?.call(on);
+    _showControls(true);
+    _scheduleHide();
   }
 
   Future<void> _setPlaying(bool play) async {
@@ -236,7 +300,7 @@ class VideoPageState extends State<VideoPage> {
   /// with a brightness control. Never macOS (and Linux has no such API here).
   static bool? _canSetBrightness;
   static Future<bool> _systemBrightness() async {
-    if (kIsWeb || Platform.isMacOS || Platform.isLinux) return false;
+    if (kIsWeb || OS.isMacOS || OS.isLinux) return false;
     try {
       return _canSetBrightness ??= await ScreenBrightness.instance.canChangeSystemBrightness;
     } catch (_) {
@@ -290,7 +354,7 @@ class VideoPageState extends State<VideoPage> {
         // a full width covers min(duration, 120 s): precise on short clips, still quick on long ones
         final span = duration.clamp(1, 120).toDouble();
         final target = (_panStart + moved.dx / size.width * span).clamp(0, duration).toDouble();
-        await v.seek(Duration(milliseconds: (target * 1000).round()));
+        _previewSeek(Duration(milliseconds: (target * 1000).round()));
         _showHud(target >= _panStart ? Icons.fast_forward : Icons.fast_rewind,
             text: '${_time(Duration(milliseconds: (target * 1000).round()))} / ${_time(v.currentDuration)}', sticky: true);
       case _Pan.brightness:
@@ -312,8 +376,7 @@ class VideoPageState extends State<VideoPage> {
 
   void _panEnd() {
     if (_pan == _Pan.seek) {
-      _scrubbing = false;
-      setState(() {});
+      unawaited(_finishSeek(_scrubPosition ?? _video!.currentPosition));
     }
     _pan = _Pan.none;
     _hideHud(after: const Duration(milliseconds: 400));
@@ -341,10 +404,11 @@ class VideoPageState extends State<VideoPage> {
     if (_error != null) return const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 56));
     if (v == null) return const Center(child: Icon(Icons.play_circle_outline, size: 72, color: Colors.white70));
     final total = v.currentDuration;
-    final at = v.currentPosition;
-    final pad = MediaQuery.paddingOf(context);
+    final at = _scrubPosition ?? v.currentPosition;
     final showBar = _controls && !_locked;
-    return LayoutBuilder(builder: (context, box) {
+    final page = LayoutBuilder(builder: (context, box) {
+      // below the turn: the turned screen's safe area
+      final pad = MediaQuery.paddingOf(context);
       final size = box.biggest;
       return Stack(children: [
         Positioned.fill(
@@ -366,7 +430,7 @@ class VideoPageState extends State<VideoPage> {
               onPanStart: gestures ? (d) => _panStartAt(d, size) : null,
               onPanUpdate: gestures ? (d) => _panUpdate(d, size) : null,
               onPanEnd: gestures ? (_) => _panEnd() : null,
-              child: VideoSurface(controller: v.surfaceController, controls: NoVideoControls, fill: Colors.black),
+              child: VideoSurface(controller: v.surfaceController, controls: NoVideoControls, resumeUponEnteringForegroundMode: true, fill: Colors.black),
             ),
           ),
         ),
@@ -428,12 +492,15 @@ class VideoPageState extends State<VideoPage> {
                       Expanded(
                         child: Slider(
                           value: total.inMilliseconds == 0 ? 0 : (at.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0),
-                          onChangeStart: (_) => _scrubbing = true,
-                          onChanged: total == Duration.zero ? null : (f) => v.seek(total * f),
-                          onChangeEnd: (_) {
-                            _scrubbing = false;
-                            _scheduleHide();
+                          onChangeStart: (_) {
+                            _hide?.cancel();
+                            setState(() {
+                              _scrubbing = true;
+                              _scrubPosition = v.currentPosition;
+                            });
                           },
+                          onChanged: total == Duration.zero ? null : (f) => _previewSeek(total * f),
+                          onChangeEnd: (f) => _finishSeek(total * f),
                         ),
                       ),
                       Text(_time(total), style: const TextStyle(color: Colors.white, fontFeatures: [FontFeature.tabularFigures()])),
@@ -497,6 +564,18 @@ class VideoPageState extends State<VideoPage> {
           ),
       ]);
     });
+    if (_turns == 0) return page;
+    // a quarter turn clockwise: the page's top is the screen's right edge, its left the top…
+    final mq = MediaQuery.of(context);
+    EdgeInsets turned(EdgeInsets e) => EdgeInsets.fromLTRB(e.top, e.right, e.bottom, e.left);
+    return RotatedBox(
+      key: const ValueKey('videoTurned'),
+      quarterTurns: _turns,
+      child: MediaQuery(
+        data: mq.copyWith(size: mq.size.flipped, padding: turned(mq.padding), viewPadding: turned(mq.viewPadding), viewInsets: EdgeInsets.zero),
+        child: page,
+      ),
+    );
   }
 }
 

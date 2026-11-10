@@ -207,6 +207,7 @@ class TokenQuery {
     FeedFilter? over,
     int? seed,
     bool newestFirst = false,
+    bool wholePosts = false,
   }) => FeedRequest(
     terms: terms,
     scope: scope,
@@ -216,6 +217,7 @@ class TokenQuery {
     fuzzy: false,
     fields: searchFields,
     filter: filter(over: over),
+    whole_posts: wholePosts,
   );
   SearchMarks get marks => SearchMarks(terms: terms, fields: searchFields);
   static const pendingFolder = 'p:folder';

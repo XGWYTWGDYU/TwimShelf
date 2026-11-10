@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'os.dart';
 
 /// Ref-counts logical sync owners; Android keeps a single non-reference-counted
 /// system lock. Calls are serialized even when start/dispose overlap.
@@ -10,7 +10,7 @@ class MulticastController {
     : _channel =
           channel ??
           const MethodChannel('org.twimshelf/android_platform'),
-      _android = android ?? Platform.isAndroid;
+      _android = android ?? OS.isAndroid;
   final MethodChannel _channel;
   final bool _android;
   int _owners = 0;

@@ -145,3 +145,18 @@ fn wait(mut done: impl FnMut() -> bool) { let until = Instant::now() + Duration:
     drop(s);
     let _ = std::fs::remove_dir_all(&d);
 }
+
+#[test] fn tag_undo_preserves_existing_user_and_ai_tags_and_later_edits() {
+    let f = Fixture::new(3);
+    f.lib.db().tag_media(&id(0), "label", tl_core::model::Origin::USER).unwrap();
+    f.lib.db().tag_media(&id(1), "label", tl_core::model::Origin::AI).unwrap();
+    let r = f.lib.apply_action(&action(K::Tag, vec![], vec!["p".into()])).unwrap();
+    assert_eq!(r.changes.len(), 2);
+    f.lib.db().untag_media(&id(2), "label").unwrap();
+    f.lib.db().tag_media(&id(2), "label", tl_core::model::Origin::USER).unwrap();
+    assert_eq!(f.lib.undo_action(&r).unwrap(), 1);
+    assert_eq!(f.lib.db().media_tags(&id(0)).unwrap(), vec![("label".into(), 1)]);
+    assert_eq!(f.lib.db().media_tags(&id(1)).unwrap(), vec![("label".into(), 2)]);
+    assert_eq!(f.lib.db().media_tags(&id(2)).unwrap(), vec![("label".into(), 1)]);
+    assert_eq!(f.lib.undo_action(&r).unwrap(), 0);
+}

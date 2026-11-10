@@ -1,0 +1,206 @@
+{
+  "extName": {
+    "message": "TwimShelf 下載器"
+  },
+  "extDescription": {
+    "message": "在 X 的每則貼文旁新增下載按鈕，一鍵交給你的 TwimShelf App 或伺服器下載。"
+  },
+  "buttonIdle": {
+    "message": "用 TwimShelf 下載"
+  },
+  "stateSending": {
+    "message": "傳送中…"
+  },
+  "stateQueued": {
+    "message": "排隊中"
+  },
+  "stateDownloading": {
+    "message": "下載中"
+  },
+  "stateDone": {
+    "message": "已下載"
+  },
+  "stateFailed": {
+    "message": "失敗"
+  },
+  "stateOffline": {
+    "message": "裝置離線，稍後重試"
+  },
+  "statePaused": {
+    "message": "已在 App 中暫停"
+  },
+  "stateCancelled": {
+    "message": "已在 App 中取消"
+  },
+  "needsBinding": {
+    "message": "請先綁定一台 TwimShelf 裝置。"
+  },
+  "openSetup": {
+    "message": "綁定裝置"
+  },
+  "extensionReloaded": {
+    "message": "擴充功能已更新，請重新整理此頁面。"
+  },
+  "chooseDevice": {
+    "message": "下載到"
+  },
+  "platform_macos": {
+    "message": "macOS"
+  },
+  "platform_windows": {
+    "message": "Windows"
+  },
+  "platform_linux": {
+    "message": "Linux"
+  },
+  "platform_server": {
+    "message": "Linux 伺服器"
+  },
+  "errorOffline": {
+    "message": "無法連線 $1（App 開啟了嗎？）"
+  },
+  "errorUnbound": {
+    "message": "該裝置已不再信任這個瀏覽器，請重新綁定。"
+  },
+  "errorNotAPost": {
+    "message": "不是貼文連結"
+  },
+  "errorLost": {
+    "message": "裝置上已沒有這個下載任務"
+  },
+  "devicesTitle": {
+    "message": "裝置"
+  },
+  "defaultDevice": {
+    "message": "下載按鈕傳送到"
+  },
+  "askEveryTime": {
+    "message": "每次詢問"
+  },
+  "addDevice": {
+    "message": "新增裝置"
+  },
+  "foundHere": {
+    "message": "這台電腦上開啟的："
+  },
+  "manualTitle": {
+    "message": "透過位址連線裝置"
+  },
+  "bind": {
+    "message": "綁定"
+  },
+  "bound": {
+    "message": "已綁定到 $1"
+  },
+  "tasksTitle": {
+    "message": "下載"
+  },
+  "clearFinished": {
+    "message": "清除已結束"
+  },
+  "noTasks": {
+    "message": "從 X 傳送的下載會顯示在這裡。"
+  },
+  "deviceUnbound": {
+    "message": "需要重新綁定"
+  },
+  "deviceOnline": {
+    "message": "線上"
+  },
+  "deviceOffline": {
+    "message": "離線"
+  },
+  "checking": {
+    "message": "檢查中…"
+  },
+  "unbind": {
+    "message": "解除"
+  },
+  "unbindTitle": {
+    "message": "解除綁定 $1"
+  },
+  "unbindConfirm": {
+    "message": "解除綁定 $1？之後這個瀏覽器不能再向它傳送下載。"
+  },
+  "retry": {
+    "message": "重試"
+  },
+  "errorWrongCode": {
+    "message": "綁定碼不對，請核對 App 中顯示的綁定碼。"
+  },
+  "errorExpired": {
+    "message": "綁定碼已過期，請在 App 中重新產生。"
+  },
+  "errorNoCode": {
+    "message": "App 目前沒有綁定碼（或已用完）。請在 App 中選擇「綁定瀏覽器」。"
+  },
+  "errorUnreachable": {
+    "message": "無法透過該位址連線裝置。"
+  },
+  "errorTooOld": {
+    "message": "該裝置的 TwimShelf 版本過舊，不支援擴充功能，請更新。"
+  },
+  "errorTooNew": {
+    "message": "該裝置需要更新版本的擴充功能。"
+  },
+  "errorBind": {
+    "message": "無法綁定（$1）"
+  },
+  "errorBadText": {
+    "message": "這既不是 6 位數綁定碼，也不是綁定文字。"
+  },
+  "errorNothing": {
+    "message": "請輸入綁定碼，或貼上綁定文字。"
+  },
+  "connectTitle": {
+    "message": "連接 TwimShelf"
+  },
+  "stepOpen": {
+    "message": "在 TwimShelf 中開啟 **設定 → 瀏覽器擴充功能 → 綁定瀏覽器**。"
+  },
+  "stepEnter": {
+    "message": "在這裡輸入 6 位數綁定碼。綁定其他電腦或 Linux 伺服器時，改為貼上綁定文字。"
+  },
+  "entryPlaceholder": {
+    "message": "綁定碼或綁定文字"
+  },
+  "manualHint": {
+    "message": "只有綁定文字裡的位址無法使用時才需要（不同網路、VPN 等）。上面的綁定碼會傳送到這個位址。"
+  },
+  "cancel": {
+    "message": "取消"
+  },
+  "binding": {
+    "message": "正在綁定…"
+  },
+  "errorNoCodeHere": {
+    "message": "這台電腦上沒有 TwimShelf 正在顯示綁定碼。請先在 App 中選擇「綁定瀏覽器」；綁定其他電腦時請貼上綁定文字。"
+  },
+  "errorNoLocal": {
+    "message": "這台電腦上沒有開啟的 TwimShelf。請開啟它，或貼上其他裝置的綁定文字。"
+  },
+  "kindServer": {
+    "message": "Linux 伺服器"
+  },
+  "kindNative": {
+    "message": "$1 App"
+  },
+  "kindFlutter": {
+    "message": "Flutter · $1"
+  },
+  "summaryNone": {
+    "message": "未連接"
+  },
+  "howToUse": {
+    "message": "在 X 上，每則貼文的書籤和分享按鈕旁都有下載按鈕。"
+  },
+  "oneDevice": {
+    "message": "已連接 1 台裝置"
+  },
+  "nDevices": {
+    "message": "已連接 $1 台裝置"
+  },
+  "nDownloading": {
+    "message": "$1 個下載中"
+  }
+}

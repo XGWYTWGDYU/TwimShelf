@@ -7,6 +7,8 @@ import 'package:share_plus/share_plus.dart';
 
 import '../l10n/l10n.dart';
 import '../platform/apple_platform.dart';
+import '../platform/os.dart';
+import '../platform/files.dart';
 
 const _channel = MethodChannel('org.twimshelf/share_inbox');
 
@@ -17,10 +19,10 @@ Future<void> shareMedia(BuildContext context, String path, {Rect? anchor}) async
   if (await ApplePlatform.instance.share([path])) return;
   if (!context.mounted) return;
   final copy = _Choice(const ValueKey('shareCopy'), Icons.copy, L('viewer.copy'), () => _copy(context, path));
-  final choices = Platform.isAndroid
+  final choices = OS.isAndroid
       ? [copy, _Choice(const ValueKey('shareOthers'), Icons.ios_share, L('viewer.shareTo'), () => _others(path, anchor))]
       : [copy, _Choice(const ValueKey('shareCopyTo'), Icons.drive_file_move_outlined, L('viewer.copyTo'), () => _copyTo(context, path))];
-  final chosen = await (Platform.isAndroid
+  final chosen = await (OS.isAndroid
       ? showModalBottomSheet<_Choice>(
           context: context,
           builder: (c) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [for (final o in choices) ListTile(key: o.key, leading: Icon(o.icon), title: Text(o.title), onTap: () => Navigator.pop(c, o))])),
@@ -54,19 +56,21 @@ void _toast(BuildContext context, String text) {
 Future<void> _copy(BuildContext context, String path) async {
   try {
     await _channel.invokeMethod<void>('copyFile', path);
-    if (context.mounted && !Platform.isAndroid) _toast(context, L('viewer.copied'));
+    if (context.mounted && !OS.isAndroid) _toast(context, L('viewer.copied'));
   } catch (_) {
     if (context.mounted) _toast(context, L('viewer.copyFailed'));
   }
 }
 
 Future<void> _others(String path, Rect? anchor) async {
+  if (OS.isWeb) return downloadToBrowser(path);
   try {
     await SharePlus.instance.share(ShareParams(files: [XFile(path)], sharePositionOrigin: anchor));
   } catch (_) {}
 }
 
 Future<void> _copyTo(BuildContext context, String path) async {
+  if (OS.isWeb) return downloadToBrowser(path);
   final place = await getSaveLocation(suggestedName: path.split(RegExp(r'[/\\\\]')).last);
   if (place == null) return;
   try {

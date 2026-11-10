@@ -1,0 +1,206 @@
+{
+  "extName": {
+    "message": "TwimShelf ダウンローダー"
+  },
+  "extDescription": {
+    "message": "X の各投稿にダウンロードボタンを追加し、TwimShelf アプリやサーバーに送ります。"
+  },
+  "buttonIdle": {
+    "message": "TwimShelf でダウンロード"
+  },
+  "stateSending": {
+    "message": "送信中…"
+  },
+  "stateQueued": {
+    "message": "待機中"
+  },
+  "stateDownloading": {
+    "message": "ダウンロード中"
+  },
+  "stateDone": {
+    "message": "ダウンロード済み"
+  },
+  "stateFailed": {
+    "message": "失敗"
+  },
+  "stateOffline": {
+    "message": "デバイスがオフライン、再試行します"
+  },
+  "statePaused": {
+    "message": "アプリで一時停止"
+  },
+  "stateCancelled": {
+    "message": "アプリでキャンセル"
+  },
+  "needsBinding": {
+    "message": "先に TwimShelf デバイスを連携してください。"
+  },
+  "openSetup": {
+    "message": "デバイスを連携"
+  },
+  "extensionReloaded": {
+    "message": "拡張機能が更新されました。このページを再読み込みしてください。"
+  },
+  "chooseDevice": {
+    "message": "ダウンロード先"
+  },
+  "platform_macos": {
+    "message": "macOS"
+  },
+  "platform_windows": {
+    "message": "Windows"
+  },
+  "platform_linux": {
+    "message": "Linux"
+  },
+  "platform_server": {
+    "message": "Linux サーバー"
+  },
+  "errorOffline": {
+    "message": "$1 に接続できません（アプリは開いていますか？）"
+  },
+  "errorUnbound": {
+    "message": "デバイスがこのブラウザを認識していません。もう一度連携してください。"
+  },
+  "errorNotAPost": {
+    "message": "投稿のリンクではありません"
+  },
+  "errorLost": {
+    "message": "デバイスにこのダウンロードがありません"
+  },
+  "devicesTitle": {
+    "message": "デバイス"
+  },
+  "defaultDevice": {
+    "message": "ボタンの送信先"
+  },
+  "askEveryTime": {
+    "message": "毎回確認"
+  },
+  "addDevice": {
+    "message": "デバイスを追加"
+  },
+  "foundHere": {
+    "message": "このコンピュータで開いているもの："
+  },
+  "manualTitle": {
+    "message": "アドレスで接続"
+  },
+  "bind": {
+    "message": "連携"
+  },
+  "bound": {
+    "message": "$1 と連携しました"
+  },
+  "tasksTitle": {
+    "message": "ダウンロード"
+  },
+  "clearFinished": {
+    "message": "終了したものを消去"
+  },
+  "noTasks": {
+    "message": "X から送ったダウンロードがここに表示されます。"
+  },
+  "deviceUnbound": {
+    "message": "再連携が必要"
+  },
+  "deviceOnline": {
+    "message": "オンライン"
+  },
+  "deviceOffline": {
+    "message": "オフライン"
+  },
+  "checking": {
+    "message": "確認中…"
+  },
+  "unbind": {
+    "message": "解除"
+  },
+  "unbindTitle": {
+    "message": "$1 の連携を解除"
+  },
+  "unbindConfirm": {
+    "message": "$1 の連携を解除しますか？このブラウザから送れなくなります。"
+  },
+  "retry": {
+    "message": "再試行"
+  },
+  "errorWrongCode": {
+    "message": "コードが違います。アプリに表示されたコードを確認してください。"
+  },
+  "errorExpired": {
+    "message": "コードの有効期限が切れました。アプリで新しいコードを表示してください。"
+  },
+  "errorNoCode": {
+    "message": "アプリにコードが表示されていません（または使用済み）。アプリで「ブラウザを連携」を選んでください。"
+  },
+  "errorUnreachable": {
+    "message": "そのアドレスでデバイスに接続できません。"
+  },
+  "errorTooOld": {
+    "message": "そのデバイスの TwimShelf は古く、拡張機能に対応していません。更新してください。"
+  },
+  "errorTooNew": {
+    "message": "そのデバイスには新しい拡張機能が必要です。"
+  },
+  "errorBind": {
+    "message": "連携できません（$1）"
+  },
+  "errorBadText": {
+    "message": "6 桁のコードでも連携テキストでもありません。"
+  },
+  "errorNothing": {
+    "message": "コードを入力するか、連携テキストを貼り付けてください。"
+  },
+  "connectTitle": {
+    "message": "TwimShelf に接続"
+  },
+  "stepOpen": {
+    "message": "TwimShelf で **設定 → ブラウザ拡張機能 → ブラウザを連携** を開きます。"
+  },
+  "stepEnter": {
+    "message": "ここに 6 桁のコードを入力します。別のコンピュータや Linux サーバーなら、連携テキストを貼り付けてください。"
+  },
+  "entryPlaceholder": {
+    "message": "コードまたは連携テキスト"
+  },
+  "manualHint": {
+    "message": "連携テキストのアドレスが使えないとき（別のネットワーク、VPN など）だけ必要です。上のコードをこのアドレスに送ります。"
+  },
+  "cancel": {
+    "message": "キャンセル"
+  },
+  "binding": {
+    "message": "連携中…"
+  },
+  "errorNoCodeHere": {
+    "message": "このコンピュータでコードを表示している TwimShelf がありません。先にアプリで「ブラウザを連携」を選ぶか、別のコンピュータなら連携テキストを貼り付けてください。"
+  },
+  "errorNoLocal": {
+    "message": "このコンピュータで TwimShelf が開いていません。開くか、ほかのデバイスの連携テキストを貼り付けてください。"
+  },
+  "kindServer": {
+    "message": "Linux サーバー"
+  },
+  "kindNative": {
+    "message": "$1 アプリ"
+  },
+  "kindFlutter": {
+    "message": "Flutter · $1"
+  },
+  "summaryNone": {
+    "message": "未接続"
+  },
+  "howToUse": {
+    "message": "X の各投稿のブックマークと共有の横にダウンロードボタンがあります。"
+  },
+  "oneDevice": {
+    "message": "1 台のデバイスに接続"
+  },
+  "nDevices": {
+    "message": "$1 台のデバイスに接続"
+  },
+  "nDownloading": {
+    "message": "$1 件ダウンロード中"
+  }
+}

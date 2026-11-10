@@ -310,6 +310,19 @@ impl Store {
         self.set_effective(media_id, &label, new)
     }) }
 
+    /// A receipt tracks only the user bit, preserving AI tags and later edits.
+    pub(crate) fn user_tag_stamp(&self, id: &str, label: &str) -> rusqlite::Result<Option<u64>> {
+        Ok(self.tag_reg(id, label)?.filter(|r| r.origin & 1 != 0).map(|r| r.h_user))
+    }
+    pub(crate) fn undo_user_tag(&self, id: &str, label: &str, clock: u64) -> rusqlite::Result<bool> {
+        if self.canonical(label)? != label || self.user_tag_stamp(id, label)? != Some(clock) { return Ok(false); }
+        let reg = self.tag_reg(id, label)?.unwrap();
+        let hlc = self.next_hlc()?;
+        self.put_tag_reg(id, label, crate::crdt::merge_bits(reg, crate::crdt::TagBits::write(0, 1, hlc)))?;
+        self.record(&crate::oplog::Op::Tag { media_id: id.into(), label: label.into(), origin: reg.origin & !1, mask: 1, hlc })?;
+        Ok(true)
+    }
+
     /// Removes a tag locally by writing tombstones (origin 0), for its current and old names.
     pub fn untag_media(&self, media_id: &str, label: &str) -> rusqlite::Result<()> { self.atomic(|| {
         let label = self.canonical(label)?;
@@ -1328,6 +1341,12 @@ impl Store {
         if !now.map_or(false, |n| crate::rules::job_finishes(n, epoch)) { return Ok(false); }
         Ok(self.conn.execute("UPDATE job SET status=?2, error=?3, updated=unixepoch() WHERE url=?1 AND epoch=?4",
             params![url, if error.is_some() { "failed" } else { "done" }, error, epoch])? > 0)
+    }
+
+    /// A link's row in the queue: its status (pending, done, failed, paused, cancelled) and error.
+    pub fn job_state(&self, url: &str) -> rusqlite::Result<Option<(String, Option<String>)>> {
+        use rusqlite::OptionalExtension;
+        self.conn.query_row("SELECT status, error FROM job WHERE url=?1", [url], |r| Ok((r.get(0)?, r.get(1)?))).optional()
     }
 
     pub fn finish_job(&self, url: &str, error: Option<String>) -> rusqlite::Result<()> {

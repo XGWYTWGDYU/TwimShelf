@@ -2,13 +2,18 @@
 """Generate every icon the Flutter apps carry, from the one source: the app's AppIcon set
 (native/Resources/Assets.xcassets/AppIcon.appiconset, named in config.yaml).
 
-None of what this writes is in git (scripts/checks/icons.py keeps it that way); scripts/apply.py
-runs this whenever a build applies config.yaml and something is missing or the source changed.
+None of what this writes is in git (scripts/checks/icons.py keeps it that way), except the web app's
+and the browser extension's icons: the extension is loaded without any build step, and the Docker
+image builds the web app with no image tools. Those are committed copies, made here like the rest
+(each repository makes its own from its own AppIcon set). scripts/apply.py runs this whenever a
+build applies config.yaml and something is missing or the source changed.
 
   Android   legacy mipmaps, and the adaptive icon's foreground over a white background
   iOS       the AppIcon set of Runner, opaque
   macOS     the AppIcon set of Runner, with the Mac icon's own corners
   in-app    assets/app_icon.png of the app and of the Windows setup
+  web       flutter/app/web: favicon and the installable web app's icons (committed)
+  extension extension/icons (committed)
 
 Windows and Linux make theirs at build time from the same set (desktop_assets.py).
 
@@ -30,6 +35,14 @@ ANDROID_RES = APP_DIR / "android/app/src/main/res"
 IOS_SET = APP_DIR / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
 MAC_SET = APP_DIR / "macos/Runner/Assets.xcassets/AppIcon.appiconset"
 IN_APP = (APP_DIR / "assets/app_icon.png", ROOT / "flutter/installer/assets/app_icon.png")
+WEB = APP_DIR / "web"
+# the Mac icon (own corners, transparent margin) at these sizes
+WEB_ROUNDED = {WEB / "favicon.png": 32}
+EXTENSION = {ROOT / f"extension/icons/icon{n}.png": n for n in (16, 32, 48, 128)}
+# the artwork to the edges, opaque (a web app's icon is masked by the system)
+WEB_FULL = {WEB / "icons/Icon-192.png": 192, WEB / "icons/Icon-512.png": 512}
+# the artwork inside the 80 % safe zone of a maskable icon
+WEB_MASKABLE = {WEB / "icons/Icon-maskable-192.png": 192, WEB / "icons/Icon-maskable-512.png": 512}
 
 ANDROID_LEGACY = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 ANDROID_ADAPTIVE = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
@@ -48,6 +61,7 @@ def catalog(folder):
 
 def outputs():
     files = list(IN_APP) + list(catalog(IOS_SET)) + list(catalog(MAC_SET))
+    files += list(WEB_ROUNDED) + list(EXTENSION) + list(WEB_FULL) + list(WEB_MASKABLE)
     for density in ANDROID_LEGACY:
         files += [ANDROID_RES / f"mipmap-{density}/ic_launcher.png", ANDROID_RES / f"mipmap-{density}/ic_launcher_foreground.png"]
     return files
@@ -124,6 +138,23 @@ def main():
     for path in IN_APP:
         path.parent.mkdir(parents=True, exist_ok=True)
         resized(image, 512).save(path)
+
+    def clean(picture, path):
+        """Committed files: pixels only, no metadata (EXIF, text chunks, ICC) of any source."""
+        out = Image.frombytes(picture.mode, picture.size, picture.tobytes())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        out.save(path, optimize=True)
+
+    for path, size in {**WEB_ROUNDED, **EXTENSION}.items():
+        clean(resized(mac, size), path)
+    for path, size in WEB_FULL.items():
+        clean(resized(image, size).convert("RGB"), path)
+    edge = image.getpixel((4, image.height // 2))[:3] + (255,)
+    for path, size in WEB_MASKABLE.items():
+        canvas = Image.new("RGBA", (size, size), edge)
+        inner = round(size * 0.8)
+        canvas.alpha_composite(resized(image, inner), ((size - inner) // 2, (size - inner) // 2))
+        clean(canvas.convert("RGB"), path)
     print(f"config: {len(outputs())} icons made from the AppIcon set")
 
 

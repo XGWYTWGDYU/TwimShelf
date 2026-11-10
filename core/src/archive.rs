@@ -621,7 +621,7 @@ mod tests {
         assert_eq!((r.posts, r.media, r.deleted), (1, 2, 0));
         let tmp_left = fs::read_dir(lib.dir.join("tmp")).map_or(0, |rd| rd.count());
         assert_eq!(tmp_left, 0, "nothing extracted or left behind");
-        let req = FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
+        let req = FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: None, fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
         let items = lib.feed(&req).unwrap();
         assert!(items.iter().all(|i| i.post_id == "77" && i.text.as_deref() == Some("中文正文")));
         let one = hex::encode(Sha256::digest(crate::testutil::jpg(b"one")));
@@ -657,7 +657,7 @@ mod tests {
             fs::write(src.join("1.jpg"), crate::testutil::jpg(name.as_bytes())).unwrap();
             let lib = Library::open(d.join(format!("lib-{name}"))).unwrap();
             crate::import::import_loose_dir_keep(&lib, &src, None, true, None, album).unwrap();
-            let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+            let all = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
             assert_eq!(all.len(), 1);
             assert!(all[0].post_id.starts_with("loose:"), "both are loose");
             assert_eq!(all[0].album, album);
@@ -694,7 +694,7 @@ mod tests {
         for (n, b) in [("1.jpg", "a"), ("2.jpg", "b"), ("3.jpg", "c")] { fs::write(src.join(n), crate::testutil::jpg(b.as_bytes())).unwrap(); }
         let lib = Library::open(d.join("lib")).unwrap();
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let all = lib.feed(&FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let all = lib.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         let mut ids: Vec<_> = all.iter().map(|i| (i.ordinal, i.media_id.clone())).collect(); ids.sort();
         lib.tag(&ids[0].1, "A", Origin::USER).unwrap();
         lib.tag(&ids[1].1, "A", Origin::AI).unwrap();
@@ -705,7 +705,7 @@ mod tests {
         let lib2 = Library::open(d.join("lib2")).unwrap();
         let r = import_pack(&lib2, &out).unwrap();
         assert_eq!(r.media, 2);
-        let got = lib2.feed(&FeedRequest { newest_first: false, terms: vec!["a".into()], scope: SearchScope::Ai, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
+        let got = lib2.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: vec!["a".into()], scope: SearchScope::Ai, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].text.as_deref(), Some("帖子"));
     }
@@ -749,7 +749,7 @@ mod tests {
         for (n, b) in [("1.jpg", "a"), ("2.jpg", "b"), ("3.jpg", "c")] { fs::write(src.join(n), crate::testutil::jpg(b.as_bytes())).unwrap(); }
         let lib = Library::open(d.join("lib")).unwrap();
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let req = FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
+        let req = FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() };
         let mut ids: Vec<_> = lib.feed(&req).unwrap().iter().map(|i| (i.ordinal, i.media_id.clone())).collect(); ids.sort();
         // media0: A (AI, by model m1, endorsed) ; media1: A + B ; media2: B
         lib.apply_ai_tags(&ids[0].1, "m1", &["a".into()], false).unwrap();
@@ -865,7 +865,7 @@ mod tests {
         for (n, b) in [("1.jpg", "a"), ("2.jpg", "b")] { fs::write(src.join(n), crate::testutil::jpg(b.as_bytes())).unwrap(); }
         let lib = Library::open(d.join("lib")).unwrap();
         lib.import_legacy_dir(&d.join("src")).unwrap();
-        let req = |kind| FeedRequest { newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(),
+        let req = |kind| FeedRequest { whole_posts: false, newest_first: false, terms: vec![], scope: SearchScope::Both, seed: Some(0), fuzzy: true, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(),
             filter: crate::library::FeedFilter { kind, ..Default::default() } };
         let all = lib.feed(&req(None)).unwrap();
         assert_eq!(all.len(), 2);

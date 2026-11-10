@@ -1,4 +1,3 @@
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
@@ -12,6 +11,7 @@ import 'settings_page.dart' show SettingsIcon, SettingsSection;
 import '../actions/folder_actions.dart';
 import '../app/jobs.dart';
 import '../widgets/text_menu.dart';
+import '../platform/os.dart';
 
 /// 文件夹: the user's folders as covers, then the media kinds and the other collections — the
 /// way to every place where the window has no sidebar.
@@ -69,7 +69,7 @@ class FoldersPage extends StatelessWidget {
                       onTap: () => _newFolder(context),
                     ),
                   for (final f in folders)
-                    _FolderRow(library: library, folder: f, cacheDir: '${library.directory}${Platform.pathSeparator}.covers', onOpen: () => onOpen(Place.folder(f.name))),
+                    _FolderRow(library: library, folder: f, cacheDir: '${library.directory}${OS.pathSeparator}.covers', onOpen: () => onOpen(Place.folder(f.name))),
                 ]),
                 if (!foldersOnly) ...[
                   SettingsSection(title: L('sidebar.mediaTypes'), children: [

@@ -8005,6 +8005,557 @@
         }
       }
     },
+    "ext.bind" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bind a Browser…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブラウザを連携…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绑定浏览器…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "綁定瀏覽器…"
+          }
+        }
+      }
+    },
+    "ext.client.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bound %@ · last used %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連携 %@ · 最終使用 %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绑定于 %@ · 最近使用 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "綁定於 %@ · 最近使用 %@"
+          }
+        }
+      }
+    },
+    "ext.clients" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bound Browsers"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連携中のブラウザ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已绑定的浏览器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已綁定的瀏覽器"
+          }
+        }
+      }
+    },
+    "ext.code.copied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copied"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コピーしました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已复制"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拷貝"
+          }
+        }
+      }
+    },
+    "ext.code.copy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Binding Text"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連携テキストをコピー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制绑定文本"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷貝綁定文字"
+          }
+        }
+      }
+    },
+    "ext.code.done" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bound: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連携しました：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已绑定：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已綁定：%@"
+          }
+        }
+      }
+    },
+    "ext.code.expires" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The code works once, for 10 minutes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コードは 1 回限り、10 分間有効です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绑定码只能用一次，10 分钟内有效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "綁定碼只能用一次，10 分鐘內有效。"
+          }
+        }
+      }
+    },
+    "ext.code.howto" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In the extension, choose “Add Device” and paste the binding text below, or pick this device from the list and type the code."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拡張機能で「デバイスを追加」を選び、下の連携テキストを貼り付けるか、一覧からこのデバイスを選んでコードを入力してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在扩展中选择「添加设备」，粘贴下面的绑定文本；或在列表中选中本设备，输入绑定码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在擴充功能中選擇「新增裝置」，貼上下面的綁定文字；或在清單中選取本裝置，輸入綁定碼。"
+          }
+        }
+      }
+    },
+    "ext.code.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Binding Code"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連携コード"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "绑定码"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "綁定碼"
+          }
+        }
+      }
+    },
+    "ext.footer.desktop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This computer receives downloads while the app is open (port %@, from this computer and your local network)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アプリを開いている間、このコンピュータがダウンロードを受け取ります（ポート %@、このコンピュータとローカルネットワークのみ）。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用打开时，这台电脑接收下载（端口 %@，仅限本机和局域网）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App 開啟時，這台電腦接收下載（連接埠 %@，僅限本機和區域網路）。"
+          }
+        }
+      }
+    },
+    "ext.footer.web" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This server receives downloads at all times, even with no page open."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサーバーはページを開いていなくても常にダウンロードを受け取ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台服务器随时接收下载，无需打开网页。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台伺服器隨時接收下載，無需開啟網頁。"
+          }
+        }
+      }
+    },
+    "ext.intro" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "With the TwimShelf extension in Chrome, Edge or another Chromium browser, every post on X gets a download button that sends it here. Bind the browser once with a code from this page."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chrome や Edge などの Chromium ブラウザに TwimShelf 拡張機能を入れると、X の各投稿にダウンロードボタンが付き、押すとここでダウンロードします。このページのコードで一度連携してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Chrome、Edge 等 Chromium 浏览器中安装 TwimShelf 扩展后，X 上的每条帖子旁都会出现下载按钮，点一下就交给这里下载。用本页的绑定码绑定一次即可。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Chrome、Edge 等 Chromium 瀏覽器中安裝 TwimShelf 擴充功能後，X 上的每則貼文旁都會出現下載按鈕，點一下就交給這裡下載。用本頁的綁定碼綁定一次即可。"
+          }
+        }
+      }
+    },
+    "ext.remove.confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unbind"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連携を解除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除绑定"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除綁定"
+          }
+        }
+      }
+    },
+    "ext.remove.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "That browser can no longer send downloads here until it is bound again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除すると、もう一度連携するまでそのブラウザからここへダウンロードを送れません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除后，该浏览器不能再向这里发送下载，除非重新绑定。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除後，該瀏覽器不能再向這裡傳送下載，除非重新綁定。"
+          }
+        }
+      }
+    },
+    "ext.remove.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unbind “%@”?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」の連携を解除しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除绑定「%@」？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除綁定「%@」？"
+          }
+        }
+      }
+    },
+    "ext.state.count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ bound"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 件連携中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已绑定 %@ 个"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已綁定 %@ 個"
+          }
+        }
+      }
+    },
+    "ext.state.none" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not bound"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未連携"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未绑定"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未綁定"
+          }
+        }
+      }
+    },
+    "ext.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browser Extension"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブラウザ拡張機能"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浏览器扩展"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "瀏覽器擴充功能"
+          }
+        }
+      }
+    },
+    "ext.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The receiver could not start: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "受信を開始できません：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接收服务无法启动：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接收服務無法啟動：%@"
+          }
+        }
+      }
+    },
     "feed.autoplaying" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8185,25 +8736,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The library is empty\nUse the button at the bottom right to import or download posts"
+            "value" : "The library is empty\nDownload posts with ↓ at the top (in ⋯ when the search is folded), or import them in Settings → Import & Backup"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ライブラリは空です\n右下のボタンから投稿を読み込むかダウンロードしてください"
+            "value" : "ライブラリは空です\n上部の ↓（検索欄が畳まれているときは ⋯ の中）で投稿をダウンロードするか、「設定 → 読み込みとバックアップ」から読み込んでください"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "资料库是空的\n点右下角的按钮导入或下载帖子"
+            "value" : "资料库是空的\n用顶部的 ↓ 下载帖子（搜索栏收起时在 ⋯ 里），或在「设置 → 导入与备份」中导入"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "資料庫是空的\n點右下角的按鈕匯入或下載貼文"
+            "value" : "資料庫是空的\n用頂部的 ↓ 下載貼文（搜尋列收起時在 ⋯ 裡），或在「設定 → 匯入與備份」中匯入"
           }
         }
       }

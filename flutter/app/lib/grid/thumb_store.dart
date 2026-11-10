@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -10,6 +9,8 @@ import 'package:tl_core/tl_core.dart';
 
 import '../platform/video.dart';
 import '../widgets/media_image.dart';
+import '../platform/os.dart';
+import '../platform/files.dart';
 
 /// Square thumbnails of media for the grids, as the native `GridThumbnails` does it:
 ///
@@ -26,14 +27,15 @@ class ThumbStore {
   ThumbStore._(this._cacheDir, this._workers);
 
   static Future<ThumbStore> create() async {
-    final base = Platform.environment['TL_LIBRARY_DIR'] != null
-        ? Directory('${Platform.environment['TL_LIBRARY_DIR']}${Platform.pathSeparator}.thumbs')
-        : Directory('${(await getApplicationCacheDirectory()).path}${Platform.pathSeparator}GridThumbnails');
-    await base.create(recursive: true);
-    HeifFileImage.cacheDir = base.path;
-    final n = math.max(2, math.min(4, Platform.numberOfProcessors - 2));
+    final base = OS.environment['TL_LIBRARY_DIR'] != null
+        ? '${OS.environment['TL_LIBRARY_DIR']}${OS.pathSeparator}.thumbs'
+        : '${(await getApplicationCacheDirectory()).path}${OS.pathSeparator}GridThumbnails';
+    await ensureDirectory(base);
+    HeifFileImage.cacheDir = base;
+    // the web build: the server makes them (a few at a time), there is no isolate here
+    final n = OS.isWeb ? 6 : math.max(2, math.min(4, OS.numberOfProcessors - 2));
     final workers = await Future.wait([for (var i = 0; i < n; i++) _Worker.spawn()]);
-    return ThumbStore._(base.path, workers);
+    return ThumbStore._(base, workers);
   }
 
   final String _cacheDir;
@@ -174,7 +176,7 @@ class ThumbStore {
         // a video poster depends on the device's decoders, and says nothing about the file
         if (video == null) onFailed?.call(id);
       } else {
-        final bytes = await File(r).readAsBytes();
+        final bytes = await readFileBytes(r);
         final codec = await ui.instantiateImageCodec(bytes, targetWidth: side, targetHeight: side);
         late final ui.FrameInfo frame;
         try {
@@ -284,11 +286,12 @@ class _Entry {
 /// A background isolate making thumbnails with the core, one at a time.
 class _Worker {
   _Worker(this._send, this._port, this._replies);
-  final SendPort _send;
-  final ReceivePort _port;
-  final Stream<dynamic> _replies;
+  final SendPort? _send;
+  final ReceivePort? _port;
+  final Stream<dynamic>? _replies;
 
   static Future<_Worker> spawn() async {
+    if (OS.isWeb) return _Worker(null, null, null);
     final port = ReceivePort();
     await Isolate.spawn(_main, port.sendPort);
     final replies = port.asBroadcastStream();
@@ -302,14 +305,26 @@ class _Worker {
 
   /// The thumbnail's file path, 'video', [notMade], or null when the media cannot be decoded.
   Future<String?> run(String id, int side, String dir) async {
-    final reply = _replies.first;
+    if (_send == null) return coreRunAsync(() => _make(id, side, dir));
+    final reply = _replies!.first;
     _send.send((id, side, dir));
     return await reply as String?;
   }
 
   void close() {
-    _send.send(null);
-    _port.close();
+    _send?.send(null);
+    _port?.close();
+  }
+
+  static String? _make(String id, int side, String dir) {
+    try {
+      final r = Core.thumbnail(id, side, dir);
+      return switch (r) { ThumbnailImage(:final path) => path, ThumbnailVideo() => 'video' };
+    } on ThumbnailNotDecodable {
+      return null;
+    } catch (_) {
+      return notMade;
+    }
   }
 
   static void _main(SendPort out) {
@@ -321,14 +336,7 @@ class _Worker {
         return;
       }
       final (id, side, dir) = msg as (String, int, String);
-      try {
-        final r = Core.thumbnail(id, side, dir);
-        out.send(switch (r) { ThumbnailImage(:final path) => path, ThumbnailVideo() => 'video' });
-      } on ThumbnailNotDecodable {
-        out.send(null);
-      } catch (_) {
-        out.send(notMade);
-      }
+      out.send(_make(id, side, dir));
     });
   }
 }

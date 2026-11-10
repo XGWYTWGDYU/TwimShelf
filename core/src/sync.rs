@@ -100,6 +100,9 @@ pub struct SyncStatus {
     /// reason: the app then looks the device up again (its port changes when it restarts) and
     /// shows the reason instead of staying silent.
     pub failed: BTreeMap<String, String>,
+    /// Devices with a session running now (the schedulers do not start another one with them).
+    #[serde(default)]
+    pub in_session: Vec<String>,
 }
 
 pub struct SyncNode {
@@ -113,6 +116,9 @@ pub struct SyncNode {
     active: Mutex<HashSet<String>>,
     /// Peer devices with a session in progress (one session per peer at a time).
     peer_sessions: Mutex<HashSet<String>>,
+    /// Files being fetched by a running session: a session with another device asks for the
+    /// rest, so a new device filling up from two peers at once never receives a file twice.
+    claimed: Mutex<HashSet<String>>,
     failed: Mutex<BTreeMap<String, String>>,
     transfer: Mutex<Option<Transfer>>,
     join: Mutex<JoinState>,
@@ -121,6 +127,7 @@ pub struct SyncNode {
 }
 
 const ALREADY_SYNCING: &str = "already syncing with this device";
+fn is_busy(e: &anyhow::Error) -> bool { format!("{e:#}").contains(ALREADY_SYNCING) }
 
 fn now_s() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64) }
@@ -232,6 +239,9 @@ enum Msg {
     NoBlob { id: String },
     BlobsEnd,
     Bye,
+    /// "A session with your device is already running": the side that finds the duplicate says
+    /// so instead of hanging up, and neither side takes it for a failure.
+    Busy,
     // ---- on-demand model sharing (mode "models") ----
     ListModels,
     Models { list: Vec<crate::models::ModelInfo> },
@@ -262,7 +272,7 @@ impl SyncNode {
         Arc::new(SyncNode {
             account_revision: tokio::sync::watch::channel(0).0,
             lib, account: Mutex::new(None), device_name: Mutex::new(tr!("sync.defaultName").into()), port: Mutex::new(None),
-            pairing: Mutex::new(None), peers: Mutex::new(BTreeMap::new()), active: Mutex::new(HashSet::new()), peer_sessions: Mutex::new(HashSet::new()), failed: Mutex::new(BTreeMap::new()), transfer: Mutex::new(None),
+            pairing: Mutex::new(None), peers: Mutex::new(BTreeMap::new()), active: Mutex::new(HashSet::new()), peer_sessions: Mutex::new(HashSet::new()), claimed: Mutex::new(HashSet::new()), failed: Mutex::new(BTreeMap::new()), transfer: Mutex::new(None),
             join: Mutex::new(JoinState::default()), changes: AtomicU64::new(0), shutdown: Mutex::new(None),
         })
     }
@@ -276,6 +286,9 @@ impl SyncNode {
             let live = pairing.as_ref().filter(|p| p.expires > Instant::now() && p.attempts < PAIR_ATTEMPTS);
             (live.map(|p| p.code.clone()), live.map(|p| p.expires.saturating_duration_since(Instant::now()).as_secs()))
         };
+        // (a guard taken inside the literal lives until its end: lock once, before it)
+        let mut in_session: Vec<String> = self.peer_sessions.lock().unwrap().iter().cloned().collect();
+        in_session.sort();
         SyncStatus {
             account_id: self.account().map(|a| a.id),
             device_id: self.device_id(),
@@ -284,11 +297,12 @@ impl SyncNode {
             pairing_code,
             pairing_seconds_left,
             peers: self.peers.lock().unwrap().values().cloned().collect(),
-            syncing: self.active.lock().unwrap().len().max(self.peer_sessions.lock().unwrap().len()),
+            syncing: self.active.lock().unwrap().len().max(in_session.len()),
             receiving: self.transfer.lock().unwrap().clone(),
             changes: self.changes.load(Ordering::SeqCst),
             join: self.join.lock().unwrap().clone(),
             failed: self.failed.lock().unwrap().clone(),
+            in_session,
         }
     }
 
@@ -636,7 +650,7 @@ impl SyncNode {
         match &r {
             Ok(()) => { failed.remove(&key); }
             // the other device started the same session first: not a failure
-            Err(e) if format!("{e:#}").contains(ALREADY_SYNCING) => {}
+            Err(e) if is_busy(e) => {}
             Err(e) => { failed.insert(key.clone(), crate::diagnostics::scrub(&format!("{e:#}"))); }
         }
         drop(failed);
@@ -676,7 +690,13 @@ impl SyncNode {
         let my_now = now_ms();
         if peer == me { bail!("connected to self"); }
         // One session per peer: a second concurrent session would fetch the same files twice.
-        if !self.peer_sessions.lock().unwrap().insert(peer.clone()) { bail!(ALREADY_SYNCING); }
+        // Both sides check, and the side that finds a duplicate tells the other (two devices may
+        // start a session with each other at the same moment; then both end, without an error,
+        // and the next round runs one).
+        if !self.peer_sessions.lock().unwrap().insert(peer.clone()) {
+            let _ = ch.send(&Msg::Busy).await;
+            bail!(ALREADY_SYNCING);
+        }
         struct Release<'a>(&'a Mutex<HashSet<String>>, String);
         impl Drop for Release<'_> { fn drop(&mut self) { self.0.lock().unwrap().remove(&self.1); } }
         let _release = Release(&self.peer_sessions, peer.clone());
@@ -688,7 +708,7 @@ impl SyncNode {
                 changed |= self.request_blobs(&mut ch).await?;
                 self.serve_blobs(&mut ch).await?;
                 // Wait until the responder has stored everything before reporting success.
-                let Msg::Bye = ch.recv().await? else { bail!("protocol: bye") };
+                match ch.recv().await? { Msg::Bye => {} Msg::Busy => bail!(ALREADY_SYNCING), _ => bail!("protocol: bye") }
             } else {
                 changed |= self.recv_ops(&mut ch).await?;
                 self.send_ops(&mut ch, &their_vv).await?;
@@ -699,6 +719,8 @@ impl SyncNode {
             Ok(())
         }.await;
         if changed { self.changes.fetch_add(1, Ordering::SeqCst); }
+        // the other device was already in a session with this one: nothing went wrong
+        let busy = matches!(&result, Err(e) if is_busy(e));
         let mut peers = self.peers.lock().unwrap();
         let p = peers.entry(peer.clone()).or_default();
         p.device = peer; p.name = peer_name; p.addr = addr;
@@ -706,9 +728,9 @@ impl SyncNode {
             p.clock_skew_ms = i64::try_from(their_now as i128 - my_now as i128).ok();
             p.clock_warning = crate::rules::skew_warning(my_now, their_now);
         }
-        match &result { Ok(_) => { p.last_sync = now_s(); p.last_error = None; } Err(e) => p.last_error = Some(format!("{e:#}")) }
+        match &result { Ok(_) => { p.last_sync = now_s(); p.last_error = None; } Err(_) if busy => {} Err(e) => p.last_error = Some(format!("{e:#}")) }
         drop(peers);
-        if let Err(e) = &result { self.lib.diag("sync_error", serde_json::json!({ "error": crate::diagnostics::scrub(&format!("{e:#}")) })); }
+        if let (Err(e), false) = (&result, busy) { self.lib.diag("sync_error", serde_json::json!({ "error": crate::diagnostics::scrub(&format!("{e:#}")) })); }
         result
     }
 
@@ -773,6 +795,7 @@ impl SyncNode {
                     self.lib.diag("sync_ops_received", serde_json::json!({ "received": ops.len(), "new": n, "by_kind": kinds }));
                     changed |= n > 0;
                 }
+                Msg::Busy => bail!(ALREADY_SYNCING),
                 Msg::OpsEnd => {
                     // Remove files of media deleted elsewhere (state check and removal are atomic).
                     if changed { self.lib.settle()?; }
@@ -784,16 +807,31 @@ impl SyncNode {
     }
 
     async fn request_blobs(&self, ch: &mut Channel) -> anyhow::Result<bool> {
-        let wanted = self.lib.db().wanted_blobs(5000)?;
+        // skip files another session is already fetching, and claim these until this ends
+        let wanted = {
+            let mut claimed = self.claimed.lock().unwrap();
+            let all = self.lib.db().wanted_blobs(5000 + claimed.len() as i64)?;
+            let mine: Vec<(String, String)> = all.into_iter().filter(|(id, _)| !claimed.contains(id)).take(5000).collect();
+            claimed.extend(mine.iter().map(|(id, _)| id.clone()));
+            mine
+        };
+        struct Claims<'a>(&'a Mutex<HashSet<String>>, Vec<String>);
+        impl Drop for Claims<'_> { fn drop(&mut self) { if let Ok(mut c) = self.0.lock() { for id in &self.1 { c.remove(id); } } } }
+        let _claims = Claims(&self.claimed, wanted.iter().map(|(id, _)| id.clone()).collect());
         let total = wanted.len() as u64;
         let asked: HashSet<String> = wanted.iter().map(|(id, _)| id.clone()).collect();
         ch.send(&Msg::Want { blobs: wanted }).await?;
         let mut got = false;
-        if total > 0 { *self.transfer.lock().unwrap() = Some(Transfer { total, ..Default::default() }); }
+        if total > 0 {
+            // another session receiving at the same time: one progress for both
+            let mut t = self.transfer.lock().unwrap();
+            match t.as_mut() { Some(t) => t.total += total, None => *t = Some(Transfer { total, ..Default::default() }) }
+        }
         let mut since_notice = 0u32;
         let mut last_notice = Instant::now();
         let result = self.receive_blobs(ch, &asked, &mut got, &mut since_notice, &mut last_notice).await;
-        *self.transfer.lock().unwrap() = None;
+        drop(_claims);
+        if self.claimed.lock().unwrap().is_empty() { *self.transfer.lock().unwrap() = None; }
         if got { self.changes.fetch_add(1, Ordering::SeqCst); }
         result.map(|_| got)
     }
@@ -868,10 +906,12 @@ impl SyncNode {
                     }
                 }
                 Msg::Plan { files, bytes } => {
-                    if let Some(t) = self.transfer.lock().unwrap().as_mut() { t.total = files; t.total_bytes = bytes; }
+                    // the files this peer has of the ones asked (another session's share stays counted)
+                    if let Some(t) = self.transfer.lock().unwrap().as_mut() { t.total = t.total.saturating_sub(asked.len() as u64) + files; t.total_bytes += bytes; }
                 }
                 Msg::NoBlob { .. } => { if let Some(t) = self.transfer.lock().unwrap().as_mut() { t.total = t.total.saturating_sub(1); } }
                 Msg::BlobsEnd => return Ok(()),
+                Msg::Busy => bail!(ALREADY_SYNCING),
                 _ => bail!("protocol: blobs"),
             }
         }
@@ -886,7 +926,7 @@ impl SyncNode {
     }
 
     async fn serve_blobs(&self, ch: &mut Channel) -> anyhow::Result<()> {
-        let Msg::Want { blobs } = ch.recv().await? else { bail!("protocol: want") };
+        let blobs = match ch.recv().await? { Msg::Want { blobs } => blobs, Msg::Busy => bail!(ALREADY_SYNCING), _ => bail!("protocol: want") };
         let valid = |id: &str, ext: &str| crate::rules::valid_blob_id(id.as_bytes()) && crate::rules::valid_ext(ext.as_bytes());
         let (mut files, mut bytes) = (0u64, 0u64);
         for (id, ext) in &blobs {
@@ -993,6 +1033,67 @@ mod pairing_tests {
             }
         }).await.expect("session locks must be released");
         assert!(b.sync_with("127.0.0.1", pa).await.is_ok(), "next session runs normally");
+    }
+
+    /// Two devices starting a session with each other at the same moment (or one during the
+    /// other's long first sync) must not show each other as failed: the duplicate is refused
+    /// with Busy, which neither side records as an error.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn crossing_sessions_are_not_failures() {
+        let (a, b) = (node("xa"), node("xb"));
+        let acct = Account::generate();
+        let pa = a.start(Some(acct.clone()), "A".into()).await.unwrap();
+        let pb = b.start(Some(acct), "B".into()).await.unwrap();
+        let src = a.lib.dir.join("src");
+        for i in 0..40 {
+            let d = src.join(format!("p{i}"));
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("1.jpg"), crate::testutil::jpg(format!("x{i}").as_bytes())).unwrap();
+        }
+        a.lib.import_legacy_dir(&src).unwrap();
+        for i in 0..20 {
+            let (a2, b2) = (a.clone(), b.clone());
+            let r = tokio::time::timeout(Duration::from_secs(20), async { tokio::join!(a2.sync_with("127.0.0.1", pb), b2.sync_with("127.0.0.1", pa)) }).await;
+            assert!(r.is_ok(), "round {i} must end");
+        }
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let busy = !a.peer_sessions.lock().unwrap().is_empty() || !b.peer_sessions.lock().unwrap().is_empty();
+                if !busy { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        for n in [&a, &b] {
+            let st = n.status();
+            assert!(st.failed.is_empty(), "no failed address: {:?}", st.failed);
+            assert!(st.peers.iter().all(|p| p.last_error.is_none()), "no peer error: {:?}", st.peers);
+            assert!(st.in_session.is_empty());
+        }
+        assert_eq!(b.lib.db().wanted_blobs(1000).unwrap().len(), 0, "everything arrived");
+    }
+
+    /// A new device filling up from two peers at once asks each for different files.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn two_sessions_never_fetch_the_same_file() {
+        let (a, b, c) = (node("ta"), node("tb"), node("tc"));
+        let acct = Account::generate();
+        let pa = a.start(Some(acct.clone()), "A".into()).await.unwrap();
+        let pb = b.start(Some(acct.clone()), "B".into()).await.unwrap();
+        c.start(Some(acct), "C".into()).await.unwrap();
+        let src = a.lib.dir.join("src");
+        for i in 0..60 {
+            let d = src.join(format!("p{i}"));
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("1.jpg"), crate::testutil::jpg(format!("y{i}").as_bytes())).unwrap();
+        }
+        a.lib.import_legacy_dir(&src).unwrap();
+        b.sync_with("127.0.0.1", pa).await.unwrap();
+        let (c1, c2) = (c.clone(), c.clone());
+        let (r1, r2) = tokio::join!(c1.sync_with("127.0.0.1", pa), c2.sync_with("127.0.0.1", pb));
+        r1.unwrap(); r2.unwrap();
+        for _ in 0..3 { c.sync_with("127.0.0.1", pa).await.unwrap(); }
+        assert_eq!(c.lib.db().wanted_blobs(1000).unwrap().len(), 0);
+        assert!(c.claimed.lock().unwrap().is_empty() && c.transfer.lock().unwrap().is_none());
     }
 
     /// Throughput of the sync protocol alone over loopback (run with --ignored --nocapture).
@@ -1365,7 +1466,7 @@ mod tests {
         std::fs::remove_dir_all(l.dir.join("src")).unwrap();
     }
     fn feed(l: &Library, terms: &[&str]) -> Vec<crate::library::FeedItem> {
-        l.feed(&FeedRequest { newest_first: false, terms: terms.iter().map(|s| s.to_string()).collect(), scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap()
+        l.feed(&FeedRequest { whole_posts: false, newest_first: false, terms: terms.iter().map(|s| s.to_string()).collect(), scope: SearchScope::Both, seed: Some(0), fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.7, fields: Default::default(), filter: Default::default() }).unwrap()
     }
 
     #[tokio::test(flavor = "multi_thread")]

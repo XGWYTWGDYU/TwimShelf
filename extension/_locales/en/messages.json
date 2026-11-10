@@ -1,0 +1,206 @@
+{
+  "extName": {
+    "message": "TwimShelf Downloader"
+  },
+  "extDescription": {
+    "message": "Adds a download button to every post on X that sends it to your TwimShelf app or server."
+  },
+  "buttonIdle": {
+    "message": "Download with TwimShelf"
+  },
+  "stateSending": {
+    "message": "Sending…"
+  },
+  "stateQueued": {
+    "message": "Waiting"
+  },
+  "stateDownloading": {
+    "message": "Downloading"
+  },
+  "stateDone": {
+    "message": "Downloaded"
+  },
+  "stateFailed": {
+    "message": "Failed"
+  },
+  "stateOffline": {
+    "message": "Device offline, will retry"
+  },
+  "statePaused": {
+    "message": "Paused in the app"
+  },
+  "stateCancelled": {
+    "message": "Cancelled in the app"
+  },
+  "needsBinding": {
+    "message": "Bind a TwimShelf device first."
+  },
+  "openSetup": {
+    "message": "Bind a Device"
+  },
+  "extensionReloaded": {
+    "message": "The extension was updated. Reload this page."
+  },
+  "chooseDevice": {
+    "message": "Download on"
+  },
+  "platform_macos": {
+    "message": "macOS"
+  },
+  "platform_windows": {
+    "message": "Windows"
+  },
+  "platform_linux": {
+    "message": "Linux"
+  },
+  "platform_server": {
+    "message": "Linux server"
+  },
+  "errorOffline": {
+    "message": "$1 cannot be reached (is the app open?)"
+  },
+  "errorUnbound": {
+    "message": "The device no longer knows this browser: bind it again."
+  },
+  "errorNotAPost": {
+    "message": "Not a post link"
+  },
+  "errorLost": {
+    "message": "The device no longer has this download"
+  },
+  "devicesTitle": {
+    "message": "Devices"
+  },
+  "defaultDevice": {
+    "message": "Download button sends to"
+  },
+  "askEveryTime": {
+    "message": "Ask every time"
+  },
+  "addDevice": {
+    "message": "Add Device"
+  },
+  "foundHere": {
+    "message": "Open on this computer:"
+  },
+  "manualTitle": {
+    "message": "Reach a device by its address"
+  },
+  "bind": {
+    "message": "Bind"
+  },
+  "bound": {
+    "message": "Bound to $1"
+  },
+  "tasksTitle": {
+    "message": "Downloads"
+  },
+  "clearFinished": {
+    "message": "Clear finished"
+  },
+  "noTasks": {
+    "message": "Downloads you send from X show here."
+  },
+  "deviceUnbound": {
+    "message": "Bind again"
+  },
+  "deviceOnline": {
+    "message": "Online"
+  },
+  "deviceOffline": {
+    "message": "Offline"
+  },
+  "checking": {
+    "message": "Checking…"
+  },
+  "unbind": {
+    "message": "Unbind"
+  },
+  "unbindTitle": {
+    "message": "Unbind $1"
+  },
+  "unbindConfirm": {
+    "message": "Unbind $1? This browser can no longer send downloads to it."
+  },
+  "retry": {
+    "message": "Retry"
+  },
+  "errorWrongCode": {
+    "message": "Wrong code. Check the code shown in the app."
+  },
+  "errorExpired": {
+    "message": "The code has expired. Show a new one in the app."
+  },
+  "errorNoCode": {
+    "message": "The app shows no code right now (or it was used up). Choose “Bind a Browser” in the app."
+  },
+  "errorUnreachable": {
+    "message": "The device cannot be reached at that address."
+  },
+  "errorTooOld": {
+    "message": "That device runs an older TwimShelf without the extension. Update it."
+  },
+  "errorTooNew": {
+    "message": "That device needs a newer version of this extension."
+  },
+  "errorBind": {
+    "message": "Could not bind ($1)"
+  },
+  "errorBadText": {
+    "message": "That is neither a 6-digit code nor a binding text."
+  },
+  "errorNothing": {
+    "message": "Type the code, or paste the binding text."
+  },
+  "connectTitle": {
+    "message": "Connect TwimShelf"
+  },
+  "stepOpen": {
+    "message": "In TwimShelf, open **Settings → Browser Extension → Bind a Browser**."
+  },
+  "stepEnter": {
+    "message": "Type the 6-digit code here. For another computer or a Linux server, paste the binding text instead."
+  },
+  "entryPlaceholder": {
+    "message": "Code or binding text"
+  },
+  "manualHint": {
+    "message": "Only needed when the binding text's addresses don't work (another network, a VPN). The code above is used with this address."
+  },
+  "cancel": {
+    "message": "Cancel"
+  },
+  "binding": {
+    "message": "Binding…"
+  },
+  "errorNoCodeHere": {
+    "message": "No TwimShelf on this computer is showing a code. Choose “Bind a Browser” in the app first; for another computer, paste the binding text."
+  },
+  "errorNoLocal": {
+    "message": "No TwimShelf is open on this computer. Open it, or paste the binding text of a device elsewhere."
+  },
+  "kindServer": {
+    "message": "Linux server"
+  },
+  "kindNative": {
+    "message": "$1 app"
+  },
+  "kindFlutter": {
+    "message": "Flutter · $1"
+  },
+  "summaryNone": {
+    "message": "Not connected"
+  },
+  "howToUse": {
+    "message": "On X, every post now has a download button next to bookmark and share."
+  },
+  "oneDevice": {
+    "message": "1 device connected"
+  },
+  "nDevices": {
+    "message": "$1 devices connected"
+  },
+  "nDownloading": {
+    "message": "$1 downloading"
+  }
+}

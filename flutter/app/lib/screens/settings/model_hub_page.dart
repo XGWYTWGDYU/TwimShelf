@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:isolate';
 
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
@@ -14,8 +13,8 @@ import '../../widgets/text_menu.dart';
 class ModelHubApi {
   const ModelHubApi();
   HubDevice? device() => Core.hubDevice();
-  Future<HubPage> search(String format, String query, bool uncensored, String? next) => Isolate.run(() => Core.hubSearch(format, query, uncensored, next));
-  Future<HubDetail> repo(String format, String repo) => Isolate.run(() => Core.hubRepo(format, repo));
+  Future<HubPage> search(String format, String query, bool uncensored, String? next) => coreRunAsync(() => Core.hubSearch(format, query, uncensored, next));
+  Future<HubDetail> repo(String format, String repo) => coreRunAsync(() => Core.hubRepo(format, repo));
 }
 
 String _size(int bytes) => bytes >= 1e9 ? '${(bytes / 1e9).toStringAsFixed(1)} GB' : '${(bytes / 1e6).round()} MB'; // i18n-exempt: unit symbols

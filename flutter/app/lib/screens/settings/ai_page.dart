@@ -1,4 +1,3 @@
-import 'dart:isolate';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
@@ -14,6 +13,7 @@ import '../../mascot/mascot.dart';
 import '../settings_page.dart';
 import 'model_hub_page.dart';
 import '../../widgets/text_menu.dart';
+import '../../platform/files.dart';
 
 /// 打标签: automatic tagging of new media, the model that tags, a run over the whole library, the
 /// on-device models (MLX on Apple devices, llama.cpp elsewhere) and the OpenAI-compatible
@@ -296,7 +296,7 @@ class _AppleOnlySectionState extends State<_AppleOnlySection> {
     if (file == null) return;
     _toast(L('models.importing'));
     try {
-      await local.import(file.path);
+      await local.import(await pickedPath(file));
       _toast(L('models.imported'));
     } catch (e) {
       _toast('$e');
@@ -716,7 +716,7 @@ class _FailuresTileState extends State<_FailuresTile> {
   }
 
   Future<void> _load() async {
-    final f = await Isolate.run(Core.aiFailures);
+    final f = await coreRunAsync(Core.aiFailures);
     if (mounted && f.length != _failures.length) setState(() => _failures = f);
   }
 
@@ -734,7 +734,7 @@ class _FailuresTileState extends State<_FailuresTile> {
       ),
     );
     if (retry != true) return;
-    await Isolate.run(Core.aiFailuresClear);
+    await coreRunAsync(Core.aiFailuresClear);
     await _load();
     await widget.tagger.startIfEnabled(asked: true);
   }

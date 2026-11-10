@@ -80,6 +80,9 @@ final class ActivityCardView: UIView {
         titleLabel.lineBreakMode = .byTruncatingTail
         detailLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         detailLabel.textColor = .secondaryLabel
+        detailLabel.numberOfLines = compact ? 1 : 2
+        titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        detailLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         let text = UIStackView(arrangedSubviews: [titleLabel, detailLabel, bar])
         text.axis = .vertical
         text.spacing = 4
@@ -98,6 +101,7 @@ final class ActivityCardView: UIView {
             thumb.leadingAnchor.constraint(equalTo: thumbHost.leadingAnchor), thumb.trailingAnchor.constraint(equalTo: thumbHost.trailingAnchor),
             symbol.centerXAnchor.constraint(equalTo: thumbHost.centerXAnchor), symbol.centerYAnchor.constraint(equalTo: thumbHost.centerYAnchor),
             bar.heightAnchor.constraint(equalToConstant: 4),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: compact ? 46 : 58),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }

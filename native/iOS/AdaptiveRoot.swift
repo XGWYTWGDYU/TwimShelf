@@ -152,7 +152,7 @@ final class FeedHost: UIViewController {
 /// tab. iPadOS shows them in a sidebar the user can turn into the floating tab bar at the top
 /// (浏览, 整理, 文件夹 and 设置 are there; the media kinds and the special collections stay in the
 /// sidebar). The folders are listed one by one and follow the library.
-final class TabletRootController: UITabBarController, UITabBarControllerDelegate {
+final class TabletRootController: UITabBarController, UITabBarControllerDelegate, UITabBarController.Sidebar.Delegate {
     private let feed: FeedViewController
     private let folderGroup: UITabGroup
     private let otherGroup: UITabGroup
@@ -172,7 +172,9 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         super.init(nibName: nil, bundle: nil)
         mode = .tabSidebar
         delegate = self
-        let browse = tab(.browse) { [feed] in FeedHost(feed: feed) }
+        sidebar.delegate = self
+        sidebar.preferredLayout = .tile
+        let browse = tab(.browse) { [feed] in UINavigationController(rootViewController: FeedHost(feed: feed)) }
         browse.preferredPlacement = .fixed
         let media = Self.group(L("sidebar.mediaTypes"), "photo.on.rectangle", "group.media", children: [grid(.photos), grid(.videos)])
         media.preferredPlacement = .sidebarOnly
@@ -218,6 +220,111 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+
+    private var changingSidebar = false
+    private var changingSize = false
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutSearch()
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        changingSize = true
+        feed.hideSearchDuringTransition(true)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            guard let self else { return }
+            self.changingSize = false
+            UIView.performWithoutAnimation {
+                self.layoutSearch()
+                self.view.layoutIfNeeded()
+                self.feed.view.layoutIfNeeded()
+            }
+            self.feed.hideSearchDuringTransition(self.changingSidebar)
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        layoutSearch()
+        #if DEBUG
+        if let state = ProcessInfo.processInfo.environment["TL_SEARCH_LAYOUT_STATE"] {
+            let orientation: UIInterfaceOrientationMask = state.hasPrefix("portrait") ? .portrait : .landscapeLeft
+            view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: orientation))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                self.sidebar.isHidden = !state.hasSuffix("sidebar")
+                if state.hasSuffix("focus") { self.feed.debugFocusSearch() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    print("LAYOUT_READY", state, self.view.bounds.size, self.sidebar.isHidden)
+                }
+            }
+        }
+        #endif
+    }
+
+    private func layoutSearch() {
+        guard !changingSidebar, !changingSize, view.window != nil, feed.isViewLoaded, feed.view.window != nil else { return }
+        guard selectedTab?.identifier == LibraryPlace.browse.id else {
+            feed.additionalSafeAreaInsets.left = 0
+            feed.restoreSearchToContent()
+            return
+        }
+        // In a narrow portrait window UIKit can present even a tiled sidebar as an overlay.
+        // Keep the browse controls in the uncovered area in that case as well.
+        let inheritedLeft = max(0, feed.view.safeAreaInsets.left - feed.additionalSafeAreaInsets.left)
+        let coveredLeft = sidebarFrame.map { view.convert($0, to: feed.view).maxX } ?? 0
+        let leftInset = max(0, coveredLeft - inheritedLeft)
+        if abs(feed.additionalSafeAreaInsets.left - leftInset) > 0.5 {
+            feed.additionalSafeAreaInsets.left = leftInset
+        }
+        // the floating tab bar's row has room at its end (a wide landscape window without the
+        // sidebar): the search folds into a magnifier there while nothing is searched
+        let width = view.safeAreaLayoutGuide.layoutFrame.width
+        if sidebar.isHidden, view.bounds.width > view.bounds.height,
+           traitCollection.horizontalSizeClass == .regular, width >= 960, let host = feed.parent as? FeedHost {
+            feed.setSearchFoldable(in: host.navigationItem)
+        } else {
+            feed.restoreSearchToContent()
+        }
+    }
+
+    private var sidebarFrame: CGRect? {
+        guard !sidebar.isHidden else { return nil }
+        let page = selectedViewController?.viewIfLoaded
+        func panel(in node: UIView) -> CGRect? {
+            guard !node.isHidden, node.alpha > 0.01 else { return nil }
+            if let page, page === node || page.isDescendant(of: node) { return nil }
+            let rect = node.convert(node.bounds, to: view)
+            if node is UIVisualEffectView, rect.minX < 1, rect.width >= 200,
+               rect.width < view.bounds.width * 0.6, rect.height > view.bounds.height * 0.7 { return rect }
+            for child in node.subviews {
+                if let frame = panel(in: child) { return frame }
+            }
+            return nil
+        }
+        for child in view.subviews {
+            if let frame = panel(in: child) { return frame }
+        }
+        return nil
+    }
+
+    func tabBarController(_ tabBarController: UITabBarController,
+                          sidebarVisibilityWillChange sidebar: UITabBarController.Sidebar,
+                          animator: any UITabBarController.Sidebar.Animating) {
+        changingSidebar = true
+        feed.hideSearchDuringTransition(true)
+        animator.addCompletion { [weak self] in
+            guard let self else { return }
+            self.changingSidebar = false
+            UIView.performWithoutAnimation {
+                self.layoutSearch()
+                self.view.layoutIfNeeded()
+                self.feed.view.layoutIfNeeded()
+            }
+            self.feed.hideSearchDuringTransition(self.changingSize)
+        }
+    }
 
     /// Nothing in the sidebar or the tab bar can be hidden, added or moved: every tab keeps a
     /// fixed place (the tab bar ones fixed, the rest sidebar only), which leaves the sidebar no

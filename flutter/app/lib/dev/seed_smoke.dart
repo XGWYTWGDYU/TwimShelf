@@ -7,12 +7,13 @@ import 'package:tl_core/tl_core.dart';
 
 import '../l10n/l10n.dart';
 import 'seed.dart';
+import '../platform/os.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await L10n.load();
   final path =
-      Platform.environment['TL_LIBRARY_DIR'] ??
+      OS.environment['TL_LIBRARY_DIR'] ??
       (await getApplicationSupportDirectory()).path;
   await Directory(path).create(recursive: true);
   Core.setLanguage(L10n.languageTag);

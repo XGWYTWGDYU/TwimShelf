@@ -175,7 +175,7 @@ struct SyncPageView: View {
     // MARK: Without an account
 
     @ViewBuilder private func noAccount(_ svc: SyncService) -> some View {
-        let joinable = svc.peers.values.filter { $0.account != nil }.sorted { $0.name < $1.name }
+        let groups = svc.joinableAccounts
         Card(tint: .green, spacing: 14) {
             HStack(alignment: .top, spacing: 14) {
                 IconTile(symbol: "person.crop.circle.badge.plus", color: .green, size: 44)
@@ -191,13 +191,17 @@ struct SyncPageView: View {
             SectionHeading(L("sync.joinExisting"), note: L("sync.joinExisting.footer"))
             Card(spacing: 12) {
                 if m.joining { HStack(spacing: 8) { ProgressView().controlSize(.small); Text(L("sync.pairing")).foregroundStyle(.secondary) } }
-                if joinable.isEmpty {
+                if groups.isEmpty {
                     HStack(spacing: 10) { ProgressView().controlSize(.small); Text(L("sync.searching")).foregroundStyle(.secondary) }
                 }
-                ForEach(Array(joinable.enumerated()), id: \.element.device) { i, p in
-                    if i > 0 { RowDivider() }
-                    CardRow(symbol: p.typeSymbol, color: .indigo, mascot: Mascot.name(forDevice: p.typeSymbol), title: p.name, detail: L("sync.accountDevices")) {
-                        Button(p.host == nil ? L("sync.resolving") : L("sync.joinEllipsis")) { m.join(p, env.window) }.disabled(p.host == nil)
+                // one group per account: the devices of one account are one choice, not strangers
+                ForEach(Array(groups.enumerated()), id: \.element.account) { gi, g in
+                    if gi > 0 { RowDivider() }
+                    Label(g.title, systemImage: "person.2.circle").font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(g.peers, id: \.device) { p in
+                        CardRow(symbol: p.typeSymbol, color: .indigo, mascot: Mascot.name(forDevice: p.typeSymbol), title: p.name, detail: p.typeName ?? L("sync.accountDevices")) {
+                            Button(p.host == nil ? L("sync.resolving") : L("sync.joinEllipsis")) { m.join(p, env.window) }.disabled(p.host == nil)
+                        }
                     }
                 }
             }

@@ -171,3 +171,9 @@ void tl_discovery_changed(void);
 void tl_discovery_sync_now(void);
 void tl_discovery_rediscover(void);
 void tl_discovery_stop(void);
+// The browser extension's receiver (see core/src/extension.rs).
+char *tl_ext_serve(const char *options_json);
+char *tl_ext_pair_begin(const char *addresses_json);
+void tl_ext_pair_cancel(void);
+char *tl_ext_clients(void);
+char *tl_ext_remove(const char *id);

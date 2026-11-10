@@ -1,7 +1,7 @@
 // Generated from config.yaml by scripts/apply.py: edit config.yaml, not this file.
 TL_BUNDLE_ID = org.twimshelf.release.b82168e857475
-MARKETING_VERSION = 1.1.0
-CURRENT_PROJECT_VERSION = 5
+MARKETING_VERSION = 1.5.0
+CURRENT_PROJECT_VERSION = 6
 TL_TEAM = 
 TL_APP_GROUP_IOS = 
 TL_IOS_ENTITLEMENTS = 

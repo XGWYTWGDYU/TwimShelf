@@ -1,24 +1,17 @@
 library;
 
 import 'dart:convert';
-import 'dart:ffi';
-import 'dart:io';
-import 'dart:isolate';
-import 'package:ffi/ffi.dart';
-import 'src/bindings.dart';
+import 'src/native.dart';
 import 'src/models.dart';
 export 'src/models.dart';
-export 'src/bindings.dart';
-export 'src/grid.dart';
-export 'src/pet.dart';
+export 'src/grid.dart' if (dart.library.js_interop) 'src/grid_web.dart';
+export 'src/pet.dart' if (dart.library.js_interop) 'src/pet_web.dart';
+export 'src/remote.dart';
+export 'src/native.dart' show coreIsRemote;
 
-DynamicLibrary openCoreLibrary() {
-  if (Platform.isAndroid || Platform.isLinux)
-    return DynamicLibrary.open('libtl_core.so');
-  if (Platform.isWindows) return DynamicLibrary.open('tl_core.dll');
-  if (Platform.isIOS || Platform.isMacOS) return DynamicLibrary.process();
-  throw UnsupportedError('core.unsupportedPlatform');
-}
+/// Runs [work] — calls into the core — off the UI: another isolate in the apps, asynchronous
+/// requests in the web build (where there are no isolates).
+Future<R> coreRunAsync<R>(R Function() work) => runAsync(work);
 
 class CoreError implements Exception {
   const CoreError(this.message);
@@ -35,15 +28,14 @@ class ThumbnailNotDecodable extends CoreError {
 /// The process-wide native library is shared by calls made from any Dart isolate.
 class Core {
   Core._();
-  static final CoreBindings _bindings = CoreBindings(openCoreLibrary());
-  static T _call<T>(T Function(Arena) action) => using(action);
-  static Pointer<Utf8> _string(String? value, Arena arena) =>
-      value == null ? nullptr : value.toNativeUtf8(allocator: arena);
-  static Object? _read(Pointer<Utf8> pointer) {
-    if (pointer == nullptr) throw const CoreError('core.noResult');
+  static final _bindings = createBindings();
+  static T _call<T>(T Function(NArena) action) => withArena(action);
+  static NStr _string(String? value, NArena arena) => toNStr(value, arena);
+  static Object? _read(NStr pointer) {
+    if (isNullNStr(pointer)) throw const CoreError('core.noResult');
     try {
       final envelope =
-          jsonDecode(pointer.toDartString()) as Map<String, dynamic>;
+          jsonDecode(readNStr(pointer)) as Map<String, dynamic>;
       if (envelope.containsKey('error'))
         throw CoreError(envelope['error'] as String);
       if (!envelope.containsKey('ok'))
@@ -55,13 +47,13 @@ class Core {
   }
 
   /// Decode a caller-owned envelope and transfer ownership to this helper.
-  static T decodeOk<T>(Pointer<Utf8> pointer, T Function(Object?) decode) =>
+  static T decodeOk<T>(NStr pointer, T Function(Object?) decode) =>
       decode(_read(pointer));
 
-  static String? _raw(Pointer<Utf8> pointer) {
-    if (pointer == nullptr) return null;
+  static String? _raw(NStr pointer) {
+    if (isNullNStr(pointer)) return null;
     try {
-      return pointer.toDartString();
+      return readNStr(pointer);
     } finally {
       _bindings.tl_string_free(pointer);
     }
@@ -137,7 +129,7 @@ class Core {
         return ImportReport.fromJson(value as Map<String, dynamic>);
       });
   static Future<ImportReport> importLegacyDirectoryAsync(String dir) =>
-      Isolate.run(() => importLegacyDirectory(dir));
+      runAsync(() => importLegacyDirectory(dir));
   static ImportReport importLegacyZip(String path, [String folder = '']) =>
       _call((arena) {
         final value = _read(_bindings.tl_import_legacy_zip(
@@ -146,7 +138,7 @@ class Core {
       });
   static Future<ImportReport> importLegacyZipAsync(
           String path, String folder) =>
-      Isolate.run(() => importLegacyZip(path, folder));
+      runAsync(() => importLegacyZip(path, folder));
   static ImportReport importPack(String path, [String folder = '']) =>
       _call((arena) {
         final value = _read(_bindings.tl_import_pack(
@@ -155,7 +147,7 @@ class Core {
       });
   static Future<ImportReport> importPackAsync(String path,
           [String folder = '']) =>
-      Isolate.run(() => importPack(path, folder));
+      runAsync(() => importPack(path, folder));
   static ExportReport _rawExportMedia(Map<String, dynamic> argsJson) =>
       _call((arena) {
         final value = _read(
@@ -173,7 +165,7 @@ class Core {
         return (value as num).toInt();
       });
   static Future<int> startDownloadAsync(DownloadRequest requestJson) =>
-      Isolate.run(() => startDownload(requestJson));
+      runAsync(() => startDownload(requestJson));
   static DownloadStatus? downloadStatus() => _call((arena) {
         final value = _read(_bindings.tl_download_status());
         return value == null
@@ -181,12 +173,12 @@ class Core {
             : DownloadStatus.fromJson(value as Map<String, dynamic>);
       });
   static Future<DownloadStatus?> downloadStatusAsync() =>
-      Isolate.run(() => downloadStatus());
+      runAsync(() => downloadStatus());
   static void cancelDownload() => _call((arena) {
         _bindings.tl_download_cancel();
       });
   static Future<void> cancelDownloadAsync() =>
-      Isolate.run(() => cancelDownload());
+      runAsync(() => cancelDownload());
   static void setCookies(String authToken, String ct0) => _call((arena) {
         _bindings.tl_set_cookies(
             _string(authToken, arena), _string(ct0, arena));
@@ -261,7 +253,7 @@ class Core {
         _read(_bindings.tl_wipe(includeModels));
       });
   static Future<void> wipeAsync({bool includeModels = false}) =>
-      Isolate.run(() => wipe(includeModels: includeModels));
+      runAsync(() => wipe(includeModels: includeModels));
   static List<String> labelsMissingVectors(String model) => _call((arena) {
         final value =
             _read(_bindings.tl_labels_missing_vectors(_string(model, arena)));
@@ -275,7 +267,7 @@ class Core {
         return value as String;
       });
   static Future<String> syncNewAccountAsync() =>
-      Isolate.run(() => syncNewAccount());
+      runAsync(() => syncNewAccount());
   /// Starts finding the account's devices and syncing with them (after [syncStart]).
   static void discoveryStart(String serviceType, String deviceName, [String deviceKind = '']) => _call((arena) {
         _read(_bindings.tl_discovery_start(_string(serviceType, arena), _string(deviceName, arena), _string(deviceKind, arena)));
@@ -287,6 +279,21 @@ class Core {
   static void discoverySyncNow() => _bindings.tl_discovery_sync_now();
   static void discoveryRediscover() => _bindings.tl_discovery_rediscover();
   static void discoveryStop() => _bindings.tl_discovery_stop();
+
+  /// The browser extension's receiver: this device's name, platform (macos, windows, linux,
+  /// server) and download settings; with `listen` the listener starts (once). Its port, or null.
+  static int? extensionServe(Map<String, Object?> options) => _call((arena) =>
+      (_read(_bindings.tl_ext_serve(_string(jsonEncode(options), arena))) as num?)?.toInt());
+  /// A new binding code: `{code, link, addresses, expires_in}`; [addresses] ("host:port") as the
+  /// browser reaches this device, or null for its own LAN addresses.
+  static Map<String, dynamic> extensionPairBegin([List<String>? addresses]) => _call((arena) =>
+      _read(_bindings.tl_ext_pair_begin(_string(jsonEncode(addresses), arena))) as Map<String, dynamic>);
+  static void extensionPairCancel() => _bindings.tl_ext_pair_cancel();
+  /// `{clients: [{id, name, added, seen}], pairing: {code, link, expires_in}?, port}`
+  static Map<String, dynamic> extensionClients() => _call((arena) =>
+      _read(_bindings.tl_ext_clients()) as Map<String, dynamic>);
+  static bool extensionRemove(String id) => _call((arena) =>
+      _read(_bindings.tl_ext_remove(_string(id, arena))) as bool);
   static int syncStart(String accountKeyHex, String deviceName) =>
       _call((arena) {
         final value = _read(_bindings.tl_sync_start(
@@ -294,45 +301,45 @@ class Core {
         return (value as num).toInt();
       });
   static Future<int> syncStartAsync(String accountKeyHex, String deviceName) =>
-      Isolate.run(() => syncStart(accountKeyHex, deviceName));
+      runAsync(() => syncStart(accountKeyHex, deviceName));
   static SyncStatus syncStatus() => _call((arena) {
         final value = _read(_bindings.tl_sync_status());
         return SyncStatus.fromJson(value as Map<String, dynamic>);
       });
   static Future<SyncStatus> syncStatusAsync() =>
-      Isolate.run(() => syncStatus());
+      runAsync(() => syncStatus());
   static int syncRestartListener() => _call((arena) {
         final value = _read(_bindings.tl_sync_restart_listener());
         return (value as num).toInt();
       });
   static Future<int> syncRestartListenerAsync() =>
-      Isolate.run(() => syncRestartListener());
+      runAsync(() => syncRestartListener());
   static String syncPairBegin() => _call((arena) {
         final value = _read(_bindings.tl_sync_pair_begin());
         return value as String;
       });
   static Future<String> syncPairBeginAsync() =>
-      Isolate.run(() => syncPairBegin());
+      runAsync(() => syncPairBegin());
   static void syncPairCancel() => _call((arena) {
         _bindings.tl_sync_pair_cancel();
       });
   static Future<void> syncPairCancelAsync() =>
-      Isolate.run(() => syncPairCancel());
+      runAsync(() => syncPairCancel());
   static void syncJoin(String host, int port, String code) => _call((arena) {
         _read(_bindings.tl_sync_join(
             _string(host, arena), port, _string(code, arena)));
       });
   static Future<void> syncJoinAsync(String host, int port, String code) =>
-      Isolate.run(() => syncJoin(host, port, code));
+      runAsync(() => syncJoin(host, port, code));
   static void syncWith(String host, int port) => _call((arena) {
         _read(_bindings.tl_sync_with(_string(host, arena), port));
       });
   static Future<void> syncWithAsync(String host, int port) =>
-      Isolate.run(() => syncWith(host, port));
+      runAsync(() => syncWith(host, port));
   static void syncReset() => _call((arena) {
         _bindings.tl_sync_reset();
       });
-  static Future<void> syncResetAsync() => Isolate.run(() => syncReset());
+  static Future<void> syncResetAsync() => runAsync(() => syncReset());
   static void setModelsDirectory(String dir) => _call((arena) {
         _read(_bindings.tl_set_models_dir(_string(dir, arena)));
       });
@@ -340,7 +347,7 @@ class Core {
         _read(_bindings.tl_model_download(_string(repo, arena)));
       });
   static Future<void> downloadModelAsync(String repo) =>
-      Isolate.run(() => downloadModel(repo));
+      runAsync(() => downloadModel(repo));
   /// Windows / Linux secrets: a new key, and values sealed / opened with it.
   static String secretKey() => _call((arena) => _read(_bindings.tl_secret_key()) as String);
   static String secretSeal(String key, String text) =>
@@ -404,13 +411,13 @@ class Core {
         return (value as num).toInt();
       });
   static Future<int> exportModelZipAsync(String id, String outPath) =>
-      Isolate.run(() => exportModelZip(id, outPath));
+      runAsync(() => exportModelZip(id, outPath));
   static ModelInfo importModel(String path) => _call((arena) {
         final value = _read(_bindings.tl_model_import(_string(path, arena)));
         return ModelInfo.fromJson(value as Map<String, dynamic>);
       });
   static Future<ModelInfo> importModelAsync(String path) =>
-      Isolate.run(() => importModel(path));
+      runAsync(() => importModel(path));
   static List<MediaRef> aiPending(int limit) => _call((arena) {
         final value = _read(_bindings.tl_ai_pending(limit));
         return (value as List)
@@ -473,7 +480,7 @@ class Core {
             .toList();
       });
   static Future<List<ModelInfo>> syncPeerModelsAsync(String host, int port) =>
-      Isolate.run(() => syncPeerModels(host, port));
+      runAsync(() => syncPeerModels(host, port));
   static void syncPullModel(
           String host, int port, String id, String label, int total) =>
       _call((arena) {
@@ -482,7 +489,7 @@ class Core {
       });
   static Future<void> syncPullModelAsync(
           String host, int port, String id, String label, int total) =>
-      Isolate.run(() => syncPullModel(host, port, id, label, total));
+      runAsync(() => syncPullModel(host, port, id, label, total));
   static int _rawTrash(Map<String, dynamic> json) => _call((arena) {
         final value =
             _read(_bindings.tl_trash(_string(jsonEncode(json), arena)));
@@ -541,7 +548,7 @@ class Core {
         return RepairResult.values.firstWhere((e) => e.wireValue == value);
       });
   static Future<RepairResult> repairAsync(String mediaId) =>
-      Isolate.run(() => repair(mediaId));
+      runAsync(() => repair(mediaId));
   static ImportProgress? importStatus() => _call((arena) {
         final value = _read(_bindings.tl_import_status());
         return value == null
@@ -549,7 +556,7 @@ class Core {
             : ImportProgress.fromJson(value as Map<String, dynamic>);
       });
   static Future<ImportProgress?> importStatusAsync() =>
-      Isolate.run(() => importStatus());
+      runAsync(() => importStatus());
   static List<List<Object?>> _rawImportReports() => _call((arena) {
         final value = _read(_bindings.tl_import_reports());
         return (value as List)
@@ -562,14 +569,14 @@ class Core {
         return ImportReport.fromJson(value as Map<String, dynamic>);
       });
   static Future<ImportReport> importReportAsync(String path) =>
-      Isolate.run(() => importReport(path));
+      runAsync(() => importReport(path));
   static int exportImportIssues(String report, String outZip) => _call((arena) {
         final value = _read(_bindings.tl_import_export_issues(
             _string(report, arena), _string(outZip, arena)));
         return (value as num).toInt();
       });
   static Future<int> exportImportIssuesAsync(String report, String outZip) =>
-      Isolate.run(() => exportImportIssues(report, outZip));
+      runAsync(() => exportImportIssues(report, outZip));
   static String renameTag(String from, String to) => _call((arena) {
         final value = _read(
             _bindings.tl_rename_tag(_string(from, arena), _string(to, arena)));
@@ -634,14 +641,14 @@ class Core {
       });
   static Future<ImportReport> importLooseZipAsync(String path,
           [String folder = '']) =>
-      Isolate.run(() => importLooseZip(path, folder));
+      runAsync(() => importLooseZip(path, folder));
   static ExportReport exportBackup(String outPath) => _call((arena) {
         final value =
             _read(_bindings.tl_export_backup(_string(outPath, arena)));
         return ExportReport.fromJson(value as Map<String, dynamic>);
       });
   static Future<ExportReport> exportBackupAsync(String outPath) =>
-      Isolate.run(() => exportBackup(outPath));
+      runAsync(() => exportBackup(outPath));
   static int exportDiagnostics(
           String outPath, Map<String, dynamic> appInfoJson) =>
       _call((arena) {
@@ -651,7 +658,7 @@ class Core {
       });
   static Future<int> exportDiagnosticsAsync(
           String outPath, Map<String, dynamic> appInfoJson) =>
-      Isolate.run(() => exportDiagnostics(outPath, appInfoJson));
+      runAsync(() => exportDiagnostics(outPath, appInfoJson));
   static int _rawTagToFolder(Map<String, dynamic> json) => _call((arena) {
         final value =
             _read(_bindings.tl_tag_to_folder(_string(jsonEncode(json), arena)));
@@ -670,14 +677,14 @@ class Core {
             : ExportProgress.fromJson(value as Map<String, dynamic>);
       });
   static Future<ExportProgress?> exportStatusAsync() =>
-      Isolate.run(() => exportStatus());
+      runAsync(() => exportStatus());
   static bool cancelExport() => _call((arena) {
         final value = _read(_bindings.tl_export_cancel());
         return value as bool;
       });
   static void cancelImport() => _call((arena) => _bindings.tl_import_cancel());
-  static Future<void> cancelImportAsync() => Isolate.run(cancelImport);
-  static Future<bool> cancelExportAsync() => Isolate.run(() => cancelExport());
+  static Future<void> cancelImportAsync() => runAsync(cancelImport);
+  static Future<bool> cancelExportAsync() => runAsync(() => cancelExport());
   static ImportReport _rawImportLooseDir(Map<String, dynamic> json) =>
       _call((arena) {
         final value = _read(
@@ -715,14 +722,14 @@ class Core {
         return (value as num).toInt();
       });
   static Future<int> stopDownloadAsync(bool pause) =>
-      Isolate.run(() => stopDownload(pause));
+      runAsync(() => stopDownload(pause));
   static int resumeDownload(DownloadRequest json) => _call((arena) {
         final value = _read(_bindings
             .tl_download_resume(_string(jsonEncode(json.toJson()), arena)));
         return (value as num).toInt();
       });
   static Future<int> resumeDownloadAsync(DownloadRequest json) =>
-      Isolate.run(() => resumeDownload(json));
+      runAsync(() => resumeDownload(json));
   static IntegritySummary integritySummary() => _call((arena) {
         final value = _read(_bindings.tl_integrity_summary());
         return IntegritySummary.fromJson(value as Map<String, dynamic>);
@@ -781,7 +788,7 @@ class Core {
       });
   static Future<ExportReport> exportMediaAsync(List<String> ids, String outPath,
           {ExportOptions? options}) =>
-      Isolate.run(() => exportMedia(ids, outPath, options: options));
+      runAsync(() => exportMedia(ids, outPath, options: options));
   static List<String> mediaIdsInFolder(String folder) => mediaIds(folder);
   static int trash({List<String> media = const [], String? post}) =>
       _rawTrash({'media': media, 'post': post});
@@ -808,14 +815,14 @@ class Core {
       });
   static Future<ImportReport> importLooseDirAsync(String dir,
           {String? folder, required bool consume, String? keepTo, bool album = true}) =>
-      Isolate.run(() => importLooseDir(dir,
+      runAsync(() => importLooseDir(dir,
           folder: folder, consume: consume, keepTo: keepTo, album: album));
   static DeletedReports deleteImportReports(List<String> files,
           {required List<String> owned}) =>
       _rawDeleteImportReports({'reports': files, 'owned': owned});
   static Future<DeletedReports> deleteImportReportsAsync(List<String> files,
           {required List<String> owned}) =>
-      Isolate.run(() => deleteImportReports(files, owned: owned));
+      runAsync(() => deleteImportReports(files, owned: owned));
   static ActionReceipt action(ActionKind kind,
           {List<String> media = const [],
           List<String> posts = const [],
@@ -831,6 +838,16 @@ class Core {
         'expected': snapshot?.entries.map((e) => e.toJson()).toList(),
         'epoch': snapshot?.epoch
       });
+  /// Keep worker closures away from UI scopes (contexts, undo callbacks and controllers).
+  static Future<ActionReceipt> actionAsync(ActionKind kind,
+          {List<String> media = const [], List<String> posts = const [],
+          String? folder, BinSnapshot? snapshot}) =>
+      runAsync(() => action(kind, media: media, posts: posts,
+          folder: folder, snapshot: snapshot));
+
+  static Future<BinSnapshot> binSnapshotAsync({List<String>? media}) =>
+      runAsync(() => binSnapshot(media: media));
+
   static BinSnapshot binSnapshot({List<String>? media}) {
     final snapshot = _rawBinSnapshot();
     if (media == null) return snapshot;
@@ -862,56 +879,7 @@ class Core {
               ))
           .toList();
   static Future<List<({String file, DateTime date, String source, int issues})>>
-      importReportsAsync() => Isolate.run(importReports);
-  // Grid handles and caller-owned numeric buffers use their explicit C lifetime.
-  // Call gridFree once for each successful gridNew, after all users have stopped.
-  static Pointer<TlGrid> gridNew(
-          double width,
-          double height,
-          double scale,
-          double inset_top,
-          double inset_bottom,
-          int count,
-          int level,
-          int phase,
-          double offset) =>
-      _bindings.tl_grid_new(width, height, scale, inset_top, inset_bottom,
-          count, level, phase, offset);
-  static void gridFree(Pointer<TlGrid> g) => _bindings.tl_grid_free(g);
-  static void gridConfigure(Pointer<TlGrid> g, double width, double height,
-          double scale, double inset_top, double inset_bottom, int count) =>
-      _bindings.tl_grid_configure(
-          g, width, height, scale, inset_top, inset_bottom, count);
-  static void gridRest(Pointer<TlGrid> g, Pointer<Double> out3) =>
-      _bindings.tl_grid_rest(g, out3);
-  static void gridSetOffset(Pointer<TlGrid> g, double offset) =>
-      _bindings.tl_grid_set_offset(g, offset);
-  static double gridMaxOffset(Pointer<TlGrid> g) =>
-      _bindings.tl_grid_max_offset(g);
-  static void gridBeginPinch(
-          Pointer<TlGrid> g, double x, double y, double time) =>
-      _bindings.tl_grid_begin_pinch(g, x, y, time);
-  static void gridPinchChanged(
-          Pointer<TlGrid> g, double scale, double x, double y) =>
-      _bindings.tl_grid_pinch_changed(g, scale, x, y);
-  static void gridRelease(Pointer<TlGrid> g, double velocity, double scale) =>
-      _bindings.tl_grid_release(g, velocity, scale);
-  static int gridTick(Pointer<TlGrid> g, double time) =>
-      _bindings.tl_grid_tick(g, time);
-  static bool gridFinishNow(Pointer<TlGrid> g) =>
-      _bindings.tl_grid_finish_now(g);
-  static void gridInfo(Pointer<TlGrid> g, Pointer<Double> out4) =>
-      _bindings.tl_grid_info(g, out4);
-  static int gridTiles(
-          Pointer<TlGrid> g, Pointer<Double> buffer, int capacity) =>
-      _bindings.tl_grid_tiles(g, buffer, capacity);
-  static int gridIndexAt(Pointer<TlGrid> g, double x, double y) =>
-      _bindings.tl_grid_index_at(g, x, y);
-  static void gridFrame(Pointer<TlGrid> g, int index, Pointer<Double> out3) =>
-      _bindings.tl_grid_frame(g, index, out3);
-  static void gridSetHidden(Pointer<TlGrid> g, int index) =>
-      _bindings.tl_grid_set_hidden(g, index);
-
+      importReportsAsync() => runAsync(importReports);
   static ThumbnailResult thumbnail(String mediaId, int side, String cacheDir) =>
       _call((arena) {
         try {
@@ -928,7 +896,7 @@ class Core {
   /// Decoding and disk IO run outside the UI isolate.
   static Future<ThumbnailResult> thumbnailAsync(
           String mediaId, int side, String cacheDir) =>
-      Isolate.run(() => thumbnail(mediaId, side, cacheDir));
+      runAsync(() => thumbnail(mediaId, side, cacheDir));
 
   /// A HEIC or AVIF file as a JPEG Flutter can show, at most [maxSide] on its long edge: the
   /// cached JPEG's path.
@@ -938,7 +906,7 @@ class Core {
 
   static Future<String> displayImageAsync(
           String path, int maxSide, String cacheDir) =>
-      Isolate.run(() => displayImage(path, maxSide, cacheDir));
+      runAsync(() => displayImage(path, maxSide, cacheDir));
 
   /// The native function starts a bounded background warmer and returns at once.
   static void thumbnailsWarm(List<String> ids, int side, String cacheDir) =>
@@ -948,6 +916,6 @@ class Core {
       });
   static Future<void> thumbnailsWarmAsync(
           List<String> ids, int side, String cacheDir) =>
-      Isolate.run(() => thumbnailsWarm(ids, side, cacheDir));
+      runAsync(() => thumbnailsWarm(ids, side, cacheDir));
   static void thumbnailsWarmCancel() => _bindings.tl_thumbnails_warm_cancel();
 }

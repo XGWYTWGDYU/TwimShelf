@@ -1803,6 +1803,7 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "if-addrs",
  "image",
  "kamadak-exif",
  "libc",

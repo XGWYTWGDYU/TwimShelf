@@ -1,0 +1,58 @@
+/* The download button, made to sit among X's own action buttons (their size and grey). */
+.tl-wrap { display: flex; align-items: center; justify-content: flex-start; }
+.tl-button {
+  --tl-accent: rgb(29, 155, 240);
+  all: unset;
+  box-sizing: border-box;
+  width: 34.75px; height: 34.75px;
+  margin-left: -8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9999px;
+  color: rgb(113, 118, 123);
+  cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+.tl-button:hover, .tl-button:focus-visible { color: var(--tl-accent); background-color: rgba(29, 155, 240, .1); }
+.tl-button:focus-visible { outline: 2px solid var(--tl-accent); outline-offset: 0; }
+.tl-icon { display: inline-flex; width: 18.75px; height: 18.75px; align-items: center; justify-content: center; }
+.tl-icon svg { width: 18.75px; height: 18.75px; fill: currentColor; }
+.tl-button[data-state="queued"], .tl-button[data-state="downloading"], .tl-button[data-state="sending"] { color: var(--tl-accent); }
+.tl-button[data-state="done"] { color: rgb(0, 186, 124); }
+.tl-button[data-state="failed"] { color: rgb(244, 33, 46); }
+.tl-button[data-state="offline"], .tl-button[data-state="paused"], .tl-button[data-state="cancelled"] { color: rgb(255, 173, 31); }
+.tl-spin {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent;
+  animation: tl-spin .8s linear infinite;
+}
+.tl-button[data-state="queued"] .tl-spin { opacity: .55; animation-duration: 1.6s; }
+@keyframes tl-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tl-spin { animation-duration: 3s; } }
+
+/* the device menu and the notes, in X's light or dark look */
+.tl-pop {
+  position: fixed; z-index: 2147483647;
+  min-width: 200px; max-width: 300px;
+  padding: 6px;
+  border-radius: 14px;
+  background: #fff; color: #0f1419;
+  box-shadow: rgba(101, 119, 134, .2) 0 0 15px, rgba(101, 119, 134, .15) 0 0 3px 1px;
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+}
+.tl-pop-title { padding: 8px 10px 6px; font-size: 13px; color: rgb(83, 100, 113); }
+.tl-item {
+  all: unset; box-sizing: border-box; width: 100%;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 10px; border-radius: 10px; cursor: pointer;
+}
+.tl-item:hover, .tl-item:focus-visible { background: rgba(15, 20, 25, .06); }
+.tl-kind { font-size: 13px; color: rgb(83, 100, 113); white-space: nowrap; }
+.tl-bubble { padding: 12px 14px; font-size: 14px; }
+.tl-action {
+  all: unset; cursor: pointer; display: inline-block; margin-top: 10px;
+  padding: 6px 14px; border-radius: 9999px; background: #0f1419; color: #fff; font-weight: 600; font-size: 14px;
+}
+.tl-pop.tl-dark { background: #000; color: #e7e9ea; box-shadow: rgba(255, 255, 255, .2) 0 0 15px, rgba(255, 255, 255, .15) 0 0 3px 1px; }
+.tl-dark .tl-item:hover, .tl-dark .tl-item:focus-visible { background: rgba(231, 233, 234, .1); }
+.tl-dark .tl-pop-title, .tl-dark .tl-kind { color: rgb(113, 118, 123); }
+.tl-dark .tl-action { background: #eff3f4; color: #0f1419; }

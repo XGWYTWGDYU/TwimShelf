@@ -1,4 +1,3 @@
-import 'dart:io';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +14,10 @@ import 'platform/desktop_window.dart';
 import 'app/shell.dart';
 import 'l10n/app_locale.dart';
 import 'l10n/l10n.dart';
+import 'platform/os.dart';
+import 'platform/server_paths.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:tl_core/tl_core.dart' show loadServerInfo;
 
 /// Android's share page, on its own see-through window over the app that shared.
 @pragma('vm:entry-point')
@@ -28,6 +31,8 @@ Future<void> shareSheetMain(List<String> args) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await L10n.load();
+  // the web build: the server's folders stand in for the app's own
+  if (OS.isWeb) PathProviderPlatform.instance = ServerPaths(await loadServerInfo());
   // Windows, Linux: everything lives in the data folder the person chose (asked on first start)
   if (DataHome.locate()) return _start();
   runApp(MaterialApp(
@@ -105,7 +110,7 @@ class _TwimShelfAppState extends State<TwimShelfApp> {
         listenable: Prefs.instance,
         builder: (context, _) => DynamicColorBuilder(
           // the wallpaper's colours on Android 12+ (only there: elsewhere the chosen colour)
-          builder: (light, dark) => _app(Platform.isAndroid ? light : null, Platform.isAndroid ? dark : null),
+          builder: (light, dark) => _app(OS.isAndroid ? light : null, OS.isAndroid ? dark : null),
         ),
       );
 
@@ -124,7 +129,8 @@ class _TwimShelfAppState extends State<TwimShelfApp> {
           future: _library,
           builder: (context, snap) {
             if (snap.hasError) {
-              return Scaffold(body: Center(child: Text(L('app.openFailed'))));
+              debugPrint('open failed: ${snap.error}\n${snap.stackTrace}');
+              return Scaffold(body: Center(child: Text(OS.isWeb ? '${L('app.openFailed')}\n${snap.error}' : L('app.openFailed'), textAlign: TextAlign.center)));
             }
             final lib = snap.data;
             if (lib == null) {

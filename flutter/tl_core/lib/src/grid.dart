@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-import '../tl_core.dart' show openCoreLibrary;
+import 'native_io.dart' show openCoreLibrary;
 import 'bindings.dart';
 
 /// One tile of a grid frame, in logical pixels: where it is drawn, how opaque (the zoom

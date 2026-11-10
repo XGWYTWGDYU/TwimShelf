@@ -51,7 +51,7 @@ Future<void> _show(BuildContext context, Offset position, List<List<_E>> groups)
   }
   final chosen = await showMenu<_E>(
     context: context,
-    position: RelativeRect.fromRect(position & const Size(1, 1), Offset.zero & overlay.size),
+    position: RelativeRect.fromRect(overlay.globalToLocal(position) & const Size(1, 1), Offset.zero & overlay.size),
     popUpAnimationStyle: menuAnimation,
     items: items,
   );

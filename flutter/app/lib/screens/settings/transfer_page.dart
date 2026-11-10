@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +12,8 @@ import '../../l10n/l10n.dart';
 import 'import_records_page.dart';
 import '../settings_page.dart';
 import '../../widgets/text_menu.dart';
+import '../../platform/os.dart';
+import '../../platform/files.dart';
 
 /// 导入与备份: old-format ZIPs (a folder per post), ZIPs of loose media, .tlpack export packs,
 /// and a backup of the whole library.
@@ -38,7 +39,7 @@ class TransferPage extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               ListTile(key: const ValueKey('importNoFolder'), contentPadding: EdgeInsets.zero, leading: const Icon(Icons.block), title: Text(L('share.noFolder')), onTap: () => Navigator.pop(c, '')),
               for (final f in folders) ListTile(contentPadding: EdgeInsets.zero, leading: const Icon(Icons.folder_outlined), title: Text(f, overflow: TextOverflow.ellipsis), onTap: () => Navigator.pop(c, f)),
-              TextField(contextMenuBuilder: appTextMenu, key: const ValueKey('importNewFolder'), controller: name, decoration: InputDecoration(labelText: L('share.newFolder'), hintText: suggested)),
+              TextField(contextMenuBuilder: appTextMenu, key: const ValueKey('importNewFolder'), controller: name, decoration: InputDecoration(labelText: L('common.newFolder'), hintText: suggested)),
             ]),
           ),
         ),
@@ -64,7 +65,16 @@ class TransferPage extends StatelessWidget {
       }
     }
     if (!context.mounted) return;
-    final report = await withProgress<ImportReport>(context, L('common.importing'), run(file.path, folder), () async {
+    // the web build: the file goes to the server first, the core imports it there
+    final String source;
+    try {
+      source = await pickedPath(file);
+    } catch (e) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    if (!context.mounted) return;
+    final report = await withProgress<ImportReport>(context, L('common.importing'), run(source, folder), () async {
       final p = await Core.importStatusAsync();
       return p == null || p.folders_total == 0 ? null : p.folders_done / p.folders_total;
     }, cancel: Core.cancelImportAsync);
@@ -88,12 +98,12 @@ class TransferPage extends StatelessWidget {
     final name = '${L('settings.backup.fileName', [stamp])}.tlpack';
     // iOS has no folder picker here: a temporary file, handed on with the share sheet afterwards
     final String out;
-    if (Platform.isIOS) {
-      out = '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}$name';
+    if (OS.isIOS || OS.isWeb) {
+      out = '${(await getTemporaryDirectory()).path}${OS.pathSeparator}$name';
     } else {
       final dir = await getDirectoryPath();
       if (dir == null) return;
-      out = '$dir${Platform.pathSeparator}$name';
+      out = '$dir${OS.pathSeparator}$name';
     }
     if (!context.mounted) return;
     final report = await withProgress<ExportReport>(context, L('settings.backup.running'), Core.exportBackupAsync(out), () async {
@@ -101,7 +111,7 @@ class TransferPage extends StatelessWidget {
       return p == null || p.total == 0 ? null : p.done / p.total;
     }, cancel: Core.cancelExportAsync);
     if (!context.mounted || report == null) return;
-    if (Platform.isIOS) await deliver(out);
+    if (OS.isIOS || OS.isWeb) await deliver(out);
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,

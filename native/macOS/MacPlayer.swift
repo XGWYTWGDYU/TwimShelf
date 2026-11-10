@@ -16,6 +16,10 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     var onPiPEnd: (() -> Void)?
     private let player: AVPlayer
     private let playerLayer = AVPlayerLayer()
+    var onMediaGeometryChanged: (() -> Void)?
+    func displayedMediaRect(in host: NSView) -> CGRect {
+        convert(playerLayer.videoRect, to: host)
+    }
     private let hud = NSTextField(labelWithString: "")
     private let bar = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let time = NSTextField(labelWithString: "0:00 / 0:00")
@@ -247,6 +251,7 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     }
 
     private func sync() {
+        onMediaGeometryChanged?()
         let t = player.currentTime().seconds
         if !scrubbing, duration > 0 { bar.doubleValue = t / duration }
         time.stringValue = "\(Self.fmt(t)) / \(Self.fmt(duration))"
@@ -472,6 +477,11 @@ final class MacPhotoView: NSView {
             let f = NSRect(x: CGFloat(i - index) * stride + offset, y: 0, width: b.width, height: b.height)
             if p.frame != f { p.frame = f }
         }
+        // the caption belongs to the post: while the strip moves towards another post's media
+        // it fades with the fingers (and the new one fades in once that page settles)
+        let towards = index + (offset < 0 ? 1 : -1)
+        let leaving = offset != 0 && items.indices.contains(towards) && items[towards].postId != current.postId
+        caption.alphaValue = leaving ? max(0, 1 - abs(offset) / max(1, stride * 0.4)) : 1
     }
 
     override func layout() {
@@ -586,48 +596,83 @@ final class MacPhotoView: NSView {
 
     private var swiping = false
     private var swallowMomentum = false
-    private var lastDelta: CGFloat = 0
+    /// What the fingers moved before the gesture was known to be sideways.
+    private var pending = CGSize.zero
+    /// The last moments of the fingers' movement (time, sideways distance), for their speed.
+    private var samples: [(t: TimeInterval, dx: CGFloat)] = []
 
-    /// A sideways two-finger swipe moves the strip with the fingers; vertical scrolling and a
-    /// zoomed-in photo are left alone. Returns whether the event was used.
+    /// Two-finger scrolling over the viewer. An unzoomed photo or a video has nothing to scroll,
+    /// so the viewer takes every such event: a sideways gesture moves the strip with the fingers,
+    /// anything else (and the momentum after it) is swallowed rather than bouncing the page's
+    /// scroll view — which would otherwise start an elastic scroll of its own under the swipe and
+    /// never see it end. A zoomed photo keeps its own scrolling (to pan). A mouse wheel (no
+    /// precise deltas) is left alone: its clicks are not a swipe. Returns whether it was used.
     private func swipe(_ e: NSEvent) -> Bool {
-        guard items.count > 1, e.hasPreciseScrollingDeltas, (page?.magnification ?? 1) <= 1.001 else { return false }
-        if !e.momentumPhase.isEmpty { return swallowMomentum }
-        if e.phase == .began || e.phase == .mayBegin {
+        guard e.hasPreciseScrollingDeltas, (page?.magnification ?? 1) <= 1.001 else { return false }
+        // the trackpad's momentum after the fingers left: the strip already settles on its own
+        if !e.momentumPhase.isEmpty { return true }
+        guard items.count > 1 else { return true }
+        if e.phase == .mayBegin { return true }
+        if e.phase == .began {
             swiping = false
-            swallowMomentum = false
-            lastDelta = 0
-        }
-        guard swiping || abs(e.scrollingDeltaX) > abs(e.scrollingDeltaY) * 1.5 else { return false }
-        if !swiping {
-            // caught mid-way: the strip goes on from where it is
-            motion = nil
-            stopLink()
-            swiping = true
-            swallowMomentum = true
+            pending = .zero
+            samples.removeAll()
         }
         // with the fingers: natural scrolling's deltas already follow them
         let dx = e.isDirectionInvertedFromDevice ? e.scrollingDeltaX : -e.scrollingDeltaX
-        lastDelta = dx
-        // resistance past the first and last page
-        let atEnd = (offset + dx > 0 && index == 0) || (offset + dx < 0 && index == items.count - 1)
-        offset = max(-stride, min(stride, offset + (atEnd ? dx * 0.3 : dx)))
-        layoutPages()
+        let dy = e.scrollingDeltaY
+        if !swiping {
+            pending.width += dx; pending.height += dy
+            if e.phase == .ended || e.phase == .cancelled { return true }
+            // decided on what the fingers did so far, not on the first (often tiny) event
+            guard abs(pending.width) > 4, abs(pending.width) > abs(pending.height) * 1.2 else { return true }
+            // caught mid-way: the strip goes on from where it is (that move is given up)
+            motion = nil
+            stopLink()
+            swiping = true
+            move(by: pending.width, at: e.timestamp)
+        } else if dx != 0 {
+            move(by: dx, at: e.timestamp)
+        }
         if e.phase == .ended || e.phase == .cancelled {
             swiping = false
-            settle()
+            settle(velocity: e.phase == .cancelled ? 0 : fingerVelocity())
         }
         return true
     }
 
-    /// The fingers let go: the nearest page, a flick carrying it on to the next.
-    private func settle() {
-        let projected = offset + lastDelta * 6
-        var d = Int((-projected / stride).rounded())
+    private func move(by dx: CGFloat, at t: TimeInterval) {
+        samples.append((t, dx))
+        samples.removeAll { t - $0.t > 0.1 }
+        // resistance past the first and last page
+        let atEnd = (offset + dx > 0 && index == 0) || (offset + dx < 0 && index == items.count - 1)
+        offset = max(-stride, min(stride, offset + (atEnd ? dx * 0.3 : dx)))
+        layoutPages()
+    }
+
+    /// Points per second over the last tenth of a second (the release itself moves nothing).
+    private func fingerVelocity() -> CGFloat {
+        guard let first = samples.first, let last = samples.last else { return 0 }
+        let span = max(1.0 / 60, last.t - first.t)
+        return samples.reduce(0) { $0 + $1.dx } / CGFloat(span)
+    }
+
+    /// The fingers let go: a flick goes on to the next page in its direction, a slow release
+    /// settles on the nearest one. The strip carries on at about the fingers' speed.
+    private func settle(velocity v: CGFloat = 0) {
+        var d: Int
+        if abs(v) > 350, (v < 0) == (offset <= 0) || abs(offset) < stride * 0.1 {
+            d = v < 0 ? 1 : -1
+        } else {
+            d = Int((-(offset + v * 0.1) / stride).rounded())
+        }
         d = max(-1, min(1, d))
         if !items.indices.contains(index + d) { d = 0 }
-        let distance = abs(-CGFloat(d) * stride - offset)
-        animate(to: -CGFloat(d) * stride, duration: 0.18 + 0.2 * Double(min(1, distance / max(stride, 1)))) { [weak self] in self?.commit(d) }
+        let target = -CGFloat(d) * stride
+        let distance = abs(target - offset)
+        // an ease-out starts at three times its average speed: match the fingers' speed
+        let matched = abs(v) > 1 ? Double(3 * distance / abs(v)) : 0.3
+        animate(to: target, duration: min(0.38, max(0.16, matched))) { [weak self] in self?.commit(d) }
     }
 
     /// Two-finger scrolling that reaches the viewer (a video page passes its own on).
@@ -635,16 +680,31 @@ final class MacPhotoView: NSView {
 
     #if DEBUG
     /// A sideways swipe as the trackpad sends it (phases, then the momentum after release), for the tour.
-    func debugSwipe(dx: CGFloat, steps: Int = 8, end: Bool = true) -> [CGFloat] {
+    func debugSwipe(dx: CGFloat, dy: CGFloat = 0, steps: Int = 8, end: Bool = true, momentum: Int = 0) -> [CGFloat] {
         var seen: [CGFloat] = []
-        for i in 0..<steps {
-            guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: 0, wheel2: Int32(dx / CGFloat(steps)), wheel3: 0) else { continue }
+        // delivered as AppKit would: to the view under the pointer (a page's scroll view, a player)
+        let target: (NSEvent) -> Void = { [weak self] e in
+            guard let self else { return }
+            let hit = self.hitTest(NSPoint(x: self.bounds.midX, y: self.bounds.midY)) ?? self
+            hit.scrollWheel(with: e)
+        }
+        func send(_ x: CGFloat, _ y: CGFloat, phase: Int64, momentumPhase: Int64) {
+            guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(y), wheel2: Int32(x), wheel3: 0) else { return }
             cg.setIntegerValueField(CGEventField(rawValue: 88)!, value: 1)
+            cg.setIntegerValueField(CGEventField(rawValue: 99)!, value: phase)
+            cg.setIntegerValueField(CGEventField(rawValue: 123)!, value: momentumPhase)
+            if let e = NSEvent(cgEvent: cg) { target(e) }
+            seen.append(offset)
+        }
+        for i in 0..<steps {
             // phases: began, changed…, ended (or, with `end` off, still changing; a lone `end` step is the release)
             let phase: Int64 = steps == 1 && end ? 4 : i == 0 ? 1 : (i == steps - 1 && end ? 4 : 2)
-            cg.setIntegerValueField(CGEventField(rawValue: 99)!, value: phase)
-            if let e = NSEvent(cgEvent: cg) { scrollWheel(with: e) }
-            seen.append(offset)
+            send(dx / CGFloat(steps), dy / CGFloat(steps), phase: phase, momentumPhase: 0)
+        }
+        // the trackpad's momentum after the release: began, changed…, ended, slowing down
+        for i in 0..<momentum {
+            let f = CGFloat(momentum - i) / CGFloat(max(1, momentum))
+            send(dx / CGFloat(steps) * f, dy / CGFloat(steps) * f, phase: 0, momentumPhase: i == 0 ? 1 : (i == momentum - 1 ? 3 : 2))
         }
         return seen
     }
@@ -725,6 +785,13 @@ final class MacViewerPage: NSView {
     let scroll = PagingScrollView()
     let image = NSImageView()
     private(set) var player: MacPlayerView?
+    var onMediaGeometryChanged: (() -> Void)?
+    func displayedMediaRect(in host: NSView) -> CGRect {
+        if let player { return player.displayedMediaRect(in: host) }
+        let size = image.image?.size ?? CGSize(width: item.width, height: item.height)
+        guard size.width > 0, size.height > 0 else { return .zero }
+        return image.convert(AVMakeRect(aspectRatio: size, insideRect: image.bounds), to: host)
+    }
     var onSwipe: ((NSEvent) -> Bool)? { didSet { scroll.onSwipe = onSwipe } }
     private var imageToken: MacMediaLoader.Token?
     private var loadedPixels: CGFloat = 0
@@ -763,6 +830,7 @@ final class MacViewerPage: NSView {
         guard item.kind == .video, player == nil else { return }
         let p = MacPlayerView(url: item.fileURL, startAt: videoStart)
         p.embedded = true
+        p.onMediaGeometryChanged = { [weak self] in self?.onMediaGeometryChanged?() }
         p.onClose = onClose
         p.frame = bounds
         p.autoresizingMask = [.width, .height]
@@ -799,6 +867,7 @@ final class MacViewerPage: NSView {
         imageToken = MacMediaLoader.shared.load(item, maxPixel: pixels) { [weak self] img in
             guard let self, self.item.mediaId == id else { return }
             if let img { self.image.image = img } else { self.loadedPixels = 0 }
+            self.onMediaGeometryChanged?()
         }
     }
     @objc private func zoomed() { if scroll.magnification > 1.2, item.kind == .photo { load(pixels: 4096) } }
@@ -853,3 +922,4 @@ final class ViewerRoundButton: NSButton {
         layer?.backgroundColor = NSColor.black.withAlphaComponent(a).cgColor
     }
 }
+
