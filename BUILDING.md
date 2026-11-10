@@ -301,7 +301,7 @@ cd server && cargo test
 
 Release 页面没有说明文字，只包含所有安装包、`SHA256SUMS.txt`、`BUILD-INFO.json` 和 `THIRD-PARTY-NOTICES.txt`。
 
-**Linux 服务器的镜像**：每次运行都分别在 x86_64 和 arm64 的机器上构建 Docker 镜像；发布新版本时推送到 GitHub Container Registry，标签是 `ghcr.io/<owner>/twimshelf:<version>` 和 `:latest`，一个标签同时包含两种架构。新建的包默认是私有的，第一次发布后到仓库所有者的 Packages 页面把它设为公开。
+**Linux 服务器的镜像**：每次运行都分别在 x86_64 和 arm64 的机器上构建 Docker 镜像；发布新版本时推送到 GitHub Container Registry，标签是 `ghcr.io/<owner>/twimshelf:<version>` 和 `:latest`，一个标签同时包含两种架构。镜像由工作流发布，会关联到仓库并继承仓库的可见性：公开仓库发布的镜像任何人都能直接拉取。如果在仓库所有者的 Packages 页面看到它是私有的，在该包的 Package settings › Change visibility 里改为公开。
 
 **Fork 之后**：工作流可以直接运行，不需要配置任何密钥，「检查更新」会自动指向你的仓库。如果要发布，请先把 Bundle ID 和包名改成自己的。
 
