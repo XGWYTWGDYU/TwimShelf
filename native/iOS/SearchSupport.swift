@@ -96,7 +96,7 @@ final class SearchSuggestionsView: UIView, UITableViewDataSource, UITableViewDel
             let sw = UISwitch()
             sw.isOn = on
             sw.accessibilityIdentifier = "sugg-" + r.id + "-switch"
-            sw.addAction(UIAction { _ in changed(sw.isOn) }, for: .valueChanged)
+            sw.addAction(UIAction { _ in UISelectionFeedbackGenerator().selectionChanged(); changed(sw.isOn) }, for: .valueChanged)
             cell.accessoryView = sw
             cell.selectionStyle = .none
         case .menu(let value, let menu):

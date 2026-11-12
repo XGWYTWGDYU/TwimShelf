@@ -1029,7 +1029,7 @@
   "storage.clear.title": "選択した項目を削除しますか？",
   "storage.failed": "計算できませんでした：%@",
   "storage.files": "%lld 個のファイル",
-  "storage.footer": "このデバイスでアプリが使用している容量です。読み取るのはサイズだけです。",
+  "storage.footer": "読み取るのはサイズだけで、内容は読み取りません。",
   "storage.group.app": "アプリ本体",
   "storage.group.app.detail": "プログラム本体と組み込みのリソース（各言語のテキスト、アイコン、既定のプロンプト）。",
   "storage.group.bin": "ゴミ箱",

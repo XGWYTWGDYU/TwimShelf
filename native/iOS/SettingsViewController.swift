@@ -73,7 +73,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
     /// form shows nothing of it).
     private func cardsSection() -> Section {
         guard UIDevice.current.userInterfaceIdiom == .pad else { return Section(id: "cards", rows: []) }
-        return Section(id: "cards", header: L("cards.section"), footer: L("cards.footer"), rows: [
+        return Section(id: "cards", header: L("cards.section"), rows: [
                 .menu(L("cards.portrait"), value: LibraryPrefs.densityNames[LibraryPrefs.cardDensityPortrait], icon: .init("rectangle.portrait.split.2x1", .systemTeal), id: "m:densityP") {
                     UIMenu(children: LibraryPrefs.densityNames.enumerated().map { i, n in
                         UIAction(title: n, state: i == LibraryPrefs.cardDensityPortrait ? .on : .off) { [weak self] _ in LibraryPrefs.cardDensityPortrait = i; self?.build() } })
@@ -99,11 +99,13 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
     private func build() {
         stats.update(ActivityCenter.shared.stats)
         let acts = ActivityCenter.shared.activities
-        var s: [Section] = [
-            Section(id: "stats", header: L("common.library"), footer: L("settings.stats.footer"), rows: [.custom("stats", stats)]),
-        ]
-        if !acts.isEmpty {
-            var rows: [Row] = acts.map { .banner("act-\($0.kind.rawValue)", card($0)) }
+        // syncing with another device: at the very top
+        let syncActs = acts.filter { $0.kind == .sync }
+        let otherActs = acts.filter { $0.kind != .sync }
+        var s: [Section] = syncActs.isEmpty ? [] : [Section(id: "sync", rows: syncActs.map { .banner("act-\($0.kind.rawValue)", card($0)) })]
+        s.append(Section(id: "stats", header: L("common.library"), rows: [.custom("stats", stats)]))
+        if !otherActs.isEmpty {
+            var rows: [Row] = otherActs.map { .banner("act-\($0.kind.rawValue)", card($0)) }
             if Core.downloadStatus()?.running == true {
                 rows.append(.button(L("settings.cancelDownload"), icon: .init("xmark", .systemRed), destructive: true) { [weak self] in do { try Core.stopDownload(pause: false) } catch { self?.alert(L("common.couldNotCancel"), error.localizedDescription) } })
             }
@@ -117,14 +119,14 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
         let aiIcon = Icon("sparkles", .systemPurple, mascot: AutoTagger.shared.running ? "camera" : nil)
         s += [
             Section(id: "content", header: L("settings.section.content"), rows: [
-                .navigation(L("common.downloadPosts"), detail: Core.downloadStatus()?.running == true ? L("settings.downloading") : L("settings.download.detail"), icon: downloadIcon, id: "n:download") { [weak self] in
+                .navigation(L("common.downloadPosts"), detail: Core.downloadStatus()?.running == true ? L("settings.downloading") : nil, icon: downloadIcon, id: "n:download") { [weak self] in
                     self?.openSub(L("common.downloadPosts")) { self?.downloadSections() ?? [] } },
-                .navigation(L("common.importAndBackup"), detail: L("settings.import.detail"), icon: .init("shippingbox.fill", .systemBrown), id: "n:transfer") { [weak self] in
+                .navigation(L("common.importAndBackup"), detail: nil, icon: .init("shippingbox.fill", .systemBrown), id: "n:transfer") { [weak self] in
                     self?.openSub(L("common.importAndBackup")) { self?.transferSections() ?? [] } },
                 .navigation(L("common.tags"), detail: L("common.count", ActivityCenter.shared.stats?.tags ?? 0), icon: .init("tag.fill", .systemBlue), id: "n:tags") { [weak self] in
                     self?.navigationController?.pushViewController(TagListViewController(style: .insetGrouped), animated: true) },
             ]),
-            Section(id: "view", header: L("settings.section.browse"), footer: L("settings.browse.footer"), rows: [
+            Section(id: "view", header: L("settings.section.browse"), rows: [
             ] + (LibraryPrefs.aboutExtras && (bad > 0 || LibraryPrefs.badOnly) ? [
                 .toggle(L("settings.badOnly", bad), LibraryPrefs.badOnly, icon: .init("exclamationmark.triangle.fill", .systemRed), id: "t:bad") { on in LibraryPrefs.badOnly = on },
             ] : []) + [
@@ -134,7 +136,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
                 .toggle(L("settings.autoLandscape"), LibraryPrefs.autoLandscape, icon: .init("rectangle.landscape.rotate", .systemOrange), id: "t:landscape") { on in LibraryPrefs.autoLandscape = on },
             ]),
             cardsSection(),
-            Section(id: "privacy", header: L("applock.section"), footer: L("applock.footer"), rows: [
+            Section(id: "privacy", header: L("applock.section"), rows: [
                 .toggle(L("applock.toggle", AppLock.methodName), AppLock.enabled, enabled: AppLock.available || AppLock.enabled, icon: .init("lock.fill", .systemBlue), id: "t:appLock") { [weak self] on in
                     // both ways ask first: whoever turns it off has to be able to pass it
                     AppLock.authenticate { outcome in
@@ -147,7 +149,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
                     }
                 },
             ]),
-            Section(id: "search", header: L("common.search"), footer: L("settings.search.footer") + (LibraryPrefs.semanticSearchAvailable ? "" : "\n" + LibraryPrefs.semanticSearchNeedsModel), rows: [
+            Section(id: "search", header: L("common.search"), rows: [
                 .toggle(L("settings.fuzzy"), LibraryPrefs.fuzzySearch, enabled: LibraryPrefs.semanticSearchAvailable, icon: .init("sparkle.magnifyingglass", .systemPurple), id: "t:fuzzy") { on in LibraryPrefs.fuzzySearch = on },
             ]),
             Section(id: "smart", header: L("settings.section.smart"), rows: [
@@ -160,7 +162,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
         ]
         // GitHub builds only
         if UpdateCheck.repo != nil {
-            s.append(Section(id: "update", footer: L("update.footer"), rows: [
+            s.append(Section(id: "update", rows: [
                 .button(L("update.check"), icon: .init("arrow.down.app.fill", .systemBlue), id: "b:update") { [weak self] in
                     UpdateCheck.run(manual: true) { r in UpdatePrompt.show(r, on: self, manual: true) } },
             ]))
@@ -175,7 +177,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
                     self.navigationController?.pushViewController(AboutViewController(settings: self), animated: true)
                 },
             ]),
-            Section(id: "wipe", footer: L("settings.wipe.footer"), rows: [
+            Section(id: "wipe", rows: [
                 .button(L("settings.wipe.button"), icon: .init("trash.fill", .systemRed), destructive: true) { [weak self] in self?.confirmWipe() },
             ]),
         ]
@@ -249,7 +251,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
             .custom("links", linksView),
             .button(L("common.download"), icon: .init("arrow.down.circle.fill", .systemBlue), id: "b:download") { [weak self] in self?.downloadLinks() },
         ]))
-        s.append(Section(id: "batch", header: L("settings.batch"), footer: L("settings.batch.footer"), rows: [
+        s.append(Section(id: "batch", header: L("settings.batch"), rows: [
             .button(batchFileName.map { L("settings.batch.loaded", $0) } ?? L("settings.batch.pick"), icon: .init("doc.badge.plus", .systemIndigo), id: "b:pick") { [weak self] in self?.pick(.bookmarks) },
             .value(L("settings.batch.posts"), batchURLs.isEmpty ? "—" : "\(batchURLs.count)", icon: .init("number", .systemGray)),
             .stepper(L("settings.batch.concurrency"), value: concurrency, range: 1...16, step: 1, icon: .init("arrow.triangle.branch", .systemTeal), format: { "\(Int($0))" }) { [weak self] v in

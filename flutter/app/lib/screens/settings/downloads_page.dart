@@ -216,7 +216,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
                   ),
                   ListTile(key: const ValueKey('download-start'), leading: const Icon(Icons.download), title: Text(L('common.download')), onTap: _downloadLinks),
                 ]),
-                SettingsSection(title: L('settings.batch'), footer: L('settings.batch.footer'), children: [
+                SettingsSection(title: L('settings.batch'), children: [
                   ListTile(
                     key: const ValueKey('batch-pick'),
                     leading: const SettingsIcon(Icons.note_add),

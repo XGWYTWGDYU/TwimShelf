@@ -358,10 +358,12 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
 
     /// 浏览 tapped twice in a row reshuffles it.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
+        if selectedTab !== tab { UISelectionFeedbackGenerator().selectionChanged() }
         guard tab.identifier == LibraryPlace.browse.id else { lastBrowseTap = nil; return true }
         let now = Date()
         if selectedTab === tab, let last = lastBrowseTap, now.timeIntervalSince(last) < 0.4 {
             lastBrowseTap = nil
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             feed.reshuffle()
         } else {
             lastBrowseTap = now

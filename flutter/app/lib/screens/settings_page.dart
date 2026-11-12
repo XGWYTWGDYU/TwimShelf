@@ -29,6 +29,7 @@ import 'settings/transfer_page.dart';
 import '../app/jobs.dart';
 import '../widgets/text_menu.dart';
 import '../platform/os.dart';
+import '../widgets/haptics.dart';
 
 /// 设置, in the native app's sections: the library's counts, content (import and backup, tags,
 /// the account cookies) and clearing everything. Checking the media and the diagnostics are on
@@ -129,7 +130,16 @@ class _SettingsPageState extends State<SettingsPage> {
           body: ListView(
             padding: EdgeInsets.only(bottom: 32 + MediaQuery.paddingOf(context).bottom),
             children: [
-              _Section(title: L('common.library'), footer: L('settings.stats.footer'), children: [
+              // syncing with another device: first, as the native app's card (only this part
+              // follows the sync model's 1.5 s poll, not the whole page)
+              ListenableBuilder(
+                listenable: library.sync,
+                builder: (context, _) => switch (library.sync.status) {
+                  final st? when st.syncing > 0 => _Section(children: [_SyncCard(status: st)]),
+                  _ => const SizedBox.shrink(),
+                },
+              ),
+              _Section(title: L('common.library'), children: [
                 if (s != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -143,10 +153,10 @@ class _SettingsPageState extends State<SettingsPage> {
               ]),
               _Section(title: L('settings.section.content'), children: [
                 nav(const ValueKey('settings-downloads'), Icons.download, L('common.downloadPosts'),
-                    library.downloads.phase.name == 'running' ? L('settings.downloading') : L('settings.download.detail'),
+                    library.downloads.phase.name == 'running' ? L('settings.downloading') : null,
                     () => DownloadsPage(downloads: library.downloads, library: library),
                     mascot: library.downloads.phase.name == 'running' ? 'bag' : null),
-                nav(null, Icons.inventory_2, L('common.importAndBackup'), L('settings.import.detail'), () => TransferPage(library: library)),
+                nav(null, Icons.inventory_2, L('common.importAndBackup'), null, () => TransferPage(library: library)),
                 nav(const ValueKey('settings-tags'), Icons.sell, L('common.tags'), s == null ? null : L('common.count', [s.tags]), () => TagsPage(library: library)),
               ]),
               _Section(title: L('appearance.title'), footer: OS.isAndroid ? L('appearance.footer') : null, children: [
@@ -168,7 +178,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   secondary: const ClawdIcon('settings', size: 30),
                   title: Text(L('mascot.toggle')),
                   value: prefs.mascot,
-                  onChanged: (v) => prefs.mascot = v,
+                  onChanged: withHaptic((v) => prefs.mascot = v),
                 ),
                 ListTile(
                   leading: const SettingsIcon(Icons.gavel),
@@ -176,33 +186,33 @@ class _SettingsPageState extends State<SettingsPage> {
                   onTap: () => MascotCredits.showLicenses(context),
                 ),
               ]),
-              _Section(title: L('settings.section.browse'), footer: L('settings.browse.footer'), children: [
+              _Section(title: L('settings.section.browse'), children: [
                 if (prefs.aboutExtras && (bad > 0 || prefs.badOnly))
                   SwitchListTile(
                     secondary: const SettingsIcon(Icons.warning, danger: true),
                     title: Text(L('settings.badOnly', [bad])),
                     value: prefs.badOnly,
-                    onChanged: (v) => prefs.badOnly = v,
+                    onChanged: withHaptic((v) => prefs.badOnly = v),
                   ),
                 // the Mac and phones and tablets: not Windows and Linux
                 if (!OS.isWindows && !OS.isLinux) SwitchListTile(
                   secondary: const SettingsIcon(Icons.headphones),
                   title: Text(L('settings.headphonesOnly')),
                   value: prefs.headphonesOnly,
-                  onChanged: (v) => prefs.headphonesOnly = v,
+                  onChanged: withHaptic((v) => prefs.headphonesOnly = v),
                 ),
                 SwitchListTile(
                   secondary: const SettingsIcon(Icons.do_not_touch),
                   title: Text(L('settings.noGestures')),
                   value: prefs.playerGesturesOff,
-                  onChanged: (v) => prefs.playerGesturesOff = v,
+                  onChanged: withHaptic((v) => prefs.playerGesturesOff = v),
                 ),
                 if (!kIsWeb && (OS.isIOS || OS.isAndroid))
                   SwitchListTile(
                     secondary: const SettingsIcon(Icons.screen_rotation),
                     title: Text(L('settings.autoLandscape')),
                     value: prefs.autoLandscape,
-                    onChanged: (v) => prefs.autoLandscape = v,
+                    onChanged: withHaptic((v) => prefs.autoLandscape = v),
                   ),
               ]),
               // how many cards a row of 浏览 holds: a large screen's choice (a phone shows one)
@@ -212,7 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   _DensityRow(title: L('cards.landscape'), icon: Icons.view_week_outlined, value: prefs.densityLandscape, onChanged: (v) => prefs.densityLandscape = v),
                 ]),
               if (AppLock.offered)
-                _Section(title: L('applock.section'), footer: L('applock.footer'), children: [
+                _Section(title: L('applock.section'), children: [
                   AppLockSwitch(lock: AppLock.instance, icon: const SettingsIcon(Icons.lock)),
                 ]),
               _Section(title: L('settings.section.smart'), children: [
@@ -572,4 +582,83 @@ class _Section extends StatelessWidget {
 /// A settings section for the subpages.
 class SettingsSection extends _Section {
   const SettingsSection({super.key, super.title, super.footer, required super.children});
+}
+
+/// 正在与其他设备同步 / 正在从其他设备接收媒体, with what is left and a bar, as the native card.
+class _SyncCard extends StatefulWidget {
+  const _SyncCard({required this.status});
+  final SyncStatus status;
+  @override
+  State<_SyncCard> createState() => _SyncCardState();
+}
+
+class _SyncCardState extends State<_SyncCard> with SingleTickerProviderStateMixin {
+  late final _spin = AnimationController(vsync: this, duration: const Duration(seconds: 1))..repeat();
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    super.dispose();
+  }
+
+  static String _bytes(int b) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']; // i18n-exempt: unit symbols
+    var v = b.toDouble();
+    var u = 0;
+    while (v >= 1000 && u < units.length - 1) {
+      v /= 1000;
+      u++;
+    }
+    return '${u == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(v < 10 ? 1 : 0)} ${units[u]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final t = widget.status.receiving;
+    final String title;
+    final String detail;
+    double? progress;
+    if (t != null && t.total > 0) {
+      final inFlight = t.current_size > 0 ? t.current_done / t.current_size : 0.0;
+      final left = t.total > t.received ? t.total - t.received : 0;
+      var d = L('activity.filesLeft', [left]);
+      if (t.total_bytes > 0) {
+        d += ' · ${_bytes(t.total_bytes > t.bytes ? t.total_bytes - t.bytes : 0)}';
+        d += L('activity.received', [t.received, t.total, _bytes(t.bytes), _bytes(t.total_bytes)]);
+      } else {
+        d += L('activity.receivedShort', [t.received, t.total, _bytes(t.bytes)]);
+      }
+      if (t.current_size > 8000000) d += L('activity.currentFile', [(inFlight * 100).round()]);
+      title = L('activity.receiving');
+      detail = d;
+      progress = (t.total_bytes > 0 ? t.bytes / t.total_bytes : (t.received + inFlight) / t.total).clamp(0.0, 1.0);
+    } else {
+      title = L('activity.syncing');
+      detail = L('activity.syncDetail');
+    }
+    return Padding(
+      key: const ValueKey('settings-sync-card'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Row(children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(color: scheme.primary.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
+          child: RotationTransition(turns: _spin, child: Icon(Icons.sync, color: scheme.primary)),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text(title, style: text.bodyLarge?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(detail, style: text.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+            const SizedBox(height: 6),
+            ClipRRect(borderRadius: BorderRadius.circular(2), child: LinearProgressIndicator(value: progress, minHeight: 4)),
+          ]),
+        ),
+      ]),
+    );
+  }
 }

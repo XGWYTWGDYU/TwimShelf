@@ -72,13 +72,7 @@ struct StorageUsageView: View {
         if showsTitle {
             Text(L("storage.title")).font(.system(size: 20, weight: .semibold)).padding(.top, 23)
         }
-        Text(summary)
-            .font(.system(size: 13))
-            .foregroundStyle(.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.top, showsTitle ? 6 : 23)
-            .padding(.horizontal, 15)
-            .padding(.bottom, 20)
+        Color.clear.frame(height: 20)
 
         VStack(spacing: 0) {
             ForEach(Array(parts.enumerated()), id: \.element.key) { i, part in
@@ -119,12 +113,6 @@ struct StorageUsageView: View {
         // the settings canvas is this colour itself: a tone of the text, so the card shows
         Color.primary.opacity(0.05)
         #endif
-    }
-
-    private var summary: String {
-        let used = UInt64(total)
-        let free = StorageReport.freeSpace().map { Double($0) } ?? 0
-        return L("storage.usage.summary", StorageReport.bytes(used), free > 0 ? StorageReport.percent(total / free) : "—")
     }
 
     private func row(_ part: Core.StorageGroup) -> some View {

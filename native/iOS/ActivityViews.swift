@@ -248,7 +248,8 @@ final class StatsCardView: UIView {
         row.distribution = .fillEqually
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
-        NSLayoutConstraint.activate([row.topAnchor.constraint(equalTo: topAnchor, constant: 6), row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+        // room above and below on every device: on a wide row (iPad) 6 pt looked squashed
+        NSLayoutConstraint.activate([row.topAnchor.constraint(equalTo: topAnchor, constant: 14), row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
                                      row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor)])
         accessibilityIdentifier = "statsCard"
     }

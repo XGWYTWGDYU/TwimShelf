@@ -90,7 +90,7 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
         if !store.taggerIds.isEmpty {
             auto.append(.button(L("models.retagAllEllipsis"), icon: .init("arrow.clockwise.circle.fill", .systemIndigo)) { [weak self] in self?.retagAll() })
         }
-        s.append(Section(id: "auto", header: L("models.tagging"), footer: L("models.tagging.footer"), rows: auto))
+        s.append(Section(id: "auto", header: L("models.tagging"), rows: auto))
 
         s.append(Section(id: "defaults", header: L("models.defaultModel"), rows: [
             .navigation(L("models.tagging"), detail: store.activeTaggerId.map { store.displayName($0) } ?? L("common.notInstalled"), icon: .init("eye.fill", .systemPink)) { [weak self] in self?.choose(.tagger) },
@@ -114,7 +114,7 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
             rows.append(.button(L("common.delete"), icon: .init("trash", .systemRed), destructive: true, id: "x:\(m.id)") { [weak self] in self?.confirmDelete(m) })
             return rows
         }
-        s.append(Section(id: "installed", header: L("models.installed", store.installed.count), footer: L("models.installed.footer"),
+        s.append(Section(id: "installed", header: L("models.installed", store.installed.count),
                          rows: installed.isEmpty ? [.value(L("models.noneInstalled"), nil, icon: .init("tray", .systemGray))] : installed))
 
         // external models: used exactly like the built-in ones
@@ -135,9 +135,9 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
         ext.append(.button(L("models.addExternalEllipsis"), icon: .init("plus.circle.fill", .systemBlue), id: "b:addExternal") { [weak self] in
             self?.navigationController?.pushViewController(ExternalModelViewController(model: .new()), animated: true)
         })
-        s.append(Section(id: "external", header: L("models.external"), footer: L("models.external.footer"), rows: ext))
+        s.append(Section(id: "external", header: L("models.external"), rows: ext))
 
-        s.append(Section(id: "store", header: L("models.available"), footer: L("hub.entry.footer", ModelCatalog.recommendedTagger.displayName), rows: [
+        s.append(Section(id: "store", header: L("models.available"), rows: [
             .navigation(L("hub.title"), detail: L("hub.entry.detail"), icon: .init("square.grid.2x2.fill", .systemBlue), id: "n:hub") { [weak self] in
                 self?.navigationController?.pushViewController(ModelHubViewController(), animated: true)
             },
@@ -150,9 +150,9 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
             if remoteLoading { rows.insert(.value(L("models.peers.querying"), nil, icon: .init("hourglass", .systemGray), id: "r:loading"), at: 0) }
             else if remote.isEmpty { rows.append(.value(remoteError ?? (SyncService.shared.reachablePeers.isEmpty ? (SyncService.shared.discoveredAccountPeers.isEmpty ? L("models.peers.none") : L("models.peers.connecting")) : (remoteChecked ? L("models.peers.nothing") : L("models.peers.tap"))), nil, icon: .init("laptopcomputer.and.iphone", .systemGray), id: "r:none")) }
             rows.append(.button(L("models.peers.query"), icon: .init("arrow.clockwise", .systemBlue), enabled: !remoteLoading, id: "r:refresh") { [weak self] in self?.loadRemote() })
-            s.append(Section(id: "remote", header: L("models.peers.title"), footer: L("models.peers.footer"), rows: rows))
+            s.append(Section(id: "remote", header: L("models.peers.title"), footer: L("models.appleOnly"), rows: rows))
         }
-        s.append(Section(id: "io", header: L("common.import"), footer: L("models.import.footer"), rows: [
+        s.append(Section(id: "io", header: L("common.import"), footer: L("models.appleOnly"), rows: [
             .button(L("models.import.button"), icon: .init("square.and.arrow.down.fill", .systemGreen)) { [weak self] in self?.pickModel() },
         ]))
         sections = s

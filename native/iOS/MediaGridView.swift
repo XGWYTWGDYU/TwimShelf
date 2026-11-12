@@ -99,10 +99,27 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
             link.add(to: .main, forMode: .common)       // keeps firing while the user scrolls
             displayLink = link
+            linkAtFullRate = false
         } else if window == nil {
             displayLink?.invalidate()
             displayLink = nil
         }
+    }
+
+    /// While the grid animates (a zoom, its settle, a re-align, a removal) the display link asks
+    /// for the display's full rate and nothing less. With a range (80…120, preferred 120) the
+    /// system is free to leave callbacks out, and does: a zoom ran at 80 to 110 frames a second on
+    /// an iPhone 17 with the app nearly idle — in nine of ten missing frames the callback had
+    /// simply not come (scrolling was not affected: the scroll view holds the full rate itself).
+    /// At rest the range is back, so a still grid does not keep the display at 120 Hz.
+    private var linkAtFullRate = false
+    private func updateLinkRate() {
+        let full = scene?.isAnimating == true || stepZoom != nil
+        guard full != linkAtFullRate, let displayLink else { return }
+        linkAtFullRate = full
+        let top = Float(window?.screen.maximumFramesPerSecond ?? 120)
+        displayLink.preferredFrameRateRange = full ? CAFrameRateRange(minimum: top, maximum: top, preferred: top)
+                                                   : CAFrameRateRange(minimum: min(80, top), maximum: top, preferred: top)
     }
 
     private var scale: CGFloat { window?.screen.scale ?? traitCollection.displayScale }
@@ -256,6 +273,7 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
         linkFrame += 1      // a new display frame: one draw allowed again
         if stepZoom != nil { advanceStep(link.targetTimestamp) }
         if scene.isAnimating || needsDraw { drawOnce(link.targetTimestamp) }
+        updateLinkRate()    // (after the draw: that is where a zoom or a removal ends)
         // a reflow (tiles deleted or restored) ends here: the accessibility elements are made then,
         // not while the tiles still move
         if wasAnimating && !scene.isAnimating { updateAccessibility() }
@@ -294,6 +312,7 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
             g.scale = 1                                   // Photos measures scale from recognition, not touch-down
             scene.engine.beginPinch(at: f, time: now)
             frameTime = now
+            updateLinkRate()
             beginZoomUI()
         case .changed:
             scene.engine.pinchChanged(scale: g.scale, finger: f)
@@ -337,6 +356,7 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
         scrollView.isScrollEnabled = false
         beginZoomUI()
         stepZoom = (1, ratio, now, mid)
+        updateLinkRate()
     }
 
     private func advanceStep(_ now: CFTimeInterval) {

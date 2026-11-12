@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 
 import '../l10n/l10n.dart';
@@ -266,6 +267,7 @@ class _AppLockSwitchState extends State<AppLockSwitch> {
             onChanged: _asking || (!available && !on)
                 ? null
                 : (v) async {
+                    HapticFeedback.selectionClick();
                     setState(() {
                       _asking = true;
                       _problem = null;

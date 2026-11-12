@@ -1,5 +1,6 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:tl_core/tl_core.dart';
 
 import '../../actions/search_export.dart';
@@ -70,12 +71,13 @@ class AiPage extends StatelessWidget {
                     ListTile(leading: const Icon(Icons.auto_awesome_outlined), title: Text(L('models.none.title')), subtitle: Text(L('models.none.message'))),
                   ])
                 else
-                  SettingsSection(title: L('models.tagging'), footer: L('models.tagging.footer'), children: [
+                  SettingsSection(title: L('models.tagging'), children: [
                     SwitchListTile(
                       key: const ValueKey('ai-autotag'),
                       title: Text(L('models.autoTag')),
                       value: models.autoTag,
                       onChanged: (v) async {
+                        HapticFeedback.selectionClick();
                         await models.setAutoTag(v);
                         if (v) await tagger.startIfEnabled(asked: true);
                       },
@@ -135,7 +137,7 @@ class AiPage extends StatelessWidget {
                   if (id == active) await models.setActiveTagger(null);
                 }),
                 if (LocalModels.apple && local.supported) _AppleOnlySection(local: local, sync: sync),
-                SettingsSection(title: L('models.external'), footer: L('models.external.footer'), children: [
+                SettingsSection(title: L('models.external'), children: [
                   for (final m in all)
                     _ModelCard(
                       key: ValueKey('ai-model-${m.id}'),
@@ -208,11 +210,11 @@ class _LocalModelsSection extends StatelessWidget {
     }
     final dl = local.download;
     final footer = [
-      LocalModels.apple ? L('models.local.footer.apple') : L('models.local.footer.gguf'),
+      if (!LocalModels.apple) L('models.local.footer.gguf'),
       if (local.devices != null && local.devices!.isNotEmpty) L('models.local.devices', [local.devices!]),
     ].join('\n');
     final extra = local.installed.where((m) => local.catalogFor(m.id) == null).toList();
-    return SettingsSection(title: L('models.local'), footer: footer, children: [
+    return SettingsSection(title: L('models.local'), footer: footer.isEmpty ? null : footer, children: [
       for (final c in local.catalog)
         if (local.find(c.folder) case final installed?)
           _ModelCard(

@@ -30251,25 +30251,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "How much space the app takes on this device. Only sizes are read."
+            "value" : "Only sizes are read, never contents."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このデバイスでアプリが使用している容量です。読み取るのはサイズだけです。"
+            "value" : "読み取るのはサイズだけで、内容は読み取りません。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本应用在这台设备上占用的空间。只读取大小，不读取内容。"
+            "value" : "只读取大小，不读取内容。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "本應用程式在這台裝置上佔用的空間。只讀取大小，不讀取內容。"
+            "value" : "只讀取大小，不讀取內容。"
           }
         }
       }

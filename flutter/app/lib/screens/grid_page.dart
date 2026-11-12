@@ -339,7 +339,10 @@ class _GridPageState extends State<GridPage> {
                       });
                     }
                   },
-                  onLongPress: (i, at) => showMediaMenu(context, library: widget.library, item: items[i], position: at, place: widget.place),
+                  onLongPress: (i, at) {
+                    HapticFeedback.mediumImpact();
+                    showMediaMenu(context, library: widget.library, item: items[i], position: at, place: widget.place);
+                  },
                   onOpen: (i) => selected != null ? _toggle(i) : Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
                         fullscreenDialog: true,
                         builder: (_) => ViewerPage(library: widget.library, items: items, index: i),

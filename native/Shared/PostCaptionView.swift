@@ -128,14 +128,6 @@ private struct PostCaptionContent: View {
                 Text("@" + sn).font(.subheadline).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
             }
             Spacer(minLength: 8)
-            if let s = item.url, let u = URL(string: s) {
-                Link(destination: u) {
-                    Image(systemName: "arrow.up.right.square").font(.body.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L("caption.openPost"))
-                .accessibilityIdentifier("captionOpenPost")
-            }
         }
     }
 

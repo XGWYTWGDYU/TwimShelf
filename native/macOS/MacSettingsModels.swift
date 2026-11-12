@@ -207,7 +207,7 @@ struct ModelsPageView: View {
             remote(store)
 
             Card(spacing: 0) {
-                CardRow(symbol: "square.and.arrow.down.fill", color: .green, title: L("mac.models.import"), detail: L("mac.models.import.detail")) {
+                CardRow(symbol: "square.and.arrow.down.fill", color: .green, title: L("mac.models.import"), detail: L("models.appleOnly")) {
                     Button(L("mac.importEllipsis")) { m.importModel(env.window) }
                 }
             }
@@ -263,8 +263,6 @@ struct ModelsPageView: View {
                         Text(L("models.autoTag")).font(.system(size: 13.5, weight: .medium))
                     }
                     .toggleStyle(.switch)
-                    Text(L("mac.models.tagging.footer"))
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -404,7 +402,7 @@ struct ModelsPageView: View {
 
     @ViewBuilder private func external(_ store: ModelStore) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeading(L("models.external"), note: L("models.external.footer"))
+            SectionHeading(L("models.external"))
             VStack(spacing: 12) {
                 ForEach(ExternalModels.all, id: \.id) { e in
                     modelCard(id: e.id, symbol: e.isLocal ? "desktopcomputer" : "cloud.fill", color: .blue, title: e.title, isDefault: e.id == store.activeTaggerId,
@@ -443,7 +441,7 @@ struct ModelsPageView: View {
 
     private var hubEntry: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeading(L("models.available"), note: L("hub.entry.footer", ModelCatalog.recommendedTagger.displayName))
+            SectionHeading(L("models.available"))
             Card(spacing: 0) {
                 CardRow(symbol: "square.grid.2x2.fill", color: .blue, title: L("hub.title"), detail: L("hub.entry.detail")) {
                     Button(L("hub.open")) { env.open(L("hub.title"), MacSettingsPages.modelHub()) }
@@ -456,7 +454,7 @@ struct ModelsPageView: View {
     @ViewBuilder private func remote(_ store: ModelStore) -> some View {
         if SyncService.shared.hasAccount {
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeading(L("models.peers.title"), note: L("mac.models.peers.footer"),
+                SectionHeading(L("models.peers.title"), note: L("models.appleOnly"),
                                trailing: AnyView(Button(L("mac.models.query")) { m.loadRemote() }.disabled(m.remoteState == "loading")))
                 Card(spacing: 10) {
                     if m.remoteState == "loading" { Text(L("models.peers.querying")).foregroundStyle(.secondary) }

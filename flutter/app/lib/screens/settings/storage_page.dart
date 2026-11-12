@@ -102,7 +102,6 @@ Future<List<StorageSkip>> clearStorageFiles(Set<String> keys, Map<String, List<S
 class _StoragePageState extends State<StoragePage> {
   StorageUsage? _usage;
   Object? _error;
-  int? _free;
   final _selected = {..._selectedAtFirst};
   bool _clearing = false;
 
@@ -139,23 +138,12 @@ class _StoragePageState extends State<StoragePage> {
     try {
       final places = await storagePlaces(widget.library.thumbs.cacheDir);
       final u = await loadStorageUsage(places);
-      final free = await loadFreeSpace(widget.library.thumbs.cacheDir).catchError((_) => null);
       if (mounted) {
-        setState(() {
-          _usage = u;
-          _free = free;
-        });
+        setState(() => _usage = u);
       }
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
-  }
-
-  /// A share of the whole, as a person reads it: `38%`, `2.4%`, `<0.1%`.
-  static String _percent(double share) {
-    final p = share * 100;
-    if (p < 0.1) return '<0.1%';
-    return p >= 10 ? '${p.toStringAsFixed(0)}%' : '${p.toStringAsFixed(1)}%';
   }
 
   List<StorageGroup> _chosen(StorageUsage u) => u.groups.where((g) => g.bytes > 0 && clearableStorage.contains(g.key) && _selected.contains(g.key)).toList();
@@ -247,10 +235,7 @@ class _StoragePageState extends State<StoragePage> {
                         _SegmentBar(groups: u.groups, height: 10),
                         const SizedBox(height: 12),
                         Text(
-                          [
-                            if (_free case final free? when free > 0) L('storage.usage.summary', [_bytes(u.total), _percent(u.total / free)]),
-                            L('storage.footer'),
-                          ].join('\n'),
+                          L('storage.footer'),
                           key: const ValueKey('storage-summary'),
                           style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                         ),

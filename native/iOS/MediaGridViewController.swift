@@ -135,7 +135,6 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
     func mediaGrid(_ g: MediaGridView, didSettleAt level: Int) {
         UserDefaults.standard.set(level, forKey: "grid.level")
         updateBarItems()
-        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     func mediaGridSelectionChanged(_ g: MediaGridView) { updateSelectionUI() }

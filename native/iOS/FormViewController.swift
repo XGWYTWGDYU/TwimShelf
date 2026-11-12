@@ -221,7 +221,7 @@ class FormViewController: UIViewController, UICollectionViewDelegate {
             let sw = UISwitch()
             sw.isOn = on
             sw.isEnabled = enabled
-            sw.addAction(UIAction { _ in changed(sw.isOn) }, for: .valueChanged)
+            sw.addAction(UIAction { _ in UISelectionFeedbackGenerator().selectionChanged(); changed(sw.isOn) }, for: .valueChanged)
             cell.accessories = [.customView(configuration: .init(customView: sw, placement: .trailing()))]
         case let .menu(title, value, menu):
             c.text = title
@@ -266,11 +266,17 @@ class FormViewController: UIViewController, UICollectionViewDelegate {
             row.translatesAutoresizingMaskIntoConstraints = false
             host.addSubview(row)
             cell.contentView.addSubview(host)
+            // Without a content configuration the cell's vertical margins are ~0, so the stepper
+            // filled the row edge to edge; pad it like the list's own rows instead.
             let m = cell.contentView.layoutMarginsGuide
+            let tall = host.heightAnchor.constraint(greaterThanOrEqualToConstant: 37)
             NSLayoutConstraint.activate([
-                host.topAnchor.constraint(equalTo: m.topAnchor), host.bottomAnchor.constraint(equalTo: m.bottomAnchor),
+                host.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 11),
+                host.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -11),
                 host.leadingAnchor.constraint(equalTo: m.leadingAnchor), host.trailingAnchor.constraint(equalTo: m.trailingAnchor),
-                row.topAnchor.constraint(equalTo: host.topAnchor), row.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+                tall,
+                row.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+                row.topAnchor.constraint(greaterThanOrEqualTo: host.topAnchor), row.bottomAnchor.constraint(lessThanOrEqualTo: host.bottomAnchor),
                 row.leadingAnchor.constraint(equalTo: host.leadingAnchor), row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
                 icon.widthAnchor.constraint(equalToConstant: 29), icon.heightAnchor.constraint(equalToConstant: 29),
             ])

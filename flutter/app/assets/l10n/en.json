@@ -1143,7 +1143,7 @@
     "one": "%lld file",
     "other": "%lld files"
   },
-  "storage.footer": "How much space the app takes on this device. Only sizes are read.",
+  "storage.footer": "Only sizes are read, never contents.",
   "storage.group.app": "The App",
   "storage.group.app.detail": "The program and what is built into it (translations, icons, the default prompt).",
   "storage.group.bin": "Recycle Bin",

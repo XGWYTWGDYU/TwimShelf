@@ -35,16 +35,18 @@ struct SettingsRootView: View {
         let online = svc.reachablePeers.count
         let downloading = ActivityCenter.shared.activities.first { $0.kind == .download }
         SettingsCanvas {
+            // syncing with another device: at the very top
+            ActivityCard(kinds: [.sync])
             hero(stats, svc)
-            ActivityCard()
+            ActivityCard(kinds: [.download, .model, .tagging, .verify, .importing])
 
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeading(L("mac.manage"))
                 LazyVGrid(columns: tiles, spacing: 14) {
-                    NavTile(title: L("common.downloadPosts"), detail: downloading.map { "\($0.title) · \($0.detail)" } ?? L("mac.download.detail"), symbol: "arrow.down", color: .blue, mascot: downloading != nil ? "bag" : nil,
+                    NavTile(title: L("common.downloadPosts"), detail: downloading.map { "\($0.title) · \($0.detail)" }, symbol: "arrow.down", color: .blue, mascot: downloading != nil ? "bag" : nil,
                             progress: downloading?.progress, id: "nav-download") { env.open(L("common.downloadPosts"), MacSettingsPages.download()) }
-                    NavTile(title: L("common.importAndBackup"), detail: L("settings.import.detail"), symbol: "shippingbox.fill", color: .brown, id: "nav-transfer") { env.open(L("common.importAndBackup"), MacSettingsPages.transfer()) }
-                    NavTile(title: L("common.tags"), detail: L("mac.tags.detail", stats?.tags ?? 0), symbol: "tag.fill", color: .indigo, id: "nav-tags") { env.open(L("common.tags"), MacTagsPage()) }
+                    NavTile(title: L("common.importAndBackup"), detail: nil, symbol: "shippingbox.fill", color: .brown, id: "nav-transfer") { env.open(L("common.importAndBackup"), MacSettingsPages.transfer()) }
+                    NavTile(title: L("common.tags"), detail: nil, symbol: "tag.fill", color: .indigo, id: "nav-tags") { env.open(L("common.tags"), MacTagsPage()) }
                     NavTile(title: L("common.aiModels"), detail: (ModelStore.shared.activeTaggerId.map { ModelStore.shared.displayName($0) } ?? L("mac.models.none")) + (counts.total > 0 ? L("mac.models.analysed", counts.done, counts.total) : ""),
                             symbol: "sparkles", color: .purple, mascot: AutoTagger.shared.running ? "camera" : nil, progress: counts.total > 0 ? Double(counts.done) / Double(counts.total) : nil, id: "nav-models") { env.open(L("common.aiModels"), MacSettingsPages.models()) }
                     NavTile(title: L("mac.sync"), detail: svc.hasAccount ? (online > 0 ? L("mac.sync.online", online) : L("mac.sync.noneOnline")) : L("mac.sync.noAccount"), symbol: "arrow.triangle.2.circlepath", color: .green,
@@ -59,7 +61,7 @@ struct SettingsRootView: View {
             // GitHub builds only
             if UpdateCheck.repo != nil {
                 Card(spacing: 12) {
-                    CardRow(symbol: "arrow.down.app.fill", color: .blue, title: L("update.check"), detail: L("update.footer")) {
+                    CardRow(symbol: "arrow.down.app.fill", color: .blue, title: L("update.check")) {
                         Button(L("update.check")) { UpdateCheck.run(manual: true) { r in MacUpdate.show(r, window: env.window, manual: true) } }
                     }
                 }
@@ -83,12 +85,12 @@ struct SettingsRootView: View {
             }
             // last: what the app takes on this Mac, the app itself, and clearing everything
             Card(spacing: 12) {
-                CardRow(symbol: "internaldrive.fill", color: .gray, title: L("storage.title"), detail: L("storage.footer")) {
-                    Button(L("common.view")) { env.open(L("storage.title"), MacSettingsPages.storage()) }.accessibilityIdentifier("nav-storage")
+                NavRow(symbol: "internaldrive.fill", color: .gray, title: L("storage.title"), id: "nav-storage") {
+                    env.open(L("storage.title"), MacSettingsPages.storage())
                 }
                 RowDivider(inset: 42)
-                CardRow(symbol: "info.circle.fill", color: .gray, title: L("settings.about")) {
-                    Button(L("common.view")) { env.open(L("settings.about"), MacSettingsPages.about()) }.accessibilityIdentifier("settingsAbout")
+                NavRow(symbol: "info.circle.fill", color: .gray, title: L("settings.about"), id: "settingsAbout") {
+                    env.open(L("settings.about"), MacSettingsPages.about())
                 }
             }
             danger
@@ -103,10 +105,7 @@ struct SettingsRootView: View {
         let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
         return VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L("common.library")).font(.system(size: 22, weight: .bold, design: .rounded))
-                    Text(L("mac.stats.footer")).font(.callout).foregroundStyle(.secondary)
-                }
+                Text(L("common.library")).font(.system(size: 22, weight: .bold, design: .rounded))
                 Spacer(minLength: 8)
                 Pill(text: svc.stateText, color: (svc.status?.syncing ?? 0) > 0 ? .blue : .secondary, symbol: "arrow.triangle.2.circlepath")
             }
@@ -132,22 +131,18 @@ struct SettingsRootView: View {
                               isOn: Binding(get: { LibraryPrefs.badOnly }, set: { LibraryPrefs.badOnly = $0 }))
                     RowDivider(inset: 42)
                 }
-                ToggleRow(symbol: "headphones", color: .pink, title: L("settings.headphonesOnly"), detail: L("mac.headphones.detail"),
+                ToggleRow(symbol: "headphones", color: .pink, title: L("settings.headphonesOnly"),
                           isOn: Binding(get: { AudioPolicy.headphonesOnly }, set: { AudioPolicy.headphonesOnly = $0 }))
                 RowDivider(inset: 42)
                 ToggleRow(symbol: "hand.raised.slash.fill", color: .indigo, title: L("settings.noGestures"),
-                          detail: L("mac.noGestures.detail"),
                           isOn: Binding(get: { LibraryPrefs.playerGesturesOff }, set: { LibraryPrefs.playerGesturesOff = $0 }))
 
                 Divider().padding(.vertical, 2)
                 groupLabel(L("common.search"))
                 ToggleRow(symbol: "sparkle.magnifyingglass", color: .purple, title: L("settings.fuzzy"),
-                          detail: LibraryPrefs.semanticSearchAvailable ? L("mac.fuzzy.detail") : LibraryPrefs.semanticSearchNeedsModel,
                           isOn: Binding(get: { LibraryPrefs.fuzzySearch }, set: { LibraryPrefs.fuzzySearch = $0; NotificationCenter.default.post(name: .libraryChanged, object: nil) }),
                           disabled: !LibraryPrefs.semanticSearchAvailable)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(L("mac.search.footer"))
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     FlowLayout(spacing: 6) {
                         ForEach(SearchKeyword.all, id: \.key) { kw in Pill(text: kw.info.word, color: .accentColor, symbol: kw.info.symbol) }
                     }
@@ -186,8 +181,7 @@ struct SettingsRootView: View {
 
     private var danger: some View {
         Card(tint: .red, spacing: 12) {
-            CardRow(symbol: "trash.fill", color: .red, title: L("mac.wipe.title"),
-                    detail: L("mac.wipe.detail")) {
+            CardRow(symbol: "trash.fill", color: .red, title: L("mac.wipe.title")) {
                 Button(L("mac.eraseEllipsis"), role: .destructive) { MacWipeFlow.start(env.window) }.accessibilityIdentifier("wipeAll")
             }
         }
@@ -336,7 +330,7 @@ struct DownloadPageView: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                SectionHeading(L("settings.batch"), note: L("mac.batch.footer"))
+                SectionHeading(L("settings.batch"))
                 Card(spacing: 16) {
                     dropZone
                     VStack(spacing: 12) {
@@ -610,7 +604,7 @@ private struct AppLockRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ToggleRow(symbol: "lock.fill", color: .blue, title: L("applock.toggle", AppLock.methodName), detail: L("applock.footer"),
+            ToggleRow(symbol: "lock.fill", color: .blue, title: L("applock.toggle", AppLock.methodName),
                       isOn: Binding(get: { on }, set: { ask($0) }), disabled: !AppLock.available && !on)
                 .accessibilityIdentifier("appLockToggle")
             if let problem { Text(problem).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }

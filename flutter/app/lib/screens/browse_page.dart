@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:tl_core/tl_core.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -530,7 +531,10 @@ class _BrowsePageState extends State<BrowsePage> {
                       key: const ValueKey('pullToShuffle'),
                       edgeOffset: top,
                       notificationPredicate: (n) => n.depth == 0 && !Prefs.instance.feedByAdded,
-                      onRefresh: () async => _shuffle(),
+                      onRefresh: () async {
+                        HapticFeedback.mediumImpact();
+                        _shuffle();
+                      },
                       child: list,
                     );
                   });

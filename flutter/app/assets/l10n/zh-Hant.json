@@ -1029,7 +1029,7 @@
   "storage.clear.title": "清除所選內容？",
   "storage.failed": "無法計算：%@",
   "storage.files": "%lld 個檔案",
-  "storage.footer": "本應用程式在這台裝置上佔用的空間。只讀取大小，不讀取內容。",
+  "storage.footer": "只讀取大小，不讀取內容。",
   "storage.group.app": "應用程式本體",
   "storage.group.app.detail": "程式本身及其內建資源（各語言文字、圖示、預設提示詞）。",
   "storage.group.bin": "回收站",

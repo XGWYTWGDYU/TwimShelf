@@ -275,6 +275,29 @@ struct CardRow<Trailing: View>: View {
     }
 }
 
+/// A row that opens a subpage: the whole row is the button, with the same arrow as the tiles.
+struct NavRow: View {
+    var symbol: String? = nil
+    var color: Color = .accentColor
+    let title: String
+    var detail: String? = nil
+    var id: String? = nil
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            CardRow(symbol: symbol, color: color, title: title, detail: detail) {
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold)).foregroundStyle(.tertiary)
+                    .offset(x: hovering ? 2 : 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { hovering = h } }
+        .accessibilityIdentifier(id ?? title)
+    }
+}
+
 /// A row with a switch.
 struct ToggleRow: View {
     var symbol: String? = nil

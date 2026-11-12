@@ -479,7 +479,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         sortButton.addAction(UIAction { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) }, for: .touchUpInside)
         updateSortButton()
         groupToggle.isOn = grouped
-        groupToggle.addAction(UIAction { [weak self] _ in self?.groupChanged() }, for: .touchUpInside)
+        groupToggle.addAction(UIAction { [weak self] _ in UISelectionFeedbackGenerator().selectionChanged(); self?.groupChanged() }, for: .touchUpInside)
         searchRow.addArrangedSubview(sortButton)
         searchRow.addArrangedSubview(groupToggle)
         searchRow.addArrangedSubview(downloadButton)

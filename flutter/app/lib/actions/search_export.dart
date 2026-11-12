@@ -10,6 +10,7 @@ import '../l10n/l10n.dart';
 import '../platform/apple_platform.dart';
 import '../platform/os.dart';
 import '../platform/files.dart';
+import '../widgets/haptics.dart';
 
 /// 导出搜索结果, as the native button beside the search field: the media of the current result
 /// as a .tlpack (with their posts, and tags and folder memberships if chosen) or a plain zip of
@@ -110,7 +111,7 @@ class _ExportDialogState extends State<_ExportDialog> {
 
   Widget _row(String title, String detail, bool value, ValueChanged<bool>? onChanged) => Opacity(
         opacity: onChanged == null ? 0.55 : 1,
-        child: SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(title), subtitle: Text(detail), value: value, onChanged: onChanged),
+        child: SwitchListTile(contentPadding: EdgeInsets.zero, title: Text(title), subtitle: Text(detail), value: value, onChanged: withHaptic(onChanged)),
       );
 
   @override

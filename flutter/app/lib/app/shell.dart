@@ -144,6 +144,11 @@ class _ShellState extends State<Shell> {
     final now = DateTime.now();
     final again = p == Place.browse && _place == p && _lastBrowseTap != null && now.difference(_lastBrowseTap!) < const Duration(milliseconds: 400);
     _lastBrowseTap = p == Place.browse && !again ? now : null;
+    if (again) {
+      HapticFeedback.lightImpact();
+    } else if (p != _place) {
+      HapticFeedback.selectionClick();
+    }
     if (again) library.shuffleRequest.value++;
     _select(p);
   }
