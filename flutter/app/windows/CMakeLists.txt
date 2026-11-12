@@ -67,6 +67,10 @@ if(TL_ARM64)
   tl_media_kit_arm64_bundle()
 endif()
 
+# ANGLE's bundled Vulkan loader crashes when ggml initializes newer NVIDIA drivers.
+# Let both plugins use the system Vulkan loader.
+list(FILTER PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "/ANGLE/vulkan-1\\.dll$")
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
@@ -96,6 +100,8 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+# Incremental builds reuse the output directory from earlier installs.
+install(CODE "file(REMOVE \"${INSTALL_BUNDLE_LIB_DIR}/vulkan-1.dll\")" COMPONENT Runtime)
 
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
