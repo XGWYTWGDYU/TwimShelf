@@ -45,11 +45,11 @@ class FakeSetup extends Setup {
 Product _product([String version = '0.2.0']) => Product(id: 'synthetic.app', name: 'TwimShelf', version: version, publisher: '', executable: 'app.exe');
 final _s = S.of(const Locale('en'));
 
-Future<FakeSetup> _pump(WidgetTester t, {Mode mode = Mode.install, InstalledCopy? copy, String? data, bool desktop = false, int failures = 0}) async {
+Future<FakeSetup> _pump(WidgetTester t, {String? payload = 'payload', InstalledCopy? copy, String? data, bool desktop = false, int failures = 0}) async {
   await t.binding.setSurfaceSize(const Size(640, 520));
   final fake = FakeSetup(_product(), copy: copy, data: data, desktop: desktop, failures: failures);
   await t.pumpWidget(MaterialApp(
-    home: SetupPage(product: fake.product, mode: mode, payload: 'payload', setupFolder: r'C:\setup', strings: _s, setup: fake),
+    home: SetupPage(product: fake.product, payload: payload, setupFolder: r'C:\setup', strings: _s, setup: fake),
   ));
   await t.pump();
   return fake;
@@ -107,10 +107,12 @@ void main() {
   });
 
   testWidgets('the same version offers to overwrite', (t) async {
-    await _pump(t, copy: _copy('0.2.0'));
+    final f = await _pump(t, copy: _copy('0.2.0'));
     expect(find.text(_s.overwriteTitle('TwimShelf')), findsOneWidget);
     expect(find.text(_s.reinstallNotice('v0.2.0')), findsOneWidget);
     expect(find.text(_s.overwrite), findsOneWidget);
+    await _go(t);
+    expect(f.installedTo, r'D:\Apps\TwimShelf');
   });
 
   testWidgets('a newer copy warns, and does not promise the data is fine', (t) async {
@@ -137,8 +139,10 @@ void main() {
   });
 
   group('uninstall', () {
-    testWidgets('keeps the data by default and says where it is', (t) async {
-      final f = await _pump(t, mode: Mode.uninstall, copy: _copy('0.2.0'), data: _data);
+    testWidgets('without an install payload, offers uninstall and keeps data by default', (t) async {
+      final f = await _pump(t, payload: null, copy: _copy('0.2.0'), data: _data);
+      expect(find.text(_s.uninstallTitle('TwimShelf')), findsOneWidget);
+      expect(find.text(_s.uninstall), findsOneWidget);
       expect(find.text(_s.dataKeptNote), findsOneWidget);
       await _go(t);
       expect(f.removedData, isNull);
@@ -146,7 +150,7 @@ void main() {
       expect(find.text(_data), findsOneWidget);
     });
     testWidgets('deletes the data only when ticked', (t) async {
-      final f = await _pump(t, mode: Mode.uninstall, copy: _copy('0.2.0'), data: _data);
+      final f = await _pump(t, payload: null, copy: _copy('0.2.0'), data: _data);
       await t.tap(find.byKey(const ValueKey('removeData')));
       await t.pump();
       await _go(t);
@@ -154,7 +158,7 @@ void main() {
       expect(find.text(_s.dataRemoved), findsOneWidget);
     });
     testWidgets('without a data folder there is nothing to offer', (t) async {
-      await _pump(t, mode: Mode.uninstall, copy: _copy('0.2.0'));
+      await _pump(t, payload: null, copy: _copy('0.2.0'));
       expect(find.byKey(const ValueKey('removeData')), findsNothing);
     });
   });

@@ -7,14 +7,11 @@ import 'package:window_manager/window_manager.dart';
 import 'setup.dart';
 import 'strings.dart';
 
-enum Mode { install, uninstall }
-
 enum _Step { ready, working, done, failed }
 
 class SetupPage extends StatefulWidget {
-  const SetupPage({super.key, required this.product, required this.mode, this.payload, required this.setupFolder, required this.strings, this.setup});
+  const SetupPage({super.key, required this.product, required this.payload, required this.setupFolder, required this.strings, this.setup});
   final Product product;
-  final Mode mode;
   final String? payload;
   final String setupFolder;
   final S strings;
@@ -30,7 +27,7 @@ class _SetupPageState extends State<SetupPage> {
   late final Setup setup = widget.setup ?? Setup(widget.product);
   S get s => widget.strings;
   Product get p => widget.product;
-  bool get installing => widget.mode == Mode.install;
+  bool get installing => widget.payload != null;
 
   late final InstalledCopy? copy = setup.installedCopy();
   late final InstallKind kind = installKind(copy, p.version);
@@ -50,8 +47,9 @@ class _SetupPageState extends State<SetupPage> {
     });
     void onProgress(double v) => setState(() => progress = v);
     try {
-      if (installing) {
-        await setup.install(payload: widget.payload!, setupFolder: widget.setupFolder, folder: folder, desktopShortcut: desktop, progress: onProgress);
+      final payload = widget.payload;
+      if (payload != null) {
+        await setup.install(payload: payload, setupFolder: widget.setupFolder, folder: folder, desktopShortcut: desktop, progress: onProgress);
       } else {
         await setup.uninstall(folder: folder, dataFolder: removeData ? data : null, progress: onProgress);
       }
