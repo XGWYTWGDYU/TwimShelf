@@ -4,10 +4,17 @@
   python3 scripts/apply.py            everything
   python3 scripts/apply.py native     the native Apple apps only (Xcode's pre-build step)
   python3 scripts/apply.py flutter    the Flutter app only
+  python3 scripts/apply.py generate   only the generated files below (no links, icons or projects)
   python3 scripts/apply.py get flutter.share_extension    one value (for build scripts)
+  python3 scripts/apply.py get icon_set                   the AppIcon set the apps use
   python3 scripts/apply.py where cache|apps|build         a build location (absolute)
 
-Writes small generated files that the projects read (never edits code):
+config.yaml holds the public values. config.local.yaml beside it (not in git, see
+config.local.example.yaml) overrides any of them on this computer: your ids, team, signing
+identity, share extensions, build location and icon. The two are merged when read; neither file
+is written, and nothing made from them is committed.
+
+Writes small generated files that the projects read (never edits code; none of them is in git):
   native/Identity.xcconfig                    native: bundle ids, version, signing, app groups
   flutter/app/ios/Flutter/Identity.xcconfig   Flutter iOS
   flutter/app/macos/Runner/Configs/Identity.xcconfig   Flutter macOS
@@ -15,14 +22,16 @@ Writes small generated files that the projects read (never edits code):
   flutter/app/linux/identity.cmake            Linux: application id, "open with"
   flutter/app/lib/app/identity.g.dart         Dart: the Linux application id
   flutter/installer/product.json              the Windows setup: "send to"
+the native Xcode project, from project.yml by XcodeGen (on a Mac, when project.yml changed)
 the build location (build.dir: <dir>/cache for every cache, <dir>/apps for packages):
   the Xcode projects' Derived Data location (per-user project settings, not committed) and
       BuildLocation.xcconfig (the Rust core's cache for Xcode builds; not committed)
   links from the Flutter projects' build folders (build, .dart_tool, .gradle, Pods, .cxx, the
       Rust core libraries) into <dir>/cache
-and, when they changed, the icons (icon.png to the native AppIcon set to the Flutter launcher
-icons), the Flutter Xcode
-projects and the native Xcode project (only when a share extension is switched on or off).
+and, when they changed, the icons: icon.png makes the native AppIcon set (committed: the web app's
+and the browser extension's icons come from it); an icon of your own (`icon:` in
+config.local.yaml) makes AppIconLocal beside it, which the apps then use. Every Flutter icon comes
+from the set the apps use.
 Only the Python standard library is used, plus Pillow when icons have to be made.
 """
 import getpass, hashlib, json, os, plistlib, re, shutil, subprocess, sys
@@ -31,37 +40,74 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FLUTTER = ROOT / 'flutter/app'
 STATE = ROOT / 'native/.applied.json'
-ICON = 'icon.png'   # the one source of every icon of every app
+ICON = 'icon.png'   # the repository's icon: the source of the committed AppIcon set
+ICONS = 'native/Resources/Assets.xcassets'
+
+
+def scalar(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in '"\'':
+        return value[1:-1]
+    if value in ('true', 'false'):
+        return value == 'true'
+    return value
 
 
 def load_yaml(path):
-    """The subset config.yaml uses: nested maps by indentation, scalars, comments, quotes."""
-    root, stack = {}, [(-1, None)]
-    stack[0] = (-1, root)
+    """The subset config.yaml uses: nested maps by indentation, lists of scalars ("- item"),
+    scalars, comments, quotes."""
+    root = {}
+    stack = [(-1, root, None, None)]   # (indent, container, its parent, its key in the parent)
     for raw in path.read_text(encoding='utf-8').splitlines():
         line = raw.split(' #')[0].rstrip() if not raw.lstrip().startswith('#') else ''
         if '"' in raw and ' #' in raw:
             # a quoted value may contain " #": cut the comment only after the closing quote
-            m = re.match(r'^(\s*[^:]+:\s*"[^"]*")', raw)
+            m = re.match(r'^(\s*(?:-\s*|[^:]+:\s*)"[^"]*")', raw)
             line = m.group(1) if m else line
         if not line.strip():
             continue
         indent = len(line) - len(line.lstrip())
-        key, _, value = line.strip().partition(':')
         while stack[-1][0] >= indent:
             stack.pop()
-        parent = stack[-1][1]
-        value = value.strip()
-        if value == '':
-            parent[key] = {}
-            stack.append((indent, parent[key]))
+        _, container, parent, key = stack[-1]
+        if line.strip().startswith('- '):
+            if isinstance(container, dict) and not container and parent is not None:
+                container = parent[key] = []   # the key's value is a list, not a map
+                stack[-1] = (stack[-1][0], container, parent, key)
+            container.append(scalar(line.strip()[2:]))
             continue
-        if value.startswith('"') and value.endswith('"'):
-            value = value[1:-1]
-        elif value in ('true', 'false'):
-            value = value == 'true'
-        parent[key] = value
+        key, _, value = line.strip().partition(':')
+        if value.strip() == '':
+            container[key] = {}
+            stack.append((indent, container[key], container, key))
+            continue
+        container[key] = scalar(value)
     return root
+
+
+def merge(base, over):
+    """config.local.yaml over config.yaml: maps merged key by key, any other value replaced."""
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def load_config():
+    c = load_yaml(ROOT / 'config.yaml')
+    local = ROOT / 'config.local.yaml'
+    return merge(c, load_yaml(local)) if local.exists() else c
+
+
+def icon_source(c):
+    """The icon the apps get: config.local.yaml's `icon:`, else the repository's icon.png."""
+    p = Path(os.path.expanduser(str(c.get('icon') or ICON)))
+    return (p if p.is_absolute() else ROOT / p).resolve()
+
+
+def icon_set(c):
+    """The AppIcon set the apps use (relative to the root): the committed one for icon.png."""
+    return f"{ICONS}/{'AppIcon' if icon_source(c) == (ROOT / ICON).resolve() else 'AppIconLocal'}.appiconset"
 
 
 def write(path, text):
@@ -147,6 +193,15 @@ def unlink(path):
         shutil.move(str(target), str(p))
 
 
+def hooks():
+    """git runs .githooks (scripts/check_private.py: this computer's values stay out of git)."""
+    if not (ROOT / '.git').exists() or not shutil.which('git'):
+        return
+    r = subprocess.run(['git', 'config', 'core.hooksPath'], cwd=ROOT, capture_output=True, text=True)
+    if r.stdout.strip() != '.githooks':
+        subprocess.run(['git', 'config', 'core.hooksPath', '.githooks'], cwd=ROOT, check=False)
+
+
 def paths(c):
     """Every build of every app writes its caches under <dir>/cache and its packages to <dir>/apps."""
     loc = locations(c)
@@ -209,7 +264,8 @@ def mac_signing(team, identity=''):
     return ('Automatic', 'Apple Development') if team else ('Manual', '-')
 
 
-def native(c, state):
+def native(c):
+    """native/Identity.xcconfig: ids, version, signing, app groups, icon, share extensions."""
     n = c['native']
     check_id('native.bundle_id', n['bundle_id'])
     share_ios, share_mac = bool(n.get('share_extension_ios')), bool(n.get('share_extension_mac'))
@@ -225,64 +281,58 @@ def native(c, state):
         f"MARKETING_VERSION = {c['version']}",
         f"CURRENT_PROJECT_VERSION = {c['build_number']}",
         f"TL_TEAM = {team}",
+        f"TL_APP_ICON = {Path(icon_set(c)).stem}",
         f"TL_APP_GROUP_IOS = {group_ios}",
         f"TL_IOS_ENTITLEMENTS = {'native/iOS/TwimShelf.entitlements' if share_ios else ''}",
         f"TL_APP_GROUP_MAC = {group_mac}",
         f"TL_MAC_ENTITLEMENTS = {'native/macOS/TwimShelf.entitlements' if share_mac else ''}",
         f"TL_MAC_SIGN_IDENTITY = {identity}",
         f"TL_MAC_SIGN_STYLE = {style}",
-    ]) + '\n// where builds go: build.dir in config.yaml (generated by the same script, not committed)\n#include? "BuildLocation.xcconfig"\n')
-    app_icon_set()
-    # the share extension is a target the apps embed or not: project.yml says which (its two
-    # embedding lines); the Xcode project is generated again only when that changes
-    share = {'iOS': share_ios, 'macOS': share_mac}
-    project = ROOT / 'project.yml'
-    text = project.read_text(encoding='utf-8')
-    def embed(m):
-        target = f'TwimShelf-{m.group(2)}Share'
-        deps = f'[{{ target: {target}, embed: true, codeSign: true }}]' if share[m.group(2)] else '[]'
-        return f'{m.group(1)}dependencies: {deps}   # share-extension ({target})'
-    new = re.sub(r'^(\s*)dependencies: \[.*\]   # share-extension(?: \(TwimShelf-)?(iOS|macOS)?.*$',
-                 lambda m: embed(m) if m.group(2) else m.group(0), text, flags=re.M)
-    if new != text:
-        project.write_text(new, encoding='utf-8')
-        if shutil.which('xcodegen'):
-            subprocess.check_call(['xcodegen', 'generate', '--quiet'], cwd=ROOT)
-            print('config: the share extension changed; the Xcode project was generated again (build once more if Xcode was building)')
-        else:
-            sys.exit('config: the share extension changed: run this again with XcodeGen installed (brew install xcodegen)')
+        # the share extension is always built; when it is off it is not signed and not embedded
+        f"TL_SHARE_EXCLUDE_IOS = {'' if share_ios else 'TwimShelfShare.appex'}",
+        f"TL_SHARE_SIGNING_IOS = {'YES' if share_ios else 'NO'}",
+        f"TL_SHARE_EXCLUDE_MAC = {'' if share_mac else 'TwimShelfShare.appex'}",
+        f"TL_SHARE_SIGNING_MAC = {'YES' if share_mac else 'NO'}",
+    ]) + '\n// where builds go: build.dir in config.yaml (generated by the same script)\n#include? "BuildLocation.xcconfig"\n')
 
 
-def app_icon_set():
-    """The native AppIcon set (committed, the source of every other icon) from icon.png; made again
-    only when that file changed, so most builds need no image library."""
+def native_project(state):
+    """TwimShelf.xcodeproj from project.yml (XcodeGen), when it is missing or project.yml changed."""
+    if sys.platform != 'darwin':
+        return
+    stamp = file_hash('project.yml')
+    if (ROOT / 'TwimShelf.xcodeproj/project.pbxproj').exists() and state.get('project') == stamp:
+        return
+    if not shutil.which('xcodegen'):
+        sys.exit('config: the Xcode project is made from project.yml by XcodeGen: brew install xcodegen (./build.sh --check)')
+    subprocess.check_call(['xcodegen', 'generate', '--quiet'], cwd=ROOT)
+    state['project'] = stamp
+    print('config: TwimShelf.xcodeproj made from project.yml')
+
+
+def app_icon_sets(c):
+    """The AppIcon set made from icon.png (committed), and AppIconLocal from an icon of your own;
+    each made again only when its source changed, so most builds need no image library."""
     tool = ROOT / 'scripts/flutter/make_icons.py'
-    stamp = ROOT / 'native/Resources/Assets.xcassets/AppIcon.appiconset/source.sha256'
-    current = file_hash(ICON)
-    if not current:
-        sys.exit(f'{ICON} does not exist')
-    if not stamp.exists() or stamp.read_text().strip() != current:
-        r = subprocess.run([sys.executable, str(tool), '--app-icon', str(ROOT / ICON)])
-        if r.returncode != 0:
-            sys.exit('config: the AppIcon set could not be made (scripts/flutter/make_icons.py)')
-        stamp.write_text(current + '\n')
+    local = ROOT / ICONS / 'AppIconLocal.appiconset'
+    for source, folder in (((ROOT / ICON).resolve(), ROOT / ICONS / 'AppIcon.appiconset'),
+                           (icon_source(c), local)):
+        if folder == local and icon_set(c) != f'{ICONS}/AppIconLocal.appiconset':
+            shutil.rmtree(local, ignore_errors=True)   # back to the repository's icon
+            continue
+        if not source.exists():
+            sys.exit(f'config: the icon {source} does not exist')
+        stamp = folder / 'source.sha256'
+        current = hashlib.sha256(source.read_bytes()).hexdigest()
+        if not stamp.exists() or stamp.read_text().strip() != current:
+            r = subprocess.run([sys.executable, str(tool), '--app-icon', str(source), '--set', str(folder)])
+            if r.returncode != 0:
+                sys.exit('config: the AppIcon set could not be made (scripts/flutter/make_icons.py)')
+            stamp.write_text(current + '\n')
 
 
-def embed_flutter_share(platform, on, dependency, appex, anchor=None):
-    """The share extension of a Flutter Apple project is a target that Runner embeds or not."""
-    path = ROOT / f'flutter/app/{platform}/Runner.xcodeproj/project.pbxproj'
-    text = path.read_text(encoding='utf-8')
-    dep = f'\t\t\t\t{dependency} /* PBXTargetDependency */,\n'
-    file = f'\t\t\t\t{appex} /* ShareExtension.appex in Embed Foundation Extensions */,\n'
-    new = text.replace(dep, '').replace(file, '')
-    if on:
-        new = re.sub(r'(/\* Embed Foundation Extensions \*/ = \{.*?files = \(\n)', lambda m: m.group(1) + file, new, count=1, flags=re.S)
-        new = re.sub(r'(/\* Runner \*/ = \{\s+isa = PBXNativeTarget;.*?dependencies = \(\n)', lambda m: m.group(1) + dep, new, count=1, flags=re.S)
-    if new != text:
-        path.write_text(new, encoding='utf-8')
-
-
-def flutter(c, state):
+def flutter(c):
+    """The Flutter app's generated files: ids, team, app groups, share extensions, version."""
     f = c['flutter']
     check_id('flutter.apple_bundle_id', f['apple_bundle_id'])
     check_id('flutter.android_package', f['android_package'], android=True)
@@ -291,6 +341,11 @@ def flutter(c, state):
     share_ios, share_mac = bool(f.get('share_extension_ios')), bool(f.get('share_extension_mac'))
     team = f.get('development_team', '')
     need_team('flutter', team, share_ios or share_mac)
+
+    def share_lines(on):
+        # the share extension is always built; when it is off it is not signed and not embedded
+        return [f"TL_SHARE_SIGNING = {'YES' if on else 'NO'}"] + ([] if on else ['EXCLUDED_SOURCE_FILE_NAMES = ShareExtension.appex'])
+
     write('flutter/app/ios/Flutter/Identity.xcconfig', HEADER + '\n'.join([
         f"PRODUCT_BUNDLE_IDENTIFIER = {f['apple_bundle_id']}",
         f"DEVELOPMENT_TEAM = {team}",
@@ -298,29 +353,18 @@ def flutter(c, state):
         # no share extension, no entitlements: any Apple account, free ones too, can sign the app
         f"TL_APP_GROUP = {'group.' + f['apple_bundle_id'] if share_ios else ''}",
         f"TL_ENTITLEMENTS = {'Runner/Runner.entitlements' if share_ios else ''}",
-    ]) + '\n// where builds go: build.dir in config.yaml (not committed)\n#include? "BuildLocation.xcconfig"\n')
+    ] + share_lines(share_ios)) + '\n// where builds go: build.dir in config.yaml\n#include? "BuildLocation.xcconfig"\n')
     style, identity = mac_signing(team)
     write('flutter/app/macos/Runner/Configs/Identity.xcconfig', HEADER + '\n'.join([
         f"PRODUCT_BUNDLE_IDENTIFIER = {f['apple_bundle_id']}",
         f"DEVELOPMENT_TEAM = {team}",
         f"TL_FLUTTER_BUNDLE = {f['apple_bundle_id']}",
         f"TL_APP_GROUP = {team + '.' + f['apple_bundle_id'] if share_mac else ''}",
+        # the Mac runner is always sandboxed: the -share entitlements add its App Group
+        f"TL_ENTITLEMENTS_SUFFIX = {'-share' if share_mac else ''}",
         f"TL_SIGN_STYLE = {style}",
         f"TL_SIGN_IDENTITY = {identity}",
-    ]) + '\n// where builds go: build.dir in config.yaml (not committed)\n#include? "BuildLocation.xcconfig"\n')
-    embed_flutter_share('ios', share_ios, 'B6AE517A5F24232B87FB1E50', 'F7CBAE714DD315375E21A053')
-    embed_flutter_share('macos', share_mac, '0D7163DF1C17EE3EA47B803E', '354403B1F7EB93A77796F896')
-    # the Mac runner is always sandboxed: only its App Group comes and goes
-    for name in ('DebugProfile', 'Release'):
-        path = ROOT / f'flutter/app/macos/Runner/{name}.entitlements'
-        entitlements = plistlib.loads(path.read_bytes())
-        before = dict(entitlements)
-        if share_mac:
-            entitlements['com.apple.security.application-groups'] = ['$(TL_APP_GROUP)']
-        else:
-            entitlements.pop('com.apple.security.application-groups', None)
-        if entitlements != before:
-            path.write_bytes(plistlib.dumps(entitlements))
+    ] + share_lines(share_mac)) + '\n// where builds go: build.dir in config.yaml\n#include? "BuildLocation.xcconfig"\n')
     pubspec = ROOT / 'flutter/app/pubspec.yaml'
     text = pubspec.read_text(encoding='utf-8')
     new = re.sub(r'^version: .*$', f"version: {c['version']}+{c['build_number']}", text, count=1, flags=re.M)
@@ -343,35 +387,52 @@ def flutter(c, state):
     product = {'id': 'TwimShelf', 'name': 'TwimShelf', 'publisher': 'TwimShelf',
                'executable': 'TwimShelf.exe', 'file': 'TwimShelf', 'version': '0', 'sendTo': share}
     write('flutter/installer/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
-    # every icon of the Flutter apps comes from the AppIcon set; without them there is no build
-    app_icon_set()
+
+
+def flutter_icons(c, state):
+    """Every icon of the Flutter apps, from the set the apps use (and the committed web and
+    extension icons from the committed set); made again when a source changed or one is missing."""
     tool = ROOT / 'scripts/flutter/make_icons.py'
-    stamp = file_hash(ICON) + file_hash('scripts/flutter/make_icons.py')
-    if state.get('flutter_icon') != stamp or subprocess.run([sys.executable, str(tool), '--check'], stdout=subprocess.DEVNULL).returncode != 0:
-        r = subprocess.run([sys.executable, str(tool)])
+    env = dict(os.environ, TL_ICON_SET=str(ROOT / icon_set(c)))
+    stamp = file_hash(f'{icon_set(c)}/icon-1024.png') + file_hash(f'{ICONS}/AppIcon.appiconset/icon-1024.png') + file_hash('scripts/flutter/make_icons.py')
+    if state.get('flutter_icon') != stamp or subprocess.run([sys.executable, str(tool), '--check'], stdout=subprocess.DEVNULL, env=env).returncode != 0:
+        r = subprocess.run([sys.executable, str(tool)], env=env)
         if r.returncode != 0:
             sys.exit('config: the Flutter icons could not be made (scripts/flutter/make_icons.py)')
         state['flutter_icon'] = stamp
 
 
 def main():
-    c = load_yaml(ROOT / 'config.yaml')
+    c = load_config()
     which = sys.argv[1] if len(sys.argv) > 1 else 'all'
     if which == 'where':
         print(locations(c)[sys.argv[2]])
         return
     if which == 'get':
+        if sys.argv[2] == 'icon_set':
+            print(ROOT / icon_set(c))
+            return
         v = c
         for k in sys.argv[2].split('.'):
             v = v[k]
         print(str(v).lower() if isinstance(v, bool) else v)
         return
+    if which == 'generate':
+        native(c)
+        flutter(c)
+        return
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
-    paths(c)
     if which in ('all', 'native'):
-        native(c, state)
+        native_project(state)
+    paths(c)
+    hooks()
+    if which in ('all', 'native', 'flutter'):
+        app_icon_sets(c)
+    if which in ('all', 'native'):
+        native(c)
     if which in ('all', 'flutter'):
-        flutter(c, state)
+        flutter(c)
+        flutter_icons(c, state)
     STATE.parent.mkdir(parents=True, exist_ok=True)
     STATE.write_text(json.dumps(state, indent=2))
 

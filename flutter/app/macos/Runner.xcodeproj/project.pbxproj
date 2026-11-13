@@ -81,6 +81,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				354403B1F7EB93A77796F896 /* ShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -329,6 +330,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				0D7163DF1C17EE3EA47B803E /* PBXTargetDependency */,
 				33CC11202044C79F0003C045 /* PBXTargetDependency */,
 			);
 			name = Runner;
@@ -732,7 +734,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "Runner/DebugProfile$(TL_ENTITLEMENTS_SUFFIX).entitlements";
 				CODE_SIGN_STYLE = "$(TL_SIGN_STYLE)";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Runner/Info.plist;
@@ -864,7 +866,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "Runner/DebugProfile$(TL_ENTITLEMENTS_SUFFIX).entitlements";
 				CODE_SIGN_STYLE = "$(TL_SIGN_STYLE)";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Runner/Info.plist;
@@ -884,7 +886,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "Runner/Release$(TL_ENTITLEMENTS_SUFFIX).entitlements";
 				CODE_SIGN_STYLE = "$(TL_SIGN_STYLE)";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = Runner/Info.plist;

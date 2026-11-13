@@ -7,7 +7,8 @@ packages:
   # the MLX engine, shared with the Flutter app's Apple runner (it brings mlx-swift-lm and
   # swift-transformers)
   TLLocalAI: { path: native/TLLocalAI }
-# bundle ids, version, team, app groups: from config.yaml (scripts/apply.py)
+# The Xcode project is made from this file (scripts/apply.py runs XcodeGen; it is not in git).
+# bundle ids, version, team, app groups, icon, share extensions: from config.yaml (scripts/apply.py)
 configFiles:
   Debug: native/Identity.xcconfig
   Release: native/Identity.xcconfig
@@ -21,10 +22,16 @@ settings:
     PRODUCT_NAME: TwimShelf
     # GitHub builds pass TL_UPDATE_REPO=owner/name (检查更新); empty everywhere else = no update check
     TL_UPDATE_REPO: ""
-    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     SWIFT_STRICT_CONCURRENCY: minimal
 targetTemplates:
+  # the icon: AppIcon (icon.png), or AppIconLocal when config.local.yaml names an icon of your own
+  # (on each target: XcodeGen's presets set it per target)
+  Icon:
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: $(TL_APP_ICON)
   App:
+    templates: [Icon]
     dependencies:
       - { package: TLLocalAI }
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
@@ -35,9 +42,11 @@ targets:
     platform: iOS
     deploymentTarget: "18.0"
     sources: [native/Shared, native/iOS, native/Resources, native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift]
-    dependencies: []   # share-extension (TwimShelf-iOSShare)
+    # the share extension is always built; config.yaml decides whether it is signed and embedded
+    dependencies: [{ target: TwimShelf-iOSShare, embed: true, codeSign: true }]
     settings:
       base:
+        EXCLUDED_SOURCE_FILE_NAMES: $(TL_SHARE_EXCLUDE_IOS)
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "Apple Development"
         DEVELOPMENT_TEAM: $(TL_TEAM)
@@ -85,13 +94,14 @@ targets:
     platform: macOS
     deploymentTarget: "15.0"
     sources: [native/Shared, native/macOS, native/Resources, native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift]
-    dependencies: []   # share-extension (TwimShelf-macOSShare)
+    dependencies: [{ target: TwimShelf-macOSShare, embed: true, codeSign: true }]
     settings:
       configs:
         # debug builds are a separate app: own settings, keychain items and window frames,
         # so test runs never read or change the installed app's
         Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug, TL_URL_SCHEME: twimshelf-debug }
       base:
+        EXCLUDED_SOURCE_FILE_NAMES: $(TL_SHARE_EXCLUDE_MAC)
         PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac
         ARCHS: arm64
         CODE_SIGN_ENTITLEMENTS: $(TL_MAC_ENTITLEMENTS)   # none without the share extension
@@ -125,6 +135,7 @@ targets:
             LSHandlerRank: Owner
             CFBundleTypeRole: Viewer
   TwimShelf-iOSShare:
+    templates: [Icon]
     type: app-extension
     platform: iOS
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
@@ -137,6 +148,7 @@ targets:
         DEVELOPMENT_TEAM: $(TL_TEAM)
         PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).ios.share
         PRODUCT_NAME: TwimShelfShare
+        CODE_SIGNING_ALLOWED: $(TL_SHARE_SIGNING_IOS)
         CODE_SIGN_ENTITLEMENTS: native/ShareExtension/iOS/Share.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
@@ -154,6 +166,7 @@ targets:
           NSExtensionAttributes:
             NSExtensionActivationRule: 'SUBQUERY (extensionItems, $extensionItem, SUBQUERY ($extensionItem.attachments, $attachment, ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.folder" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url" || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text").@count > 0).@count > 0'
   TwimShelf-macOSShare:
+    templates: [Icon]
     type: app-extension
     platform: macOS
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
@@ -165,6 +178,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.share
         PRODUCT_NAME: TwimShelfShare
+        CODE_SIGNING_ALLOWED: $(TL_SHARE_SIGNING_MAC)
         ARCHS: arm64
         CODE_SIGN_ENTITLEMENTS: native/ShareExtension/macOS/Share.entitlements
         TL_URL_SCHEME: twimshelf

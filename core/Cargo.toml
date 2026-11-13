@@ -48,11 +48,3 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
 
 [dev-dependencies]
 proptest = "1"
-
-# Crypto, hashing, SQLite and compression are 20-50x slower unoptimized; optimize
-# dependencies even in debug builds (our own crate stays debuggable).
-[profile.dev.package."*"]
-opt-level = 3
-
-[profile.release]
-debug = "line-tables-only"

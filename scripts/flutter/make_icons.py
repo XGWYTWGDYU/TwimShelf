@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Generate every icon the Flutter apps carry, from the one source: the app's AppIcon set
-(native/Resources/Assets.xcassets/AppIcon.appiconset, named in config.yaml).
+"""Generate every icon the Flutter apps carry, from the AppIcon set the apps use: the committed
+native/Resources/Assets.xcassets/AppIcon.appiconset (made from icon.png), or AppIconLocal beside it
+when config.local.yaml names an icon of your own (TL_ICON_SET, set by scripts/apply.py).
 
 None of what this writes is in git (scripts/checks/icons.py keeps it that way), except the web app's
 and the browser extension's icons: the extension is loaded without any build step, and the Docker
-image builds the web app with no image tools. Those are committed copies, made here like the rest
-(each repository makes its own from its own AppIcon set). scripts/apply.py runs this whenever a
+image builds the web app with no image tools. Those are committed copies, always made from the committed set (an icon of your own
+never reaches git). scripts/apply.py runs this whenever a
 build applies config.yaml and something is missing or the source changed.
 
   Android   legacy mipmaps, and the adaptive icon's foreground over a white background
@@ -18,20 +19,33 @@ build applies config.yaml and something is missing or the source changed.
 Windows and Linux make theirs at build time from the same set (desktop_assets.py).
 
   python3 scripts/flutter/make_icons.py                       the icons above
-  python3 scripts/flutter/make_icons.py --app-icon icon.png   the AppIcon set itself, from the
-      one source file: square, with its own corners and transparent margin. The Mac icons are that
+  python3 scripts/flutter/make_icons.py --app-icon icon.png [--set DIR]   an AppIcon set (the
+      committed one unless DIR is given), from one source file: square, with its own corners and transparent margin. The Mac icons are that
       file scaled; the iOS icon is its artwork alone, cut to the edges and opaque (iOS masks it).
   python3 scripts/flutter/make_icons.py --check    names what is missing; exit 1 if anything is
   python3 scripts/flutter/make_icons.py --in-app   only assets/app_icon.png (the web build in Docker,
       which has neither the platform folders nor the need for their icons)
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_DIR = ROOT / "native/Resources/Assets.xcassets/AppIcon.appiconset"
+# the committed set (icon.png): the web app's and the extension's icons
+PUBLIC_DIR = ROOT / "native/Resources/Assets.xcassets/AppIcon.appiconset"
+
+
+def source_dir():
+    """The set the apps use: given by scripts/apply.py, else asked of it."""
+    given = os.environ.get("TL_ICON_SET")
+    if given:
+        return Path(given)
+    try:
+        return Path(subprocess.check_output([sys.executable, str(ROOT / "scripts/apply.py"), "get", "icon_set"], text=True).strip())
+    except (OSError, subprocess.CalledProcessError):
+        return PUBLIC_DIR   # the Docker image: no config.local.yaml, the committed set
 APP_DIR = ROOT / "flutter/app"
 ANDROID_RES = APP_DIR / "android/app/src/main/res"
 IOS_SET = APP_DIR / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
@@ -87,27 +101,32 @@ def pillow():
     return Image
 
 
-def app_icon_set(path):
+def app_icon_set(path, folder=PUBLIC_DIR):
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    if not (folder / "Contents.json").exists():
+        (folder / "Contents.json").write_bytes((PUBLIC_DIR / "Contents.json").read_bytes())
     Image = pillow()
     with Image.open(path) as f:
         source = f.convert("RGBA")
     if source.width != source.height:
         sys.exit(f"{path}: an icon must be square")
     for size in (16, 32, 64, 128, 256, 512, 1024):
-        source.resize((size, size), Image.Resampling.LANCZOS).save(SOURCE_DIR / f"mac-{size}.png", optimize=True)
+        source.resize((size, size), Image.Resampling.LANCZOS).save(folder / f"mac-{size}.png", optimize=True)
     left, top, right, bottom = source.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
     art = source.crop((left, top, right, bottom))
     # the corners iOS masks away: the colour of the artwork's edge, not white
     middle = art.height // 2
     canvas = Image.new("RGBA", art.size, art.getpixel((4, middle))[:3] + (255,))
     canvas.alpha_composite(art)
-    canvas.resize((1024, 1024), Image.Resampling.LANCZOS).convert("RGB").save(SOURCE_DIR / "icon-1024.png", optimize=True)
-    print(f"config: the AppIcon set made from {Path(path).name}")
+    canvas.resize((1024, 1024), Image.Resampling.LANCZOS).convert("RGB").save(folder / "icon-1024.png", optimize=True)
+    print(f"config: {folder.name} made from {Path(path).name}")
 
 
 def main():
     if "--app-icon" in sys.argv:
-        app_icon_set(sys.argv[sys.argv.index("--app-icon") + 1])
+        folder = sys.argv[sys.argv.index("--set") + 1] if "--set" in sys.argv else PUBLIC_DIR
+        app_icon_set(sys.argv[sys.argv.index("--app-icon") + 1], folder)
         return
     if "--check" in sys.argv:
         missing = [str(f.relative_to(ROOT)) for f in outputs() if not f.exists()]
@@ -115,10 +134,15 @@ def main():
         sys.exit(1 if missing else 0)
 
     Image = pillow()
-    with Image.open(SOURCE_DIR / "icon-1024.png") as f:
+    source = source_dir()
+    with Image.open(source / "icon-1024.png") as f:
         image = f.convert("RGBA")
-    with Image.open(SOURCE_DIR / "mac-1024.png") as f:
+    with Image.open(source / "mac-1024.png") as f:
         mac = f.convert("RGBA")
+    with Image.open(PUBLIC_DIR / "icon-1024.png") as f:
+        public_image = f.convert("RGBA")
+    with Image.open(PUBLIC_DIR / "mac-1024.png") as f:
+        public_mac = f.convert("RGBA")
 
     def resized(source, size):
         return source.resize((size, size), Image.Resampling.LANCZOS)
@@ -154,17 +178,18 @@ def main():
         path.parent.mkdir(parents=True, exist_ok=True)
         out.save(path, optimize=True)
 
+    # the committed ones: from the committed set, whatever icon this computer uses
     for path, size in {**WEB_ROUNDED, **EXTENSION}.items():
-        clean(resized(mac, size), path)
+        clean(resized(public_mac, size), path)
     for path, size in WEB_FULL.items():
-        clean(resized(image, size).convert("RGB"), path)
-    edge = image.getpixel((4, image.height // 2))[:3] + (255,)
+        clean(resized(public_image, size).convert("RGB"), path)
+    edge = public_image.getpixel((4, public_image.height // 2))[:3] + (255,)
     for path, size in WEB_MASKABLE.items():
         canvas = Image.new("RGBA", (size, size), edge)
         inner = round(size * 0.8)
-        canvas.alpha_composite(resized(image, inner), ((size - inner) // 2, (size - inner) // 2))
+        canvas.alpha_composite(resized(public_image, inner), ((size - inner) // 2, (size - inner) // 2))
         clean(canvas.convert("RGB"), path)
-    print(f"config: {len(outputs())} icons made from the AppIcon set")
+    print(f"config: {len(outputs())} icons made from {source.name}")
 
 
 if __name__ == "__main__":

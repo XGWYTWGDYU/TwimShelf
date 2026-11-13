@@ -1,9 +1,12 @@
-# 这个仓库自己的配置：Bundle ID 和包名、版本号、签名、分享扩展开关、构建位置。
-# 代码里用到这些值的地方都引用这里。应用名称和图标不在这里：名称 TwimShelf 直接写在代码里，
-# 图标只来自根目录的 icon.png。
-# 改完之后不用手动做什么：./build.sh、build.ps1 和 Xcode 的构建按钮都会先按这里重新生成配置
-# （scripts/apply.py）。只有开关原生版的分享扩展时，原生 Xcode 工程需要重新生成一次：
-# 运行 ./build.sh --configure（需要 XcodeGen）。
+# 这个仓库的配置：Bundle ID 和包名、版本号、签名、分享扩展开关、构建位置。这里是公开的默认值。
+# 代码里用到这些值的地方都引用这里。应用名称直接写在代码里；图标来自根目录的 icon.png。
+#
+# 自己电脑上的值（自己的 Bundle ID、团队、签名证书、分享扩展、构建位置、自己的图标）写在旁边的
+# config.local.yaml 里，它不进 Git，读取时逐项覆盖这里（写法见 config.local.example.yaml）。
+# 由这两个文件生成的文件（Xcode 工程、Identity.xcconfig 等）也都不进 Git。
+#
+# 改完之后不用手动做什么：./build.sh、build.ps1 和 Xcode 的构建按钮都会先按这里重新生成
+# （scripts/apply.py）。新克隆下来、还没构建过时，先运行一次 ./build.sh --configure。
 
 version: 1.5.2                # 所有平台共用的版本号；提高它并推送到 main，GitHub Actions 就会发布新版本
 build_number: 8               # 每次发布递增（iOS 的 CFBundleVersion、Android 的 versionCode 都用它）

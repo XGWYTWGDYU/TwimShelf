@@ -1,11 +1,11 @@
 #!/bin/zsh
 # Builds tl-core for the current Xcode platform into $BUILT_PRODUCTS_DIR.
-# A fresh Mac needs nothing else: Rust (per user, no administrator rights) and the target are
-# installed on the first build.
+# Needs rustup (./build.sh --check installs it); the pinned Rust (rust-toolchain.toml) and the
+# target are added on first use.
 set -e
 if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-  echo "note: installing Rust into ~/.cargo (first build only)"
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+  echo "error: Rust is missing: run ./build.sh --check"
+  exit 1
 fi
 [ -f ~/.cargo/env ] && source ~/.cargo/env
 cd "$SRCROOT/core"

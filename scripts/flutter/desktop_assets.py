@@ -32,7 +32,7 @@ def generate(output, app_id=None, app_name=None, icon_name=None):
     shutil.rmtree(output / 'icons', ignore_errors=True)
     for old in output.glob('*.metainfo.xml'):
         old.unlink()
-    source = ROOT / 'native/Resources/Assets.xcassets/AppIcon.appiconset'
+    source = Path(config('icon_set'))   # the AppIcon set the apps use (scripts/apply.py)
     images = []
     for size in SIZES:
         data = (source / f'mac-{size}.png').read_bytes()

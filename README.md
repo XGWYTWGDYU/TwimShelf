@@ -98,14 +98,14 @@ cd TwimShelf
 
 Windows 上运行 `powershell -ExecutionPolicy Bypass -File build.ps1`。详细说明、Xcode 的用法和常见问题见 **[构建指南](BUILDING.md)**。
 
-Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都集中在 [`config.yaml`](config.yaml) 里修改。图标来自根目录的 `icon.png`。
+Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都集中在 [`config.yaml`](config.yaml) 里修改。图标来自根目录的 `icon.png`。只在自己电脑上用的值（自己的团队、Bundle ID、图标等）写进不进 Git 的 `config.local.yaml`，见[构建指南](BUILDING.md#本机配置configlocalyaml)。
 
 ## 源码结构
 
 | 目录 | 内容 |
 | --- | --- |
-| `core` | Rust 核心：数据库、下载、导入、同步、搜索、资料库管理 |
-| `native` | 原生苹果版：`Shared` 共享代码，`iOS`、`macOS` 平台界面，`ShareExtension` 分享扩展，`TLLocalAI` 本地模型引擎 |
+| `core` | Rust 核心：数据库、下载、导入、同步、搜索、资料库管理（和 `server` 同属根目录的 Cargo workspace） |
+| `native` | 原生苹果版（工程由 XcodeGen 按根目录的 `project.yml` 生成）：`Shared` 共享代码，`iOS`、`macOS` 平台界面，`ShareExtension` 分享扩展，`TLLocalAI` 本地模型引擎 |
 | `flutter/app` | Flutter 版应用 |
 | `flutter/installer` | Windows 安装程序 |
 | `flutter/tl_core`、`tl_native`、`tl_llama` | Flutter 插件：Rust 核心绑定、平台能力、llama.cpp 推理 |
@@ -117,7 +117,7 @@ Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都�
 
 ## 参与贡献
 
-欢迎通过 Issue 反馈问题，或者通过 Pull Request 提交改进。涉及数据库或同步协议的修改，请补充能够验证数据一致性的测试。请不要提交个人签名配置、真实账号凭据、媒体或真实的资料库，测试请使用合成数据（[说明](docs/testdata.md)）。
+欢迎通过 Issue 反馈问题，或者通过 Pull Request 提交改进。涉及数据库或同步协议的修改，请补充能够验证数据一致性的测试。个人签名配置请写进 `config.local.yaml`；请不要提交真实账号凭据、媒体或真实的资料库，测试请使用合成数据（[说明](docs/testdata.md)）。
 
 ## 许可证
 

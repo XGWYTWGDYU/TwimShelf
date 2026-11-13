@@ -25,8 +25,8 @@ for cm in ("flutter/app/windows/runner/CMakeLists.txt", "flutter/installer/windo
         problems.append(f"{cm}: does not make the icon from the AppIcon set")
 if "desktop_assets.py" not in (ROOT / "build.ps1").read_text(encoding="utf-8"):
     problems.append("build.ps1: the setup's icon is not made from the AppIcon set")
-if "AppIcon.appiconset" not in (ROOT / "scripts/flutter/desktop_assets.py").read_text(encoding="utf-8"):
-    problems.append("desktop_assets.py: reads something else than the AppIcon set")
+if "icon_set" not in (ROOT / "scripts/flutter/desktop_assets.py").read_text(encoding="utf-8"):
+    problems.append("desktop_assets.py: reads something else than the AppIcon set the apps use")
 
 if problems:
     print("\n".join(problems))

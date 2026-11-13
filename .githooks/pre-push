@@ -1,0 +1,3 @@
+#!/bin/sh
+# this computer's own values (config.local.yaml) stay out of git: scripts/check_private.py
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_private.py" push

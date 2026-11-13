@@ -62,17 +62,16 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - run: rustup update stable --no-self-update
+      - run: rustup toolchain install   # the one in rust-toolchain.toml
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-test-${{ runner.os }}-${{ hashFiles('core/Cargo.lock') }}
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-test-${{ runner.os }}-
       - name: Rust tests
-        working-directory: core
-        run: cargo test --locked --features heif
+        run: cargo test -p tl-core --locked --features heif
       - name: Project checks
         run: |
           python3 scripts/checks/icons.py
@@ -86,6 +85,7 @@ jobs:
         target: [native-macos, native-ios, flutter-macos, flutter-ios]
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install   # the one in rust-toolchain.toml
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -94,14 +94,13 @@ jobs:
           xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
-      - run: rustup update stable --no-self-update
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             build/cache/pub
-          key: deps-${{ matrix.target }}-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          key: deps-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'flutter/app/pubspec.lock') }}
           restore-keys: deps-${{ matrix.target }}-
       - name: Build
         run: ./build.sh --yes ${{ matrix.target }}
@@ -119,6 +118,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install   # the one in rust-toolchain.toml
       - name: Make room (the NDK and the native builds take many gigabytes)
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
       - uses: actions/setup-python@v5
@@ -128,14 +128,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - run: rustup update stable --no-self-update
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             build/cache/pub
-          key: deps-android-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          key: deps-android-${{ hashFiles('Cargo.lock', 'flutter/app/pubspec.lock') }}
           restore-keys: deps-android-
       - name: Release key
         env:
@@ -164,17 +163,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install   # the one in rust-toolchain.toml
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: rustup update stable --no-self-update
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             build/cache/pub
-          key: deps-linux-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          key: deps-linux-${{ hashFiles('Cargo.lock', 'flutter/app/pubspec.lock') }}
           restore-keys: deps-linux-
       - name: Build
         run: |
@@ -192,17 +191,17 @@ jobs:
     steps:
       - run: git config --system core.longpaths true
       - uses: actions/checkout@v4
+      - run: rustup toolchain install   # the one in rust-toolchain.toml
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: rustup update stable --no-self-update
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             build/cache/pub
-          key: deps-windows-${{ hashFiles('core/Cargo.lock', 'flutter/app/pubspec.lock') }}
+          key: deps-windows-${{ hashFiles('Cargo.lock', 'flutter/app/pubspec.lock') }}
           restore-keys: deps-windows-
       - name: Vulkan SDK (GPU support for on-device AI)
         run: |
@@ -250,7 +249,10 @@ jobs:
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           output=--load
           [[ "$RELEASE" == true ]] && output=--push
+          rust=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)
+          flutter=$(sed -nE 's/.*"flutter": *"([^"]+)".*/\1/p' .fvmrc)
           docker buildx build -f docker/Dockerfile --build-arg VERSION="$VERSION" \
+            --build-arg RUST_VERSION="$rust" --build-arg FLUTTER_VERSION="$flutter" \
             --cache-from "type=gha,scope=docker-${{ matrix.arch }}" \
             --cache-to "type=gha,mode=max,scope=docker-${{ matrix.arch }}" \
             -t "$image:$VERSION-${{ matrix.arch }}" $output .

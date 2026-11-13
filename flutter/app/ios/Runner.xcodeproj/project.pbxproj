@@ -52,6 +52,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				F7CBAE714DD315375E21A053 /* ShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -307,6 +308,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				B6AE517A5F24232B87FB1E50 /* PBXTargetDependency */,
 			);
 			name = Runner;
 			packageProductDependencies = (

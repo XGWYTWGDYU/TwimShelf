@@ -2,3 +2,5 @@
 #include "../Flutter/Identity.xcconfig"
 #include "../Flutter/Generated.xcconfig"
 PRODUCT_BUNDLE_IDENTIFIER = $(TL_FLUTTER_BUNDLE).share
+// off in config.yaml: built, but neither signed nor embedded (scripts/apply.py)
+CODE_SIGNING_ALLOWED = $(TL_SHARE_SIGNING)

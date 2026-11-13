@@ -30,13 +30,6 @@ hex = "0.4"
 rpassword = "7"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 
-[profile.release]
-opt-level = 3
-debug = "line-tables-only"
-
-[profile.dev.package."*"]
-opt-level = 3
-
 [features]
 default = ["heif"]
 # HEIC and AVIF (libheif, built from pinned sources by the core; needs CMake, Meson, Ninja, NASM)

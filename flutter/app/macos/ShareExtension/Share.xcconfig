@@ -1,3 +1,5 @@
 // the Flutter app's share extension: the same sources as the native app's
 #include "../Runner/Configs/Identity.xcconfig"
 PRODUCT_BUNDLE_IDENTIFIER = $(TL_FLUTTER_BUNDLE).share
+// off in config.yaml: built, but neither signed nor embedded (scripts/apply.py)
+CODE_SIGNING_ALLOWED = $(TL_SHARE_SIGNING)

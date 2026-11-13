@@ -1,0 +1,14 @@
+# The Rust code: the core every app links, and the Linux server built on it.
+[workspace]
+members = ["core", "server"]
+# the Kani proofs build on their own (scripts/kani_guard.sh)
+exclude = ["core/verification"]
+resolver = "2"
+
+# Crypto, hashing, SQLite and compression are 20-50x slower unoptimized; optimize
+# dependencies even in debug builds (our own crates stay debuggable).
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+debug = "line-tables-only"

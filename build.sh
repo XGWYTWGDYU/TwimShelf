@@ -27,8 +27,9 @@ SDK="$CACHE/sdk"
 YES=0; CHECK=0; TARGETS=()
 
 # pinned versions: a build made today and one made in a year use the same tools
-FLUTTER_VERSION=3.47.8
-RUST_TOOLCHAIN=stable
+# (Flutter in .fvmrc, Rust in rust-toolchain.toml; rustup installs that one on first use)
+FLUTTER_VERSION=$(sed -nE 's/.*"flutter": *"([^"]+)".*/\1/p' "$ROOT/.fvmrc")
+RUST_TOOLCHAIN=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' "$ROOT/rust-toolchain.toml")
 ANDROID_PLATFORM=android-36
 ANDROID_BUILD_TOOLS=36.0.0
 ANDROID_CMAKE=3.31.6
@@ -92,6 +93,9 @@ need_flutter() {
       FLUTTER="$SDK/flutter/bin/flutter"
     else [[ $CHECK == 1 ]] && MISSING+=(Flutter) && return 0; fail "Flutter is required"; fi
   fi
+  local have_version; have_version=$(cat "$(dirname "$FLUTTER")/../version" 2>/dev/null || true)
+  [[ -z "$have_version" || "$have_version" == "$FLUTTER_VERSION" ]] ||
+    printf '\033[33mFlutter %s is not the pinned %s (.fvmrc): the build may differ from the release builds\033[0m\n' "$have_version" "$FLUTTER_VERSION" >&2
   export PUB_CACHE="$CACHE/pub" GRADLE_USER_HOME="$CACHE/gradle"
   "$FLUTTER" config --no-analytics >/dev/null 2>&1 || true
 }
@@ -130,6 +134,27 @@ need_android() {
 need_xcode() {
   have xcodebuild || fail "Install Xcode from the App Store, open it once, then run this again"
   xcode-select -p >/dev/null 2>&1 || fail "Run: sudo xcode-select -s /Applications/Xcode.app"
+}
+
+# the native Xcode project is made from project.yml (scripts/apply.py runs it; not in git)
+need_xcodegen() { [[ $OS == Darwin ]] && need_tool xcodegen "XcodeGen (makes the Xcode project from project.yml)" xcodegen - - - || true; }
+
+# A release-signed APK on this computer: config.local.yaml names the keystore (android.keystore,
+# android.key_alias) and the keychain item holding its password (android.keychain_service).
+# key.properties is written for this build only. CI writes its own from the repository's secrets.
+ANDROID_KEY_WRITTEN=0
+android_key() {
+  local props="$ROOT/flutter/app/android/key.properties" store alias service pass
+  [[ -f "$props" ]] && return 0
+  store=$(python3 "$ROOT/scripts/apply.py" get android.keystore 2>/dev/null) || return 0
+  alias=$(python3 "$ROOT/scripts/apply.py" get android.key_alias)
+  service=$(python3 "$ROOT/scripts/apply.py" get android.keychain_service)
+  store="${store/#\~/$HOME}"
+  [[ -f "$store" ]] || fail "The Android keystore $store (config.local.yaml) does not exist"
+  pass=$(security find-generic-password -s "$service" -w 2>/dev/null) || fail "No keychain item \"$service\" with the keystore's password (config.local.yaml)"
+  printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$store" "$pass" "$alias" "$pass" > "$props"
+  ANDROID_KEY_WRITTEN=1
+  trap '[[ $ANDROID_KEY_WRITTEN == 1 ]] && rm -f "$ROOT/flutter/app/android/key.properties"' EXIT
 }
 
 need_flutter_apple() {
@@ -206,6 +231,7 @@ build_target() {
       fi ;;
     flutter-android)
       need_rust; need_flutter; need_android
+      [[ $OS == Darwin ]] && android_key
       PATH="$ANDROID_HOME/cmake/$ANDROID_CMAKE/bin:$PATH" core_for android
       (cd "$ROOT/flutter/app" && "$FLUTTER" pub get && "$FLUTTER" build apk --release --split-per-abi $(flutter_defines))
       for f in "$ROOT"/flutter/app/build/app/outputs/flutter-apk/app-*-release.apk; do
@@ -223,7 +249,7 @@ build_target() {
       # the Linux server and the web app; everything is compiled inside the image, so this
       # computer needs only Docker (its own build cache stays in Docker's storage)
       have docker || fail "Docker is needed: https://docs.docker.com/get-docker/ (or OrbStack, Colima)"
-      docker build -f "$ROOT/docker/Dockerfile" --build-arg VERSION="$v" -t "twimshelf:$v" -t twimshelf:latest "$ROOT"
+      docker build -f "$ROOT/docker/Dockerfile" --build-arg VERSION="$v" --build-arg RUST_VERSION="$RUST_TOOLCHAIN" --build-arg FLUTTER_VERSION="$FLUTTER_VERSION" -t "twimshelf:$v" -t twimshelf:latest "$ROOT"
       local arch; arch=$(docker image inspect --format '{{.Architecture}}' "twimshelf:$v")
       docker save "twimshelf:$v" | gzip > "$DIST/TwimShelf-$v-docker-linux-$arch.tar.gz" ;;
     flutter-windows) fail "flutter-windows builds on Windows: build.ps1" ;;
@@ -236,7 +262,7 @@ while (( $# )); do
   case "$1" in
     --yes|-y) YES=1; export TL_YES=1 ;;
     --check) CHECK=1 ;;
-    --configure) python3 "$ROOT/scripts/apply.py"; exit ;;
+    --configure) need_xcodegen; python3 "$ROOT/scripts/apply.py"; exit ;;
     --list) cat <<EOF
 native-macos     the native Mac app (.dmg)                 macOS with Xcode
 native-ios       the native iPhone/iPad app (unsigned .ipa) macOS with Xcode
@@ -261,7 +287,7 @@ mkdir -p "$CACHE" "$DIST"
 if [[ $CHECK == 1 ]]; then
   for t in "${TARGETS[@]}"; do
     case "$t" in
-      native-*) need_xcode; need_rust ;;
+      native-*) need_xcode; need_xcodegen; need_rust ;;
       flutter-macos|flutter-ios) need_xcode; need_rust; need_flutter; need_flutter_apple ;;
       flutter-android) need_rust; need_flutter; need_android ;;
       flutter-linux) need_rust; need_flutter; need_linux_desktop ;;
@@ -272,6 +298,7 @@ if [[ $CHECK == 1 ]]; then
   say "Everything needed for ${TARGETS[*]} is here"; exit 0
 fi
 
+need_xcodegen
 python3 "$ROOT/scripts/apply.py"
 for t in "${TARGETS[@]}"; do build_target "$t"; done
 say "Packages: $DIST"

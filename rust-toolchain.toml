@@ -1,0 +1,4 @@
+# The Rust every build uses (rustup installs it on first use, with the targets each build adds).
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"

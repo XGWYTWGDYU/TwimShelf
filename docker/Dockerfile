@@ -1,24 +1,27 @@
 # TwimShelf Linux server: the Rust core and the web app on one port.
 #
-#   docker build -f docker/Dockerfile -t twimshelf .
+#   ./build.sh docker            (passes the pinned Rust and Flutter versions, see below)
 #   docker run -d -p 2778:2778 -v /path/to/data:/data twimshelf
 #
 # /app holds the program (server + web app), /data everything it keeps (see docker/README.md).
 # The version is config.yaml's, as for every other build (./build.sh docker builds and saves it).
+# The tools are the repository's pinned ones: RUST_VERSION from rust-toolchain.toml, FLUTTER_VERSION
+# from .fvmrc (docker build --build-arg RUST_VERSION=… --build-arg FLUTTER_VERSION=… by hand).
 
-ARG FLUTTER_VERSION=3.47.8
+ARG RUST_VERSION
+ARG FLUTTER_VERSION
 
 # ---- the server: the core with HEIC/AVIF, built from pinned sources ----
-FROM rust:1-bookworm AS server
+FROM rust:${RUST_VERSION}-bookworm AS server
 RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build nasm meson pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY config.yaml config.yaml
+COPY config.yaml Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY core core
 COPY server server
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/src/server/target \
+    --mount=type=cache,target=/src/target \
     export TL_VERSION="$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' config.yaml)" && \
-    cd server && cargo build --release --locked && cp target/release/twimshelf-server /twimshelf-server
+    cargo build -p tl-server --release --locked && cp target/release/twimshelf-server /twimshelf-server
 
 # ---- the web app: the Flutter app built for browsers ----
 FROM debian:bookworm-slim AS web
@@ -29,11 +32,13 @@ ENV PATH=/flutter/bin:$PATH FLUTTER_SUPPRESS_ANALYTICS=true
 RUN flutter config --no-analytics --enable-web >/dev/null && flutter precache --web
 WORKDIR /src
 COPY flutter flutter
-# the app's icons are made from the AppIcon set (not in git), as every build does
+# the files made from config.yaml (not in git), and the app's icon from the AppIcon set, as every
+# build does
 COPY config.yaml config.yaml
+COPY scripts/apply.py scripts/apply.py
 COPY scripts/flutter/make_icons.py scripts/flutter/make_icons.py
 COPY native/Resources/Assets.xcassets/AppIcon.appiconset native/Resources/Assets.xcassets/AppIcon.appiconset
-RUN python3 scripts/flutter/make_icons.py --in-app
+RUN python3 scripts/apply.py generate && python3 scripts/flutter/make_icons.py --in-app
 RUN cd flutter/app && flutter pub get && flutter build web --release --no-wasm-dry-run --no-web-resources-cdn
 
 # ---- what runs ----

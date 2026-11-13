@@ -1,0 +1,37 @@
+# 复制成 config.local.yaml（不进 Git），只写需要和 config.yaml 不同的项，其余照用 config.yaml。
+# scripts/apply.py 读取时逐项覆盖，不会改写任何一个文件；提交时也只会看到公开的 config.yaml。
+# 下面每一项都是可选的。
+
+# 自己的图标（相对路径以项目根目录为准；.local/ 不进 Git，适合放这类文件）
+# icon: .local/icon.png
+
+# build:
+#   dir: ~/Builds/TwimShelf                  # 构建缓存和安装包放在别处
+
+# native:
+#   bundle_id: com.example.twimshelf
+#   development_team: ABCDE12345              # 10 位 Team ID
+#   mac_signing_identity: "Apple Development: Your Name (XXXXXXXXXX)"
+#   share_extension_ios: true                 # 需要付费开发者账号
+#   share_extension_mac: true
+
+# flutter:
+#   apple_bundle_id: com.example.twimshelf.flutter
+#   android_package: com.example.twimshelf
+#   desktop_id: com.example.twimshelf
+#   development_team: ABCDE12345
+#   share_extension_ios: true
+#   share_extension_mac: true
+
+# Android 发布签名（只在本机构建时用；GitHub Actions 用仓库的 Secrets）。
+# 密码存在钥匙串里：security add-generic-password -s "<keychain_service>" -a twimshelf -w
+# android:
+#   keystore: ~/.android/keys/twimshelf-release.jks
+#   key_alias: twimshelf
+#   keychain_service: TwimShelf Android release key
+
+# 提交前检查（scripts/check_private.py）除了上面这些值，还会拦下这里列出的文字，
+# 比如你的名字、邮箱、用户名（正则表达式）。
+# private:
+#   - "Your Name"
+#   - you@example\.com

@@ -15,7 +15,8 @@
 param([string[]]$Targets = @(), [switch]$Check, [switch]$Yes)
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path "$PSScriptRoot").Path
-$FlutterVersion = '3.47.8'
+# pinned: Flutter in .fvmrc, Rust in rust-toolchain.toml (rustup installs that one on first use)
+$FlutterVersion = (Get-Content "$Root\.fvmrc" -Raw | ConvertFrom-Json).flutter
 # Flutter builds for the machine it runs on: an ARM64 Windows makes the ARM64 app, x64 the x64 one
 $Arm = $env:PROCESSOR_ARCHITECTURE -eq 'ARM64'
 $Arch = if ($Arm) { 'arm64' } else { 'x64' }

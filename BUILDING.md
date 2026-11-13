@@ -47,20 +47,24 @@ macOS 和 Linux 上用 `build.sh`，Windows 上用 `build.ps1`。脚本会构建
 
 | 环境变量 | 作用 |
 | --- | --- |
-| `FLUTTER_ROOT` | 已有的 Flutter SDK（版本见 `build.sh` 开头的 `FLUTTER_VERSION`） |
+| `FLUTTER_ROOT` | 已有的 Flutter SDK（版本应与 `.fvmrc` 一致，不一致时脚本会提醒） |
 | `ANDROID_HOME` | 已有的 Android SDK |
 | `TL_VERSION` | 只改变安装包文件名里的版本号 |
 | `TL_UPDATE_REPO` | `owner/name`，打开「检查更新」。本地构建通常留空，这时应用不会联网检查更新 |
 
 ## 用 Xcode 构建和运行
 
-第一次打开前，先运行一次配置。这样从第一次构建开始，所有产物就都在项目的 `build/` 目录下：
+第一次打开前，先检查工具，再运行一次配置。原生版的 Xcode 工程不在 Git 里，由 XcodeGen 按 `project.yml` 生成；配置还会生成签名、Bundle ID 等设置，并把所有产物放到构建目录：
+
+```bash
+./build.sh --check
+```
 
 ```bash
 ./build.sh --configure
 ```
 
-如果跳过这一步也能正常构建，只是第一次的产物会放到 Xcode 默认的 DerivedData 里，关闭并重新打开工程之后才会转到 `build/`。
+`--check` 会询问并安装缺少的工具（Rust、XcodeGen、Flutter、CocoaPods 等）。Xcode 的构建按钮本身不安装任何工具，缺少时会提示运行它。
 
 ### 原生版
 
@@ -74,7 +78,7 @@ open TwimShelf.xcodeproj
   - 真机：打开 `TwimShelf-iOS` target 的 **Signing & Capabilities**，在 **Team** 里选择自己的账号，然后点击运行。免费的个人账号也可以，需要 App Group 的分享扩展默认是关闭的。
 - **Mac 版要长期使用**：在 Mac target 的 **Signing & Capabilities** 里勾选 **Automatically manage signing** 并选择 Team，之后重新编译时系统钥匙串不会反复询问权限。
 
-Rust 核心会在构建时自动编译；如果还没有安装 Rust，第一次构建时会自动装到 `~/.cargo`。第一次构建还要下载 Swift 依赖（约 500 MB），需要等一段时间。
+Rust 核心会在构建时自动编译，使用 `rust-toolchain.toml` 固定的 Rust 版本（rustup 第一次用到时自动安装）。第一次构建还要下载 Swift 依赖（约 500 MB），需要等一段时间。改了 `project.yml` 之后，下一次构建会自动重新生成工程。
 
 ### Flutter 版
 
@@ -86,17 +90,17 @@ open flutter/app/ios/Runner.xcworkspace
 open flutter/app/macos/Runner.xcworkspace
 ```
 
-选择 `Runner` scheme 点击运行即可。scheme 的预处理步骤会准备好一切：Flutter SDK、Dart 依赖、Rust 核心和 CocoaPods。这些步骤的输出在 `build/cache/logs/xcode-prepare.log` 里，需要 CMake（`brew install cmake`）。
+选择 `Runner` scheme 点击运行即可。scheme 的预处理步骤会准备好配置、Dart 依赖、Rust 核心和 CocoaPods；Flutter SDK、Rust、CocoaPods 和 CMake 需要先装好（`./build.sh --check flutter-ios`）。这些步骤的输出在 `build/cache/logs/xcode-prepare.log` 里。
 
 签名方式和原生版相同：Mac 版不需要账号，iOS 真机在 `Runner` target 里选择自己的 Team。
 
 ### 不通过Xcode
 
-把 10 位的 Team ID 写进 `config.yaml` 的 `native.development_team` 和 `flutter.development_team`。Team ID 可以在 [Apple Developer 账号页面](https://developer.apple.com/account)或 Xcode 的账号设置里查到。这是个人信息，**不要提交这个改动**。
+把 10 位的 Team ID 写进 `config.local.yaml` 的 `native.development_team` 和 `flutter.development_team`（见[本机配置](#本机配置configlocalyaml)）。Team ID 可以在 [Apple Developer 账号页面](https://developer.apple.com/account)或 Xcode 的账号设置里查到。这个文件不进 Git。
 
 ### 安装到真机和本机（命令行）
 
-先在 `config.yaml` 里填好 `development_team`。产物放进构建目录，要给 `xcodebuild` 指定 `-derivedDataPath`，否则会落到 Xcode 默认的 DerivedData：
+先在 `config.local.yaml` 里填好 `development_team`。产物放进构建目录，要给 `xcodebuild` 指定 `-derivedDataPath`，否则会落到 Xcode 默认的 DerivedData：
 
 ```bash
 C=$(python3 scripts/apply.py where cache)
@@ -149,12 +153,14 @@ cd flutter/app && flutter build web --release --no-web-resources-cdn
 服务器（Rust 产物放进构建目录）：
 
 ```bash
-cd server && CARGO_TARGET_DIR="$(python3 ../scripts/apply.py where cache)/cargo-server" cargo build --release
+CARGO_TARGET_DIR="$(python3 scripts/apply.py where cache)/cargo" cargo build -p tl-server --release
 ```
 
 ```bash
-TL_DATA=/某个测试目录 TL_WEB=../flutter/app/build/web TL_PORT=2778 "$(python3 ../scripts/apply.py where cache)/cargo-server/release/twimshelf-server"
+TL_DATA=/某个测试目录 TL_WEB=flutter/app/build/web TL_PORT=2778 "$(python3 scripts/apply.py where cache)/cargo/release/twimshelf-server"
 ```
+
+`core` 和 `server` 是同一个 Cargo workspace（根目录的 `Cargo.toml`），共用一份 `Cargo.lock`。
 
 服务器报告的版本取自环境变量 `TL_VERSION`（镜像构建时从 `config.yaml` 读取），不设时用 `server/Cargo.toml` 的版本。`--no-web-resources-cdn` 让 CanvasKit 跟网页版一起打包，局域网里没有外网也能打开。网页版的远程调用（`flutter/tl_core/lib/src/bindings_web.dart`）和服务器的分发表（`server/src/dispatch.rs`）由 `scripts/gen_web_bindings.py` 从 `bindings.dart` 生成，给核心加了新函数后运行一次。
 
@@ -172,14 +178,13 @@ TL_DATA=/某个测试目录 TL_WEB=../flutter/app/build/web TL_PORT=2778 "$(pyth
 
 可以在 macOS、Linux 或 Windows 上构建，脚本会询问并下载 Android SDK 和 NDK（约 3 GB）。**项目路径里不能有空格**，原因见[常见问题](#常见问题)。
 
-默认使用调试密钥签名，适合自己使用。需要用自己的发布密钥时，新建 `flutter/app/android/key.properties`（已被 Git 忽略）：
+默认使用调试密钥签名，适合自己使用。需要用自己的发布密钥时，密钥库放在仓库外面（比如 `~/.android/keys/`），密码存进钥匙串，再在 `config.local.yaml` 里写上 `android:` 一节（写法见 `config.local.example.yaml`）。在 Mac 上用 `./build.sh flutter-android` 构建时，脚本从钥匙串取出密码，只为这次构建写一份 `flutter/app/android/key.properties`，构建结束后删除：
 
-```properties
-storeFile=/绝对路径/release.jks
-storePassword=...
-keyAlias=...
-keyPassword=...
+```bash
+security add-generic-password -s "TwimShelf Android release key" -a twimshelf -w
 ```
+
+其他系统上可以自己新建 `flutter/app/android/key.properties`（已被 Git 忽略，内容是 `storeFile`、`storePassword`、`keyAlias`、`keyPassword` 四行）。
 
 ### Linux
 
@@ -199,7 +204,9 @@ powershell -ExecutionPolicy Bypass -File build.ps1 flutter-windows
 
 ## 配置：config.yaml
 
-Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都在根目录的 [`config.yaml`](config.yaml) 里，代码里用到它们的地方都引用这里。应用名称 TwimShelf 直接写在代码里，不在配置中。改完之后不需要手动做什么，`build.sh`、`build.ps1` 和 Xcode 的构建按钮都会先按它重新生成配置。
+Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都在根目录的 [`config.yaml`](config.yaml) 里，代码里用到它们的地方都引用这里。这里写的是公开的默认值。应用名称 TwimShelf 直接写在代码里，不在配置中。改完之后不需要手动做什么，`build.sh`、`build.ps1` 和 Xcode 的构建按钮都会先按它重新生成配置（`scripts/apply.py`）。
+
+由配置生成的文件都不进 Git：原生版的 Xcode 工程、各个 `Identity.xcconfig`、`identity.properties`、`identity.cmake`、`identity.g.dart`、`product.json`。新克隆下来先运行一次 `./build.sh --configure`。
 
 | 配置项 | 含义 |
 | --- | --- |
@@ -215,9 +222,26 @@ Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都�
 | `native.development_team`、`flutter.development_team` | 开发团队，默认留空 |
 | `native.mac_signing_identity` | Mac 版指定签名身份，默认留空 |
 
-**换图标**：替换 `icon.png`。要求是正方形 PNG，自带圆角和透明边，建议 1024×1024 以上。各平台的图标都会自动生成：Mac 版直接缩放，iOS 和 Android 版取图案部分并铺满。第一次生成时需要 Pillow，脚本会自动下载到构建缓存里，不会安装到系统。
+**换图标**：替换 `icon.png`（只想在自己电脑上换，见下一节的 `icon`）。要求是正方形 PNG，自带圆角和透明边，建议 1024×1024 以上。各平台的图标都会自动生成：Mac 版直接缩放，iOS 和 Android 版取图案部分并铺满。第一次生成时需要 Pillow，脚本会自动下载到构建缓存里，不会安装到系统。
 
 **分发自己的版本**：请把 Bundle ID 和包名都改成自己的。
+
+### 本机配置：config.local.yaml
+
+自己电脑上和公开默认值不同的东西，写在根目录的 `config.local.yaml` 里（不进 Git；把 [`config.local.example.yaml`](config.local.example.yaml) 复制过去改）。读取配置时它逐项覆盖 `config.yaml`，不会改写任何文件，所以提交时只会看到公开的值：
+
+- 自己的 Bundle ID、开发团队、Mac 签名身份、分享扩展开关、构建目录
+- `icon`：自己的图标。它生成 `AppIconLocal` 图标集（不进 Git），各个应用改用它；提交进 Git 的 AppIcon 图标集、网页版和扩展的图标始终来自 `icon.png`
+- `android`：本机的 Android 发布密钥（见 [Android](#android)）
+- `private`：提交前额外要拦下的文字，比如自己的名字和邮箱
+
+`.local/` 目录同样不进 Git，适合放自己的图标这类文件。
+
+构建一次之后，Git 会使用仓库里的 `.githooks`：提交和推送前，`scripts/check_private.py` 检查改动里有没有 `config.local.yaml` 里的这些值，有就拦下。
+
+### 工具版本
+
+Rust 的版本固定在 `rust-toolchain.toml`，Flutter 的版本固定在 `.fvmrc`。构建脚本、Xcode 的预处理步骤、Docker 镜像和 GitHub Actions 都读这两个文件；升级时只改这里。
 
 ## 构建目录
 
@@ -241,17 +265,9 @@ iOS 和 Mac 的「分享到 TwimShelf」默认关闭。扩展通过 App Group �
 
 开启方法：
 
-1. 在 `config.yaml` 里把对应的 `share_extension_ios` 或 `share_extension_mac` 改成 `true`，并填写同一节的 `development_team`（只在 Xcode 里选 Team 不够）。这是个人信息，不要提交这个改动。
+1. 在 `config.local.yaml` 里把对应的 `share_extension_ios` 或 `share_extension_mac` 改成 `true`，并填写同一节的 `development_team`（只在 Xcode 里选 Team 不够）。
 2. 共享组由 Bundle ID 决定：iOS 使用 `group.<bundle_id>`，Mac 使用 `<Team ID>.<bundle_id>`，不用单独配置。
-3. 运行配置。原生版开关变化时需要重新生成工程，所以要先安装 XcodeGen：
-
-```bash
-brew install xcodegen
-```
-
-```bash
-./build.sh --configure
-```
+3. 重新构建即可。各个工程里一直带着分享扩展：开关只决定它签不签名、嵌不嵌进应用，所以开关时工程文件不会变。
 
 不开分享扩展时，主应用自己的导入功能不受影响。Android「分享到」、Windows「发送到」、Linux「打开方式」不需要 App Group，默认开启。
 
@@ -260,7 +276,7 @@ brew install xcodegen
 Rust 核心：
 
 ```bash
-cd core && cargo test --locked --features heif
+cargo test -p tl-core --locked --features heif
 ```
 
 原生版的逻辑检查：
@@ -278,7 +294,7 @@ cd flutter/app && flutter test
 服务器：
 
 ```bash
-cd server && cargo test
+cargo test -p tl-server
 ```
 
 网格缩放回放测试在 Xcode 里运行 `GridTests` scheme。标记为 `#[ignore]` 的 Rust 测试要联网或者要真实账号，运行前先看一下源码，需要的帖子链接和 Cookie 通过环境变量传入。
@@ -320,7 +336,7 @@ Release 页面没有说明文字，只包含所有安装包、`SHA256SUMS.txt`�
 
 **Xcode 提示 Bundle ID 不可用（"cannot be registered to your development team"）**
 
-Apple 要求 Bundle ID 全球唯一，已经被其他团队注册的不能再用。把 `config.yaml` 里的 `native.bundle_id`（原生版）或 `flutter.apple_bundle_id`（Flutter 版）改成自己的，比如 `com.yourname.twimshelf`，不要提交这个改动。注意：改 Bundle ID 后设备上会被当成另一个应用，数据不会自动带过来。
+Apple 要求 Bundle ID 全球唯一，已经被其他团队注册的不能再用。在 `config.local.yaml` 里把 `native.bundle_id`（原生版）或 `flutter.apple_bundle_id`（Flutter 版）改成自己的，比如 `com.yourname.twimshelf`。注意：改 Bundle ID 后设备上会被当成另一个应用，数据不会自动带过来。
 
 **Xcode 提示 "Signing for ... requires a development team"**
 
@@ -358,6 +374,6 @@ CocoaPods 需要 UTF-8 环境，运行 `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF
 
 自己构建或下载的临时签名版本都会这样。到「系统设置 › 隐私与安全性」选择「仍要打开」。
 
-**开关分享扩展之后提示需要 XcodeGen**
+**提示需要 XcodeGen，或者找不到 `TwimShelf.xcodeproj`**
 
-原生工程需要重新生成：`brew install xcodegen`，然后运行 `./build.sh --configure`。
+原生版的工程由 XcodeGen 生成：运行 `./build.sh --check`（会询问并安装 XcodeGen），然后运行 `./build.sh --configure`。

@@ -28,9 +28,36 @@ __pycache__/
 /flutter/tl_*/pubspec.lock
 /flutter/installer/pubspec.lock
 /flutter/app/android/local.properties
-# generated per checkout by scripts/apply.py: where builds go, what was last applied
+# this computer's own values (see config.local.example.yaml) and private files
+/config.local.yaml
+/.local/
+
+# made by scripts/apply.py from config.yaml (+ config.local.yaml): never edit, never commit
+/TwimShelf.xcodeproj/*
+# …except the Swift packages' pinned versions, which Xcode keeps inside it
+!/TwimShelf.xcodeproj/project.xcworkspace/
+/TwimShelf.xcodeproj/project.xcworkspace/*
+!/TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/
+/TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/*
+!/TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+/native/Identity.xcconfig
+/native/Resources/Assets.xcassets/AppIconLocal.appiconset/
+/flutter/app/ios/Flutter/Identity.xcconfig
+/flutter/app/macos/Runner/Configs/Identity.xcconfig
+/flutter/app/android/identity.properties
+/flutter/app/linux/identity.cmake
+/flutter/app/lib/app/identity.g.dart
+/flutter/installer/product.json
 **/BuildLocation.xcconfig
 /native/.applied.json
+
+# Rust (the workspace's own target folder; scripts build into build.dir instead)
+/target/
+
+# signing keys never live here (see BUILDING.md); a build writes key.properties only for itself
+/flutter/app/android/key.properties
+*.jks
+*.keystore
 
 
 # icons: made from native/Resources/Assets.xcassets/AppIcon.appiconset by scripts/flutter/make_icons.py
