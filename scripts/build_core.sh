@@ -3,11 +3,16 @@
 # Needs rustup (./build.sh --check installs it); the pinned Rust (rust-toolchain.toml) and the
 # target are added on first use.
 set -e
-if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-  echo "error: Rust is missing: run ./build.sh --check"
+# Xcode's PATH has none of these: rustup.rs puts Rust in ~/.cargo/bin, Homebrew's rustup in its prefix
+RUST_BIN=""
+for d in "$HOME/.cargo/bin" /opt/homebrew/opt/rustup/bin /opt/homebrew/bin /usr/local/opt/rustup/bin /usr/local/bin; do
+  if [ -x "$d/cargo" ]; then RUST_BIN="$d"; break; fi
+done
+if [ -z "$RUST_BIN" ]; then
+  echo "error: Rust (rustup) is missing: run ./build.sh --check"
   exit 1
 fi
-[ -f ~/.cargo/env ] && source ~/.cargo/env
+export PATH="$RUST_BIN:$PATH"
 cd "$SRCROOT/core"
 case "$PLATFORM_NAME" in
   iphoneos) T=aarch64-apple-ios; S=iphoneos ;;
@@ -21,5 +26,5 @@ FLAG=--release
 rustup target list --installed | grep -qx "$T" || rustup target add "$T"
 # build.dir of config.yaml (Xcode passes TL_CACHE_DIR from BuildLocation.xcconfig)
 CACHE="${TL_CACHE_DIR:-$(python3 "$SRCROOT/scripts/apply.py" where cache)}"
-env -i HOME="$HOME" PATH="$HOME/.cargo/bin:/usr/bin:/bin" SDKROOT="$(xcrun --sdk $S --show-sdk-path)" DEVELOPER_DIR="$DEVELOPER_DIR" CARGO_TARGET_DIR="$CACHE/cargo" cargo build $FLAG --target $T
+env -i HOME="$HOME" PATH="$RUST_BIN:/usr/bin:/bin" ${RUSTUP_HOME:+RUSTUP_HOME="$RUSTUP_HOME"} ${CARGO_HOME:+CARGO_HOME="$CARGO_HOME"} SDKROOT="$(xcrun --sdk $S --show-sdk-path)" DEVELOPER_DIR="$DEVELOPER_DIR" CARGO_TARGET_DIR="$CACHE/cargo" cargo build $FLAG --target $T
 cp "$CACHE/cargo/$T/$P/libtl_core.a" "$BUILT_PRODUCTS_DIR/libtl_core.a"

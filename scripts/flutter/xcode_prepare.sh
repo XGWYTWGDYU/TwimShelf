@@ -18,7 +18,7 @@ fail() {
   osascript -e "display notification \"$* — see build/cache/logs/xcode-prepare.log\" with title \"TwimShelf build\"" >/dev/null 2>&1 || true
   exit 1
 }
-export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/rustup/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 # Xcode runs pre-actions without a locale; CocoaPods needs UTF-8
 export LANG="${LANG:-en_US.UTF-8}" LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
