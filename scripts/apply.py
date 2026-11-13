@@ -423,13 +423,12 @@ def main():
         return
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     if which in ('all', 'native'):
+        native(c)              # XcodeGen checks the project's xcconfig exists: written first
         native_project(state)
     paths(c)
     hooks()
     if which in ('all', 'native', 'flutter'):
         app_icon_sets(c)
-    if which in ('all', 'native'):
-        native(c)
     if which in ('all', 'flutter'):
         flutter(c)
         flutter_icons(c, state)
