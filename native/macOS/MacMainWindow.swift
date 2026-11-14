@@ -36,6 +36,15 @@ final class MacRootViewController: NSViewController {
         split.view.frame = view.bounds
         split.view.autoresizingMask = [.width, .height]
         view.addSubview(split.view)
+        // what runs (downloads, imports, AI tagging, sync…) floats over every page, not only 浏览
+        let activity = MacActivityPanel()
+        activity.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(activity)
+        NSLayoutConstraint.activate([
+            activity.trailingAnchor.constraint(equalTo: content.view.trailingAnchor, constant: -18),
+            activity.bottomAnchor.constraint(equalTo: content.view.bottomAnchor, constant: -18),
+        ])
+        content.feed.onViewer = { [weak activity] open in activity?.suppressed = open }
         view.addSubview(MascotPetView(frame: view.bounds))
         main.isCollapsed = false
         sidebar.onSelect = { [weak self] p in self?.content.show(p) }

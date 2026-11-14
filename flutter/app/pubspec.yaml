@@ -1,7 +1,7 @@
 name: twimshelf
 description: "The Flutter app."
 publish_to: 'none'
-version: 1.5.2+8
+version: 1.5.3+9
 
 environment:
   sdk: ^3.13.7
@@ -60,6 +60,11 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   integration_test:
     sdk: flutter
+  # test_driver/perf_driver.dart (the performance tests' results)
+  flutter_driver:
+    sdk: flutter
+  # integration_test/transfer_flow_test.dart builds its own ZIP
+  archive: ^4.6.0
 
 flutter:
   uses-material-design: true

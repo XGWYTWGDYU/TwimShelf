@@ -113,8 +113,11 @@ def app_icon_set(path, folder=PUBLIC_DIR):
         sys.exit(f"{path}: an icon must be square")
     for size in (16, 32, 64, 128, 256, 512, 1024):
         source.resize((size, size), Image.Resampling.LANCZOS).save(folder / f"mac-{size}.png", optimize=True)
-    left, top, right, bottom = source.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
-    art = source.crop((left, top, right, bottom))
+    # the artwork is its opaque part: a Mac icon's soft drop shadow around it is not (cut with the
+    # artwork, its black pixels became a black rim on iOS, and the corners' fill came from it)
+    alpha = source.getchannel("A")
+    box = alpha.point(lambda v: 255 if v >= 250 else 0).getbbox() or alpha.point(lambda v: 255 if v > 8 else 0).getbbox()
+    art = source.crop(box)
     # the corners iOS masks away: the colour of the artwork's edge, not white
     middle = art.height // 2
     canvas = Image.new("RGBA", art.size, art.getpixel((4, middle))[:3] + (255,))

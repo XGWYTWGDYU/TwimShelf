@@ -45,7 +45,6 @@ Future<void> main() async {
     SharedPreferences.setMockInitialValues({});
     final models = ExternalModels(await SharedPreferences.getInstance(), shared: memorySettings(), secrets: SecretStore(MemorySecretBackend()),
     );
-    await models.initialize();
     await models.save(
       const ExternalModel(
         id: 'ext:synthetic',

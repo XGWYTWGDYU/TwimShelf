@@ -20,6 +20,15 @@ final class TagListViewController: UITableViewController, UISearchResultsUpdatin
         navigationItem.searchController = sc
         navigationItem.hidesSearchBarWhenScrolling = false
         let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), menu: UIMenu(children: [
+            // the order, read each time the menu opens (its tick follows the choice)
+            UIDeferredMenuElement.uncached { [weak self] done in
+                done([UIMenu(title: L("tags.sort"), image: UIImage(systemName: "arrow.up.arrow.down"), children: TagSort.allCases.map { s in
+                    UIAction(title: s.title, state: s == TagSort.saved ? .on : .off) { _ in
+                        TagSort.saved = s
+                        self?.filter(self?.navigationItem.searchController?.searchBar.text ?? "")
+                    }
+                })])
+            },
             UIMenu(options: .displayInline, children: [
                 UIAction(title: L("tags.deleteAIEllipsis"), image: UIImage(systemName: "sparkles"), attributes: .destructive) { [weak self] _ in self?.confirmRemoveAI() },
             ]),
@@ -40,7 +49,7 @@ final class TagListViewController: UITableViewController, UISearchResultsUpdatin
     func updateSearchResults(for sc: UISearchController) { filter(sc.searchBar.text ?? "") }
     private func filter(_ q: String) {
         let k = q.trimmingCharacters(in: .whitespaces).lowercased()
-        shown = k.isEmpty ? all : all.filter { $0.label.contains(k) }
+        shown = TagSort.saved.apply(k.isEmpty ? all : all.filter { $0.label.contains(k) })
         tableView.reloadData()
     }
 

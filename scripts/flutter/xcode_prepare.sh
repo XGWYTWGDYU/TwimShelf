@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run by the Flutter app's Xcode schemes before every build: config.yaml, the Dart packages, the
 # Rust core library and the pods are put in place first. It installs no tools: a missing one is
-# named (./build.sh --check flutter-ios or flutter-macos offers to install them).
+# named (./build.sh --check flutter-ios or flutter-macos lists them; with --yes it installs them).
 # Xcode does not show a pre-action's output: it goes to <build.dir>/cache/logs/xcode-prepare.log, and a
 # failure also shows as a notification.
 #   xcode_prepare.sh ios|macos
@@ -15,7 +15,7 @@ exec >"$LOG" 2>&1
 platform=${1:-ios}
 fail() {
   echo "FAILED: $*"
-  osascript -e "display notification \"$* — see build/cache/logs/xcode-prepare.log\" with title \"TwimShelf build\"" >/dev/null 2>&1 || true
+  osascript -e "display notification \"$* — see $LOG\" with title \"TwimShelf build\"" >/dev/null 2>&1 || true
   exit 1
 }
 export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/rustup/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -43,9 +43,11 @@ python3 "$ROOT/scripts/apply.py" flutter || fail "Applying config.yaml failed"
 # Dart packages (writes the Generated.xcconfig Xcode reads next)
 (cd "$ROOT/flutter/app" && "$FLUTTER" pub get) || fail "flutter pub get failed"
 
-# the Rust core, when it is missing or older than its sources
-fw="$ROOT/flutter/tl_core/apple/TlCore.xcframework"
-newest=$(find "$ROOT/core/src" "$ROOT/core/Cargo.toml" -newer "$fw" -print -quit 2>/dev/null)
+# the Rust core, when it is missing or older than what it is built from (its messages and the
+# HEIC build are outside core/src; the header goes into the framework)
+fw="$ROOT/flutter/tl_core/apple/$platform/TlCore.xcframework"
+newest=$(find "$ROOT/core/src" "$ROOT/core/Cargo.toml" "$ROOT/core/build.rs" "$ROOT/core/messages.json" "$ROOT/core/heif" \
+  "$ROOT/Cargo.lock" "$ROOT/rust-toolchain.toml" "$ROOT/native/Shared/tl_core.h" -newer "$fw" -print -quit 2>/dev/null)
 if [[ ! -d "$fw" || -n "$newest" ]]; then
   FLUTTER="$FLUTTER" "$ROOT/scripts/flutter/build_core.sh" "$platform" || fail "Building the Rust core failed"
 fi

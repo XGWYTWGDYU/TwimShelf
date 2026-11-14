@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// This device's display preferences, under the native apps' `UserDefaults` names.
@@ -10,15 +9,6 @@ class Prefs extends ChangeNotifier {
 
   static Future<void> load() async {
     instance = Prefs._(await SharedPreferences.getInstance());
-    await instance._removeRetired();
-  }
-
-  /// Settings of features that are gone (整理 mode), removed at every launch: the list only
-  /// grows, so a device that skips versions is cleaned the same way.
-  Future<void> _removeRetired() async {
-    for (final k in const ['triage.mode', 'triage.filter', 'triage.recentFolders']) {
-      if (_p.containsKey(k)) await _p.remove(k);
-    }
   }
 
   /// 清除所有数据: every setting; with [keepAI], those of the AI models stay.
@@ -42,6 +32,10 @@ class Prefs extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// How 标签 is ordered: 0 by media, 1 by your tags, 2 by AI tags, 3 by name (as the native apps).
+  int get tagSort => (_p.getInt('tags.sort') ?? 0).clamp(0, 3);
+  set tagSort(int v) => _set('tags.sort', v);
 
   /// 浏览 by when things were added, newest first, instead of at random.
   bool get feedByAdded => _bool('feed.sortByAdded', false);
@@ -119,7 +113,7 @@ class Prefs extends ChangeNotifier {
   set brightness(int v) => _set('appearance.brightness', v);
 }
 
-/// The colours offered in 外观, by name (appearance.color.<name>).
+/// The colours offered in 外观, by name (`appearance.color.<name>`).
 const seedColors = {
   'pink': Color(0xFFE91E63),
   'red': Color(0xFFF44336),

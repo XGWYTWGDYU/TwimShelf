@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Builds tl-core for the current Xcode platform into $BUILT_PRODUCTS_DIR.
-# Needs rustup (./build.sh --check installs it); the pinned Rust (rust-toolchain.toml) and the
+# Needs rustup (./build.sh --check says when it is missing; with --yes it installs it); the pinned Rust (rust-toolchain.toml) and the
 # target are added on first use.
 set -e
 # Xcode's PATH has none of these: rustup.rs puts Rust in ~/.cargo/bin, Homebrew's rustup in its prefix

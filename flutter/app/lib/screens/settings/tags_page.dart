@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
 
 import '../../app/library.dart';
+import '../../app/prefs.dart';
 import '../../app/jobs.dart';
 import '../../actions/media_actions.dart' show menuAnimation;
 import '../../l10n/l10n.dart';
@@ -11,6 +12,18 @@ import '../../widgets/text_menu.dart';
 
 /// 标签: every tag with how many media carry it (yours and the AI's); rename or merge one, put
 /// its media into a folder, delete it; delete all AI tags.
+/// The tag list in an order (`Prefs.tagSort`): largest first (ties by name), or by name — media,
+/// your tags, AI tags, name, as the native apps.
+List<TagCount> sortedTags(List<TagCount> tags, int order) {
+  int by(int a, int b, TagCount x, TagCount y) => a != b ? b.compareTo(a) : x.label.compareTo(y.label);
+  return [...tags]..sort((x, y) => switch (order) {
+        1 => by(x.user, y.user, x, y),
+        2 => by(x.ai, y.ai, x, y),
+        3 => x.label.compareTo(y.label),
+        _ => by(x.count, y.count, x, y),
+      });
+}
+
 class TagsPage extends StatefulWidget {
   const TagsPage({super.key, required this.library});
   final LibraryModel library;
@@ -30,9 +43,15 @@ class _TagsPageState extends State<TagsPage> {
 
   Future<void> _load() async {
     final t = await coreRunAsync(Core.allTags);
-    t.sort((a, b) => b.count.compareTo(a.count));
     if (mounted) setState(() => _tags = t);
   }
+
+  static String _orderTitle(int order) => switch (order) {
+        1 => L('tags.sort.mine'),
+        2 => L('tags.sort.ai'),
+        3 => L('common.name'),
+        _ => L('tags.sort.count'),
+      };
 
   Future<void> _changed() async {
     await widget.library.refresh();
@@ -102,12 +121,23 @@ class _TagsPageState extends State<TagsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final tags = _tags;
+    final order = Prefs.instance.tagSort;
+    final tags = _tags == null ? null : sortedTags(_tags!, order);
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         title: Text(L('common.tags')),
         actions: [
+          PopupMenuButton<int>(
+            key: const ValueKey('tagSort'),
+            icon: const Icon(Icons.sort),
+            tooltip: L('tags.sort'),
+            popUpAnimationStyle: menuAnimation,
+            onSelected: (v) => setState(() => Prefs.instance.tagSort = v),
+            itemBuilder: (_) => [
+              for (var o = 0; o < 4; o++) CheckedPopupMenuItem(value: o, checked: o == order, child: Text(_orderTitle(o))),
+            ],
+          ),
           PopupMenuButton<void Function()>(
             popUpAnimationStyle: menuAnimation,
             onSelected: (f) => f(),
@@ -138,7 +168,7 @@ class _TagsPageState extends State<TagsPage> {
                               key: ValueKey('tag-${t.label}'),
                               leading: SettingsIcon(t.user > 0 ? Icons.sell_outlined : Icons.auto_awesome),
                               title: Text(t.label),
-                              subtitle: Text(L('common.count', [t.count])),
+                              subtitle: Text(L('tags.cell.detail', [t.count, t.user, t.ai])),
                               trailing: PopupMenuButton<void Function()>(
                                 popUpAnimationStyle: menuAnimation,
                                 onSelected: (f) => f(),

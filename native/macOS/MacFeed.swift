@@ -425,9 +425,21 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     private let chipBar = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: "")
     private let statsLabel = NSTextField(labelWithString: "")
-    private let activityPanel = MacActivityPanel()
-    private let inlinePlayer = AVPlayer()
-    private weak var inlineCard: FeedCard?
+    /// Every video card at least half in view plays, muted, with a player of its own.
+    private lazy var inline = InlineVideos<FeedCard>(
+        attach: { [weak self] card, player, url in
+            #if DEBUG
+            self?.debugInlineSwaps += 1
+            #endif
+            player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            card.playerLayer.player = player
+            card.showsInlineVideo = true
+            player.play()
+        },
+        detach: { _, card in
+            card?.playerLayer.player = nil
+            card?.showsInlineVideo = false
+        })
     private var generation = 0
 
     override func loadView() {
@@ -469,7 +481,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.alignment = .center
         emptyLabel.font = .systemFont(ofSize: 15)
-        [chipBar, scroll, emptyLabel, statsLabel, activityPanel, toast].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; root.addSubview($0) }
+        [chipBar, scroll, emptyLabel, statsLabel, toast].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; root.addSubview($0) }
         NSLayoutConstraint.activate([
             chipBar.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
             chipBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -481,17 +493,10 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             statsLabel.centerYAnchor.constraint(equalTo: chipBar.centerYAnchor),
             statsLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
             chipBar.trailingAnchor.constraint(lessThanOrEqualTo: statsLabel.leadingAnchor, constant: -10),
-            activityPanel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            activityPanel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -18),
             toast.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             toast.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
         ])
         view = root
-        inlinePlayer.isMuted = true
-        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] n in
-            guard let self, (n.object as? AVPlayerItem) === self.inlinePlayer.currentItem else { return }
-            self.inlinePlayer.seek(to: .zero); self.inlinePlayer.play()
-        }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryChanged, object: nil)
         NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.renderChips(); self?.reload() }
@@ -833,7 +838,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     }
 
     func collectionView(_ cv: NSCollectionView, didEndDisplaying item: NSCollectionViewItem, forRepresentedObjectAt ip: IndexPath) {
-        if item === inlineCard { detachInline() }
+        if let card = item as? FeedCard { inline.stop { $0 === card } }
     }
 
     /// While scrolling: load pictures a screen ahead, and choose the autoplay video only once the
@@ -842,7 +847,8 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     @objc private func scrolled() {
         prefetchAhead()
         pendingInline?.cancel()
-        if let card = inlineCard, !card.view.frame.intersects(scroll.contentView.documentVisibleRect) { detachInline() }
+        let visible = scroll.contentView.documentVisibleRect
+        inline.stop { !$0.view.frame.intersects(visible) }
         let w = DispatchWorkItem { [weak self] in self?.updateInline() }
         pendingInline = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: w)
@@ -864,35 +870,23 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         MacMediaLoader.shared.prefetch(ips.compactMap { entries[$0.item % entries.count].first }, maxPixel: FeedCard.decodePixels)
     }
 
-    /// Muted autoplay for the most visible video card.
+    /// Muted autoplay for every video card at least half in view.
     private func updateInline() {
         // not while a collection covers 浏览
         if covered { detachInline(); return }
         let visible = scroll.contentView.documentVisibleRect
-        var best: (FeedCard, CGFloat)?
-        for case let card as FeedCard in collection.visibleItems() where card.current?.kind == .video {
+        var wanted: [(FeedCard, URL)] = []
+        for case let card as FeedCard in collection.visibleItems() {
+            guard let item = card.current, item.kind == .video else { continue }
             let f = card.view.frame.intersection(visible)
             let r = f.isNull ? 0 : (f.width * f.height) / max(card.view.frame.width * card.view.frame.height, 1)
-            if r > 0.6, r > (best?.1 ?? 0) { best = (card, r) }
+            if r >= 0.5 { wanted.append((card, item.fileURL)) }
         }
-        guard let card = best?.0, let item = card.current else { detachInline(); return }
-        if card === inlineCard, (inlinePlayer.currentItem?.asset as? AVURLAsset)?.url == item.fileURL { return }
-        detachInline()
-        #if DEBUG
-        debugInlineSwaps += 1
-        #endif
-        inlinePlayer.replaceCurrentItem(with: AVPlayerItem(url: item.fileURL))
-        card.playerLayer.player = inlinePlayer
-        card.showsInlineVideo = true
-        inlineCard = card
-        inlinePlayer.play()
+        inline.show(wanted)
     }
 
     private func detachInline() {
-        inlinePlayer.pause()
-        inlineCard?.playerLayer.player = nil
-        inlineCard?.showsInlineVideo = false
-        inlineCard = nil
+        inline.stopAll()
     }
 
     /// Opens a media inside the main window (never a new window): the player or photo viewer
@@ -901,7 +895,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     func openMedia(_ item: FeedItem, in list: [FeedItem]) { open(item, list: list) }
 
     private func open(_ item: FeedItem, list: [FeedItem]? = nil) {
-        let t = inlineCard?.current?.mediaId == item.mediaId ? inlinePlayer.currentTime() : .zero
+        let t = inline.player { $0.current?.mediaId == item.mediaId }?.currentTime() ?? .zero
         detachInline()
         if let p = pipPlayer { p.teardown(); pipPlayer = nil }
         let v: NSView
@@ -1222,12 +1216,8 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         reload()
     }
 
-    func toggleLooseOnly() { filter.looseOnly.toggle(); renderChips(); reload() }
-    var looseOnly: Bool { filter.looseOnly }
     func toggleRecentOnly() { filter.recentOnly.toggle(); renderChips(); reload() }
-    var recentOnly: Bool { filter.recentOnly }
     func showMessage(_ text: String) { toast.show(text) }
-    var currentFolder: String? { filter.folder }
 
     private func folderMenuItem(_ title: String, media: [String] = [], posts: [String] = []) -> NSMenuItem {
         let mi = NSMenuItem(title: title, action: nil, keyEquivalent: "")

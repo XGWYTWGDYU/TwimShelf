@@ -1,9 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "+%@" : {
-
-    },
     "a11y.notSelected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1362,64 +1359,6 @@
         }
       }
     },
-    "app.imported" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Imported %@ posts, %@ items"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 件の投稿、%@ 件のメディアを読み込みました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已导入 %@ 个帖子，%@ 个媒体"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已匯入 %@ 則貼文，%@ 個媒體"
-          }
-        }
-      }
-    },
-    "app.importFailed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import failed: %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "読み込みに失敗しました：%@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导入失败：%@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "匯入失敗：%@"
-          }
-        }
-      }
-    },
     "app.openFailed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2261,35 +2200,6 @@
         }
       }
     },
-    "applock.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "When on, the app asks every time it opens. If that fails you can use the device's passcode or password. This keeps people out of the app; it does not encrypt the library's files."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "オンにすると、アプリを開くたびに認証を求めます。認証できないときはデバイスのパスコードやパスワードも使えます。アプリの利用を防ぐ機能で、ライブラリのファイルは暗号化されません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开启后，每次打开应用都要先通过认证；认证不了时可以改用设备密码。它只拦住打开应用的人，不会加密资料库文件。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟後，每次開啟 App 都要先通過驗證；無法驗證時可以改用裝置密碼。它只攔住開啟 App 的人，不會加密資料庫檔案。"
-          }
-        }
-      }
-    },
     "applock.method.android" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2982,35 +2892,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "展開"
-          }
-        }
-      }
-    },
-    "caption.openPost" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open the post on X"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "X で投稿を開く"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 X 打开帖子"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 X 開啟貼文"
           }
         }
       }
@@ -8759,6 +8640,35 @@
         }
       }
     },
+    "feed.empty.library.app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The library is empty\nDownload posts with ↓ beside the search field, or import them in Settings → Import & Backup"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ライブラリは空です\n検索欄の横の ↓ で投稿をダウンロードするか、「設定 → 読み込みとバックアップ」から読み込んでください"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "资料库是空的\n用搜索栏旁的 ↓ 下载帖子，或在「设置 → 导入与备份」中导入"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "資料庫是空的\n用搜尋列旁的 ↓ 下載貼文，或在「設定 → 匯入與備份」中匯入"
+          }
+        }
+      }
+    },
     "feed.empty.library.mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11566,35 +11476,6 @@
         }
       }
     },
-    "hub.entry.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recommended: %@ (based on this device's memory). Downloads use your current network, so watch your data."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "おすすめ：%@（このデバイスのメモリに基づく）。ダウンロードには現在のネットワークを使用するため、通信量にご注意ください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推荐：%@（按本机内存）。下载使用的是你当前的网络，请注意流量。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推薦：%@（依本機記憶體）。下載使用的是你目前的網路，請注意流量。"
-          }
-        }
-      }
-    },
     "hub.estimate" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13714,35 +13595,6 @@
         }
       }
     },
-    "keychain.err.migrate" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't move the old debug credentials into the keychain; the file is kept for now"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "古いデバッグ用認証情報をキーチェーンに移せません。ファイルは当面残します"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法把旧的调试凭据存入钥匙串，文件暂时保留"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法把舊的除錯憑證存入鑰匙圈，檔案暫時保留"
-          }
-        }
-      }
-    },
     "keychain.err.save" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14306,35 +14158,6 @@
         }
       }
     },
-    "mac.batch.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A bookmarks JSON exported by the Twitter Web Exporter userscript, downloaded post by post at the set concurrency and interval. Starting again after an interruption continues with the unfinished posts."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ユーザースクリプト Twitter Web Exporter で書き出したブックマーク JSON を、同時実行数と間隔に従って 1 件ずつダウンロードします。中断後に再開すると未完了の投稿から続けます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用油猴脚本 Twitter Web Exporter 导出的收藏夹 JSON，按并发数和间隔逐条下载。中断后再次开始会从未完成的帖子继续。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用使用者腳本 Twitter Web Exporter 匯出的書籤 JSON，依並行數和間隔逐則下載。中斷後再次開始會從未完成的貼文繼續。"
-          }
-        }
-      }
-    },
     "mac.batch.interval.detail" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14608,35 +14431,6 @@
         }
       }
     },
-    "mac.download.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Links · Batch JSON · Cookie"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "リンク · 一括 JSON · Cookie"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "链接 · 批量 JSON · Cookie"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "連結 · 批次 JSON · Cookie"
-          }
-        }
-      }
-    },
     "mac.download.paused" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14877,64 +14671,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "「%@」：移出整篇貼文"
-          }
-        }
-      }
-    },
-    "mac.fuzzy.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Matches what contains the word, plus tags close in meaning"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "その語を含むものに加え、意味の近いタグも探します"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "包含匹配，并找意思相近的标签"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "包含比對，並找意思相近的標籤"
-          }
-        }
-      }
-    },
-    "mac.headphones.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Without headphones, videos start muted and ask whether to turn sound on"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "イヤホンがないときは動画をミュートで始め、音を出すか確認します"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没连耳机时视频先静音，并询问是否开启声音"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沒接耳機時影片先靜音，並詢問是否開啟聲音"
           }
         }
       }
@@ -15891,35 +15627,6 @@
         }
       }
     },
-    "mac.models.available.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recommended: %@. All are MLX 4-bit, none over 14B. Downloads use the current network."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "おすすめ：%@。すべて MLX 4-bit で 14B 以下です。ダウンロードには現在のネットワークを使います。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推荐：%@。全部为 MLX 4-bit，均不超过 14B。下载会使用当前网络。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推薦：%@。全部為 MLX 4-bit，均不超過 14B。下載會使用目前網路。"
-          }
-        }
-      }
-    },
     "mac.models.download.message" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16309,35 +16016,6 @@
         }
       }
     },
-    "mac.models.import.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import any standard MLX model folder or its ZIP instead of downloading it again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "標準の MLX モデルフォルダやその ZIP を読み込めば、再ダウンロードを避けられます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可导入任意标准 MLX 模型文件夹或其 ZIP，避免重复下载。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可匯入任意標準 MLX 模型資料夾或其 ZIP，避免重複下載。"
-          }
-        }
-      }
-    },
     "mac.models.installed.detail" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16425,35 +16103,6 @@
         }
       }
     },
-    "mac.models.peers.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Models don't sync on their own. Listed here are models that online devices of the same sync account have and this Mac doesn't; “Fetch” transfers one over the local network and installs it once verified."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "モデルは自動では同期されません。同じ同期アカウントのオンラインのデバイスにあって、この Mac にないモデルを表示します。「取得」で LAN 経由で転送し、検証後にインストールします。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型不会自动同步。这里列出同一同步账户、当前在线的设备上有而本机没有的模型，点击「拉取」才会通过局域网传输，校验通过后安装。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型不會自動同步。這裡列出同一同步帳戶、目前在線的裝置上有而本機沒有的模型，點擊「拉取」才會透過區域網路傳輸，校驗通過後安裝。"
-          }
-        }
-      }
-    },
     "mac.models.peers.tap" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16508,35 +16157,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查詢"
-          }
-        }
-      }
-    },
-    "mac.models.recommended" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recommended"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "おすすめ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推荐"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推薦"
           }
         }
       }
@@ -16653,35 +16273,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "AI 加標籤"
-          }
-        }
-      }
-    },
-    "mac.models.tagging.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Only media no model has analyzed yet are tagged automatically; changing the default model doesn't re-tag. Tags you added or approved are never deleted."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自動でタグ付けされるのは、まだどのモデルも分析していないメディアだけです。デフォルトのモデルを変えても再タグ付けしません。自分で付けた・承認したタグは削除されません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只有尚未被任何模型分析过的媒体会被自动标记；更换默认模型不会重新标记。你添加或认可的标签永远不会被删除。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只有尚未被任何模型分析過的媒體會被自動標記；更換預設模型不會重新標記。你加入或認可的標籤永遠不會被刪除。"
           }
         }
       }
@@ -16827,35 +16418,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不放入資料夾"
-          }
-        }
-      }
-    },
-    "mac.noGestures.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dragging no longer seeks (press-and-hold speed-up and double-click pause still work); ← → and two-finger swipes move between photos and videos"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ドラッグで再生位置を変えなくなります（長押しの倍速、ダブルクリックの一時停止はそのまま）。← → と 2 本指の左右スワイプで写真と動画を切り替えます"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拖动不再调节进度（长按倍速、双击暂停照常）；← → 和两指左右滑动在照片和视频之间切换"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拖動不再調整進度（長按倍速、按兩下暫停照常）；← → 和兩指左右滑動在照片和影片之間切換"
           }
         }
       }
@@ -17063,47 +16625,6 @@
         }
       }
     },
-    "mac.problems.count" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld warning or error"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld warnings and errors"
-                }
-              }
-            }
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 件の警告とエラー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 条警告和错误"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 條警告和錯誤"
-          }
-        }
-      }
-    },
     "mac.problems.footer" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17220,35 +16741,6 @@
         }
       }
     },
-    "mac.prompt.label" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Prompt: "
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "プロンプト："
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "提示词："
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "提示詞："
-          }
-        }
-      }
-    },
     "mac.prompt.question.detail" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17332,35 +16824,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "儲存提示詞"
-          }
-        }
-      }
-    },
-    "mac.prompt.saved.message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The new prompt is used for all tagging from now on."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新しいプロンプトは今後すべてのタグ付けに使われます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新的提示词会用于以后的所有打标签。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新的提示詞會用於以後的所有加標籤。"
           }
         }
       }
@@ -17568,35 +17031,6 @@
         }
       }
     },
-    "mac.search.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Type these words in the search field and a space to make condition capsules; other words are what to search for, in any order. A minus in front (-word, -User) leaves something out."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "検索フィールドにこれらの語を入力してスペースを押すと条件のカプセルになります。ほかの語は検索語で、条件と自由に組み合わせられます。前にマイナスを付けると除外します（-語、-ユーザー）。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在搜索框里输入这些词，按空格变成条件胶囊；其他词是要搜索的内容，可以和条件穿插。前面加减号（-词、-用户）表示排除。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在搜尋框輸入這些詞，按空白鍵變成條件膠囊；其他詞是要搜尋的內容，可以和條件穿插。前面加減號（-詞、-使用者）表示排除。"
-          }
-        }
-      }
-    },
     "mac.selected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17680,35 +17114,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Finder 中顯示"
-          }
-        }
-      }
-    },
-    "mac.stats.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Counts are for checking only; see each device's status for sync results."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "件数は照合用です。同期結果は各デバイスの状態を確認してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "数量仅供核对；同步结果请查看各设备的状态。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "數量僅供核對；同步結果請查看各裝置的狀態。"
           }
         }
       }
@@ -17870,47 +17275,6 @@
         }
       }
     },
-    "mac.tags.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld tag — click one to see only it in Browse"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld tags — click one to see only it in Browse"
-                }
-              }
-            }
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 個のタグ — クリックするとブラウズでそのタグだけ表示"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 个标签，点一下就在浏览里只看它"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 個標籤，點一下就在瀏覽裡只看它"
-          }
-        }
-      }
-    },
     "mac.toolbar.back" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17936,35 +17300,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "返回"
-          }
-        }
-      }
-    },
-    "mac.toolbar.group.tip" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Group by post: a post shows as one card"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "投稿ごとにまとめる：1 投稿を 1 枚のカードで表示"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按帖子分组：一个帖子显示为一张卡片"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按貼文分組：一則貼文顯示為一張卡片"
           }
         }
       }
@@ -18052,35 +17387,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看…"
-          }
-        }
-      }
-    },
-    "mac.wipe.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Deletes all posts, media, tags, cookies and sync settings on this Mac and starts fresh."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この Mac のすべての投稿・メディア・タグ・Cookie・同期設定を削除して初期状態に戻します。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "删除本机的全部帖子、媒体、标签、Cookie 与同步配置，恢复为全新状态。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "刪除本機的全部貼文、媒體、標籤、Cookie 與同步設定，恢復為全新狀態。"
           }
         }
       }
@@ -18980,35 +18286,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可下載"
-          }
-        }
-      }
-    },
-    "models.available.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recommended: %@ (for this device's memory). All are MLX 4-bit, none over 14B. Downloads use your current network — mind your data plan."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "おすすめ：%@（このデバイスのメモリに合わせて）。すべて MLX 4-bit で 14B 以下です。ダウンロードには現在のネットワークを使うので、通信量にご注意ください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推荐：%@（按本机内存）。全部为 MLX 4-bit，均不超过 14B。下载使用的是你当前的网络，请注意流量。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推薦：%@（依本機記憶體）。全部為 MLX 4-bit，均不超過 14B。下載使用的是你目前的網路，請注意流量。"
           }
         }
       }
@@ -20144,35 +19421,6 @@
         }
       }
     },
-    "models.external.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenAI-compatible APIs (OpenAI, Grok, OpenRouter, Ollama, LM Studio…). Only an address means a local service; an API key and a model name mean a cloud model. The list of models syncs between devices; API keys stay in each device's own keychain."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenAI 互換 API（OpenAI、Grok、OpenRouter、Ollama、LM Studio など）。アドレスだけならローカルサービス、API キーとモデル名があればクラウドモデルです。モデルの一覧はデバイス間で同期され、API キーは各デバイスのキーチェーンだけに保存されます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenAI 兼容接口（OpenAI、Grok、OpenRouter、Ollama、LM Studio 等）。只填地址是本地服务；填了 API Key 和模型名称是云端模型。模型列表在设备间同步，API Key 只保存在各自设备的钥匙串里。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OpenAI 相容介面（OpenAI、Grok、OpenRouter、Ollama、LM Studio 等）。只填位址是本機服務；填了 API Key 和模型名稱是雲端模型。模型列表在裝置間同步，API Key 只儲存在各自裝置的鑰匙圈裡。"
-          }
-        }
-      }
-    },
     "models.external.key" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20869,35 +20117,6 @@
         }
       }
     },
-    "models.import.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import any standard MLX model folder or its ZIP (exported on another device and AirDropped, say) instead of downloading it again. Between Apple devices only: MLX models run on Apple silicon alone."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "標準の MLX モデルフォルダやその ZIP（別のデバイスで書き出して AirDrop したものなど）を読み込めば、再ダウンロードを避けられます。Apple デバイス間のみ：MLX モデルは Apple シリコンでしか動きません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可导入任意标准 MLX 模型文件夹，或其 ZIP（例如从另一台设备导出后隔空投送过来的），避免重复下载。仅限 Apple 设备之间使用：MLX 模型只能在 Apple 芯片上运行。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可匯入任意標準 MLX 模型資料夾，或其 ZIP（例如從另一台裝置匯出後 AirDrop 過來的），避免重複下載。僅限 Apple 裝置之間使用：MLX 模型只能在 Apple 晶片上執行。"
-          }
-        }
-      }
-    },
     "models.imported" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21014,35 +20233,6 @@
         }
       }
     },
-    "models.installed.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Models use the standard Hugging Face / MLX folder format (config.json, tokenizer and .safetensors); several can be installed side by side."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "モデルは標準の Hugging Face / MLX フォルダ形式（config.json、トークナイザ、.safetensors）で、複数を並べてインストールできます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型使用标准的 Hugging Face / MLX 文件夹格式（config.json、分词器与 .safetensors），可以多个并存。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型使用標準的 Hugging Face / MLX 資料夾格式（config.json、分詞器與 .safetensors），可以多個並存。"
-          }
-        }
-      }
-    },
     "models.local" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21097,35 +20287,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "執行於：%@"
-          }
-        }
-      }
-    },
-    "models.local.footer.apple" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Runs on this device with MLX, as in the native app. Nothing leaves the device."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ネイティブ版と同じく MLX でこのデバイス上で動きます。何もデバイスの外に出ません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "与原生版本一样使用 MLX 在本机运行，不会把任何内容发出设备。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "與原生版本一樣使用 MLX 在本機執行，不會把任何內容傳出裝置。"
           }
         }
       }
@@ -21391,35 +20552,6 @@
         }
       }
     },
-    "models.peers.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Models don't sync on their own. Listed here are models that online devices of the same sync account have and this one doesn't; tapping one fetches it over the local network and installs it once verified. Between Apple devices only: MLX models run on Apple silicon alone."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "モデルは自動では同期されません。同じ同期アカウントのオンラインのデバイスにあって、このデバイスにないモデルを表示します。タップすると LAN 経由で取得し、検証後にインストールします。Apple デバイス間のみ：MLX モデルは Apple シリコンでしか動きません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型不会自动同步。这里列出同一同步账户、当前在线的设备上有而本机没有的模型，点击后才会通过局域网拉取，并在校验通过后安装。仅限 Apple 设备之间使用：MLX 模型只能在 Apple 芯片上运行。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型不會自動同步。這裡列出同一同步帳戶、目前在線的裝置上有而本機沒有的模型，點擊後才會透過區域網路拉取，並在校驗通過後安裝。僅限 Apple 裝置之間使用：MLX 模型只能在 Apple 晶片上執行。"
-          }
-        }
-      }
-    },
     "models.peers.none" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21590,35 +20722,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "其他裝置上的模型"
-          }
-        }
-      }
-    },
-    "models.prompts" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Prompts"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "プロンプト"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "提示词"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "提示詞"
           }
         }
       }
@@ -22257,35 +21360,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暫停：做完目前這張後停下，進度保留。停止：放棄所有工作，自動標記也先不執行，直到重新打開開關或下次啟動。"
-          }
-        }
-      }
-    },
-    "models.tagging.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Only media no model has analyzed yet are tagged automatically; changing the default model doesn't re-tag. Re-tag one item from its long-press menu when needed, or everything here. Tags you added or approved are never deleted."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自動でタグ付けされるのは、まだどのモデルも分析していないメディアだけです。デフォルトのモデルを変えても再タグ付けはしません。必要なら長押しメニューで個別に、またはここで全体を再タグ付けできます。自分で付けた・承認したタグは削除されません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只有尚未被任何模型分析过的媒体会被自动标记，更换默认模型不会重新标记。需要时可在照片的长按菜单中单独重新标记，或在这里全部重新标记。你添加或认可的标签永远不会被删除。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只有尚未被任何模型分析過的媒體會被自動標記，更換預設模型不會重新標記。需要時可在照片的長按選單中單獨重新標記，或在這裡全部重新標記。你加入或認可的標籤永遠不會被刪除。"
           }
         }
       }
@@ -23864,35 +22938,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯出搜尋結果"
-          }
-        }
-      }
-    },
-    "search.fuzzy.needsModel" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fuzzy search by meaning needs a semantic search model: download and choose one in AI Models first."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "意味によるあいまい検索には意味検索モデルが必要です。先に「AI モデル」でダウンロードして選んでください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "语义模糊搜索需要语义搜索模型：先在「AI 模型」中下载并选择一个。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "語意模糊搜尋需要語意搜尋模型：先在「AI 模型」中下載並選擇一個。"
           }
         }
       }
@@ -26009,35 +25054,6 @@
         }
       }
     },
-    "settings.backdrop" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Animated Home Background"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ホームの動く背景"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主页动态背景"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主頁動態背景"
-          }
-        }
-      }
-    },
     "settings.backup.button" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26398,35 +25414,6 @@
         }
       }
     },
-    "settings.batch.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose a bookmarks JSON exported by the Twitter Web Exporter userscript; posts are downloaded one by one. Concurrency is how many posts download at once; the interval is the wait before each post starts. With many posts, lower concurrency and a longer interval are safer. Starting again after an interruption continues with the unfinished posts. Method and folder follow the settings at the top."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ユーザースクリプト Twitter Web Exporter で書き出したブックマーク JSON を選ぶと、1 件ずつダウンロードします。同時実行数は同時にダウンロードする投稿数、間隔は各投稿の開始前に待つ時間です。投稿が多いときは同時実行数を下げ、間隔を長くすると安定します。中断後に再開すると未完了の投稿から続けます。方法とフォルダは一番上の設定に従います。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择油猴脚本 Twitter Web Exporter 导出的收藏夹 JSON，逐条下载。并发数是同时下载几个帖子，间隔是每个帖子开始前等待的时间；帖子多时调低并发、加大间隔更稳妥。中断后再次开始会从未完成的帖子继续。下载方式和文件夹沿用最上面的设置。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選擇使用者腳本 Twitter Web Exporter 匯出的書籤 JSON，逐則下載。並行數是同時下載幾則貼文，間隔是每則貼文開始前等待的時間；貼文多時調低並行數、加大間隔更穩妥。中斷後再次開始會從未完成的貼文繼續。下載方式和資料夾沿用最上方的設定。"
-          }
-        }
-      }
-    },
     "settings.batch.interval" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26597,35 +25584,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開始批次下載"
-          }
-        }
-      }
-    },
-    "settings.browse.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "“Sound Only with Headphones”: without headphones, videos start muted and ask whether to turn sound on. “Disable Gestures in Video Player”: dragging in the player no longer changes position, volume or brightness (press-and-hold speed-up and double-tap pause still work); swipe sideways in a post to move between photos and videos, drag down to close the player. When off, arrows on both sides of the player go to the previous and next item."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「イヤホン接続時のみ音を出す」：イヤホンがないときは動画をミュートで始め、音を出すか確認します。「動画プレーヤーのジェスチャを無効化」：プレーヤー内のドラッグで再生位置・音量・明るさを変えなくなります（長押しの倍速、ダブルタップの一時停止はそのまま）。投稿内で左右にスワイプして写真と動画を切り替え、下にドラッグでプレーヤーを閉じます。オフのときは、プレーヤーの両側の矢印で前後に移動します。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「仅用耳机播放声音」：没连耳机时视频先静音，并询问是否开启声音。「视频播放器禁用手势」：播放器里不再拖动调节进度、音量和亮度（长按倍速、双击暂停照常）；在帖子里左右滑动就能在照片和视频之间切换，向下拖动关闭播放器。不开启时，播放器两侧有箭头切换上一个、下一个。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "「僅用耳機播放聲音」：沒接耳機時影片先靜音，並詢問是否開啟聲音。「影片播放器停用手勢」：播放器裡不再拖動調整進度、音量和亮度（長按倍速、點兩下暫停照常）；在貼文裡左右滑動就能在照片和影片之間切換，向下拖動關閉播放器。未開啟時，播放器兩側有箭頭切換上一個、下一個。"
           }
         }
       }
@@ -27123,35 +26081,6 @@
         }
       }
     },
-    "settings.download.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Links · Batch · Cookie"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "リンク · 一括 · Cookie"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "链接 · 批量 · Cookie"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "連結 · 批次 · Cookie"
-          }
-        }
-      }
-    },
     "settings.downloading" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27351,35 +26280,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "僅用耳機播放聲音"
-          }
-        }
-      }
-    },
-    "settings.import.detail" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ZIP · Export package · Full backup"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ZIP · 書き出しパッケージ · 全体バックアップ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ZIP · 导出包 · 整库备份"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ZIP · 匯出包 · 整庫備份"
           }
         }
       }
@@ -28208,35 +27108,6 @@
         }
       }
     },
-    "settings.search.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "In the search field, type a condition word (Tags, Text, User, Mine, AI, Common, Videos, Photos, Folder, Recent, Imported) and a space to make it a condition capsule; any other word and a space becomes something to search for, in any order. Without Tags, Text or User, tags, post text and authors are all searched. A minus in front leaves something out (-word, -User). Fuzzy search: matches what contains the word, plus tags close in meaning."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "検索フィールドに条件語（タグ・本文・ユーザー・自分・AI・共通・動画・写真・フォルダ・最近・外部読み込み）を入力してスペースを押すと条件のカプセルになります。ほかの語はスペースで検索語になり、条件と自由に組み合わせられます。タグ・本文・ユーザーを指定しないときは、タグ・投稿本文・作者をまとめて検索します。前にマイナスを付けると除外します（-語、-ユーザー）。あいまい検索：その語を含むものに加え、意味の近いタグも探します。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在搜索框里输入「标签」「贴文」「用户」「我的」「AI」「共同」「视频」「照片」「文件夹」「最近」「外部导入」后按空格，它们会变成条件胶囊；其他词按空格变成要搜索的内容，可以和条件穿插。不加「标签」「贴文」「用户」时，在标签、帖子正文和作者里一起找。语义模糊搜索：包含匹配，并找意思相近的标签。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在搜尋框輸入「標籤」「貼文」「使用者」「我的」「AI」「共同」「影片」「照片」「資料夾」「最近」「外部匯入」後按空白鍵，會變成條件膠囊；其他詞按空白鍵變成要搜尋的內容，可以和條件穿插。不加「標籤」「貼文」「使用者」時，會同時在標籤、貼文內文和作者裡找。前面加減號表示排除（-詞、-使用者）。語意模糊搜尋：包含比對，並找意思相近的標籤。"
-          }
-        }
-      }
-    },
     "settings.section.browse" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28382,31 +27253,60 @@
         }
       }
     },
-    "settings.stats.footer" : {
+    "settings.signOut" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Compare these numbers on each device to check that sync is complete."
+            "value" : "Sign Out"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "各デバイスでこの数字を照らし合わせると、同期が完了しているか確認できます。"
+            "value" : "サインアウト"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在每台设备上核对这些数字，可以确认同步是否完整。"
+            "value" : "退出登录"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在每台裝置上核對這些數字，可以確認同步是否完整。"
+            "value" : "登出"
+          }
+        }
+      }
+    },
+    "settings.signOut.footer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signs this browser out of the web app. Other browsers stay signed in; to sign everyone out, change the password with twimshelf passwd."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このブラウザをウェブ版からサインアウトします。ほかのブラウザはそのままです。全員をサインアウトするには twimshelf passwd でパスワードを変更してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让这个浏览器退出网页版。其他浏览器保持登录；要让所有人退出，请用 twimshelf passwd 修改密码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讓這個瀏覽器登出網頁版。其他瀏覽器保持登入；要讓所有人登出，請用 twimshelf passwd 修改密碼。"
           }
         }
       }
@@ -28933,64 +27833,6 @@
         }
       }
     },
-    "share.done.ios" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Handed to {app}: %@ files (%@).\nOpening {app} imports them as loose media; each file's result is recorded in Import History."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "{app} に渡しました：%@ 個のファイル（%@）。\n{app} を開くと単体メディアとして自動で読み込まれ、各ファイルの結果は「読み込み履歴」に記録されます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已交给 {app}：%@ 个文件（%@）。\n打开 {app} 后会自动导入为散装媒体，每个文件的结果都会记在「导入记录」里。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已交給 {app}：%@ 個檔案（%@）。\n打開 {app} 後會自動匯入為散裝媒體，每個檔案的結果都會記在「匯入記錄」裡。"
-          }
-        }
-      }
-    },
-    "share.done.mac" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Handed to {app}: %@ files (%@); opening the app to import them. Each file's result is recorded in Import History."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "{app} に渡しました：%@ 個のファイル（%@）。アプリを開いて読み込みます。各ファイルの結果は「読み込み履歴」に記録されます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已交给 {app}：%@ 个文件（%@），正在打开 App 导入。每个文件的结果都会记在「导入记录」里。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已交給 {app}：%@ 個檔案（%@），正在打開 App 匯入。每個檔案的結果都會記在「匯入記錄」裡。"
-          }
-        }
-      }
-    },
     "share.downloadInApp" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29074,35 +27916,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "沒有完成：%@"
-          }
-        }
-      }
-    },
-    "share.folder" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Folder"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "フォルダ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "文件夹"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "資料夾"
           }
         }
       }
@@ -29509,47 +28322,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已就緒 %lld 項"
-          }
-        }
-      }
-    },
-    "share.skipped" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "\n\n%lld item not handed over:\n"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "\n\n%lld items not handed over:\n"
-                }
-              }
-            }
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "\n\n渡せなかった %lld 項目：\n"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "\n\n没有交出的 %lld 项：\n"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "\n\n沒有交出的 %lld 項：\n"
           }
         }
       }
@@ -30241,35 +29013,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 個檔案"
-          }
-        }
-      }
-    },
-    "storage.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Only sizes are read, never contents."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "読み取るのはサイズだけで、内容は読み取りません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只读取大小，不读取内容。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只讀取大小，不讀取內容。"
           }
         }
       }
@@ -30999,64 +29742,6 @@
         }
       }
     },
-    "storage.total" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Total"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "合計"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "总计"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "總計"
-          }
-        }
-      }
-    },
-    "storage.usage.summary" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This app uses %@, which is %@ of your free disk space."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このアプリは %@ を使用しています。空き容量の %@ にあたります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本应用共占用 %@，相当于可用空间的 %@。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本應用程式共佔用 %@，相當於可用空間的 %@。"
-          }
-        }
-      }
-    },
     "sync.account" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31459,35 +30144,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d:%02d 後失效 · 最多嘗試 5 次"
-          }
-        }
-      }
-    },
-    "sync.code.tries" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Up to 5 tries"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最大 5 回まで"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最多尝试 5 次"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最多嘗試 5 次"
           }
         }
       }
@@ -34996,35 +33652,6 @@
         }
       }
     },
-    "tags.allCount" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All Tags (%@)"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてのタグ（%@）"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部标签（%@）"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部標籤（%@）"
-          }
-        }
-      }
-    },
     "tags.allToFolder" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36142,35 +34769,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "依"
-          }
-        }
-      }
-    },
-    "tags.tapToRename" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap a tag to rename it; an existing name merges the two tags."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "タグをタップすると名前を変更できます。既存の名前にすると 2 つのタグが統合されます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "点按标签可以重命名；改成已有的名字会把两个标签合并。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "點按標籤可以重新命名；改成已有的名稱會把兩個標籤合併。"
           }
         }
       }

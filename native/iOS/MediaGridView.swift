@@ -47,7 +47,6 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
     var selected: Set<String> = [] { didSet { scene?.selected = selected; redraw() } }
     var level: Int { scene?.engine.rest.level ?? initialLevel }
     var levelCount: Int { scene?.engine.cfg.levels ?? 3 }
-    var columns: Int { scene.map { $0.engine.cfg.columns[$0.engine.rest.level] } ?? 3 }
     var isZooming: Bool { scene?.engine.isZooming == true }
     var initialLevel = 1
 

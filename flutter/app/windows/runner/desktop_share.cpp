@@ -86,25 +86,6 @@ HANDLE AcquirePrimary() {
   return mutex;
 }
 
-// Earlier versions put a shortcut in Explorer's Send to: this install's own goes away.
-void RemoveSendTo(const std::string& title) {
-  PWSTR send_to = nullptr;
-  check_hresult(SHGetKnownFolderPath(FOLDERID_SendTo, 0, nullptr, &send_to));
-  fs::path directory(send_to); CoTaskMemFree(send_to);
-  std::wstring label(to_hstring(title));
-  for (auto& c : label) if (c < 32 || std::wstring(L"<>:\"/\\|?*").find(c) != label.npos) c = L'_';
-  const fs::path destination = directory / (label + L".lnk");
-  if (!fs::exists(destination)) return;
-  com_ptr<IShellLinkW> shortcut;
-  check_hresult(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(shortcut.put())));
-  check_hresult(shortcut.as<IPersistFile>()->Load(destination.c_str(), STGM_READ));
-  wchar_t target[32768]{};
-  check_hresult(shortcut->GetPath(target, 32768, nullptr, SLGP_RAWPATH));
-  if (_wcsicmp(target, Executable().c_str()) != 0) return; // Never another install's.
-  std::error_code error;
-  fs::remove(destination, error);
-}
-
 void CopyFileToClipboard(const std::string& path) {
   std::wstring wide(winrt::to_hstring(path));
   std::replace(wide.begin(), wide.end(), L'/', L'\\');

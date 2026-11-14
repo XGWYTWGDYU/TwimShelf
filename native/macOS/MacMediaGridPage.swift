@@ -296,12 +296,6 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
 
     private func updateSelectionUI() { onStateChanged?() }
 
-    func shareSelected(from b: NSView) {
-        let urls = selectedMedia.map(\.fileURL).filter { FileManager.default.fileExists(atPath: $0.path) }
-        guard !urls.isEmpty else { return }
-        NSSharingServicePicker(items: urls).show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
-    }
-
     /// The folders the selection can go into (the toolbar's 加入文件夹 menu).
     func addToFolderMenu() -> NSMenu {
         let ids = selectedMedia.map(\.mediaId)

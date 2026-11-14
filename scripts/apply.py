@@ -5,6 +5,7 @@
   python3 scripts/apply.py native     the native Apple apps only (Xcode's pre-build step)
   python3 scripts/apply.py flutter    the Flutter app only
   python3 scripts/apply.py generate   only the generated files below (no links, icons or projects)
+  python3 scripts/apply.py versions [--check]   only the version, in the files in git that carry it
   python3 scripts/apply.py get flutter.share_extension    one value (for build scripts)
   python3 scripts/apply.py get icon_set                   the AppIcon set the apps use
   python3 scripts/apply.py where cache|apps|build         a build location (absolute)
@@ -22,6 +23,8 @@ Writes small generated files that the projects read (never edits code; none of t
   flutter/app/linux/identity.cmake            Linux: application id, "open with"
   flutter/app/lib/app/identity.g.dart         Dart: the Linux application id
   flutter/installer/product.json              the Windows setup: "send to"
+config.yaml's version into the files in git that carry one (flutter/app/pubspec.yaml,
+server/Cargo.toml with Cargo.lock, extension/manifest.json): commit them with config.yaml.
 the native Xcode project, from project.yml by XcodeGen (on a Mac, when project.yml changed)
 the build location (build.dir: <dir>/cache for every cache, <dir>/apps for packages):
   the Xcode projects' Derived Data location (per-user project settings, not committed) and
@@ -181,16 +184,7 @@ def link(path, target):
         os.symlink(t, p, target_is_directory=True)
 
 
-def unlink(path):
-    """A link made by an earlier version of this script goes back to a real folder (with what
-    the cache held)."""
-    p = ROOT / path
-    if not is_link(p):
-        return
-    target = Path(os.readlink(p).removeprefix('\\\\?\\'))
-    remove_link(p)
-    if target.exists():
-        shutil.move(str(target), str(p))
+
 
 
 def hooks():
@@ -208,11 +202,8 @@ def paths(c):
     cache = loc['cache']
     for d in (cache, loc['apps']):
         d.mkdir(parents=True, exist_ok=True)
-    def xc(name, extra=''):
-        return HEADER + '\n'.join([
-            f'TL_CACHE_DIR = {cache}',
-        ]) + '\n' + extra
-    write('native/BuildLocation.xcconfig', xc('native'))
+    location = HEADER + f'TL_CACHE_DIR = {cache}\n'
+    write('native/BuildLocation.xcconfig', location)
     # Xcode's Derived Data (products, intermediates, Swift package checkouts, index): the
     # project's own setting for this user (File › Project Settings › Derived Data), which Xcode
     # and xcodebuild both follow. Xcode reads it when it opens the project.
@@ -228,18 +219,16 @@ def paths(c):
             settings.update(want)
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_bytes(plistlib.dumps(settings))
-    write('flutter/app/ios/Flutter/BuildLocation.xcconfig', xc('flutter-ios'))
-    write('flutter/app/macos/Runner/Configs/BuildLocation.xcconfig', xc('flutter-macos'))
+    write('flutter/app/ios/Flutter/BuildLocation.xcconfig', location)
+    write('flutter/app/macos/Runner/Configs/BuildLocation.xcconfig', location)
     flutter = cache / 'flutter'
     for pkg in ('app', 'installer', 'tl_core', 'tl_native', 'tl_llama'):
         link(f'flutter/{pkg}/.dart_tool', flutter / pkg / 'dart_tool')
         if pkg in ('app', 'installer'):
             link(f'flutter/{pkg}/build', flutter / pkg / 'build')
     link('flutter/app/android/.gradle', flutter / 'app' / 'gradle-project')
-    # not Pods: CocoaPods finds the Flutter files relative to where Pods really is, so it stays
-    # beside its project (it is the installed dependency project, not build output)
-    for plat in ('ios', 'macos'):
-        unlink(f'flutter/app/{plat}/Pods')
+    # (not Pods: CocoaPods finds the Flutter files relative to where Pods really is, so it stays
+    # beside its project; it is the installed dependency project, not build output)
     link('flutter/tl_llama/android/.cxx', flutter / 'tl_llama' / 'android-cxx')
     # the Rust core's libraries for the Flutter app (scripts/flutter/build_core.sh)
     libs = cache / 'core-libs'
@@ -297,10 +286,13 @@ def native(c):
 
 
 def native_project(state):
-    """TwimShelf.xcodeproj from project.yml (XcodeGen), when it is missing or project.yml changed."""
+    """TwimShelf.xcodeproj from project.yml (XcodeGen), when it is missing, project.yml changed or
+    a file was added to or removed from native/ (XcodeGen lists every source file by name)."""
     if sys.platform != 'darwin':
         return
-    stamp = file_hash('project.yml')
+    names = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'native').rglob('*')
+                   if p.is_file() and p.name != '.DS_Store' and not p.name.endswith('.xcconfig'))
+    stamp = hashlib.sha256((file_hash('project.yml') + '\n' + '\n'.join(names)).encode()).hexdigest()
     if (ROOT / 'TwimShelf.xcodeproj/project.pbxproj').exists() and state.get('project') == stamp:
         return
     if not shutil.which('xcodegen'):
@@ -365,11 +357,6 @@ def flutter(c):
         f"TL_SIGN_STYLE = {style}",
         f"TL_SIGN_IDENTITY = {identity}",
     ] + share_lines(share_mac)) + '\n// where builds go: build.dir in config.yaml\n#include? "BuildLocation.xcconfig"\n')
-    pubspec = ROOT / 'flutter/app/pubspec.yaml'
-    text = pubspec.read_text(encoding='utf-8')
-    new = re.sub(r'^version: .*$', f"version: {c['version']}+{c['build_number']}", text, count=1, flags=re.M)
-    if new != text:
-        pubspec.write_text(new, encoding='utf-8')
     write('flutter/app/lib/app/identity.g.dart', HEADER + '\n'.join([
         "const appName = 'TwimShelf';",
         '',
@@ -387,6 +374,38 @@ def flutter(c):
     product = {'id': 'TwimShelf', 'name': 'TwimShelf', 'publisher': 'TwimShelf',
                'executable': 'TwimShelf.exe', 'file': 'TwimShelf', 'version': '0', 'sendTo': share}
     write('flutter/installer/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
+
+
+# Files in git that carry the version: (file, pattern with the version as its second group, what
+# the version is written as). config.yaml's `version` is the only place it is set.
+VERSIONED = (
+    ('flutter/app/pubspec.yaml', r'^(version: )(.*)$', '{version}+{build_number}'),
+    ('server/Cargo.toml', r'^(version = ")([^"]*)(")', '{version}'),
+    ('Cargo.lock', r'^(name = "tl-server"\nversion = ")([^"]*)(")', '{version}'),
+    ('extension/manifest.json', r'^(  "version": ")([^"]*)(")', '{version}'),
+)
+
+
+def versions(c, check=False):
+    """Writes config.yaml's version into the files above (those that are here: the Docker image
+    builds with a part of the repository). With `check`, changes nothing and names what differs."""
+    stale = []
+    for path, pattern, form in VERSIONED:
+        p = ROOT / path
+        if not p.exists():
+            continue
+        want = form.format(version=c['version'], build_number=c['build_number'])
+        text = p.read_text(encoding='utf-8')
+        m = re.search(pattern, text, flags=re.M)
+        if not m:
+            sys.exit(f'config: no version found in {path}')
+        if m.group(2) == want:
+            continue
+        stale.append(f'{path}: {m.group(2)}, config.yaml says {want}')
+        if not check:
+            with open(p, 'w', encoding='utf-8', newline='') as f:
+                f.write(text[:m.start(2)] + want + text[m.end(2):])
+    return stale
 
 
 def flutter_icons(c, state):
@@ -417,6 +436,12 @@ def main():
             v = v[k]
         print(str(v).lower() if isinstance(v, bool) else v)
         return
+    if which == 'versions':
+        stale = versions(c, check='--check' in sys.argv)
+        if stale and '--check' in sys.argv:
+            sys.exit('\n'.join(stale) + '\nrun: python3 scripts/apply.py versions')
+        return
+    versions(c)
     if which == 'generate':
         native(c)
         flutter(c)

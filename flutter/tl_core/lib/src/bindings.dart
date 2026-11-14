@@ -81,9 +81,6 @@ class CoreBindings {
   late final tl_import_cancel = library.lookupFunction<Void Function(), void Function()>('tl_import_cancel');
   late final tl_report_thumbnail_failed = library.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>('tl_report_thumbnail_failed');
   late final tl_db_snapshot = library.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>('tl_db_snapshot');
-  late final tl_free_space = library.lookupFunction<
-      Pointer<Utf8> Function(Pointer<Utf8>),
-      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_free_space');
   late final tl_wipe = library.lookupFunction<Pointer<Utf8> Function(Bool),
       Pointer<Utf8> Function(bool)>('tl_wipe');
   late final tl_string_free = library.lookupFunction<
@@ -144,12 +141,6 @@ class CoreBindings {
   late final tl_hub_install = library.lookupFunction<
       Pointer<Utf8> Function(Pointer<Utf8>),
       Pointer<Utf8> Function(Pointer<Utf8>)>('tl_hub_install');
-  late final tl_model_download_gguf = library.lookupFunction<
-      Pointer<Utf8> Function(Pointer<Utf8>),
-      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_model_download_gguf');
-  late final tl_model_download = library.lookupFunction<
-      Pointer<Utf8> Function(Pointer<Utf8>),
-      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_model_download');
   late final tl_model_status = library.lookupFunction<Pointer<Utf8> Function(),
       Pointer<Utf8> Function()>('tl_model_status');
   late final tl_model_cancel = library

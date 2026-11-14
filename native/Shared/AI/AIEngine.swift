@@ -108,34 +108,13 @@ actor AIEngine {
         }
 
         private static let key = "ai.prompt"
-        /// Bumped when the default prompt changes in a way saved prompts must follow; older
-        /// saved prompts are replaced once (the user agreed to this for version 2).
-        private static let version = 2
-        private static let versionKey = "ai.prompt.version"
         static let changed = Notification.Name("AIPromptChanged")
 
         /// The prompt in use: the shared setting (the same on every device of the sync account),
         /// or the defaults.
         static func load() -> Prompt {
-            migrateLocal()
             if let s = Core.setting(key), let p = try? JSONDecoder().decode(Prompt.self, from: Data(s.utf8)) { return p }
             return defaults
-        }
-        /// Saved here and sent to every device (the defaults clear the setting everywhere).
-        static func save(_ p: Prompt) {
-            if p == defaults { Core.setSetting(key, nil) }
-            else if let d = try? JSONEncoder().encode(p) { Core.setSetting(key, String(decoding: d, as: UTF8.self)) }
-            NotificationCenter.default.post(name: changed, object: nil)
-        }
-
-        /// Earlier versions kept a custom prompt on this device only: hand it to the shared
-        /// setting once (unless another device already shared one).
-        private static func migrateLocal() {
-            let ud = UserDefaults.standard
-            if ud.integer(forKey: versionKey) < version { ud.removeObject(forKey: key); ud.set(version, forKey: versionKey) }
-            guard let d = ud.data(forKey: key) else { return }
-            if Core.setting(key) == nil, (try? JSONDecoder().decode(Prompt.self, from: d)) != nil { Core.setSetting(key, String(decoding: d, as: UTF8.self)) }
-            ud.removeObject(forKey: key)
         }
 
         /// Defaults from the bundled AIPrompt.txt ([system] / [prompt] / [context] sections).
@@ -230,5 +209,4 @@ actor AIEngine {
     // MARK: Image preparation
 
     nonisolated static func stillImage(path: String, kind: String) -> CIImage? { ModelInput.stillImage(path: path, kind: kind) }
-    nonisolated static func fitForModel(_ image: CIImage) -> CIImage { ModelInput.fitForModel(image) }
 }

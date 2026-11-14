@@ -1,57 +1,5 @@
 import UIKit
 
-// MARK: - Tabs inside the home bar
-
-final class HomeTabItem: UIControl {
-    private let symbol: String
-    private let tabID: String
-    private let icon = UIImageView()
-    private let label = UILabel()
-
-    init(title: String, symbol: String, id: String) {
-        self.symbol = symbol
-        tabID = id
-        super.init(frame: .zero)
-        icon.contentMode = .scaleAspectFit
-        icon.preferredSymbolConfiguration = .init(pointSize: 17, weight: .medium)
-        label.text = title
-        label.font = .systemFont(ofSize: 10, weight: .semibold)
-        label.adjustsFontForContentSizeCategory = false
-        let st = UIStackView(arrangedSubviews: [icon, label])
-        st.axis = .vertical
-        st.alignment = .center
-        st.spacing = 2
-        st.isUserInteractionEnabled = false
-        st.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(st)
-        NSLayoutConstraint.activate([
-            st.centerXAnchor.constraint(equalTo: centerXAnchor), st.centerYAnchor.constraint(equalTo: centerYAnchor),
-            widthAnchor.constraint(greaterThanOrEqualToConstant: 50), widthAnchor.constraint(greaterThanOrEqualTo: st.widthAnchor, constant: 14),
-            heightAnchor.constraint(equalToConstant: 44), icon.heightAnchor.constraint(equalToConstant: 22),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = title
-        accessibilityIdentifier = id
-        update()
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override var isSelected: Bool { didSet { update() } }
-    override var isHighlighted: Bool { didSet { UIView.animate(withDuration: 0.12, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { self.alpha = self.isHighlighted ? 0.55 : 1 } } }
-
-    private func update() {
-        let color: UIColor = isSelected ? .tintColor : .secondaryLabel
-        if Mascot.isOn {
-            icon.image = Mascot.icon(tabID == "tab-browse" ? "home" : "folder", side: 28)
-        } else {
-            icon.image = UIImage(systemName: isSelected ? symbol + ".fill" : symbol) ?? UIImage(systemName: symbol)
-        }
-        icon.tintColor = color
-        label.textColor = color
-        accessibilityTraits = isSelected ? [.button, .selected] : [.button]
-    }
-}
-
 // MARK: - Folders page
 
 /// The L("place.folders") tab, laid out like the Photos app's Collections: the folders as large covers in

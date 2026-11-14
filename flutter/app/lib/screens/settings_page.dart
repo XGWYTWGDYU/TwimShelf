@@ -157,7 +157,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     () => DownloadsPage(downloads: library.downloads, library: library),
                     mascot: library.downloads.phase.name == 'running' ? 'bag' : null),
                 nav(null, Icons.inventory_2, L('common.importAndBackup'), null, () => TransferPage(library: library)),
-                nav(const ValueKey('settings-tags'), Icons.sell, L('common.tags'), s == null ? null : L('common.count', [s.tags]), () => TagsPage(library: library)),
+                nav(const ValueKey('settings-tags'), Icons.sell, L('common.tags'), null, () => TagsPage(library: library)),
               ]),
               _Section(title: L('appearance.title'), footer: OS.isAndroid ? L('appearance.footer') : null, children: [
                 const _ColorChoice(),
@@ -194,8 +194,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     value: prefs.badOnly,
                     onChanged: withHaptic((v) => prefs.badOnly = v),
                   ),
-                // the Mac and phones and tablets: not Windows and Linux
-                if (!OS.isWindows && !OS.isLinux) SwitchListTile(
+                // iPhone and iPad only
+                if (OS.isIOS) SwitchListTile(
                   secondary: const SettingsIcon(Icons.headphones),
                   title: Text(L('settings.headphonesOnly')),
                   value: prefs.headphonesOnly,

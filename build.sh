@@ -72,7 +72,8 @@ need_tool() {   # need_tool <command> <what> <brew> <apt> <dnf> <pacman>
 }
 
 need_rust() {
-  export PATH="$HOME/.cargo/bin:$PATH"
+  # rustup.rs puts Rust in ~/.cargo/bin; Homebrew's rustup is not linked into its bin (as scripts/build_core.sh)
+  export PATH="$HOME/.cargo/bin:$PATH:/opt/homebrew/opt/rustup/bin:/usr/local/opt/rustup/bin"
   if ! have rustup; then
     say "Missing: Rust (rustup, about 300 MB)"
     if ask "Install Rust from rustup.rs into ~/.cargo?"; then
@@ -116,6 +117,7 @@ need_android() {
     else [[ $CHECK == 1 ]] && MISSING+=("Android SDK") && return 0; fail "The Android SDK is required"; fi
   fi
   # the NDK Flutter asks for, and CMake for llama.cpp
+  [[ -n "${FLUTTER:-}" ]] || return 0   # --check without Flutter: already listed as missing
   local ndk; ndk=$(sed -nE 's/.*ndkVersion[^=]*= "([^"]+)".*/\1/p' "$(dirname "$FLUTTER")/../packages/flutter_tools/gradle/src/main/kotlin/FlutterExtension.kt" | head -1)
   local parts=("platform-tools" "platforms;$ANDROID_PLATFORM" "build-tools;$ANDROID_BUILD_TOOLS" "ndk;$ndk" "cmake;$ANDROID_CMAKE")
   local missing=()

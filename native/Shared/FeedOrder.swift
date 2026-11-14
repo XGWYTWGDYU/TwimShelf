@@ -128,7 +128,6 @@ enum LibraryPrefs {
 
     /// A semantic search (embedding) model is installed and selected.
     static var semanticSearchAvailable: Bool { ModelStore.shared.activeEmbedder != nil }
-    static let semanticSearchNeedsModel = L("search.fuzzy.needsModel")
 
     static let keepChoices: [(days: Int, title: String)] = [(7, L("trash.keep.7")), (30, L("trash.keep.30")), (90, L("trash.keep.90")), (365, L("trash.keep.365")), (0, L("trash.neverShort"))]
     static func keepTitle(_ d: Int) -> String { keepChoices.first { $0.days == d }?.title ?? L("trash.keep.days", d) }

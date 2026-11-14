@@ -75,6 +75,7 @@ jobs:
       - name: Project checks
         run: |
           python3 scripts/checks/icons.py
+          python3 scripts/apply.py versions --check
           python3 scripts/flutter/test_desktop_packaging.py "$RUNNER_TEMP/packaging"
 
   apple:

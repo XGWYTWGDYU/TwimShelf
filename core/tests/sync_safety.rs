@@ -188,8 +188,9 @@ fn orphan_files_are_swept_at_startup() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The migration is one transaction: a database left half-migrated (columns added, version not
-/// yet written) opens normally, and one written by a newer app is refused instead of downgraded.
+/// The migration is one transaction: a database left half-migrated (the new tables there, the
+/// version not yet written) opens normally, and one written by a newer app is refused instead of
+/// downgraded.
 #[test]
 fn migration_is_atomic_and_never_downgrades() {
     let dir = tmp("mig");
@@ -198,8 +199,8 @@ fn migration_is_atomic_and_never_downgrades() {
     {
         let s = Store::open(path.to_str().unwrap()).unwrap();
         s.upsert_post(&PostMeta { id: "keep".into(), text: Some("原文".into()), ..Default::default() }).unwrap();
-        // the v3 → v4 columns are present but the version still says 3 (a crash right after them)
-        s.conn().execute_batch("PRAGMA user_version=3;").unwrap();
+        // everything is in place but the version still says 14 (a crash right before it is written)
+        s.conn().execute_batch("PRAGMA user_version=14;").unwrap();
     }
     let s = Store::open(path.to_str().unwrap()).unwrap();
     let text: String = s.conn().query_row("SELECT text FROM post WHERE id='keep'", [], |r| r.get(0)).unwrap();

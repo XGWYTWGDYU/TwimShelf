@@ -132,7 +132,6 @@ final class CardHeightCache {
         return h
     }
 
-    func removeAll() { heights.removeAll() }
 }
 
 extension FeedItem {

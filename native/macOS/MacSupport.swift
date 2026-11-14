@@ -175,7 +175,6 @@ final class MacMediaLoader {
 }
 
 extension NSColor {
-    static let twitterBlue = NSColor(srgbRed: 0.114, green: 0.631, blue: 0.949, alpha: 1)
     static func tagColor(_ t: TagView) -> NSColor { t.isUser && t.isAI ? .systemGreen : (t.isAI ? .systemPurple : .systemBlue) }
 }
 
@@ -336,6 +335,8 @@ final class MacActivityCard: NSView {
 final class MacActivityPanel: NSVisualEffectView {
     private let stack = NSStackView()
     private var cards: [Activity.Kind: MacActivityCard] = [:]
+    /// Out of the way while something covers the page (the media viewer); shown again after.
+    var suppressed = false { didSet { if suppressed != oldValue { render(ActivityCenter.shared.activities) } } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -369,7 +370,7 @@ final class MacActivityPanel: NSVisualEffectView {
             let c = cards[a.kind] ?? { let c = MacActivityCard(); stack.addArrangedSubview(c); c.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true; cards[a.kind] = c; return c }()
             c.update(a)
         }
-        let show = !list.isEmpty
+        let show = !list.isEmpty && !suppressed
         guard show == isHidden else { return }
         if show { isHidden = false }
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -388,15 +389,11 @@ final class MacActivityPanel: NSVisualEffectView {
 /// changes; live values are pushed into the views they keep references to.
 final class MacForm: NSView {
     static let maxWidth: CGFloat = 680
-    /// Groups tinted instead of opaque, for a form inside a popover's glass (an opaque group
-    /// there looks like a white board laid on the glass).
-    var translucentGroups = false
     private let stack = NSStackView()
     /// Rows of the current section's group.
     private var current: NSStackView?
     /// The trailing button row last added, so consecutive `button` calls share one row.
     private var actionRow: NSStackView?
-    private static let rowInset = NSEdgeInsets(top: 9, left: 14, bottom: 9, right: 14)
 
     init() {
         super.init(frame: .zero)
@@ -425,179 +422,6 @@ final class MacForm: NSView {
 
     func clear() { stack.arrangedSubviews.forEach { $0.removeFromSuperview() }; current = nil; actionRow = nil }
 
-    /// Ends the current section: what follows (e.g. a row of buttons) goes under the groups.
-    func endSection() { current = nil; actionRow = nil }
-
-    private func addToColumn(_ v: NSView, spacingBefore: CGFloat) {
-        if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(spacingBefore, after: last) }
-        stack.addArrangedSubview(v)
-        v.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-    }
-
-    /// Starts a new section; following calls add rows to its group. (`symbol` and `color` are
-    /// kept for callers; section headers are plain text, as in System Settings.)
-    func card(_ title: String, symbol: String = "", color: NSColor = .controlAccentColor, footer: String? = nil) {
-        let t = NSTextField(labelWithString: title)
-        t.font = .systemFont(ofSize: 13, weight: .semibold)
-        t.lineBreakMode = .byTruncatingTail
-        let head = Self.inset(t, NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 6))
-        addToColumn(head, spacingBefore: stack.arrangedSubviews.isEmpty ? 0 : 26)
-        let box = MacSettingsCard()
-        box.translucent = translucentGroups
-        let rows = NSStackView()
-        rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 0
-        rows.translatesAutoresizingMaskIntoConstraints = false
-        box.addSubview(rows)
-        NSLayoutConstraint.activate([
-            rows.topAnchor.constraint(equalTo: box.topAnchor), rows.bottomAnchor.constraint(equalTo: box.bottomAnchor),
-            rows.leadingAnchor.constraint(equalTo: box.leadingAnchor), rows.trailingAnchor.constraint(equalTo: box.trailingAnchor),
-        ])
-        addToColumn(box, spacingBefore: 8)
-        current = rows
-        actionRow = nil
-        if let footer {
-            let f = NSTextField(wrappingLabelWithString: footer)
-            f.font = .systemFont(ofSize: 11)
-            f.textColor = .secondaryLabelColor
-            addToColumn(Self.inset(f, NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 6)), spacingBefore: 6)
-        }
-    }
-
-    private static func inset(_ v: NSView, _ e: NSEdgeInsets) -> NSView {
-        let c = NSView()
-        v.translatesAutoresizingMaskIntoConstraints = false
-        c.addSubview(v)
-        NSLayoutConstraint.activate([
-            v.topAnchor.constraint(equalTo: c.topAnchor, constant: e.top), v.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -e.bottom),
-            v.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: e.left), v.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -e.right),
-        ])
-        return c
-    }
-
-    /// Adds a row to the current group (a hairline above every row but the first); outside a
-    /// section the view goes straight into the column.
-    private func addRow(_ content: NSView, fill: Bool, insets: NSEdgeInsets = MacForm.rowInset) {
-        actionRow = nil
-        guard let rows = current else {
-            addToColumn(content, spacingBefore: 12)
-            return
-        }
-        if !rows.arrangedSubviews.isEmpty {
-            let line = NSBox(); line.boxType = .separator
-            let wrap = Self.inset(line, NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 0))
-            rows.addArrangedSubview(wrap)
-            wrap.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-        }
-        let row = NSView()
-        content.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(content)
-        // content centred vertically; a row is at least 40 pt (one line of text sits in the middle)
-        let snug = content.topAnchor.constraint(equalTo: row.topAnchor, constant: insets.top)
-        snug.priority = .defaultLow
-        var cs = [
-            snug, content.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: insets.top),
-            content.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            content.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: insets.left),
-            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
-        ]
-        cs.append(fill ? content.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -insets.right)
-                       : content.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -insets.right))
-        NSLayoutConstraint.activate(cs)
-        rows.addArrangedSubview(row)
-        row.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-    }
-
-    /// A label-and-controls row: the title (with an optional secondary line under it) on the
-    /// leading side, the controls on the trailing side. Returns the title label.
-    @discardableResult
-    func field(_ title: String, detail: String? = nil, _ controls: [NSView]) -> NSTextField {
-        let t = NSTextField(labelWithString: title)
-        t.lineBreakMode = .byTruncatingTail
-        t.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        var lead: NSView = t
-        if let detail, !detail.isEmpty {
-            let d = NSTextField(labelWithString: detail)
-            d.font = .systemFont(ofSize: 11)
-            d.textColor = .secondaryLabelColor
-            d.lineBreakMode = .byTruncatingTail
-            d.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            let v = NSStackView(views: [t, d]); v.orientation = .vertical; v.alignment = .leading; v.spacing = 2
-            v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            lead = v
-        }
-        field(lead, controls)
-        return t
-    }
-
-    /// The same row with a custom leading view.
-    func field(_ lead: NSView, _ controls: [NSView]) {
-        let trail = NSStackView(views: controls)
-        trail.spacing = 8
-        trail.setHuggingPriority(.required, for: .horizontal)
-        trail.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let h = NSStackView(views: [lead, spacer, trail])
-        h.spacing = 12
-        h.alignment = .centerY
-        addRow(h, fill: true)
-    }
-
-    @discardableResult
-    func note(_ text: String) -> NSTextField {
-        let l = NSTextField(wrappingLabelWithString: text)
-        l.font = .systemFont(ofSize: 12)
-        l.textColor = .secondaryLabelColor
-        add(l)
-        return l
-    }
-
-    @discardableResult
-    func label(_ text: String, size: CGFloat = 13, mono: Bool = false) -> NSTextField {
-        let l = NSTextField(wrappingLabelWithString: text)
-        l.font = mono ? .monospacedDigitSystemFont(ofSize: size, weight: .regular) : .systemFont(ofSize: size)
-        add(l)
-        return l
-    }
-
-    /// An action button. Buttons line up on the trailing edge; consecutive ones share a row.
-    /// With `label` the button gets a row of its own with that label on the leading side (a
-    /// group never shows a lone button in an empty row).
-    @discardableResult
-    func button(_ title: String, label: String? = nil, detail: String? = nil, symbol: String? = nil, destructive: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> NSButton {
-        let b = ClosureButton(title: title, action: action)
-        if let symbol { b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); b.imagePosition = .imageLeading }
-        if destructive { b.hasDestructiveAction = true; b.contentTintColor = .systemRed }
-        b.isEnabled = enabled
-        if let label {
-            field(label, detail: detail, [b])
-        } else if let r = actionRow { r.insertArrangedSubview(b, at: r.arrangedSubviews.count) } else {
-            let spacer = NSView()
-            spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-            let r = NSStackView(views: [spacer, b])
-            r.spacing = 8
-            addRow(r, fill: true)
-            actionRow = r
-        }
-        return b
-    }
-
-    /// A row of controls; when the column is too narrow it wraps onto more lines, instead of
-    /// forcing the panel wider. A plain `NSView()` is a spacer that pushes what follows to the
-    /// trailing side while everything fits on one line.
-    func row(_ views: [NSView]) {
-        add(MacFlowRow(views))
-    }
-
-    func separator() {}
-
-    func add(_ v: NSView, fill: Bool = true) {
-        addRow(v, fill: fill)
-        if !fill, let control = v as? NSControl { control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal) }
-    }
-
-    /// A full-width row without the inner padding (a link row draws its own).
-    func addFlush(_ v: NSView) { addRow(v, fill: true, insets: NSEdgeInsets()) }
 }
 
 final class ClosureButton: NSButton {
@@ -614,18 +438,6 @@ final class ClosureButton: NSButton {
         self.action = #selector(fire)
     }
     @objc private func fire() { handler?() }
-}
-
-final class ClosureSwitch: NSSwitch {
-    private var handler: ((Bool) -> Void)?
-    convenience init(on: Bool, changed: @escaping (Bool) -> Void) {
-        self.init(frame: .zero)
-        state = on ? .on : .off
-        handler = changed
-        target = self
-        action = #selector(fire)
-    }
-    @objc private func fire() { handler?(state == .on) }
 }
 
 /// Runs work off the main thread and reports through an alert on failure.
@@ -728,87 +540,6 @@ func macChooseFolder(_ window: NSWindow?, title: String, suggested: String?, mes
     if let window { a.beginSheetModal(for: window, completionHandler: handle) } else { handle(a.runModal()) }
 }
 
-
-/// Lays its views out left to right and wraps them onto further lines when they do not fit.
-/// Labels longer than the whole width are truncated to it.
-final class MacFlowRow: NSView {
-    private let items: [NSView]
-    private let spacing: CGFloat = 8, lineSpacing: CGFloat = 6
-    private var lastHeight: CGFloat = -1
-
-    init(_ views: [NSView]) {
-        items = views
-        super.init(frame: .zero)
-        for v in views { v.translatesAutoresizingMaskIntoConstraints = true; addSubview(v) }
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override var isFlipped: Bool { true }
-
-    private static func isSpacer(_ v: NSView) -> Bool { type(of: v) == NSView.self && v.subviews.isEmpty }
-
-    private func size(of v: NSView, max w: CGFloat) -> NSSize {
-        if let t = v as? NSTextField, t.cell?.wraps == true { t.preferredMaxLayoutWidth = w }
-        var s = v.fittingSize
-        if s.width > w { s.width = w; if let t = v as? NSTextField { t.lineBreakMode = .byTruncatingTail } }
-        return s
-    }
-
-    /// Places the views for `width`; returns the height used.
-    @discardableResult
-    private func place(width: CGFloat, apply: Bool) -> CGFloat {
-        guard width > 0 else { return 0 }
-        let real = items.filter { !Self.isSpacer($0) && !$0.isHidden }
-        let sizes = real.map { size(of: $0, max: width) }
-        // one line? then spacers share the leftover room
-        let oneLine = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(real.count - 1, 0)) <= width
-        var lines: [[(NSView, NSSize)]] = [[]]
-        var x: CGFloat = 0
-        for (v, s) in zip(real, sizes) {
-            if !lines[lines.count - 1].isEmpty, x + spacing + s.width > width { lines.append([]); x = 0 }
-            x += (lines[lines.count - 1].isEmpty ? 0 : spacing) + s.width
-            lines[lines.count - 1].append((v, s))
-        }
-        var y: CGFloat = 0
-        if oneLine, items.contains(where: Self.isSpacer) {
-            let h = sizes.map(\.height).max() ?? 0
-            let used = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(real.count - 1, 0))
-            let spacers = items.filter(Self.isSpacer).count
-            let gap = (width - used) / CGFloat(spacers)
-            var cx: CGFloat = 0
-            var first = true
-            for v in items where !v.isHidden {
-                if Self.isSpacer(v) { if apply { v.frame = NSRect(x: cx, y: 0, width: gap, height: 1) }; cx += gap; continue }
-                let s = sizes[real.firstIndex(of: v)!]
-                if !first { cx += spacing }
-                first = false
-                if apply { v.frame = NSRect(x: cx, y: (h - s.height) / 2, width: s.width, height: s.height) }
-                cx += s.width
-            }
-            return h
-        }
-        for v in items where Self.isSpacer(v) { if apply { v.frame = .zero } }
-        for line in lines where !line.isEmpty {
-            let h = line.map(\.1.height).max() ?? 0
-            var cx: CGFloat = 0
-            for (v, s) in line {
-                if apply { v.frame = NSRect(x: cx, y: y + (h - s.height) / 2, width: s.width, height: s.height) }
-                cx += s.width + spacing
-            }
-            y += h + lineSpacing
-        }
-        return max(y - lineSpacing, 0)
-    }
-
-    override func layout() {
-        super.layout()
-        let h = place(width: bounds.width, apply: true)
-        if abs(h - lastHeight) > 0.5 { lastHeight = h; invalidateIntrinsicContentSize() }
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: lastHeight >= 0 ? lastHeight : place(width: max(bounds.width, 300), apply: false))
-    }
-}
 
 
 extension CAMediaTimingFunction {

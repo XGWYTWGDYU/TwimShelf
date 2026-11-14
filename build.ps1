@@ -196,8 +196,10 @@ function Build-Android {
   $env:CARGO_TARGET_DIR = "$Cache\cargo"
   rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android | Out-Null
   $env:CMAKE = "$env:ANDROID_HOME\cmake\3.31.6\bin\cmake.exe"
-  Push-Location "$Root\core"; cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 31 -o "$Root\flutter\tl_core\android\src\main\jniLibs" rustc --locked --lib --release --features heif --crate-type cdylib; Pop-Location
-  Push-Location "$Root\flutter\app"; & $Flutter pub get; & $Flutter build apk --release --split-per-abi (Defines); Pop-Location
+  Push-Location "$Root\core"; cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 31 -o "$Root\flutter\tl_core\android\src\main\jniLibs" rustc --locked --lib --release --features heif --crate-type cdylib; $failed = $LASTEXITCODE; Pop-Location
+  if ($failed) { Fail 'Building the Rust core failed' }
+  Push-Location "$Root\flutter\app"; & $Flutter pub get; & $Flutter build apk --release --split-per-abi (Defines); $failed = $LASTEXITCODE; Pop-Location
+  if ($failed) { Fail 'Building the app failed' }
   Get-ChildItem "$Root\flutter\app\build\app\outputs\flutter-apk\app-*-release.apk" | ForEach-Object {
     $abi = $_.Name -replace 'app-(.*)-release.apk', '$1'
     Copy-Item $_.FullName "$Dist\TwimShelf-Flutter-$v-android-$abi.apk"

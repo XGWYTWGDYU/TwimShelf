@@ -30,7 +30,7 @@ Future<void> exportSearchResult(BuildContext context, List<FeedItem> items, {Lis
   await exportToFile(context, ids, options, name);
 }
 
-/// "<app> 猫咪搜索结果": only the words searched for, not conditions or words left out; what no
+/// `<app> 猫咪搜索结果`: only the words searched for, not conditions or words left out; what no
 /// system accepts in a file name goes.
 String searchExportName(List<String> terms) {
   final words = terms.map((t) => t.replaceAll(RegExp(r'[\\/:*?"<>|\x00-\x1f]'), ' ').trim()).where((t) => t.isNotEmpty).join(' ');

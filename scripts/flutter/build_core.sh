@@ -24,7 +24,7 @@ fi
 # where things go comes from the caller (build.sh at the root, or your shell): nothing machine-specific here
 # build.dir of config.yaml: every cache under <dir>/cache
 CACHE="$(python3 "$ROOT/scripts/apply.py" where cache)"
-export PATH="$CACHE/sdk/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$CACHE/sdk/bin:$HOME/.cargo/bin:$PATH:/opt/homebrew/opt/rustup/bin:/usr/local/opt/rustup/bin"
 export CARGO_TARGET_DIR="$CACHE/cargo"
 export XWIN_CACHE_DIR="$CACHE/xwin"
 export ANDROID_HOME="${ANDROID_HOME:-$CACHE/sdk/android}"
@@ -116,22 +116,34 @@ case "$platform" in
     report "$DEST/linux/lib/libtl_core.so" elf ;;
   macos|ios)
     need xcrun; need xcodebuild
-    # the oldest systems the Flutter app supports (its Podfiles / Xcode projects): without these
+    # each platform has its own framework (flutter/tl_core/<platform>/TlCore.xcframework links to
+    # it), so a Mac build compiles nothing for iOS and an iOS build nothing for the Mac.
+    # The oldest systems the Flutter app supports (its Podfiles / Xcode projects): without these
     # the library is built for this Mac's system and would not load on an older one
-    export MACOSX_DEPLOYMENT_TARGET=14.0 IPHONEOS_DEPLOYMENT_TARGET=17.0
-    targets aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim
-    for target in aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim; do static "$target"; done
-    staging="$CARGO_TARGET_DIR/xcframework/$profile"
-    mkdir -p "$staging/headers" "$DEST/apple"
+    export MACOSX_DEPLOYMENT_TARGET=15.0 IPHONEOS_DEPLOYMENT_TARGET=18.0
+    staging="$CARGO_TARGET_DIR/xcframework/$profile/$platform"
+    rm -rf "$staging"
+    mkdir -p "$staging/headers" "$DEST/apple/$platform"
     cp "$HEADER" "$staging/headers/tl_core.h"
-    xcrun lipo -create "$CARGO_TARGET_DIR/aarch64-apple-darwin/$profile/libtl_core.a" "$CARGO_TARGET_DIR/x86_64-apple-darwin/$profile/libtl_core.a" -output "$staging/libtl_core.a"
-    # Both entry points produce the complete XCFramework, retaining all Apple slices.
-    rm -rf "$staging/TlCore.xcframework"
-    xcodebuild -create-xcframework -library "$staging/libtl_core.a" -headers "$staging/headers" -library "$CARGO_TARGET_DIR/aarch64-apple-ios/$profile/libtl_core.a" -headers "$staging/headers" -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/$profile/libtl_core.a" -headers "$staging/headers" -output "$staging/TlCore.xcframework"
-    rm -rf "$DEST/apple/TlCore.xcframework"
-    cp -R "$staging/TlCore.xcframework" "$DEST/apple/"
-    report "$DEST/apple/TlCore.xcframework/macos-arm64_x86_64/libtl_core.a" apple arm64
-    report "$DEST/apple/TlCore.xcframework/macos-arm64_x86_64/libtl_core.a" apple x86_64
-    report "$DEST/apple/TlCore.xcframework/ios-arm64/libtl_core.a" apple arm64
-    report "$DEST/apple/TlCore.xcframework/ios-arm64-simulator/libtl_core.a" apple arm64 ;;
+    if [[ $platform == macos ]]; then
+      # Flutter builds a universal Mac app: both architectures in one library
+      targets aarch64-apple-darwin x86_64-apple-darwin
+      for target in aarch64-apple-darwin x86_64-apple-darwin; do static "$target"; done
+      xcrun lipo -create "$CARGO_TARGET_DIR/aarch64-apple-darwin/$profile/libtl_core.a" "$CARGO_TARGET_DIR/x86_64-apple-darwin/$profile/libtl_core.a" -output "$staging/libtl_core.a"
+      xcodebuild -create-xcframework -library "$staging/libtl_core.a" -headers "$staging/headers" -output "$staging/TlCore.xcframework"
+    else
+      # the device and the simulator (Xcode picks by the run destination)
+      targets aarch64-apple-ios aarch64-apple-ios-sim
+      for target in aarch64-apple-ios aarch64-apple-ios-sim; do static "$target"; done
+      xcodebuild -create-xcframework -library "$CARGO_TARGET_DIR/aarch64-apple-ios/$profile/libtl_core.a" -headers "$staging/headers" -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/$profile/libtl_core.a" -headers "$staging/headers" -output "$staging/TlCore.xcframework"
+    fi
+    rm -rf "$DEST/apple/$platform/TlCore.xcframework"
+    cp -R "$staging/TlCore.xcframework" "$DEST/apple/$platform/"
+    if [[ $platform == macos ]]; then
+      report "$DEST/apple/macos/TlCore.xcframework/macos-arm64_x86_64/libtl_core.a" apple arm64
+      report "$DEST/apple/macos/TlCore.xcframework/macos-arm64_x86_64/libtl_core.a" apple x86_64
+    else
+      report "$DEST/apple/ios/TlCore.xcframework/ios-arm64/libtl_core.a" apple arm64
+      report "$DEST/apple/ios/TlCore.xcframework/ios-arm64-simulator/libtl_core.a" apple arm64
+    fi ;;
 esac

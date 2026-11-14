@@ -39,6 +39,9 @@ abstract interface class VideoEngine {
   Future<void> loop(bool enabled);
   Future<bool> hasAudio();
   Future<Uint8List?> screenshot();
+  /// Unloads the media and keeps the player for the next one: much cheaper than [dispose], which
+  /// waits for the player's own thread to end (half a second and more, on the calling thread).
+  Future<void> stop();
   Future<void> dispose();
 }
 
@@ -102,6 +105,10 @@ class MediaKitVideoEngine implements VideoEngine {
   @override
   Future<Uint8List?> screenshot() => player.screenshot(format: 'image/png');
   @override
+  @override
+  Future<void> stop() => player.stop();
+
+  @override
   Future<void> dispose() => player.dispose();
 }
 
@@ -123,7 +130,9 @@ class VideoPlayback {
     VideoEngine? engine,
     HeadphoneRoutes? routes,
     String? Function(String)? readSetting,
-  }) : _engine = engine ?? MediaKitVideoEngine(),
+    bool? headphonesPolicy,
+  }) : _policy = headphonesPolicy ?? OS.isIOS,
+       _engine = engine ?? MediaKitVideoEngine(),
        _routes = routes ?? SystemHeadphoneRoutes(),
        _readSetting = readSetting ?? ((_) => Prefs.instance.headphonesOnly ? '1' : '0') {
     _routeSubscription = _routes.changes.listen((connected) {
@@ -136,6 +145,9 @@ class VideoPlayback {
       unawaited(_applyAudio().catchError((Object _) {}));
     });
   }
+  /// "Sound only through headphones" applies here: on iPhone and iPad only (elsewhere a value
+  /// set earlier, or synced from another device, must not keep videos muted).
+  final bool _policy;
   final VideoEngine _engine;
   final HeadphoneRoutes _routes;
   final String? Function(String) _readSetting;
@@ -166,6 +178,7 @@ class VideoPlayback {
 
   Future<void> open(String path, {bool autoplay = true}) async {
     _check();
+    await _released.catchError((Object _) {});
     if (!await fileExists(path)) {
       throw const FileSystemException('video.fileMissing');
     }
@@ -196,12 +209,9 @@ class VideoPlayback {
     final next = _audioTail.then((_) async {
       if (_closed) return;
       try {
-        // not offered on Windows and Linux: a value set earlier must not keep them muted
-        _headphonesOnly = !OS.isWindows && !OS.isLinux && headphonesOnlySetting(
-          _readSetting('audio.headphonesOnly'),
-        );
+        _headphonesOnly = _policy && headphonesOnlySetting(_readSetting('audio.headphonesOnly'));
       } catch (_) {
-        _headphonesOnly = true;
+        _headphonesOnly = _policy;
       }
       final blocked = _headphonesOnly && !_headphones && !_allowSpeaker;
       final shouldMute = _opening || _manualMute || blocked;
@@ -266,6 +276,21 @@ class VideoPlayback {
     _check();
     await _engine.loop(enabled);
   }
+
+  /// Stops the video and keeps the player for another one ([open] again); a reused player
+  /// starts muted, as a new one does. [open] waits for a release still under way.
+  Future<void> release() {
+    if (_closed) return Future.value();
+    _generation++;
+    _opening = false;
+    muted.value = true;
+    needsSpeakerConsent.value = false;
+    return _released = () async {
+      await _engine.stop();
+      await _engine.volume(0);
+    }();
+  }
+  Future<void> _released = Future.value();
 
   Future<void> dispose() async {
     if (_closed) return;

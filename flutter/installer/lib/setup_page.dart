@@ -10,7 +10,10 @@ import 'strings.dart';
 enum _Step { ready, working, done, failed }
 
 class SetupPage extends StatefulWidget {
-  const SetupPage({super.key, required this.product, required this.payload, required this.setupFolder, required this.strings, this.setup});
+  const SetupPage({super.key, required this.product, required this.payload, required this.setupFolder, required this.strings, this.setup, this.update = false});
+  /// Started by the app to update itself: an installed older (or the same) version is replaced at
+  /// once, with its choices kept, and the new version starts. Anything else is offered as usual.
+  final bool update;
   final Product product;
   final String? payload;
   final String setupFolder;
@@ -39,6 +42,17 @@ class _SetupPageState extends State<SetupPage> {
   _Step step = _Step.ready;
   double progress = 0;
   String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.update && installing && (kind == InstallKind.upgrade || kind == InstallKind.reinstall)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _run();
+        if (mounted && step == _Step.done) await _finish();
+      });
+    }
+  }
 
   Future<void> _run() async {
     setState(() {

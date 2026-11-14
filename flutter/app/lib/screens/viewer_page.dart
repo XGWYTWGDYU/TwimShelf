@@ -12,6 +12,7 @@ import '../platform/desktop_window.dart';
 import 'video_page.dart';
 import '../widgets/media_image.dart';
 import '../widgets/text_menu.dart';
+import '../app/activity.dart';
 import '../widgets/wheel_pager.dart';
 
 /// The full-screen viewer over a list (a grid's, 浏览's), as the native one:
@@ -54,6 +55,12 @@ class _ViewerPageState extends State<ViewerPage> {
   bool _turned = false;
 
   @override
+  void initState() {
+    super.initState();
+    immersivePages.value++;   // the progress panel steps aside
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _prepareNeighbours();
@@ -75,6 +82,7 @@ class _ViewerPageState extends State<ViewerPage> {
 
   @override
   void dispose() {
+    immersivePages.value--;
     _pages.dispose();
     super.dispose();
   }

@@ -37,9 +37,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     private let player: AVPlayer
     private let startAt: CMTime
     private let playerLayer = AVPlayerLayer()
-    func displayedMediaRect(in host: UIView) -> CGRect {
-        stage.convert(playerLayer.videoRect, to: host)
-    }
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var playbackVisible = false
@@ -426,29 +423,6 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak box] in
             UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, animations: { box?.alpha = 0 }) { _ in box?.removeFromSuperview() }
         }
-    }
-
-    /// A pill under the top edge that fades out after a few seconds.
-    private func showBanner(_ text: String) {
-        let label = PaddedLabel()
-        label.insets = UIEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
-        label.text = text
-        label.font = .systemFont(ofSize: 14, weight: .semibold)
-        label.textColor = .white
-        label.backgroundColor = UIColor.black.withAlphaComponent(0.65)
-        label.layer.cornerRadius = 16
-        label.clipsToBounds = true
-        label.numberOfLines = 0
-        label.textAlignment = .center
-        label.accessibilityIdentifier = "audioBanner"
-        label.translatesAutoresizingMaskIntoConstraints = false
-        stage.addSubview(label)
-        NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
-                                     label.topAnchor.constraint(equalTo: safe.topAnchor, constant: 60),
-                                     label.widthAnchor.constraint(lessThanOrEqualTo: stage.widthAnchor, constant: -40)])
-        label.alpha = 0
-        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { label.alpha = 1 }
-        UIView.animate(withDuration: 0.4, delay: 4, options: []) { label.alpha = 0 } completion: { _ in label.removeFromSuperview() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -935,9 +909,6 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
         self.videoStart = videoStart
         super.init(nibName: nil, bundle: nil)
     }
-    convenience init(url: URL) {
-        self.init(items: [FeedItem(mediaId: url.lastPathComponent, postId: "", ordinal: 0, kind: .photo, path: url.path, text: nil, authorName: nil, screenName: nil, url: nil, tags: [])], index: 0)
-    }
     required init?(coder: NSCoder) { fatalError() }
     override var prefersStatusBarHidden: Bool { true }
     private var currentPlayer: PlayerViewController? { pages.viewControllers?.first as? PlayerViewController }
@@ -1162,11 +1133,6 @@ final class ZoomPage: UIViewController, UIScrollViewDelegate, ViewerPage {
     private let scroll = UIScrollView()
     private let imageView = UIImageView()
     var onMediaGeometryChanged: (() -> Void)?
-    func displayedMediaRect(in host: UIView) -> CGRect {
-        let size = imageView.image?.size ?? CGSize(width: item.width, height: item.height)
-        guard size.width > 0, size.height > 0 else { return .zero }
-        return imageView.convert(AVMakeRect(aspectRatio: size, insideRect: imageView.bounds), to: host)
-    }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         onMediaGeometryChanged?()

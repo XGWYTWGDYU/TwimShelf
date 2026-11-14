@@ -78,16 +78,13 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true   # 120 Hz grid zoom on ProMotion phones
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: false
+        # the backup's own type, for the file pickers; no app opens it (a double-click in Finder or
+        # Files must never import a backup again), and it is not offered as a ZIP to unpack either
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: org.twimshelf.tlpack
             UTTypeDescription: TwimShelf Export
-            UTTypeConformsTo: [public.zip-archive, public.data]
+            UTTypeConformsTo: [public.data]
             UTTypeTagSpecification: { public.filename-extension: [tlpack] }
-        CFBundleDocumentTypes:
-          - CFBundleTypeName: TwimShelf Export
-            LSItemContentTypes: [org.twimshelf.tlpack]
-            LSHandlerRank: Owner
-            CFBundleTypeRole: Viewer
   TwimShelf-macOS:
     templates: [App]
     type: application
@@ -124,16 +121,13 @@ targets:
         NSPrincipalClass: NSApplication
         NSLocalNetworkUsageDescription: Used to find your other devices on the local network and sync the library with them directly.
         NSBonjourServices: [_twlib._tcp, _twlib-debug._tcp]   # the debug build advertises its own type
+        # the backup's own type, for the file pickers; no app opens it (a double-click in Finder or
+        # Files must never import a backup again), and it is not offered as a ZIP to unpack either
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: org.twimshelf.tlpack
             UTTypeDescription: TwimShelf Export
-            UTTypeConformsTo: [public.zip-archive, public.data]
+            UTTypeConformsTo: [public.data]
             UTTypeTagSpecification: { public.filename-extension: [tlpack] }
-        CFBundleDocumentTypes:
-          - CFBundleTypeName: TwimShelf Export
-            LSItemContentTypes: [org.twimshelf.tlpack]
-            LSHandlerRank: Owner
-            CFBundleTypeRole: Viewer
   TwimShelf-iOSShare:
     templates: [Icon]
     type: app-extension

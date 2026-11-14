@@ -11,7 +11,7 @@ let localAI = here.appendingPathComponent("../../../../native/TLLocalAI").standa
 
 let package = Package(
   name: "tl_native",
-  platforms: [.iOS("17.0"), .macOS("14.0")],
+  platforms: [.iOS("18.0"), .macOS("15.0")],
   products: [.library(name: "tl-native", targets: ["tl_native"])],
   dependencies: [.package(name: "TLLocalAI", path: localAI)],
   targets: [.target(name: "tl_native", dependencies: [.product(name: "TLLocalAI", package: "TLLocalAI")])]

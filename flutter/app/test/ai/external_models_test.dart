@@ -63,7 +63,6 @@ void main() {
     shared = {};
     settings = SharedSettings((k) => shared[k], (k, v) => v == null ? shared.remove(k) : shared[k] = v);
     models = ExternalModels(preferences, secrets: secrets, defaults: prompt, shared: settings);
-    await models.initialize();
     await models.save(model);
   });
   test(
@@ -218,18 +217,11 @@ void main() {
     );
   });
   test(
-    'default prompt version migration and corrupt stored data recover',
+    'corrupt stored data recover',
     () async {
-      await preferences.setString('ai.prompt', '{"prompt":"old"}');
-      await preferences.setInt('ai.prompt.version', 1);
-      await models.initialize();
       expect(models.promptFor('m').prompt, 'Q');
-      // what this device kept before moves to the account
-      shared.remove('ai.external');
-      await preferences.setString('ai.external', '[{"id":"ext:a","name":"","url":"http://x","model":""}]');
-      await models.initialize();
+      shared['ai.external'] = '[{"id":"ext:a","name":"","url":"http://x","model":""}]';
       expect(models.all.single.id, 'ext:a');
-      expect(preferences.getString('ai.external'), isNull);
       shared['ai.prompts'] = 'not json';
       shared['ai.modelPrompts'] = '{"x":2}';
       expect(models.promptFor('x').prompt, 'Q');

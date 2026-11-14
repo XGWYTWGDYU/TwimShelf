@@ -266,7 +266,6 @@ class ExternalModels extends ChangeNotifier {
       secrets: secrets,
       defaults: defaults,
     );
-    await result.initialize();
     return result;
   }
 
@@ -410,21 +409,6 @@ class ExternalModels extends ChangeNotifier {
   Future<void> savePromptFor(String model, AiPrompt prompt) => _serial(() async {
     shared.write('$_promptKey$model', jsonEncode(prompt.toJson()));
     notifyListeners();
-  });
-
-  /// What this app kept on the device before these were shared moves to the account, unless
-  /// another device has already given a value.
-  Future<void> initialize() => _serial(() async {
-    if ((preferences.getInt('ai.prompt.version') ?? 0) < 2) {
-      await _set('ai.prompt', null);
-      await _set('ai.prompt.version', 2);
-    }
-    for (final key in const ['ai.external', 'ai.prompt', 'ai.prompts', 'ai.modelPrompts']) {
-      final local = preferences.getString(key);
-      if (local == null) continue;
-      if (shared.read(key) == null) shared.write(key, local);
-      await preferences.remove(key);
-    }
   });
 
   /// 清除所有数据: the API keys always go; the models' settings too with [settings].

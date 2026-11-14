@@ -216,7 +216,7 @@ class _StoragePageState extends State<StoragePage> {
         top: false,
         bottom: false,
         child: u == null
-            ? SettingsSection(footer: L('storage.footer'), children: [
+            ? SettingsSection(children: [
                 ListTile(
                   key: const ValueKey('storage-state'),
                   leading: _error == null ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)) : Icon(Icons.error_outline, color: scheme.error),
@@ -233,12 +233,6 @@ class _StoragePageState extends State<StoragePage> {
                         Text(_bytes(u.total), key: const ValueKey('storage-total'), style: theme.textTheme.displayMedium?.copyWith(fontWeight: FontWeight.w800, color: scheme.onSurface)),
                         const SizedBox(height: 12),
                         _SegmentBar(groups: u.groups, height: 10),
-                        const SizedBox(height: 12),
-                        Text(
-                          L('storage.footer'),
-                          key: const ValueKey('storage-summary'),
-                          style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                        ),
                       ]),
                     ),
                     for (final (title, keys) in _sections) _section(context, u, title, keys),

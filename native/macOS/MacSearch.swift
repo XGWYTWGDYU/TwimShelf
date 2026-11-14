@@ -53,7 +53,6 @@ final class CapsuleTokenField: NSView, NSTextFieldDelegate {
 
     /// The text field's editor while typing.
     func currentEditor() -> NSText? { text.currentEditor() }
-    var editingField: NSTextField { text }
 
     override var acceptsFirstResponder: Bool { true }
     override func becomeFirstResponder() -> Bool { window?.makeFirstResponder(text) ?? false }
@@ -478,11 +477,6 @@ final class MacTokenSearch: NSView {
     /// What is being typed (not yet a capsule).
     private var typed: String {
         ((field.objectValue as? [Any])?.compactMap { $0 as? String }.last ?? "").trimmingCharacters(in: .whitespaces)
-    }
-
-    private func add(_ key: String) {
-        field.objectValue = tokens + [MacSearchToken(key)]
-        changed()
     }
 
     private func focusAfterPick() {

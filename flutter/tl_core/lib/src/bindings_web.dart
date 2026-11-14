@@ -35,7 +35,6 @@ class CoreBindings {
   void tl_import_cancel() { coreCall('tl_import_cancel', []); }
   String? tl_report_thumbnail_failed(String? a0) => coreCall('tl_report_thumbnail_failed', [a0]) as String?;
   String? tl_db_snapshot(String? a0) => coreCall('tl_db_snapshot', [a0]) as String?;
-  String? tl_free_space(String? a0) => coreCall('tl_free_space', [a0]) as String?;
   String? tl_wipe(bool a0) => coreCall('tl_wipe', [a0]) as String?;
   String? tl_labels_missing_vectors(String? a0) => coreCall('tl_labels_missing_vectors', [a0]) as String?;
   String? tl_set_vectors(String? a0) => coreCall('tl_set_vectors', [a0]) as String?;
@@ -57,8 +56,6 @@ class CoreBindings {
   String? tl_hub_search(String? a0) => coreCall('tl_hub_search', [a0]) as String?;
   String? tl_hub_repo(String? a0, String? a1) => coreCall('tl_hub_repo', [a0, a1]) as String?;
   String? tl_hub_install(String? a0) => coreCall('tl_hub_install', [a0]) as String?;
-  String? tl_model_download_gguf(String? a0) => coreCall('tl_model_download_gguf', [a0]) as String?;
-  String? tl_model_download(String? a0) => coreCall('tl_model_download', [a0]) as String?;
   String? tl_model_status() => coreCall('tl_model_status', []) as String?;
   void tl_model_cancel() { coreCall('tl_model_cancel', []); }
   String? tl_models_installed() => coreCall('tl_models_installed', []) as String?;

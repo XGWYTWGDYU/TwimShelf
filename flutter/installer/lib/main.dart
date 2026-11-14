@@ -12,6 +12,8 @@ import 'strings.dart';
 
 /// The Windows setup: install, uninstall — Material 3, sharp at any display scale.
 ///   tl_setup.exe --payload `dir`   install the program in `dir` (the setup.exe stub passes it)
+///   … --update                     the app updating itself: over the installed copy, without
+///                                  asking, then the new version starts (setup.exe passes it on)
 ///   tl_setup.exe [--uninstall]    from the installed copy: open the uninstall page
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,14 +30,15 @@ Future<void> main(List<String> args) async {
   final payload = arg('--payload');
   final productFile = payload != null ? File('$payload\\..\\payload.json') : File('$here\\payload.json');
   final product = Product.fromJson(jsonDecode(productFile.readAsStringSync()) as Map<String, dynamic>);
-  runApp(SetupApp(product: product, payload: payload, setupFolder: here));
+  runApp(SetupApp(product: product, payload: payload, setupFolder: here, update: args.contains('--update')));
 }
 
 class SetupApp extends StatelessWidget {
-  const SetupApp({super.key, required this.product, required this.payload, required this.setupFolder});
+  const SetupApp({super.key, required this.product, required this.payload, required this.setupFolder, this.update = false});
   final Product product;
   final String? payload;
   final String setupFolder;
+  final bool update;
 
   @override
   Widget build(BuildContext context) {
@@ -66,7 +69,7 @@ class SetupApp extends StatelessWidget {
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: theme(Brightness.light),
       darkTheme: theme(Brightness.dark),
-      home: SetupPage(product: product, payload: payload, setupFolder: setupFolder, strings: S.of(system)),
+      home: SetupPage(product: product, payload: payload, setupFolder: setupFolder, strings: S.of(system), update: update),
     );
   }
 }

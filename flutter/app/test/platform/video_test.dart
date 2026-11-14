@@ -49,6 +49,11 @@ class FakeVideo implements VideoEngine {
   }
 
   @override
+  Future<void> stop() async {
+    calls.add('stop');
+  }
+
+  @override
   Future<void> pause() async {
     calls.add('pause');
   }
@@ -98,12 +103,11 @@ void main() {
   test(
     'headphones policy reads core key, starts muted, and consent is per-video',
     () async {
-      // the Mac, phones and tablets only: Windows and Linux have no such setting
-      if (Platform.isWindows || Platform.isLinux) return;
       final engine = FakeVideo(), routes = FakeRoutes();
       final player = VideoPlayback(
         engine: engine,
         routes: routes,
+        headphonesPolicy: true,
         readSetting: (key) {
           expect(key, 'audio.headphonesOnly');
           return 'true';
@@ -137,6 +141,7 @@ void main() {
       final player = VideoPlayback(
         engine: engine,
         routes: routes,
+        headphonesPolicy: true,
         readSetting: (_) => setting,
       );
       await player.open(source.path, autoplay: false);

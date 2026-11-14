@@ -52,14 +52,17 @@ class _HostState extends State<_Host> {
   Future<void> _show() async {
     final inbox = ShareInbox(root: Directory(widget.root), asks: false);
     final batch = await inbox.partialBatch(widget.id);
-    if (batch != null && mounted) {
-      await presentShareSheet(
-        context,
-        shares: inbox,
-        batch: batch,
-        folders: await _folders(),
-        confirm: inbox.publishChosen,
-      );
+    if (batch != null) {
+      final folders = await _folders();
+      if (mounted) {
+        await presentShareSheet(
+          context,
+          shares: inbox,
+          batch: batch,
+          folders: folders,
+          confirm: inbox.publishChosen,
+        );
+      }
     }
     await SystemNavigator.pop();
   }

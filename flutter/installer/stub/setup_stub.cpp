@@ -79,6 +79,12 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   STARTUPINFOW si{sizeof si};
   PROCESS_INFORMATION pi{};
   std::wstring cmd = L"\"" + dir + L"\\setup\\tl_setup.exe\" --payload \"" + dir + L"\\payload\"";
+  // the app updating itself (setup.exe --update): passed on, so the setup does it without asking
+  int argc = 0;
+  if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
+    for (int i = 1; i < argc; i++) if (wcscmp(argv[i], L"--update") == 0) cmd += L" --update";
+    LocalFree(argv);
+  }
   if (!CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, (dir + L"\\setup").c_str(), &si, &pi)) fail(L"Cannot start the setup.");
   WaitForSingleObject(pi.hProcess, INFINITE);
   CloseHandle(pi.hThread);

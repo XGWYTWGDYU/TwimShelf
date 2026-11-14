@@ -116,12 +116,7 @@ class ShareInbox with WidgetsBindingObserver {
       }
       try {
         // Registration labels come from the same initialized catalog as the UI.
-        // what an earlier version left in Explorer's Send to
-        if (root == null && OS.isWindows) {
-          await _channel.invokeMethod<void>('removeSendTo', L('share.title'));
-        } else if (root == null && OS.isLinux) {
-          await installDesktopEntry();
-        }
+        if (root == null && OS.isLinux) await installDesktopEntry();
         if (root == null && OS.isWindows) await _channel.invokeMethod<void>('installJumpList', L('shortcut.downloadPosts'));
       } catch (_) {
         // Registration is recoverable and must not prevent a pending import.

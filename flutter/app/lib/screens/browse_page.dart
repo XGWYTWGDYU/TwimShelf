@@ -764,7 +764,7 @@ class _CardMedia extends StatelessWidget {
 
 /// A video in a card: plays muted and looping while at least half of it is on screen, stops
 /// (and lets its player go) once it leaves. Its poster shows until the first frame and whenever
-/// it is not playing. A few play at once at most, the rest wait as posters.
+/// it is not playing. Every video in view plays, however many there are.
 class _FeedVideo extends StatefulWidget {
   const _FeedVideo({required this.item, required this.library, required this.current});
   final FeedItem item;
@@ -776,16 +776,16 @@ class _FeedVideo extends StatefulWidget {
 }
 
 class _FeedVideoState extends State<_FeedVideo> {
-  /// Players alive at once (each is a decoder and a texture).
-  static const _limit = 4;
   static final _playing = <_FeedVideoState>{};
-  static final _waiting = <_FeedVideoState>[];
   static final _instances = <_FeedVideoState>{};
+  /// Players of videos that left the screen, kept for the next ones: creating a player and
+  /// especially disposing of one blocks the UI thread (on iOS the app's main thread) for half a
+  /// second and more, which a scroll felt as a stall every time a video came or went.
+  static final _idle = <VideoPlayback>[];
   static bool _viewerOpen = false;
 
   static Future<void> suspendForViewer() async {
     _viewerOpen = true;
-    _waiting.clear();
     await Future.wait(_playing.toList().map((s) => s._stop()));
   }
 
@@ -824,21 +824,15 @@ class _FeedVideoState extends State<_FeedVideo> {
 
   void _update() {
     if (_wants) {
-      if (_video != null || _waiting.contains(this)) return;
-      if (_playing.length < _limit) {
-        _start();
-      } else {
-        _waiting.add(this);
-      }
+      if (_video == null) _start();
     } else {
-      _waiting.remove(this);
       _stop();
     }
   }
 
   Future<void> _start() async {
     _playing.add(this);
-    final v = VideoPlayback();
+    final v = _idle.isNotEmpty ? _idle.removeLast() : VideoPlayback();
     setState(() => _video = v);
     try {
       await v.setMuted(true);
@@ -863,12 +857,10 @@ class _FeedVideoState extends State<_FeedVideo> {
     _video = null;
     _firstFrame = false;
     if (mounted && !_gone) setState(() {});
-    await v.dispose();
-    // the next card waiting for a player gets this one's place
-    while (_waiting.isNotEmpty && _playing.length < _limit) {
-      final next = _waiting.removeAt(0);
-      if (next.mounted && !next._gone && next._wants) next._start();
-    }
+    // back to the pool at once (so no more players exist than ever played at once, and none is
+    // disposed of while scrolling); it stops in the background, and the next video waits for that
+    _idle.add(v);
+    unawaited(v.release().catchError((Object _) {}));
   }
 
   bool _gone = false;
@@ -877,7 +869,6 @@ class _FeedVideoState extends State<_FeedVideo> {
   void dispose() {
     _gone = true;
     _instances.remove(this);
-    _waiting.remove(this);
     _stop();
     super.dispose();
   }

@@ -323,32 +323,6 @@ fn concurrent_opposite_renames_converge() {
     assert_eq!(ea.0[0].0, ea.1[0].0, "both media show the same single name");
 }
 
-/// A v3 database (no per-field clocks) upgrades in place without losing anything.
-#[test]
-fn v3_database_migrates_in_place() {
-    let dir = std::env::temp_dir().join(format!("tl-mig-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("db.sqlite");
-    {
-        let s = Store::open(path.to_str().unwrap()).unwrap();
-        s.upsert_post(&PostMeta { id: "keep".into(), text: Some("原文".into()), ..Default::default() }).unwrap();
-        s.add_media(&format!("{:064}", 7), "keep", 0, &MediaKind::Photo, "blobs/00/x.jpg", false).unwrap();
-        s.tag_media(&format!("{:064}", 7), "猫", Origin::USER).unwrap();
-        s.conn().execute_batch("ALTER TABLE post DROP COLUMN h_author; ALTER TABLE post DROP COLUMN h_screen; ALTER TABLE post DROP COLUMN h_text;
-            ALTER TABLE post DROP COLUMN h_created; ALTER TABLE post DROP COLUMN h_url; PRAGMA user_version=3;").unwrap();
-    }
-    let s = Store::open(path.to_str().unwrap()).unwrap();
-    let text: String = s.conn().query_row("SELECT text FROM post WHERE id='keep'", [], |r| r.get(0)).unwrap();
-    assert_eq!(text, "原文");
-    assert_eq!(s.conn().query_row("SELECT count(*) FROM media", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
-    assert_eq!(s.media_tags(&format!("{:064}", 7)).unwrap(), vec![("猫".to_string(), 1)]);
-    s.upsert_post(&PostMeta { id: "keep".into(), text: Some("新正文".into()), ..Default::default() }).unwrap();
-    let text: String = s.conn().query_row("SELECT text FROM post WHERE id='keep'", [], |r| r.get(0)).unwrap();
-    assert_eq!(text, "新正文");
-    std::fs::remove_dir_all(&dir).unwrap();
-}
-
 
 /// A device on an older app version receives a record of a kind it does not know (a newer
 /// version made it): sync does not fail; the record is kept, passed on unchanged to a third

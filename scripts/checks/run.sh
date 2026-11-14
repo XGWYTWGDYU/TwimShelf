@@ -16,3 +16,11 @@ SCENARIO=model "$out/queue"
 
 python3 scripts/checks/frontend_contracts/run.py
 python3 scripts/checks/icons.py
+# config.yaml's version is in every file in git that carries one
+python3 scripts/apply.py versions --check
+
+# interface text: every key the apps use is in the catalog, and the Flutter app's copy is the
+# catalog's export (a key added by hand to the copy would be lost by the next export)
+python3 scripts/catalog.py check
+python3 scripts/to_flutter.py --out "$out/l10n" >/dev/null
+diff -r "$out/l10n" flutter/app/assets/l10n >/dev/null || { echo "flutter/app/assets/l10n differs from the catalog's export: run python3 scripts/to_flutter.py" >&2; exit 1; }

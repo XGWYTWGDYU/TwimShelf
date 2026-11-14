@@ -601,37 +601,6 @@ struct FlowLayout: Layout {
     }
 }
 
-/// A card with an icon and a title as its head, for a page's main blocks.
-struct TitledCard<Content: View, Trailing: View>: View {
-    let title: String
-    var detail: String? = nil
-    var symbol: String? = nil
-    var color: Color = .accentColor
-    var tint: Color? = nil
-    @ViewBuilder var trailing: Trailing
-    @ViewBuilder var content: Content
-    var body: some View {
-        Card(tint: tint, spacing: 16) {
-            HStack(alignment: .center, spacing: 12) {
-                if let symbol { IconTile(symbol: symbol, color: color, size: 34) }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 15, weight: .semibold))
-                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                }
-                Spacer(minLength: 8)
-                trailing
-            }
-            content
-        }
-    }
-}
-
-extension TitledCard where Trailing == EmptyView {
-    init(title: String, detail: String? = nil, symbol: String? = nil, color: Color = .accentColor, tint: Color? = nil, @ViewBuilder content: () -> Content) {
-        self.init(title: title, detail: detail, symbol: symbol, color: color, tint: tint, trailing: { EmptyView() }, content: content)
-    }
-}
-
 // MARK: - Dialogs that are not a page's own
 
 /// Shows an open panel as its own window (not a sheet on the settings window).

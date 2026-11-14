@@ -95,12 +95,6 @@ struct StorageUsageView: View {
         }
         .background(cardColor, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
 
-        Text(L("storage.footer"))
-            .font(.system(size: 13))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
         Button(L("storage.refresh")) { measure() }
             .disabled(clearing)
             .padding(.top, 16)

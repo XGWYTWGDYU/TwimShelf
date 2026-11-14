@@ -35,9 +35,6 @@ bool FlutterWindow::OnCreate() {
     try {
       if (call.method_name() == "getSharesRoot") {
         result->Success(flutter::EncodableValue(Utf8FromUtf16(desktop_share::Root().c_str())));
-      } else if (call.method_name() == "removeSendTo") {
-        desktop_share::RemoveSendTo(std::get<std::string>(*call.arguments()));
-        result->Success();
       } else if (call.method_name() == "copyFile") {
         desktop_share::CopyFileToClipboard(std::get<std::string>(*call.arguments()));
         result->Success();

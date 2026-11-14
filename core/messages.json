@@ -947,12 +947,6 @@
   "zh-Hans": "内部错误：找不到 GraphQL 操作 {operation}",
   "zh-Hant": "內部錯誤：找不到 GraphQL 操作 {operation}"
  },
- "protected.notAvailable": {
-  "en": "The protected-account module isn't connected yet",
-  "ja": "鍵アカウント用モジュールはまだ接続されていません",
-  "zh-Hans": "锁定账号下载模块尚未接入",
-  "zh-Hant": "鎖定帳號下載模組尚未接入"
- },
  "protected.notFound": {
   "en": "The post doesn't exist or can't be seen: {m}",
   "ja": "投稿が存在しないか、閲覧できません：{m}",

@@ -198,9 +198,11 @@ enum Diagnostics {
             "prefs": [
                 "auto_tag": ModelStore.shared.autoTag, "has_tagger": ModelStore.shared.activeTaggerId != nil,
                 "has_embedder": ModelStore.shared.activeEmbedderId != nil,
-                "headphones_only": AudioPolicy.headphonesOnly,
             ],
         ]
+        #if os(iOS)
+        if var prefs = info["prefs"] as? [String: Any] { prefs["headphones_only"] = AudioPolicy.headphonesOnly; info["prefs"] = prefs }
+        #endif
         #if canImport(UIKit)
         info["memory_gb"] = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
         info["low_power"] = ProcessInfo.processInfo.isLowPowerModeEnabled

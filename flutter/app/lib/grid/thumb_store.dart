@@ -98,7 +98,6 @@ class ThumbStore {
     _nearby.clear();
   }
 
-  bool isVideo(String id) => _videos.contains(id);
   bool isFailed(String id) => _failed.contains(id);
 
   /// The best image at hand for a tile [pixels] wide; asks for what is missing.

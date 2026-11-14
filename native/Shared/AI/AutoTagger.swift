@@ -60,12 +60,35 @@ final class AutoTagger {
         #endif
         // New media (download, import, sync) → analyse it; ignore our own notifications.
         NotificationCenter.default.addObserver(forName: .libraryChanged, object: nil, queue: .main) { n in
-            MainActor.assumeIsolated { if n.object as AnyObject? !== self, !self.running { self.startIfEnabled() } }
+            MainActor.assumeIsolated {
+                self.refreshCounts()
+                if n.object as AnyObject? !== self, !self.running { self.startIfEnabled() }
+            }
         }
     }
 
-    /// (analysed by any model, total media).
-    var counts: (done: Int, total: Int) { Core.aiCounts() }
+    /// (analysed by any model, total media), as last read. Read again off the main thread whenever
+    /// the library or the tagging changes (`progressChanged` tells when it did): these are two
+    /// counts over every media, and views that asked for them at each redraw (on the main thread,
+    /// several times a second) slowed scrolling down in a large library. Only the first read waits.
+    var counts: (done: Int, total: Int) {
+        if let c = cachedCounts { return c }
+        let c = Core.aiCounts()
+        cachedCounts = c
+        return c
+    }
+    private var cachedCounts: (done: Int, total: Int)?
+    private let countsWork = LatestWork()
+
+    private func refreshCounts() {
+        countsWork.submit { [weak self] isCurrent in
+            let c = await Task.detached(priority: .utility) { Core.aiCounts() }.value
+            guard let self, isCurrent() else { return }
+            if let old = self.cachedCounts, old == c { return }
+            self.cachedCounts = c
+            NotificationCenter.default.post(name: Self.progressChanged, object: nil)
+        }
+    }
 
     /// Starts automatic tagging of not-yet-analysed media if enabled.
     func startIfEnabled() {
@@ -157,7 +180,10 @@ final class AutoTagger {
         }
     }
 
-    private func post() { NotificationCenter.default.post(name: Self.progressChanged, object: nil) }
+    private func post() {
+        refreshCounts()
+        NotificationCenter.default.post(name: Self.progressChanged, object: nil)
+    }
 
     private func run(_ job: Job) async {
         guard let epoch = try? Core.epoch() else { return }

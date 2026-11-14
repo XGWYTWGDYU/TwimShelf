@@ -3,7 +3,12 @@ use crate::library::{FeedItem, TagView};
 use crate::model::{MediaKind, Origin, PostMeta, SearchScope};
 use rusqlite::{params, Connection};
 
-pub struct Store { conn: Connection }
+pub struct Store {
+    conn: Connection,
+    /// Every media had its size the last time that was asked (`media_without_size`), and no
+    /// media came in since: the question needs no pass over the whole table (every feed asks it).
+    sized: std::sync::atomic::AtomicBool,
+}
 
 #[derive(Debug, serde::Serialize)]
 pub struct TagCount { pub label: String, pub count: i64, pub user: i64, pub ai: i64 }
@@ -28,9 +33,11 @@ pub struct FolderOverview { pub name: String, pub count: i64, pub videos: i64, p
 pub struct TrashItem { #[serde(flatten)] pub item: FeedItem, /// When it was moved to the bin (ms since 1970).
     pub trashed_at_ms: u64 }
 
-/// Schema version. Versions from 3 on are migrated in place; anything older, or a newer one
-/// (written by a newer app), is refused: a library is never rebuilt from nothing or downgraded.
+/// Schema version. Versions from `OLDEST` (the first release's) on are migrated in place;
+/// anything older, or a newer one (written by a newer app), is refused: a library is never
+/// rebuilt from nothing or downgraded.
 const VERSION: i64 = 18;
+const OLDEST: i64 = 14;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS post(id TEXT PRIMARY KEY, author_name TEXT, screen_name TEXT, text TEXT, created_at TEXT, url TEXT,
@@ -50,7 +57,8 @@ CREATE TABLE IF NOT EXISTS tag_src(media_id TEXT NOT NULL, tag_id INTEGER NOT NU
 -- Grow-only set: media analysed by a model (synced, so other devices don't redo the work).
 CREATE TABLE IF NOT EXISTS ai_done(media_id TEXT NOT NULL, model TEXT NOT NULL, PRIMARY KEY(media_id, model));
 CREATE TABLE IF NOT EXISTS tag_vec(label TEXT NOT NULL, model TEXT NOT NULL, vec BLOB NOT NULL, PRIMARY KEY(label, model));
-CREATE TABLE IF NOT EXISTS job(url TEXT PRIMARY KEY, status TEXT NOT NULL, error TEXT, updated INTEGER);
+-- opts: per-link download options; epoch: a request counter
+CREATE TABLE IF NOT EXISTS job(url TEXT PRIMARY KEY, status TEXT NOT NULL, error TEXT, updated INTEGER, opts TEXT, epoch INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS op(device TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(device, seq));
 -- Every (post, ordinal) a media has been claimed by, from any device (grow-only, derived from
@@ -139,52 +147,18 @@ impl Store {
         }
         // A format from before any release, or a damaged version number: never rebuilt from nothing,
         // which would delete the library. It stays as it is, and the person is told.
-        if existed && version < 3 {
+        if existed && version < OLDEST {
             return Err(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
                 Some(tr!("store.tooOld", version = version))));
         }
         // up to date: opening writes nothing (a full disk must not keep the library from opening)
-        if existed && version == VERSION { return Ok((Store { conn }, false)); }
-        let has = |table: &str, col: &str| -> rusqlite::Result<bool> {
-            conn.prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name=?1"))?.exists([col])
-        };
+        if existed && version == VERSION { return Ok((Store { conn, sized: Default::default() }, false)); }
         conn.execute_batch("BEGIN IMMEDIATE;")?;
         let r: rusqlite::Result<()> = (|| {
-            // v3 → v4: per-field clocks on posts
-            let post_exists: bool = conn.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='post'")?.exists([])?;
-            if post_exists {
-                for c in ["h_author", "h_screen", "h_text", "h_created", "h_url"] {
-                    if !has("post", c)? { conn.execute_batch(&format!("ALTER TABLE post ADD COLUMN {c} INTEGER NOT NULL DEFAULT 0;"))?; }
-                }
-            }
-            // v4 → v5 and later new tables
+            // every table and index of the current format (a new library, and tables added since 14)
             conn.execute_batch(SCHEMA)?;
-            // v5 → v6: rename rules and the derived canonical column
-            if !has("tag", "canon")? { conn.execute_batch("ALTER TABLE tag ADD COLUMN canon INTEGER;")?; }
-            // v8 → v9: per-link download options and a request counter
-            if !has("job", "opts")? { conn.execute_batch("ALTER TABLE job ADD COLUMN opts TEXT;")?; }
-            if !has("job", "epoch")? { conn.execute_batch("ALTER TABLE job ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;")?; }
-            // v9 → v10: one clock per tag origin bit (both start at the register's clock)
-            if !has("tag_media", "h_user")? {
-                conn.execute_batch("ALTER TABLE tag_media ADD COLUMN h_user INTEGER NOT NULL DEFAULT 0;
-                    ALTER TABLE tag_media ADD COLUMN h_ai INTEGER NOT NULL DEFAULT 0;
-                    UPDATE tag_media SET h_user=hlc, h_ai=hlc;")?;
-            }
-            // v10 → v11: every claim of a media, rebuilt from the full history of Media records
-            // (before, only the smallest pending claim was kept, and a claim whose post had not
-            // arrived yet could be lost: devices then disagreed on the owner)
-            if existed && version < 11 {
-                conn.execute_batch("INSERT OR IGNORE INTO media_claim SELECT json_extract(body,'$.id'), json_extract(body,'$.post_id'), json_extract(body,'$.ordinal')
-                        FROM op WHERE json_extract(body,'$.t')='media' AND json_extract(body,'$.id') IS NOT NULL AND json_extract(body,'$.post_id') IS NOT NULL;
-                    INSERT OR IGNORE INTO media_claim SELECT id, post_id, ordinal FROM media;
-                    INSERT OR IGNORE INTO media_claim SELECT media_id, post_id, ordinal FROM want_blob;
-                    UPDATE media SET (post_id, ordinal) = (SELECT c.post_id, c.ordinal FROM media_claim c JOIN post p ON p.id=c.post_id
-                        WHERE c.media_id=media.id ORDER BY c.post_id, c.ordinal LIMIT 1)
-                      WHERE EXISTS(SELECT 1 FROM media_claim c JOIN post p ON p.id=c.post_id WHERE c.media_id=media.id);")?;
-            }
             // v14 → v15: triage mode is gone; its decisions were local to this device (never in
-            // the op log), so the table simply goes. A step of the ladder like the others: a
-            // library from any older version passes it once, however many versions it skips.
+            // the op log), so the table simply goes.
             conn.execute_batch("DROP TABLE IF EXISTS triage;")?;
             // v15 → v16: every post that arrives looks up its claims by post
             conn.execute_batch("CREATE INDEX IF NOT EXISTS media_claim_post ON media_claim(post_id, media_id);")?;
@@ -196,7 +170,7 @@ impl Store {
             Ok(()) => conn.execute_batch("COMMIT;")?,
             Err(e) => { let _ = conn.execute_batch("ROLLBACK;"); return Err(e); }
         }
-        Ok((Store { conn }, false))
+        Ok((Store { conn, sized: Default::default() }, false))
     }
 
     /// Local import/download of a post: present fields are written with a fresh clock, so the
@@ -858,9 +832,12 @@ impl Store {
 
     /// Media whose size has not been read yet: (id, path, kind).
     pub fn media_without_size(&self, limit: usize) -> rusqlite::Result<Vec<(String, String, String)>> {
+        use std::sync::atomic::Ordering;
+        if self.sized.load(Ordering::SeqCst) { return Ok(vec![]); }
         let mut st = self.conn.prepare_cached("SELECT m.id, m.path, m.kind FROM media m WHERE NOT EXISTS(SELECT 1 FROM media_size s WHERE s.media_id=m.id) LIMIT ?1")?;
-        let rows = st.query_map([limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        rows.collect()
+        let rows: Vec<(String, String, String)> = st.query_map([limit as i64], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+        if rows.is_empty() { self.sized.store(true, Ordering::SeqCst); }
+        Ok(rows)
     }
 
     pub fn set_media_sizes(&self, sizes: &[(&str, u32, u32)]) -> rusqlite::Result<()> {
@@ -949,6 +926,7 @@ impl Store {
         match cur {
             None => {
                 self.conn.execute("DELETE FROM verified_media WHERE media_id=?1", [id])?;
+                self.sized.store(false, std::sync::atomic::Ordering::SeqCst);
                 self.conn.execute("INSERT INTO media VALUES(?1,?2,?3,?4,?5)", params![id, owner.0, owner.1, k, path])?;
                 self.conn.execute("DELETE FROM want_blob WHERE media_id=?1", [id])?;
                 Ok(true)
@@ -977,12 +955,6 @@ impl Store {
             self.conn.execute("UPDATE media SET post_id=?2, ordinal=?3 WHERE id=?1 AND (post_id, ordinal) IS NOT (?2, ?3)", params![id, o.0, o.1])?;
         }
         Ok(())
-    }
-
-    /// Media where every term matches in at least one enabled field: a tag from its label set
-    /// (within `scope`), the post text, or the author's name / @handle (substring).
-    pub fn feed_items_with(&self, label_sets: &[Vec<String>], terms: &[String], scope: SearchScope, fields: crate::library::SearchFields) -> rusqlite::Result<Vec<FeedItem>> {
-        self.feed_filtered(label_sets, terms, scope, fields, &crate::library::FeedFilter::default())
     }
 
     /// The feed query: search terms plus the extra filters (author, exact tags, review state,
@@ -1266,27 +1238,84 @@ impl Store {
         }
         // Limit detail queries to this result set, including narrow searches and exports.
         // Chunking stays below SQLite's parameter limit and avoids one query per media.
-        for chunk in items.chunks_mut(400) {
+        // The rows are read as they are stored and put together here: joining, grouping and
+        // sorting them in SQL (temporary B-trees per chunk) took most of a whole-library feed.
+        use std::collections::HashMap;
+        // every raw tag → its canonical tag (rename rules), numbered in label order (so that
+        // ordering by number orders by label), and the labels by number
+        let (canon, labels) = {
+            let mut q = self.conn.prepare_cached("SELECT r.id, c.id, c.label FROM tag r JOIN tag c ON c.id = coalesce(r.canon, r.id)")?;
+            let mut rows = q.query([])?;
+            let mut raw: Vec<(i64, i64, String)> = Vec::new();
+            while let Some(r) = rows.next()? { raw.push((r.get(0)?, r.get(1)?, r.get(2)?)); }
+            let mut labels: Vec<(String, i64)> = raw.iter().map(|(_, c, l)| (l.clone(), *c)).collect();
+            labels.sort();
+            labels.dedup_by(|a, b| a.1 == b.1);
+            let number: HashMap<i64, u32> = labels.iter().enumerate().map(|(i, (_, c))| (*c, i as u32)).collect();
+            let canon: HashMap<i64, u32> = raw.iter().map(|(r, c, _)| (*r, number[c])).collect();
+            (canon, labels.into_iter().map(|(l, _)| l).collect::<Vec<String>>())
+        };
+        // A large result (the whole feed) reads both tables once, from start to end; a small one
+        // (a narrow search, an export) looks its media up through the index, a chunk at a time.
+        let whole = items.len() >= 1000;
+        let chunk_len = if whole { items.len() } else { 400 };
+        for chunk in items.chunks_mut(chunk_len.max(1)) {
             let ids: Vec<String> = chunk.iter().map(|i| i.media_id.clone()).collect();
-            let ph = vec!["?"; ids.len()].join(",");
-            let mut tags: std::collections::HashMap<String, Vec<TagView>> = Default::default();
-            let mut tq = self.conn.prepare(&format!("SELECT tm.media_id, t.label, max(tm.origin & 1) | max(tm.origin & 2) FROM tag_media tm JOIN tag_c t ON t.raw_id=tm.tag_id WHERE tm.media_id IN ({ph}) AND tm.origin != 0 GROUP BY tm.media_id, t.id ORDER BY t.label"))?;
-            let mut rows = tq.query(rusqlite::params_from_iter(ids.iter()))?;
+            // the chunk's media, numbered by position
+            let at: HashMap<&str, u32> = ids.iter().enumerate().rev().map(|(i, id)| (id.as_str(), i as u32)).collect();
+            let args: &[String] = if whole { &[] } else { &ids };
+            let ph = vec!["?"; args.len()].join(",");
+            let filter = if whole { String::new() } else { format!("media_id IN ({ph}) AND ") };
+            // (media, canonical tag, origin) of every tagging; a media's raw tags of one canonical
+            // tag become one tag with all their origin bits
+            let mut tags: Vec<(u32, u32, u8)> = Vec::new();
+            let mut tq = self.conn.prepare(&format!("SELECT media_id, tag_id, origin FROM tag_media WHERE {filter}origin != 0"))?;
+            let mut rows = tq.query(rusqlite::params_from_iter(args.iter()))?;
             while let Some(r) = rows.next()? {
-                tags.entry(r.get(0)?).or_default().push(TagView { label: r.get(1)?, origin: r.get(2)?, models: vec![] });
+                let Some(&m) = at.get(r.get_ref(0)?.as_str()?) else { continue };
+                let Some(&t) = canon.get(&r.get::<_, i64>(1)?) else { continue };
+                tags.push((m, t, (r.get::<_, i64>(2)? & 3) as u8));
             }
-            let mut src: std::collections::HashMap<(String, String), Vec<String>> = Default::default();
-            let mut sq = self.conn.prepare(&format!("SELECT DISTINCT s.media_id, t.label, s.model FROM tag_src s JOIN tag_c t ON t.raw_id=s.tag_id WHERE s.media_id IN ({ph}) AND s.present=1 ORDER BY s.model"))?;
-            let mut rows = sq.query(rusqlite::params_from_iter(ids.iter()))?;
-            while let Some(r) = rows.next()? { src.entry((r.get(0)?, r.get(1)?)).or_default().push(r.get(2)?); }
-            let mut bq = self.conn.prepare(&format!("SELECT media_id, reason FROM bad_media WHERE media_id IN ({ph})"))?;
-            let bad: std::collections::HashMap<String, String> = bq.query_map(rusqlite::params_from_iter(ids.iter()), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
-            for it in chunk {
+            tags.sort_unstable();
+            // (media, canonical tag, model) of the models that proposed each tag, models numbered
+            let mut models: Vec<String> = Vec::new();
+            let mut model_no: HashMap<String, u32> = HashMap::new();
+            let mut src: Vec<(u32, u32, u32)> = Vec::new();
+            let mut sq = self.conn.prepare(&format!("SELECT media_id, tag_id, model FROM tag_src WHERE {filter}present=1"))?;
+            let mut rows = sq.query(rusqlite::params_from_iter(args.iter()))?;
+            while let Some(r) = rows.next()? {
+                let Some(&m) = at.get(r.get_ref(0)?.as_str()?) else { continue };
+                let Some(&t) = canon.get(&r.get::<_, i64>(1)?) else { continue };
+                let name = r.get_ref(2)?.as_str()?;
+                let k = match model_no.get(name) { Some(&k) => k, None => {
+                    models.push(name.to_string());
+                    model_no.insert(name.to_string(), (models.len() - 1) as u32);
+                    (models.len() - 1) as u32
+                } };
+                src.push((m, t, k));
+            }
+            src.sort_unstable();
+            src.dedup();
+            let mut bq = self.conn.prepare(&if whole { "SELECT media_id, reason FROM bad_media".to_string() } else { format!("SELECT media_id, reason FROM bad_media WHERE media_id IN ({ph})") })?;
+            let bad: HashMap<String, String> = bq.query_map(rusqlite::params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+            let (mut ti, mut si) = (0, 0);
+            for (n, it) in chunk.iter_mut().enumerate() {
+                let n = n as u32;
                 it.bad = bad.get(&it.media_id).cloned();
-                it.tags = tags.remove(&it.media_id).unwrap_or_default();
-                for tag in &mut it.tags {
-                    tag.models = src.remove(&(it.media_id.clone(), tag.label.clone())).unwrap_or_default();
+                let mut list: Vec<TagView> = Vec::new();
+                while ti < tags.len() && tags[ti].0 == n {
+                    let (_, t, mut origin) = tags[ti];
+                    ti += 1;
+                    while ti < tags.len() && tags[ti].0 == n && tags[ti].1 == t { origin |= tags[ti].2; ti += 1; }
+                    // the models of this tag (those of tags the media does not carry are skipped)
+                    while si < src.len() && (src[si].0, src[si].1) < (n, t) { si += 1; }
+                    let mut names: Vec<String> = Vec::new();
+                    while si < src.len() && src[si].0 == n && src[si].1 == t { names.push(models[src[si].2 as usize].clone()); si += 1; }
+                    names.sort();
+                    list.push(TagView { label: labels[t as usize].clone(), origin, models: names });
                 }
+                while si < src.len() && src[si].0 == n { si += 1; }
+                it.tags = list;
             }
         }
         Ok(items)
@@ -1365,11 +1394,70 @@ impl Store {
         self.conn.query_row(&format!("SELECT count(*) FROM media m WHERE m.post_id=?1 AND {LIVE_SQL}"), [post_id], |r| r.get(0))
     }
 
-    /// Every tag with how many media carry it, by origin bit.
+    /// Every tag with how many live media carry it, by origin bit; most used first.
+    ///
+    /// Counted here rather than in SQL: a GROUP BY with three DISTINCT counts over every tagging
+    /// joined to its media by text id took most of a second in a library of 50,000 media (all of
+    /// it at launch); one pass over the rows, numbered and sorted, takes a fraction of that.
     pub fn all_tags(&self) -> rusqlite::Result<Vec<TagCount>> {
-        let mut st = self.conn.prepare("SELECT t.label, count(DISTINCT tm.media_id), count(DISTINCT CASE WHEN tm.origin & 1 != 0 THEN tm.media_id END), count(DISTINCT CASE WHEN tm.origin & 2 != 0 THEN tm.media_id END) FROM tag_c t JOIN tag_media tm ON tm.tag_id=t.raw_id JOIN media m ON m.id=tm.media_id WHERE tm.origin != 0 AND NOT EXISTS(SELECT 1 FROM trash x WHERE x.media_id=m.id AND x.state!=0) GROUP BY t.id ORDER BY count(DISTINCT tm.media_id) DESC, t.label")?;
-        let v = st.query_map([], |r| Ok(TagCount { label: r.get(0)?, count: r.get(1)?, user: r.get(2)?, ai: r.get(3)? }))?.collect();
-        v
+        use std::collections::{HashMap, HashSet};
+        let trashed: HashSet<String> = {
+            let mut st = self.conn.prepare("SELECT media_id FROM trash WHERE state!=0")?;
+            let v = st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            v
+        };
+        // live media, numbered
+        let mut live: HashMap<String, u32> = HashMap::new();
+        {
+            let mut st = self.conn.prepare("SELECT id FROM media")?;
+            let mut rows = st.query([])?;
+            while let Some(r) = rows.next()? {
+                let id: String = r.get(0)?;
+                if !trashed.contains(&id) { let n = live.len() as u32; live.insert(id, n); }
+            }
+        }
+        // every raw tag's canonical tag, numbered, with its label
+        let mut canon: HashMap<i64, u32> = HashMap::new();
+        let mut labels: Vec<String> = Vec::new();
+        {
+            let mut ids: HashMap<i64, u32> = HashMap::new();
+            let mut st = self.conn.prepare("SELECT r.id, c.id, c.label FROM tag r JOIN tag c ON c.id = coalesce(r.canon, r.id)")?;
+            let mut rows = st.query([])?;
+            while let Some(r) = rows.next()? {
+                let c: i64 = r.get(1)?;
+                let n = *ids.entry(c).or_insert_with(|| { labels.push(String::new()); (labels.len() - 1) as u32 });
+                if labels[n as usize].is_empty() { labels[n as usize] = r.get(2)?; }
+                canon.insert(r.get(0)?, n);
+            }
+        }
+        // (tag, media, origin) of every live tagging; a media tagged under two spellings of one
+        // tag counts once, with both origins
+        let mut rows: Vec<(u32, u32, u8)> = Vec::new();
+        {
+            let mut st = self.conn.prepare("SELECT media_id, tag_id, origin FROM tag_media WHERE origin != 0")?;
+            let mut q = st.query([])?;
+            while let Some(r) = q.next()? {
+                let Some(&m) = live.get(r.get_ref(0)?.as_str()?) else { continue };
+                let Some(&t) = canon.get(&r.get::<_, i64>(1)?) else { continue };
+                rows.push((t, m, r.get::<_, i64>(2)? as u8));
+            }
+        }
+        rows.sort_unstable();
+        let mut counts: Vec<(i64, i64, i64)> = vec![(0, 0, 0); labels.len()];
+        let mut i = 0;
+        while i < rows.len() {
+            let (t, m, mut origin) = rows[i];
+            i += 1;
+            while i < rows.len() && rows[i].0 == t && rows[i].1 == m { origin |= rows[i].2; i += 1; }
+            let c = &mut counts[t as usize];
+            c.0 += 1;
+            if origin & 1 != 0 { c.1 += 1; }
+            if origin & 2 != 0 { c.2 += 1; }
+        }
+        let mut v: Vec<TagCount> = labels.into_iter().zip(counts).filter(|(_, c)| c.0 > 0)
+            .map(|(label, (count, user, ai))| TagCount { label, count, user, ai }).collect();
+        v.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.label.cmp(&b.label)));
+        Ok(v)
     }
 
     pub fn stats(&self) -> rusqlite::Result<Stats> {
@@ -1377,7 +1465,7 @@ impl Store {
         Ok(Stats { posts: q(&format!("SELECT count(DISTINCT m.post_id) FROM media m WHERE {LIVE_SQL}"))?,
             photos: q(&format!("SELECT count(*) FROM media m WHERE m.kind='photo' AND {LIVE_SQL}"))?,
             videos: q(&format!("SELECT count(*) FROM media m WHERE m.kind='video' AND {LIVE_SQL}"))?,
-            tags: q(&format!("SELECT count(DISTINCT t.id) FROM tag_media tm JOIN tag_c t ON t.raw_id=tm.tag_id JOIN media m ON m.id=tm.media_id WHERE tm.origin != 0 AND {LIVE_SQL}"))?,
+            tags: self.all_tags()?.len() as i64,
             pending_jobs: q("SELECT count(*) FROM job WHERE status='pending'")?, failed_jobs: q("SELECT count(*) FROM job WHERE status='failed'")?,
             trashed: q("SELECT count(*) FROM trash x JOIN media m ON m.id=x.media_id WHERE x.state=1")?,   // as listed (awaited files are not shown)
             bad: q(&format!("SELECT count(*) FROM bad_media b JOIN media m ON m.id=b.media_id WHERE {LIVE_SQL}"))?,

@@ -136,7 +136,6 @@ enum Mascot {
 /// The little Clawd of core/src/pet.rs: a view paints its rectangles and passes on the pointer and
 /// the taps. Top-left coordinates.
 final class PetEngine {
-    struct Rect { let frame: CGRect; let color: CGColor }
     private let handle = tl_pet_new(UInt64.random(in: 1...UInt64.max))
     private let capacity = 400
     private let buffer: UnsafeMutablePointer<Double>

@@ -34,7 +34,7 @@ TwimShelf  能把你喜欢的帖子、图片和视频保存到自己的设备上
 | Android | Flutter | Android 12 | `.apk` |
 | Windows | Flutter | Windows 10 1803 | `setup.exe` |
 | Linux | Flutter | 见[构建指南](BUILDING.md) | `.AppImage` |
-| macOS、iPhone、iPad | Flutter | macOS 14、iOS 17 | `.dmg`、未签名 `.ipa` |
+| macOS、iPhone、iPad | Flutter | macOS 15、iOS 18 | `.dmg`、未签名 `.ipa` |
 | Linux 服务器 | 服务器 + 网页版 | Docker（x86_64、arm64） | Docker 镜像 `ghcr.io/xgwytwgdyu/twimshelf` |
 | Chrome、Edge 等 | 浏览器扩展 | Chromium 116 | 仓库里的 `extension` 目录 |
 

@@ -131,9 +131,6 @@ struct SettingsRootView: View {
                               isOn: Binding(get: { LibraryPrefs.badOnly }, set: { LibraryPrefs.badOnly = $0 }))
                     RowDivider(inset: 42)
                 }
-                ToggleRow(symbol: "headphones", color: .pink, title: L("settings.headphonesOnly"),
-                          isOn: Binding(get: { AudioPolicy.headphonesOnly }, set: { AudioPolicy.headphonesOnly = $0 }))
-                RowDivider(inset: 42)
                 ToggleRow(symbol: "hand.raised.slash.fill", color: .indigo, title: L("settings.noGestures"),
                           isOn: Binding(get: { LibraryPrefs.playerGesturesOff }, set: { LibraryPrefs.playerGesturesOff = $0 }))
 

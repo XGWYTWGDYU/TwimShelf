@@ -45,11 +45,11 @@ class FakeSetup extends Setup {
 Product _product([String version = '0.2.0']) => Product(id: 'synthetic.app', name: 'TwimShelf', version: version, publisher: '', executable: 'app.exe');
 final _s = S.of(const Locale('en'));
 
-Future<FakeSetup> _pump(WidgetTester t, {String? payload = 'payload', InstalledCopy? copy, String? data, bool desktop = false, int failures = 0}) async {
+Future<FakeSetup> _pump(WidgetTester t, {String? payload = 'payload', InstalledCopy? copy, String? data, bool desktop = false, int failures = 0, bool update = false}) async {
   await t.binding.setSurfaceSize(const Size(640, 520));
   final fake = FakeSetup(_product(), copy: copy, data: data, desktop: desktop, failures: failures);
   await t.pumpWidget(MaterialApp(
-    home: SetupPage(product: fake.product, payload: payload, setupFolder: r'C:\setup', strings: _s, setup: fake),
+    home: SetupPage(product: fake.product, payload: payload, setupFolder: r'C:\setup', strings: _s, setup: fake, update: update),
   ));
   await t.pump();
   return fake;
@@ -64,6 +64,22 @@ Future<void> _go(WidgetTester t) async {
 InstalledCopy _copy(String? version) => InstalledCopy(folder: r'D:\Apps\TwimShelf', version: version);
 
 void main() {
+  group('the app updating itself (--update)', () {
+    testWidgets('an older installed copy is replaced at once, where it is, without a click', (t) async {
+      // a failing run stops before the new version is started (which would end the test)
+      final fake = await _pump(t, copy: _copy('0.1.0'), desktop: true, failures: 1, update: true);
+      await t.pump();
+      expect(fake.runs, 1);
+      expect(find.byKey(const ValueKey('go')), findsNothing);
+    });
+    testWidgets('a first install or a downgrade still asks', (t) async {
+      for (final copy in [null, _copy('9.0.0')]) {
+        final fake = await _pump(t, copy: copy, update: true);
+        await t.pump();
+        expect(fake.runs, 0);
+      }
+    });
+  });
   group('versions', () {
     test('compare by number, not by text', () {
       expect(compareVersions('0.9.0', '0.10.0'), lessThan(0));

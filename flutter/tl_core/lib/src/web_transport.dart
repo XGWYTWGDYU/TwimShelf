@@ -169,13 +169,6 @@ Future<String> uploadBytes(String name, Uint8List bytes) async {
   return (jsonDecode(r.$2) as Map<String, dynamic>)['path'] as String;
 }
 
-/// Sends a browser file (a `File`/`Blob`, streamed by the browser) to the server; its path there.
-Future<String> uploadBlob(String name, web.Blob blob) async {
-  final r = await _fetch('api/upload?name=${Uri.encodeQueryComponent(name)}', 'POST', blob, 'application/octet-stream');
-  if (r.$1 != 200) throw RemoteCoreError(r.$1, r.$2);
-  return (jsonDecode(r.$2) as Map<String, dynamic>)['path'] as String;
-}
-
 /// An HTTP request made by the server on the page's behalf (other origins refuse a page).
 Future<({int status, Map<String, String> headers, Uint8List body})> proxyRequest(String method, Uri url,
     {Map<String, String> headers = const {}, List<int>? body}) async {

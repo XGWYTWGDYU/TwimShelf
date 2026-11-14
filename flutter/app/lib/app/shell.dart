@@ -18,6 +18,8 @@ import '../screens/settings_page.dart';
 import '../screens/data_home_page.dart';
 import '../services/updates.dart';
 import '../screens/browse_page.dart';
+import '../widgets/activity_panel.dart';
+import 'activity.dart';
 import 'library.dart';
 import 'places.dart';
 import 'prefs.dart';
@@ -59,6 +61,8 @@ class _ShellState extends State<Shell> {
 
   LibraryModel get library => widget.library;
   Prefs get prefs => Prefs.instance;
+  /// What runs in the background, for the progress panel over every page.
+  late final ActivityCenter _activity = ActivityCenter(library);
 
   /// Share the browse navigator across layouts so resizing reparents its live search and feed.
   GlobalKey<NavigatorState> _navigator(Place p) {
@@ -117,6 +121,7 @@ class _ShellState extends State<Shell> {
 
   @override
   void dispose() {
+    _activity.dispose();
     library.removeListener(_changed);
     library.revealRequest.removeListener(_reveal);
     library.filterRequest.removeListener(_showFilter);
@@ -185,10 +190,16 @@ class _ShellState extends State<Shell> {
       child: DropImport(
         shares: library.shares,
         child: MascotPetLayer(
-          child: switch (layout) {
-            ShellLayout.bar => _withChrome(_barLayout()),
-            ShellLayout.sidebar => _sidebarLayout(),
-          },
+          child: Stack(children: [
+            Positioned.fill(
+              child: switch (layout) {
+                ShellLayout.bar => _withChrome(_barLayout()),
+                ShellLayout.sidebar => _sidebarLayout(),
+              },
+            ),
+            // over every page; above the floating bar on a phone (its capsule is about 72 high)
+            ActivityPanel(center: _activity, compact: layout == ShellLayout.bar, bottomInset: layout == ShellLayout.bar ? 72 : 0),
+          ]),
         ),
       ),
     );

@@ -61,9 +61,6 @@ final class MacSettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) { panel.didHide() }
-
-    /// The media viewer no longer shares a window with the settings: nothing to do.
-    func viewerChanged(open: Bool) {}
 }
 
 /// The panel: a header (back, title, close) above the current page; pages push and pop.
@@ -192,6 +189,9 @@ final class MacTagsPage: NSViewController {
     override func loadView() {
         model.window = { [weak self] in self?.view.window }
         let host = NSHostingView(rootView: TagCardsView(model: model))
+        // sized by the panel, never by its content (as SettingsHost): a SwiftUI size made into
+        // required constraints can resize the window it is in
+        host.sizingOptions = []
         host.setAccessibilityIdentifier("tagCards")
         view = host
         view.frame = NSRect(x: 0, y: 0, width: 680, height: 560)
@@ -202,10 +202,7 @@ final class MacTagsPage: NSViewController {
 /// The page's state and the actions behind its menus (alerts and sheets belong to the window).
 @MainActor
 final class TagsModel: ObservableObject {
-    enum Sort: String, CaseIterable {
-        case count, ai, mine, name
-        var title: String { switch self { case .count: L("tags.sort.count"); case .ai: L("tags.sort.ai"); case .mine: L("tags.sort.mine"); case .name: L("common.name") } }
-    }
+    typealias Sort = TagSort
     enum Show: String, CaseIterable {
         case all, mine, ai, both
         var title: String { switch self { case .all: L("search.kw.all.word"); case .mine: L("search.kw.mine.word"); case .ai: L("search.kw.ai.word"); case .both: L("search.kw.common.word") } }
@@ -213,7 +210,7 @@ final class TagsModel: ObservableObject {
 
     @Published var all: [TagCount] = []
     @Published var query = ""
-    @Published var sort = Sort.count
+    @Published var sort = TagSort.saved { didSet { TagSort.saved = sort } }
     @Published var show = Show.all
     @Published var loaded = false
     var window: () -> NSWindow? = { nil }
@@ -237,12 +234,7 @@ final class TagsModel: ObservableObject {
         case .ai: v = v.filter { $0.ai > 0 }
         case .both: v = v.filter { Self.common($0) > 0 }
         }
-        switch sort {
-        case .count: return v.sorted { ($0.count, $1.label) > ($1.count, $0.label) }
-        case .ai: return v.sorted { ($0.ai, $1.label) > ($1.ai, $0.label) }
-        case .mine: return v.sorted { ($0.user, $1.label) > ($1.user, $0.label) }
-        case .name: return v.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
-        }
+        return sort.apply(v)
     }
 
     func showOnHome(_ label: String) { NotificationCenter.default.post(name: MacFeedViewController.showLabelNote, object: label) }

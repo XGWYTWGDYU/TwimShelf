@@ -48,12 +48,6 @@ enum StorageReport {
         return p >= 10 ? String(format: "%.0f%%", p) : String(format: "%.1f%%", p)
     }
 
-    /// Free space on the volume the app is on.
-    static func freeSpace() -> Int64? {
-        let values = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage
-    }
-
     /// Clears [keys] off the main thread. `done` on the main thread gets what could not be cleared
     /// and why. Files of the "cache" group touched in the last hour stay: a share or an export may
     /// be using them.

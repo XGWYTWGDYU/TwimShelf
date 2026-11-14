@@ -370,14 +370,6 @@ final class ModelPromptEditor: UIStackView {
         onSaved()
     }
 
-    /// Another device's change comes in: it shows, unless something is being typed here.
-    func refresh() {
-        let now = ModelPrompts.prompt(forModel: model)
-        guard now != saved else { return }
-        let edited = AIEngine.Prompt(system: system.text, prompt: prompt.text, context: context.text, existing: existing.text, vocabulary: vocabulary.text)
-        if edited == saved { fill(now) }
-        saved = now
-    }
 }
 
 /// One field of a form: what it is above, what is typed below, with room around them.

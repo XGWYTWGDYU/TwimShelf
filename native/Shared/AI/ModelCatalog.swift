@@ -21,7 +21,6 @@ struct CatalogModel: Hashable, Decodable {
 enum ModelCatalog {
     static let all: [CatalogModel] = Core.modelCatalog(format: "mlx")
     static var taggers: [CatalogModel] { all.filter { $0.role == .tagger } }
-    static var embedders: [CatalogModel] { all.filter { $0.role == .embedder } }
     static func find(_ repo: String) -> CatalogModel? { all.first { $0.repo == repo } }
 
     /// A sensible default for this device's memory: the largest tagger recommended for it.
@@ -109,18 +108,19 @@ final class ModelStore {
     }
 
     func info(_ id: String?) -> Core.ModelInfo? { id.flatMap { i in installed.first { $0.id == i } } }
-    var activeTagger: Core.ModelInfo? { info(activeTaggerId) }
     var activeEmbedder: Core.ModelInfo? { info(activeEmbedderId) }
 
     /// Friendly name for a model id (catalog name when known, else the folder name).
     func displayName(_ id: String) -> String {
-        if let e = ExternalModels.find(id) { return L("format.nameDetail", e.title, e.kindLabel) }
+        // only an "ext:" id can be an external model: the list is a setting in the core, and every
+        // tag of every card asked for it (on the main thread, waiting for the library behind any
+        // long read, which made filling a card in a large library take 80 ms)
+        if ExternalModels.isExternal(id), let e = ExternalModels.find(id) { return L("format.nameDetail", e.title, e.kindLabel) }
         let repo = installed.first { $0.id == id }?.repo ?? id.replacingOccurrences(of: "--", with: "/")
         return ModelCatalog.find(repo)?.displayName ?? id.components(separatedBy: "--").last ?? id
     }
 
     func isInstalled(repo: String) -> Bool { installed.contains { $0.repo == repo } }
-    func id(forRepo repo: String) -> String? { installed.first { $0.repo == repo }?.id }
 
     /// Keeps defaults valid and picks one when none is set; never triggers re-tagging.
     func adoptInstalled() {

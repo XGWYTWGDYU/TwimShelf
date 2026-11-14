@@ -120,15 +120,15 @@ fn wait(mut done: impl FnMut() -> bool) { let until = Instant::now() + Duration:
     let cancelled = tl_core::verify::summary(&f.lib).unwrap().last.unwrap();
     assert_eq!(cancelled.outcome, "cancelled"); assert!(!cancelled.finished);
 }
-#[test] fn schema_migration_preserves_v13_data() {
+#[test] fn schema_migration_preserves_v14_data() {
     let path = std::env::temp_dir().join(format!("tl-migration-{}.db", rand::random::<u64>()));
-    { let s = Store::open(path.to_str().unwrap()).unwrap(); s.upsert_post(&PostMeta { id: "keep".into(), ..Default::default() }).unwrap(); s.conn().execute_batch("DROP TABLE verified_media; PRAGMA user_version=13;").unwrap(); }
+    { let s = Store::open(path.to_str().unwrap()).unwrap(); s.upsert_post(&PostMeta { id: "keep".into(), ..Default::default() }).unwrap(); s.conn().execute_batch("DROP TABLE verified_media; PRAGMA user_version=14;").unwrap(); }
     { let s = Store::open(path.to_str().unwrap()).unwrap(); assert_eq!(s.conn().query_row("SELECT count(*) FROM post WHERE id='keep'", [], |r|r.get::<_,i64>(0)).unwrap(), 1); assert_eq!(s.conn().query_row("SELECT count(*) FROM verified_media", [], |r|r.get::<_,i64>(0)).unwrap(), 0); }
     let _ = std::fs::remove_file(path);
 }
 
-/// Triage mode was removed in schema 15: a library from an older version (with its local
-/// `triage` table) opens without it, whatever version it comes from; a current one is untouched.
+/// Triage mode was removed in schema 15: a library of the first release (schema 14, with its
+/// local `triage` table) opens without it; a current one is untouched.
 #[test] fn old_triage_records_are_dropped_on_upgrade() {
     let d = std::env::temp_dir().join(format!("tl-triage-drop-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
@@ -137,7 +137,7 @@ fn wait(mut done: impl FnMut() -> bool) { let until = Instant::now() + Duration:
     {
         let c = rusqlite::Connection::open(&path).unwrap();
         c.execute_batch("CREATE TABLE triage(post_id TEXT PRIMARY KEY, decision TEXT NOT NULL, folder TEXT, moved TEXT NOT NULL, at INTEGER NOT NULL);
-            INSERT INTO triage VALUES('p','keep',NULL,'[]',0); PRAGMA user_version=12;").unwrap();
+            INSERT INTO triage VALUES('p','keep',NULL,'[]',0); PRAGMA user_version=14;").unwrap();
     }
     let s = Store::open(&path).unwrap();
     let left: i64 = s.conn().query_row("SELECT count(*) FROM sqlite_master WHERE name='triage'", [], |r| r.get(0)).unwrap();

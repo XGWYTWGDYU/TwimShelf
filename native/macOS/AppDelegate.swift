@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSSearchFieldDelegate {
@@ -96,6 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     }
 
     private var libraryReady = false
+    /// The main window's last frame at or above its minimum size (see `guardWindowSize`).
+    private var lastGoodFrame: NSRect?
     private var pendingOpenURLs: [URL] = []
     @MainActor private func finishOpening() {
         #if DEBUG
@@ -117,11 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         #endif
         MemoryPressure.start()
         CrashWatch.shared.start()
-        #if !DEBUG
-        Keychain.migrateDebugSecrets()
-        #endif
         Session.applyStoredCookies()
-        AudioPolicy.observe()
         ModelStore.shared.configure()
         ActivityCenter.shared.start()
         GridThumbnails.keepLibraryWarm { NSScreen.main?.backingScaleFactor ?? 2 }   // grid thumbnails made ahead of time
@@ -179,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         window.toolbarStyle = .unified
         refreshChrome()
         NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.fitSearchWidth() }
+            MainActor.assumeIsolated { self?.guardWindowSize(); self?.fitSearchWidth() }
         }
         NotificationCenter.default.addObserver(forName: ActivityCenter.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { if let self, self.root.content.place == .browse || self.root.content.place == .trash { self.refreshChrome() } }
@@ -261,17 +260,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
     }
 
-    /// .tlpack opened from Finder or AirDrop.
+    /// twimshelf://share — the share extension launched the app. (No file opens the app: a
+    /// backup is imported only from 导入与备份, never by opening it in Finder.)
     func application(_ application: NSApplication, open urls: [URL]) {
         guard libraryReady else { pendingOpenURLs.append(contentsOf: urls); return }
-        // twimshelf://share — the share extension launched the app
         if urls.contains(where: { $0.scheme?.hasPrefix("twimshelf") == true }) { ShareInbox.importPending() }
-        for url in urls where url.pathExtension.lowercased() == "tlpack" {
-            macRun(window, { try Core.importPack(url) }) { r in
-                NotificationCenter.default.post(name: .libraryChanged, object: nil)
-                macAlert(self.window, L("app.imported", r.posts, r.media))
-            }
-        }
     }
 
     #if DEBUG
@@ -411,8 +404,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
     }
 
-    /// Walks the main screens and saves a picture of each (synthetic library only).
-    static func allViews(in v: NSView) -> [NSView] { [v] + v.subviews.flatMap { allViews(in: $0) } }
     /// The viewer under a storm of trackpad swipes (TL_VIEWER_STRESS = report file): quick and
     /// slow ones, flicks with momentum, swipes that catch the strip mid-way, past both ends, and
     /// arrow keys between them, over every media of the library (TL_TOUR_POSTS imported first).
@@ -1249,6 +1240,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
 
     /// The search field gets about a quarter of the window, so the toolbar's own items (title,
     /// zoom, 选择, More) always fit beside it, down to the narrowest window.
+    /// The main window was once found 0 points wide (an invisible window, the app still running),
+    /// which its minimum size does not prevent: that applies to resizing by hand, not to frames set
+    /// in code or by the system. Such a frame goes back to the last good one, and what set it is
+    /// written to the system log (Console: subsystem of the app, category "window") to find it.
+    private func guardWindowSize() {
+        guard window.isVisible, !window.isMiniaturized, !window.styleMask.contains(.fullScreen) else { return }
+        let f = window.frame, min = window.minSize
+        if f.width >= min.width - 1, f.height >= min.height - 1 { lastGoodFrame = f; return }
+        let stack = Thread.callStackSymbols.prefix(40).joined(separator: "\n")
+        Logger(subsystem: Bundle.main.bundleIdentifier ?? "TwimShelf", category: "window")
+            .error("main window shrank to \(NSStringFromRect(f), privacy: .public) (minimum \(NSStringFromSize(min), privacy: .public)); restoring. Set by:\n\(stack, privacy: .public)")
+        let restore = lastGoodFrame ?? NSRect(origin: f.origin, size: NSSize(width: max(min.width, 1180), height: max(min.height, 820)))
+        // after the change that is running now has finished (no frame change inside its notification)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window.frame.width < min.width - 1 || self.window.frame.height < min.height - 1 else { return }
+            self.window.setFrame(restore, display: true)
+        }
+    }
+
     private func fitSearchWidth() {
         tokenSearch.setWidth(window.frame.width * 0.28)
     }
@@ -1530,8 +1540,6 @@ extension AppDelegate {
                .init(width: 900, height: 700), .init(width: 1400, height: 900)]
         var log: [String] = []
         var activePage: NSViewController?
-        var previousCardHeights: [CGFloat] = []
-        var previousContentWidth: CGFloat = 0
         var failures = 0
         func check(_ condition: Bool, _ message: String) {
             if !condition { failures += 1; log.append("FAIL " + message) }
@@ -1564,7 +1572,6 @@ extension AppDelegate {
                 panel.push(page, title: name)
                 (page as? FormPane)?.resume()
                 activePage = page
-                previousCardHeights = []
             }
             testWindow.appearance = NSAppearance(named: index % sizes.count < 2 ? .aqua : .darkAqua)
             guard let page = activePage else { return }

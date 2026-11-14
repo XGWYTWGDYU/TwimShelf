@@ -44,7 +44,6 @@ final class MacMediaGridView: NSView {
     var level: Int { scene?.engine.rest.level ?? initialLevel }
     var levelCount: Int { scene?.engine.cfg.levels ?? 3 }
     var columns: Int { scene.map { $0.engine.cfg.columns[$0.engine.rest.level] } ?? 0 }
-    var isZooming: Bool { scene?.engine.isZooming == true }
 
     override var isFlipped: Bool { true }
 
@@ -374,11 +373,6 @@ final class MacMediaGridView: NSView {
         let maxY = cfg.maxOffset(level: r.level, phase: r.phase) - cfg.insetTop
         let y = min(max(scrollView.contentView.bounds.origin.y + dy, -cfg.insetTop), maxY)
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: y))
-    }
-    fileprivate var debugAtBottom: Bool {
-        guard let scene else { return true }
-        let r = scene.engine.rest
-        return r.offset >= scene.engine.cfg.maxOffset(level: r.level, phase: r.phase) - 1
     }
     fileprivate func debugPinchBegin(at p: CGPoint) {
         guard let scene else { return }

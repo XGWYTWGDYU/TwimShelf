@@ -160,7 +160,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 root.debugWindowTour(scene, sizes: [CGSize(width: 1194, height: 834), CGSize(width: 1000, height: 760), CGSize(width: 760, height: 760), CGSize(width: 600, height: 800), CGSize(width: 400, height: 800)], log: log)
             }
             #endif
-            if !options.urlContexts.isEmpty { self.scene(scene, openURLContexts: options.urlContexts) }
         }
     }
 
@@ -172,34 +171,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if AppDelegate.libraryReady { ShareInbox.importPending() }
     }
 
-    /// Handles .tlpack files opened from Files or AirDrop.
-    func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
-        Task {
-            guard await AppDelegate.ready.value else { return }
-            for ctx in contexts {
-                let url = ctx.url
-                let ext = url.pathExtension.lowercased()
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    let message: String
-                    do {
-                        guard ext == "tlpack" else { return }
-                        let r = try Core.importPack(url)
-                        message = L("app.imported", r.posts, r.media)
-                    } catch { message = L("app.importFailed", error.localizedDescription) }
-                    DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: .libraryChanged, object: nil)
-                        let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-                        a.addAction(UIAlertAction(title: L("common.ok"), style: .default))
-                        var top = self.window?.rootViewController
-                        while let p = top?.presentedViewController { top = p }
-                        top?.present(a, animated: true)
-                    }
-                }
-            }
-        }
-    }
 }
 
 #if DEBUG

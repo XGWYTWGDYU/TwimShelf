@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -15,7 +16,9 @@ import '../platform/os.dart';
 /// 检查更新, in GitHub builds only: they are built with `--dart-define=TL_UPDATE_REPO=owner/name`;
 /// every other build has none and never looks. At most once a day when the app opens, or when
 /// asked in Settings. iOS and iPadOS open the release page; elsewhere the release's installer
-/// is downloaded, checked against the release (size, SHA-256) and started.
+/// is downloaded, checked against the release (size, SHA-256) and started: in one click on
+/// Windows (the setup replaces this copy without asking and starts the new one) and Linux (the
+/// AppImage replaces itself); Android downloads the APK as soon as there is one and opens it.
 class Updates {
   Updates._();
   static const repo = String.fromEnvironment('TL_UPDATE_REPO');
@@ -27,7 +30,7 @@ class Updates {
   static List<String> get _suffixes {
     if (OS.isMacOS) return const ['.dmg'];
     if (OS.isAndroid) return const ['.apk'];
-    if (OS.isWindows) return const ['.msix', '.exe'];
+    if (OS.isWindows) return const ['.exe'];
     // an AppImage replaces itself; installed any other way, the release page
     if (OS.isLinux && OS.environment['APPIMAGE'] != null) return const ['.AppImage'];
     return const [];
@@ -78,6 +81,14 @@ class Updates {
 
   static Future<void> offer(BuildContext context, UpdateInfo info) async {
     final installs = info.asset_url != null;
+    // Android: the APK is fetched at once, so that Install opens it straight away
+    String? apk;
+    if (installs && OS.isAndroid) {
+      try {
+        apk = await _download(info);
+      } catch (_) {}
+      if (!context.mounted) return;
+    }
     final choice = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
@@ -101,7 +112,27 @@ class Updates {
       if (u != null && u.scheme == 'https') await launchUrl(u, mode: LaunchMode.externalApplication);
       return;
     }
+    if (apk != null) {
+      await _openApk(apk);
+      return;
+    }
     await _install(context, info);
+  }
+
+  static Future<String> _download(UpdateInfo info) async {
+    final dir = await TlNative.updatesDir() ?? '${(await getTemporaryDirectory()).path}${OS.pathSeparator}updates';
+    return coreRunAsync(() => Core.downloadUpdate(info, dir));
+  }
+
+  /// Hands the APK to the system's installer. When this app may not install packages yet, the
+  /// system's page for allowing it opens instead, and the installer follows once back here.
+  static Future<void> _openApk(String file) async {
+    if (await TlNative.installApk(file)) return;
+    late final AppLifecycleListener back;
+    back = AppLifecycleListener(onResume: () {
+      back.dispose();
+      unawaited(TlNative.installApk(file));
+    });
   }
 
   /// Puts a downloaded AppImage in the place of [self]. The download may be on another file
@@ -126,17 +157,18 @@ class Updates {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(SnackBar(content: Text(L('update.downloading')), duration: const Duration(minutes: 10)));
     try {
-      final dir = await TlNative.updatesDir() ?? '${(await getTemporaryDirectory()).path}${OS.pathSeparator}updates';
-      final file = await coreRunAsync(() => Core.downloadUpdate(info, dir));
+      final file = await _download(info);
       messenger.hideCurrentSnackBar();
       if (OS.isAndroid) {
-        await TlNative.installApk(file);
+        await _openApk(file);
       } else if (OS.isMacOS) {
         await Process.run('open', [file]);
         messenger.showSnackBar(SnackBar(content: Text(L('update.opened.mac'))));
       } else if (OS.isWindows) {
-        // the installer (MSIX: App Installer) takes over and replaces this version
-        await Process.start('explorer.exe', [file], mode: ProcessStartMode.detached);
+        // one click: the setup installs over this copy without asking, then starts the new
+        // version (a copy it did not install, it offers as usual)
+        await Process.start(file, const ['--update'], mode: ProcessStartMode.detached);
+        exit(0);
       } else if (OS.isLinux) {
         // an AppImage is the app: the new one takes the old one's place, then starts
         final self = OS.environment['APPIMAGE']!;

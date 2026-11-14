@@ -211,9 +211,11 @@ final class GridThumbnails {
             guard !added.isEmpty || old != ids else { return }
             for it in added {
                 guard libraryCounter.value == gen else { known[dir.path] = nil; return }
-                let url = cacheURL(it, in: dir)
-                if fresh(url, for: it) { continue }
+                // the whole step in its own pool: the file checks' URLs, attributes and errors were
+                // kept until the last of tens of thousands of media had been visited
                 autoreleasepool {
+                    let url = cacheURL(it, in: dir)
+                    if fresh(url, for: it) { return }
                     if let img = decodeOriginal(it, minSide: side), let sq = square(img, side: side) { write(sq, to: url) }
                 }
             }

@@ -40,23 +40,6 @@ enum L10n {
         return String(format: fmt, locale: Locale.current, arguments: values)
     }
 
-    /// The text of `key` in every language of the app (words that may be typed in any of them,
-    /// such as the search's conditions), the current language first.
-    static func everyLanguage(_ key: String) -> [String] {
-        var out: [String] = [L(key)]
-        for b in bundles.values {
-            let v = b.localizedString(forKey: key, value: "\u{1}", table: nil)
-            if v != "\u{1}", !out.contains(v) { out.append(v) }
-        }
-        return out
-    }
-
-    private static let bundles: [String: Bundle] = {
-        var d: [String: Bundle] = [:]
-        for l in languages { if let p = Bundle.main.path(forResource: l, ofType: "lproj"), let b = Bundle(path: p) { d[l] = b } }
-        return d
-    }()
-
     private enum Kind { case object, integer, double }
 
     /// The argument kinds of a format in argument order (positional specifiers placed by their

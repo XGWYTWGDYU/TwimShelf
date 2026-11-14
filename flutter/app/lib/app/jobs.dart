@@ -26,8 +26,6 @@ Future<CookieCheck> checkCookies(String auth, String ct0) => coreRunAsync(() => 
 
 Future<StorageUsage> loadStorageUsage(Map<String, List<String>> places) => coreRunAsync(() => Core.storageUsage(places));
 
-Future<int?> loadFreeSpace(String path) => coreRunAsync(() => Core.freeSpace(path));
-
 Future<int> emptyTrashOff() => coreRunAsync(Core.emptyTrash);
 
 Future<List<String>> loadBookmarkURLs(String path) => coreRunAsync(() => Core.bookmarkURLs(path));

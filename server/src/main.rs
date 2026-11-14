@@ -126,10 +126,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The name the account's other devices show for this server (`TL_DEVICE_NAME`).
 /// config.yaml's version (the image build passes it), or the crate's for a plain `cargo build`.
 const VERSION: &str = match option_env!("TL_VERSION") { Some(v) if !v.is_empty() => v, _ => env!("CARGO_PKG_VERSION") };
 
+/// The name the account's other devices show for this server (`TL_DEVICE_NAME`).
 pub fn device_name() -> String { env("TL_DEVICE_NAME", "TwimShelf Linux Server") }
 
 /// The server is a device of its own: once the web app has joined it to a sync account (the key
@@ -363,7 +363,6 @@ struct ProxyRequest {
 }
 fn get_method() -> String { "GET".into() }
 
-/// An HTTPS request for the page (external AI services cannot be called from another origin).
 /// A fallback font for the web app (see the top): from `cache/fonts`, or fetched from Google
 /// Fonts the first time and kept there.
 async fn gfont(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>) -> Response {
@@ -397,6 +396,7 @@ async fn gfont(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>) -> Res
     ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], bytes).into_response()
 }
 
+/// An HTTPS request for the page (external AI services cannot be called from another origin).
 async fn proxy(Json(r): Json<ProxyRequest>) -> Response {
     let res: anyhow::Result<Value> = async {
         let url = reqwest::Url::parse(&r.url)?;

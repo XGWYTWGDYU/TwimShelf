@@ -175,6 +175,3 @@ class LocalModelError implements Exception {
   @override
   String toString() => message;
 }
-
-/// For tests and isolates: whether an id names a local model folder rather than an external one.
-bool isLocalModelId(String id) => !ExternalModels.isExternal(id) && id.isNotEmpty;

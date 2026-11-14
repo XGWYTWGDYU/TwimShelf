@@ -120,7 +120,6 @@ class TokenQuery {
       _excludeRecent = false,
       _excludeExternal = false;
   List<String> get terms => List.unmodifiable(_terms);
-  List<String> get excludedTerms => List.unmodifiable(_excludedTerms);
   String? get folder => _folder;
   Set<MediaKind> get allowedKinds =>
       (_kinds.isEmpty ? MediaKind.values.toSet() : _kinds).difference(

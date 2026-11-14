@@ -31,18 +31,6 @@ enum Keychain {
     }
     static func wipeAll() { try? FileManager.default.removeItem(at: debugFile) }
     #else
-    #if os(macOS)
-    /// Release builds take over secrets that debug builds of before the separate debug library
-    /// kept in a plain file in this library, then delete the file — only once every value is
-    /// safely in the keychain (a failed save keeps the file, so nothing is lost).
-    static func migrateDebugSecrets() {
-        let file = Core.libraryDirectory.appendingPathComponent(".debug-secrets.json")
-        guard let data = try? Data(contentsOf: file), let d = try? JSONDecoder().decode([String: String].self, from: data) else { return }
-        var ok = true
-        for (k, v) in d where get(k) == nil { ok = set(k, v) && ok }
-        if ok { try? FileManager.default.removeItem(at: file) } else { AppLog.warn("keychain", L("keychain.err.migrate")) }
-    }
-    #endif
     static func get(_ key: String) -> String? {
         let q: [CFString: Any] = [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: key,
                                   kSecReturnData: true, kSecMatchLimit: kSecMatchLimitOne]

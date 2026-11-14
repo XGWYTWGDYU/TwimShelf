@@ -123,7 +123,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
                     self?.openSub(L("common.downloadPosts")) { self?.downloadSections() ?? [] } },
                 .navigation(L("common.importAndBackup"), detail: nil, icon: .init("shippingbox.fill", .systemBrown), id: "n:transfer") { [weak self] in
                     self?.openSub(L("common.importAndBackup")) { self?.transferSections() ?? [] } },
-                .navigation(L("common.tags"), detail: L("common.count", ActivityCenter.shared.stats?.tags ?? 0), icon: .init("tag.fill", .systemBlue), id: "n:tags") { [weak self] in
+                .navigation(L("common.tags"), detail: nil, icon: .init("tag.fill", .systemBlue), id: "n:tags") { [weak self] in
                     self?.navigationController?.pushViewController(TagListViewController(style: .insetGrouped), animated: true) },
             ]),
             Section(id: "view", header: L("settings.section.browse"), rows: [

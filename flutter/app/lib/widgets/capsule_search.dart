@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tl_core/tl_core.dart';
@@ -61,13 +63,13 @@ class _CapsuleSearchState extends State<CapsuleSearch> {
   void initState() {
     super.initState();
     if (widget.autofocus) WidgetsBinding.instance.addPostFrameCallback((_) => _focus.requestFocus());
-    if (widget.inline) _loadTags();
+    if (widget.inline) unawaited(_loadTags());
     if (_keys.isNotEmpty) _setText('');
     widget.addKey?.addListener(_external);
     _focus.addListener(() {
       if (widget.fullScreen || widget.inline) return;
       if (_focus.hasFocus) {
-        _loadTags();
+        unawaited(_loadTags());
         _panel.show();
       } else {
         // a tap on a panel row arrives after the field loses focus
@@ -100,9 +102,12 @@ class _CapsuleSearchState extends State<CapsuleSearch> {
     widget.onChanged(query);
   }
 
-  void _loadTags() {
+  /// The tags for the suggestions, read off the UI thread (in a large library counting every
+  /// tag takes a while, and on iOS the UI thread is the app's main thread).
+  Future<void> _loadTags() async {
     try {
-      _tags = Core.allTags();
+      final tags = await coreRunAsync(Core.allTags);
+      if (mounted) setState(() => _tags = tags);
     } catch (_) {}
   }
 

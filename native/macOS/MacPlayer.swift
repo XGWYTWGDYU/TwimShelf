@@ -17,9 +17,6 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     private let player: AVPlayer
     private let playerLayer = AVPlayerLayer()
     var onMediaGeometryChanged: (() -> Void)?
-    func displayedMediaRect(in host: NSView) -> CGRect {
-        convert(playerLayer.videoRect, to: host)
-    }
     private let hud = NSTextField(labelWithString: "")
     private let bar = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let time = NSTextField(labelWithString: "0:00 / 0:00")
@@ -126,10 +123,6 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
             self?.player.seek(to: .zero); self?.player.play()
         }
         if startAt > .zero { player.seek(to: startAt, toleranceBefore: .zero, toleranceAfter: .zero) }
-        applyAudioPolicy()
-        audioObserver = NotificationCenter.default.addObserver(forName: AudioPolicy.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.applyAudioPolicy() }
-        }
         player.playImmediately(atRate: 1)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
         scheduleHide()
@@ -180,62 +173,9 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
         onPiPRestore?(); done(true)
     }
     func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) { onPiPEnd?() }
-    var isInPiP: Bool { pip?.isPictureInPictureActive ?? false }
     required init?(coder: NSCoder) { fatalError() }
 
-    private var audioObserver: NSObjectProtocol?
-
-    /// Reminder pill near the top of the video that fades out after a few seconds.
-    /// The user chose to hear this video through the speakers (reset when headphones go away).
-    private var allowSpeaker = false
-    private var hadHeadphones = AudioPolicy.headphonesConnected
-    private weak var soundPrompt: NSView?
-
-    private func applyAudioPolicy() {
-        let now = AudioPolicy.headphonesConnected
-        if hadHeadphones && !now { allowSpeaker = false }
-        hadHeadphones = now
-        let mute = AudioPolicy.shouldMute(allowSpeaker: allowSpeaker)
-        player.isMuted = mute
-        if !mute { soundPrompt?.removeFromSuperview(); return }
-        guard soundPrompt == nil else { return }
-        let url = fileURL
-        Task { [weak self] in
-            guard await AudioPolicy.hasAudio(url) else { return }
-            await MainActor.run { self?.showSoundPrompt() }
-        }
-    }
-
-    /// "没有连接耳机，已静音 · 开启声音".
-    private func showSoundPrompt() {
-        guard soundPrompt == nil, player.isMuted else { return }
-        let l = NSTextField(labelWithString: AudioPolicy.promptText)
-        l.font = .systemFont(ofSize: 13, weight: .semibold)
-        l.textColor = .white
-        let on = ClosureButton(title: L("audio.turnOn")) { [weak self] in
-            self?.allowSpeaker = true
-            self?.player.isMuted = false
-            self?.soundPrompt?.removeFromSuperview()
-        }
-        on.setAccessibilityIdentifier("soundOn")
-        let box = NSStackView(views: [l, on])
-        box.spacing = 10
-        box.edgeInsets = NSEdgeInsets(top: 6, left: 14, bottom: 6, right: 10)
-        box.wantsLayer = true
-        box.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
-        box.layer?.cornerRadius = 14
-        box.setAccessibilityIdentifier("audioBanner")
-        box.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(box)
-        NSLayoutConstraint.activate([box.centerXAnchor.constraint(equalTo: centerXAnchor), box.topAnchor.constraint(equalTo: topAnchor, constant: 110)])
-        soundPrompt = box
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak box] in
-            NSAnimationContext.runAnimationGroup({ $0.duration = 0.4; $0.timingFunction = .springy; box?.animator().alphaValue = 0 }) { box?.removeFromSuperview() }
-        }
-    }
-
     func teardown() {
-        if let a = audioObserver { NotificationCenter.default.removeObserver(a); audioObserver = nil }
         player.pause()
         if let t = timeObserver { player.removeTimeObserver(t); timeObserver = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e) }
@@ -401,10 +341,6 @@ final class MacPhotoView: NSView {
     private var captionBottom: NSLayoutConstraint!
     private var chromeHidden = false
 
-    convenience init(url: URL) {
-        self.init(items: [FeedItem(mediaId: url.lastPathComponent, postId: "", ordinal: 0, kind: .photo, path: url.path, text: nil, authorName: nil, screenName: nil, url: nil, tags: [])], index: 0)
-    }
-
     init(items: [FeedItem], index: Int, videoStart: CMTime = .zero) {
         self.items = items
         self.index = max(0, min(index, items.count - 1))
@@ -432,6 +368,10 @@ final class MacPhotoView: NSView {
         counter.textColor = .white
         counter.setAccessibilityIdentifier("photoCounter")
         caption.setAccessibilityIdentifier("postCaptionHost")
+        // Sized by its constraints only (it fills the viewer). With the default options the
+        // SwiftUI content's size becomes required constraints: a loose media shows no caption,
+        // its content is then 0 wide at most, and AppKit shrank the whole window to 0 to obey.
+        caption.sizingOptions = []
         [caption, close, share, prev, next, counter].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
         captionBottom = caption.bottomAnchor.constraint(equalTo: bottomAnchor)
         NSLayoutConstraint.activate([
@@ -595,7 +535,6 @@ final class MacPhotoView: NSView {
     // MARK: Swipes
 
     private var swiping = false
-    private var swallowMomentum = false
     /// What the fingers moved before the gesture was known to be sideways.
     private var pending = CGSize.zero
     /// The last moments of the fingers' movement (time, sideways distance), for their speed.
@@ -786,12 +725,6 @@ final class MacViewerPage: NSView {
     let image = NSImageView()
     private(set) var player: MacPlayerView?
     var onMediaGeometryChanged: (() -> Void)?
-    func displayedMediaRect(in host: NSView) -> CGRect {
-        if let player { return player.displayedMediaRect(in: host) }
-        let size = image.image?.size ?? CGSize(width: item.width, height: item.height)
-        guard size.width > 0, size.height > 0 else { return .zero }
-        return image.convert(AVMakeRect(aspectRatio: size, insideRect: image.bounds), to: host)
-    }
     var onSwipe: ((NSEvent) -> Bool)? { didSet { scroll.onSwipe = onSwipe } }
     private var imageToken: MacMediaLoader.Token?
     private var loadedPixels: CGFloat = 0

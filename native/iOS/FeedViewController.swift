@@ -69,13 +69,13 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private let activityPanel = ActivityPanel()
     private let toast = ToastView()
 
-    // Inline autoplay: one shared muted player for the most visible video.
-    private let inlinePlayer = AVPlayer()
-    private weak var inlineHost: MediaPageView?
-    private var loopObserver: NSObjectProtocol?
-    /// The inline video's layer shows only once its first frame is ready (the still frame under
+    // Inline autoplay: every video at least half in view plays, muted, with a player of its own.
+    private lazy var inline = InlineVideos<MediaPageView>(
+        attach: { [weak self] page, player, url in self?.attachInline(page, player, url) },
+        detach: { [weak self] id, page in self?.detachedInline(id, page) })
+    /// An inline video's layer shows only once its first frame is ready (the still frame under
     /// it shows until then; an empty video layer is black).
-    private var readyObservation: NSKeyValueObservation?
+    private var readyObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -83,12 +83,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             MainActor.assumeIsolated { if self?.view.window != nil { self?.answerQuickDownloadRequest() } }
         }
         view.backgroundColor = .feedBackground
-        inlinePlayer.isMuted = true
-        inlinePlayer.automaticallyWaitsToMinimizeStalling = false
-        loopObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] n in
-            guard let self, (n.object as? AVPlayerItem) === self.inlinePlayer.currentItem else { return }
-            self.inlinePlayer.seek(to: .zero); self.inlinePlayer.play()
-        }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged(_:)), name: .libraryChanged, object: nil)
         // in the background the video layer is dropped; back in front, playback is picked up again
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -341,8 +335,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     #if DEBUG
     func debugFocusSearch() { if searchFolded { unfoldSearch() } else { searchField.becomeFirstResponder() } }
-    func debugClearSearch() { clearSearch() }
-    var debugSearchFolded: Bool { searchFolded }
     #endif
 
     private func layoutSearchChrome() {
@@ -913,6 +905,10 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) {
                 self.chipScroll.isHidden = empty
                 self.chipScroll.alpha = empty ? 0 : 1
+                // showing or hiding the row changes no constraint: without this the layout pass
+                // (viewDidLayoutSubviews, which sets the cards' top inset under the row) never
+                // runs, and the first card stays under the chips
+                self.view.setNeedsLayout()
                 self.view.layoutIfNeeded()
             }
         }
@@ -1311,7 +1307,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     func collectionView(_ cv: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt ip: IndexPath) {
-        if let host = inlineHost, host.isDescendant(of: cell) { detachInline() }
+        inline.stop { $0.isDescendant(of: cell) }
     }
 
     /// The cards rest at their top (the user has not scrolled down): kept there when the space
@@ -1352,7 +1348,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     func feedCell(_ cell: FeedCell, didTapPage index: Int) {
         guard let item = cell.currentItem else { return }
         // a video goes on from where it was playing in the card
-        let time = item.kind == .video && inlineHost === cell.currentPageView ? inlinePlayer.currentTime() : .zero
+        let time = item.kind == .video ? (cell.currentPageView.flatMap { inline.player(for: $0) }?.currentTime() ?? .zero) : .zero
         let vc: UIViewController
         // every media of the list, photos and videos alike, so swiping goes on into the next post
         // (found by the media itself: with posts not grouped, a post's media are separate entries)
@@ -1366,35 +1362,35 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         present(vc, animated: true)
     }
 
-    /// Attaches the shared muted player to the video page closest to the viewport's center.
+    /// Plays every video page that is at least half in view, each with its own muted player.
     private func updateInlinePlayback() {
         guard viewIfLoaded?.window != nil, presentedViewController == nil else { return }
         let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
-        var best: (MediaPageView, CGFloat)?
+        var wanted: [(MediaPageView, URL)] = []
         for cell in collectionView.visibleCells.compactMap({ $0 as? FeedCell }) {
-            guard let page = cell.currentPageView, page.item?.kind == .video else { continue }
+            guard let page = cell.currentPageView, let item = page.item, item.kind == .video else { continue }
             let f = page.convert(page.bounds, to: collectionView).intersection(visible)
             let ratio = f.isNull ? 0 : (f.width * f.height) / max(page.bounds.width * page.bounds.height, 1)
-            if ratio > 0.6, ratio > (best?.1 ?? 0) { best = (page, ratio) }
+            if ratio >= 0.5 { wanted.append((page, item.fileURL)) }
         }
-        guard let target = best?.0 else { detachInline(); return }
-        guard target !== inlineHost else { return }
-        detachInline()
-        guard let item = target.item else { return }
-        inlineHost = target
-        // Load the asset off the main thread, then attach.
-        let asset = AVURLAsset(url: item.fileURL)
+        inline.show(wanted)
+    }
+
+    /// Loads the video off the main thread, then puts it on its card.
+    private func attachInline(_ target: MediaPageView, _ player: AVPlayer, _ url: URL) {
+        guard let mediaId = target.item?.mediaId else { return }
+        let asset = AVURLAsset(url: url)
         Task { [weak self, weak target] in
             _ = try? await asset.load(.isPlayable)
             let playerItem = AVPlayerItem(asset: asset)
             await MainActor.run {
-                guard let self, let target, self.inlineHost === target, target.item?.mediaId == item.mediaId else { return }
-                self.inlinePlayer.replaceCurrentItem(with: playerItem)
+                guard let self, let target, self.inline.player(for: target) === player, target.item?.mediaId == mediaId else { return }
+                player.replaceCurrentItem(with: playerItem)
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 target.playerLayer.opacity = 0
                 CATransaction.commit()
-                target.playerLayer.player = self.inlinePlayer
-                self.readyObservation = target.playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
+                target.playerLayer.player = player
+                self.readyObservations[ObjectIdentifier(target)] = target.playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
                     guard layer.isReadyForDisplay else { return }
                     DispatchQueue.main.async {
                         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -1404,21 +1400,25 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                 }
                 target.playBadge.isHidden = true
                 target.accessibilityValue = L("feed.autoplaying")
-                self.inlinePlayer.play()
+                player.play()
             }
         }
     }
 
-    /// Stops the inline video and takes it off its card: the card's still frame shows again.
+    /// A video stopped: its card's still frame shows again.
+    private func detachedInline(_ id: ObjectIdentifier, _ page: MediaPageView?) {
+        readyObservations[id] = nil
+        guard let page else { return }
+        page.playerLayer.player = nil
+        page.playBadge.isHidden = page.item?.kind != .video
+        page.accessibilityValue = nil
+    }
+
+    /// Stops the inline videos and takes them off their cards: the still frames show again.
     /// (Every pause goes through here: a paused video layer left on a card can lose its frame —
     /// after the full-screen player, or in the background — and then shows black.)
     private func detachInline() {
-        inlinePlayer.pause()
-        readyObservation = nil
-        inlineHost?.playerLayer.player = nil
-        inlineHost?.playBadge.isHidden = inlineHost?.item?.kind != .video
-        inlineHost?.accessibilityValue = nil
-        inlineHost = nil
+        inline.stopAll()
     }
 
     // MARK: Tag editing

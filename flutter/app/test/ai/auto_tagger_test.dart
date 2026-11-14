@@ -120,7 +120,6 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     models = ExternalModels(await SharedPreferences.getInstance(), shared: memorySettings(), secrets: SecretStore(MemorySecretBackend()),
     );
-    await models.initialize();
     await models.save(
       const ExternalModel(
         id: 'ext:test',

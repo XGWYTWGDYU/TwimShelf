@@ -2,6 +2,8 @@
 
 - [最快的方式：运行脚本](#最快的方式运行脚本)
 - [用 Xcode 构建和运行](#用-xcode-构建和运行)
+- [服务器、网页版和 Docker](#服务器网页版和-docker)
+- [浏览器扩展](#浏览器扩展)
 - [其他平台](#其他平台)
 - [配置：config.yaml](#配置configyaml)
 - [构建目录](#构建目录)
@@ -64,7 +66,7 @@ macOS 和 Linux 上用 `build.sh`，Windows 上用 `build.ps1`。脚本会构建
 ./build.sh --configure
 ```
 
-`--check` 会询问并安装缺少的工具（Rust、XcodeGen、Flutter、CocoaPods 等）。Xcode 的构建按钮本身不安装任何工具，缺少时会提示运行它。
+`--check` 只列出缺少的工具（Rust、XcodeGen、Flutter、CocoaPods 等），不安装；加上 `--yes`（`./build.sh --check --yes`）会把缺少的装上。Xcode 的构建按钮本身不安装任何工具，缺少时会提示运行它。
 
 ### 原生版
 
@@ -94,7 +96,7 @@ open flutter/app/macos/Runner.xcworkspace
 
 签名方式和原生版相同：Mac 版不需要账号，iOS 真机在 `Runner` target 里选择自己的 Team。
 
-### 不通过Xcode
+### 不通过 Xcode
 
 把 10 位的 Team ID 写进 `config.local.yaml` 的 `native.development_team` 和 `flutter.development_team`（见[本机配置](#本机配置configlocalyaml)）。Team ID 可以在 [Apple Developer 账号页面](https://developer.apple.com/account)或 Xcode 的账号设置里查到。这个文件不进 Git。
 
@@ -137,7 +139,7 @@ Mac 版把 scheme 换成 `TwimShelf-macOS`、destination 换成 `'platform=macOS
 全部编译都在镜像里完成（Rust 服务器和 Flutter 网页版），本机只需要 Docker，不需要 Rust 或 Flutter。Docker 自己的构建缓存放在 Docker（或 OrbStack）的磁盘镜像里，不受 `build.dir` 控制，要换磁盘请在 Docker 的设置里移动它的数据位置。不用脚本时也可以直接构建：
 
 ```bash
-docker build -f docker/Dockerfile --build-arg VERSION=1.5.0 -t twimshelf .
+docker build -f docker/Dockerfile --build-arg VERSION="$(python3 scripts/apply.py get version)" --build-arg RUST_VERSION="$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)" --build-arg FLUTTER_VERSION="$(sed -nE 's/.*"flutter": *"([^"]+)".*/\1/p' .fvmrc)" -t twimshelf .
 ```
 
 运行、登录、更新和公网访问见 [docker/README.md](docker/README.md)。
@@ -162,11 +164,11 @@ TL_DATA=/某个测试目录 TL_WEB=flutter/app/build/web TL_PORT=2778 "$(python3
 
 `core` 和 `server` 是同一个 Cargo workspace（根目录的 `Cargo.toml`），共用一份 `Cargo.lock`。
 
-服务器报告的版本取自环境变量 `TL_VERSION`（镜像构建时从 `config.yaml` 读取），不设时用 `server/Cargo.toml` 的版本。`--no-web-resources-cdn` 让 CanvasKit 跟网页版一起打包，局域网里没有外网也能打开。网页版的远程调用（`flutter/tl_core/lib/src/bindings_web.dart`）和服务器的分发表（`server/src/dispatch.rs`）由 `scripts/gen_web_bindings.py` 从 `bindings.dart` 生成，给核心加了新函数后运行一次。
+服务器报告的版本取自环境变量 `TL_VERSION`（镜像构建时从 `config.yaml` 读取），不设时用 `server/Cargo.toml` 的版本，两者都来自 `config.yaml`。`--no-web-resources-cdn` 让 CanvasKit 跟网页版一起打包，局域网里没有外网也能打开。网页版的远程调用（`flutter/tl_core/lib/src/bindings_web.dart`）和服务器的分发表（`server/src/dispatch.rs`）由 `scripts/gen_web_bindings.py` 从 `bindings.dart` 生成，给核心加了新函数后运行一次。
 
 ## 浏览器扩展
 
-`extension` 目录是独立的 Chromium 扩展（Manifest V3），和主项目没有关联：没有构建步骤，构建脚本和 `config.yaml` 都不处理它，版本号写在它自己的 `manifest.json` 里。在 `chrome://extensions` 打开开发者模式，选择「加载已解压的扩展程序」并选中这个目录；改了代码后在同一页面点刷新。扩展和 App 之间的接口在 `core/src/extension.rs`：桌面版 App 监听 27800–27809 端口（仅本机和局域网），服务器在自己的端口下提供 `/ext/`。
+`extension` 目录是独立的 Chromium 扩展（Manifest V3），和主项目没有关联：没有构建步骤。`manifest.json` 里的版本号跟随 `config.yaml`（见[发布新版本](#github-actions-自动构建和发布)），其余内容构建脚本都不处理。在 `chrome://extensions` 打开开发者模式，选择「加载已解压的扩展程序」并选中这个目录；改了代码后在同一页面点刷新。扩展和 App 之间的接口在 `core/src/extension.rs`：桌面版 App 监听 27800–27809 端口（仅本机和局域网），服务器在自己的端口下提供 `/ext/`。
 
 ## 其他平台
 
@@ -279,11 +281,13 @@ Rust 核心：
 cargo test -p tl-core --locked --features heif
 ```
 
-原生版的逻辑检查：
+原生版的逻辑检查，以及界面文字的检查：
 
 ```bash
 scripts/checks/run.sh
 ```
+
+界面文字只改 `native/Resources/Localizable.xcstrings`（批量加入可以用 `python3 scripts/catalog.py add`），再运行 `python3 scripts/to_flutter.py` 导出给 Flutter。不要直接改 `flutter/app/assets/l10n` 里的文件，下一次导出会覆盖它们。
 
 Flutter 版：
 
@@ -313,7 +317,7 @@ cargo test -p tl-server
 
 只改文档（`*.md`、`docs/`）的推送不会触发构建。
 
-**发布新版本**：提高 `config.yaml` 里的 `version` 和 `build_number`，推送到 `main`。
+**发布新版本**：提高 `config.yaml` 里的 `version` 和 `build_number`，运行一次 `python3 scripts/apply.py versions`（任何一次构建也会做），它把版本号写进 `flutter/app/pubspec.yaml`、`server/Cargo.toml`、`Cargo.lock` 和 `extension/manifest.json`；把这几个文件和 `config.yaml` 一起提交，推送到 `main`。版本号没写齐时 CI 的检查会失败。
 
 Release 页面没有说明文字，只包含所有安装包、`SHA256SUMS.txt`、`BUILD-INFO.json` 和 `THIRD-PARTY-NOTICES.txt`。
 
@@ -376,4 +380,4 @@ CocoaPods 需要 UTF-8 环境，运行 `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF
 
 **提示需要 XcodeGen，或者找不到 `TwimShelf.xcodeproj`**
 
-原生版的工程由 XcodeGen 生成：运行 `./build.sh --check`（会询问并安装 XcodeGen），然后运行 `./build.sh --configure`。
+原生版的工程由 XcodeGen 生成：运行 `./build.sh --check --yes`（会安装 XcodeGen；不加 `--yes` 只报告缺什么），然后运行 `./build.sh --configure`。

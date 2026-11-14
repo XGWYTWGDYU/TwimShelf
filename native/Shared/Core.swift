@@ -16,6 +16,7 @@ struct PackedFeed: Decodable {
         let createdAt: String?
         let recent: Bool
         var album: Bool? = nil
+        enum CodingKeys: String, CodingKey { case id, text, authorName = "author_name", screenName = "screen_name", url, createdAt = "created_at", recent, album }
     }
     /// [label, origin, models]
     struct Tag: Decodable {
@@ -39,6 +40,8 @@ struct PackedFeed: Decodable {
     let posts: [Post]
     let tagLists: [[Tag]]
     let media: [Media]
+    // Keys spelled out, and read without the decoder's snake-case conversion (see `Core.feed`).
+    enum CodingKeys: String, CodingKey { case root, posts, tagLists = "tag_lists", media }
 
     var items: [FeedItem] {
         let lists = tagLists.map { $0.map(\.view) }
@@ -93,7 +96,6 @@ struct FeedItem: Codable, Hashable {
     /// Value for the "only this author" filter: the @handle, or the display name without one.
     var authorKey: String? { screenName ?? authorName }
     var authorDisplay: String { screenName.map { "@\($0)" } ?? authorName ?? L("common.unknownAuthor") }
-    var isReviewed: Bool { tags.contains { $0.isUser } }
     /// Badge text for a media that failed verification.
     var badText: String? {
         switch bad {
@@ -360,11 +362,11 @@ enum Core {
     private struct Envelope<T: Decodable>: Decodable { let ok: T?; let error: String? }
     private struct Empty: Decodable {}
 
-    private static func call<T: Decodable>(_ p: UnsafeMutablePointer<CChar>?, as: T.Type, caller: String = #function) throws -> T {
+    private static func call<T: Decodable>(_ p: UnsafeMutablePointer<CChar>?, as: T.Type, snakeCase: Bool = true, caller: String = #function) throws -> T {
         guard let p else { AppLog.error("core", L("core.noResult", caller)); throw CoreError(message: "core returned nothing") }
         defer { tl_string_free(p) }
         let env: Envelope<T>
-        do { env = try decoder.decode(Envelope<T>.self, from: Data(bytes: p, count: strlen(p))) }
+        do { env = try (snakeCase ? decoder : JSONDecoder()).decode(Envelope<T>.self, from: Data(bytes: p, count: strlen(p))) }
         catch { AppLog.error("core", L("core.badResultDetail", caller, error)); throw error }
         if let v = env.ok { return v }
         guard let msg = env.error else {
@@ -458,10 +460,11 @@ enum Core {
 
     /// The feed, read in the core's compact form (each post and tag list once, paths relative to
     /// the library): a large library is a quarter of the data, and every media of a post shares
-    /// one copy of its text.
+    /// one copy of its text. Its keys are spelled out: converting every key from snake case took
+    /// almost half of the decoding of a large library's feed.
     static func feed(_ req: FeedRequest) throws -> [FeedItem] {
         let json = String(decoding: try encoder.encode(req), as: UTF8.self)
-        return try call(tl_feed_packed(json), as: PackedFeed.self).items
+        return try call(tl_feed_packed(json), as: PackedFeed.self, snakeCase: false).items
     }
 
     static func importLegacyDirectory(_ url: URL) throws -> ImportReport {
@@ -546,11 +549,6 @@ enum Core {
 
     // MARK: Import progress and reports
 
-    /// Name of the newest saved import report (a directory listing; cheap enough for change checks).
-    static var latestImportReportName: String? {
-        let dir = libraryDirectory.appendingPathComponent("logs/import-reports", isDirectory: true)
-        return (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.filter { $0.hasPrefix("import-") }.max()
-    }
     static func importStatus() -> ImportProgress? { try? call(tl_import_status(), as: ImportProgress.self) }
     static func importReport(_ path: String) throws -> ImportReport { try call(tl_import_report(path), as: ImportReport.self) }
     /// Saved reports, newest first.
@@ -604,8 +602,6 @@ enum Core {
     /// Moves media (and/or every live media of a post) to the recycle bin; returns how many.
     @discardableResult static func trash(media: [String] = [], post: String? = nil) throws -> Int { try call(tl_trash(json(Ids(media: media, post: post))), as: Int.self) }
     @discardableResult static func restore(_ media: [String]) throws -> Int { try call(tl_trash_restore(json(Ids(media: media))), as: Int.self) }
-    /// Permanent deletion (on every device). Only media in the bin.
-    @discardableResult static func purge(_ media: [String]) throws -> Int { try call(tl_trash_purge(json(Ids(media: media))), as: Int.self) }
     @discardableResult static func emptyTrash() throws -> Int { try call(tl_trash_empty(), as: Int.self) }
     static func trashList() -> [TrashItem] { (try? call(tl_trash_list(), as: [TrashItem].self)) ?? [] }
     static var trashKeepDays: Int {
@@ -635,9 +631,6 @@ enum Core {
         return try call(tl_download_start(json), as: Int.self)
     }
     static func downloadStatus() -> DownloadStatus? { try? call(tl_download_status(), as: DownloadStatus.self) }
-    @MainActor static func cancelDownload() {
-        do { try stopDownload(pause: false) } catch { AppLog.error("download", error.localizedDescription) }
-    }
     @MainActor static func stopDownload(pause: Bool) throws {
         _ = try call(tl_download_stop(pause), as: Int.self)
         ActivityCenter.shared.refreshNow(); ActivityCenter.shared.refreshStats()
@@ -725,7 +718,6 @@ enum Core {
     struct MediaRef: Codable, Hashable { let mediaId: String; let path: String; let kind: String; var text: String? = nil }
 
     static func setModelsDirectory(_ url: URL) { try? callUnit(tl_set_models_dir(url.path)) }
-    static func downloadModel(_ repo: String) throws { try callUnit(tl_model_download(repo)) }
     static func modelStatus() -> ModelDownloadStatus? { (try? call(tl_model_status(), as: ModelDownloadStatus?.self)) ?? nil }
     static func cancelModelDownload() { tl_model_cancel() }
     /// A model download left unfinished by a quit or crash; downloading it again continues.

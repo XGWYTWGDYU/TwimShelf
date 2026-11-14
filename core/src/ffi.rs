@@ -16,6 +16,18 @@ fn s(p: *const c_char) -> String {
     unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
 }
 fn out(v: String) -> *mut c_char { CString::new(v).map_or(std::ptr::null_mut(), CString::into_raw) }
+
+/// `{"ok": …}` or `{"error": …}`, written straight to text: going through a `serde_json::Value`
+/// first copied a whole feed (megabytes) once more.
+fn respond_with<T: serde::Serialize>(r: anyhow::Result<T>) -> *mut c_char {
+    #[derive(serde::Serialize)]
+    struct Answer<'a, T> { ok: &'a T }
+    let error = |e: String| serde_json::json!({ "error": e }).to_string();
+    out(match r {
+        Ok(v) => serde_json::to_string(&Answer { ok: &v }).unwrap_or_else(|e| error(format!("{e:#}"))),
+        Err(e) => error(format!("{e:#}")),
+    })
+}
 fn lib() -> anyhow::Result<Arc<Library>> {
     LIB.lock().unwrap().clone().ok_or_else(|| anyhow::anyhow!("library not open"))
 }
@@ -25,10 +37,7 @@ fn with<T: serde::Serialize>(f: impl FnOnce(Arc<Library>) -> anyhow::Result<T>) 
         Ok(r) => r,
         Err(p) => Err(anyhow::anyhow!(tr!("ffi.internal", msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default()))),
     };
-    out(match r {
-        Ok(v) => serde_json::json!({ "ok": v }).to_string(),
-        Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
-    })
+    respond_with(r)
 }
 
 /// The open library, for the core's own listeners (the browser extension's).
@@ -37,10 +46,7 @@ pub(crate) fn current_library() -> Option<Arc<Library>> { LIB.lock().ok()?.clone
 /// `with` for functions that need no open library.
 fn respond<T: serde::Serialize>(f: impl FnOnce() -> anyhow::Result<T>) -> *mut c_char {
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| Err(anyhow::anyhow!(tr!("ffi.internal", msg = ""))));
-    out(match r {
-        Ok(v) => serde_json::json!({ "ok": v }).to_string(),
-        Err(e) => serde_json::json!({ "error": format!("{e:#}") }).to_string(),
-    })
+    respond_with(r)
 }
 
 /// Every exported function runs under `catch_unwind` (directly or through `with`): a Rust panic
@@ -281,12 +287,6 @@ pub extern "C" fn tl_share_pack(dir: *const c_char, out_path: *const c_char) -> 
 #[no_mangle]
 pub extern "C" fn tl_import_cancel() { guard((), crate::import::cancel) }
 
-/// Free bytes on the volume of `path`, or null when the system does not say.
-#[no_mangle]
-pub extern "C" fn tl_free_space(path: *const c_char) -> *mut c_char {
-    guard_ptr(|| out(serde_json::json!({ "ok": crate::storage::free_space(std::path::Path::new(&s(path))) }).to_string()))
-}
-
 /// Deletes all local data (AI models only when `include_models`). Never synced.
 #[no_mangle]
 pub extern "C" fn tl_wipe(include_models: bool) -> *mut c_char { guard_ptr(|| {
@@ -460,11 +460,6 @@ pub extern "C" fn tl_repair(media_id: *const c_char) -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn tl_set_models_dir(dir: *const c_char) -> *mut c_char { with(|l| l.set_models_dir(s(dir).into())) }
 
-#[no_mangle]
-pub extern "C" fn tl_model_download(repo: *const c_char) -> *mut c_char {
-    with(|l| crate::models::start_download(s(repo), None, l.models_dir()))
-}
-
 /// The models offered for download in `format` (`mlx` or `gguf`), with the folder each installs into.
 #[no_mangle]
 pub extern "C" fn tl_model_catalog(format: *const c_char) -> *mut c_char {
@@ -499,13 +494,6 @@ pub extern "C" fn tl_hub_repo(format: *const c_char, repo: *const c_char) -> *mu
 #[no_mangle]
 pub extern "C" fn tl_hub_install(json: *const c_char) -> *mut c_char {
     with(|l| crate::hub::install(&l.models_dir(), serde_json::from_str(&s(json))?))
-}
-
-/// llama.cpp models (Flutter on Android, Windows, Linux): `json` = `{"repo","weights","projector"}`.
-#[no_mangle]
-pub extern "C" fn tl_model_download_gguf(json: *const c_char) -> *mut c_char {
-    #[derive(Deserialize)] struct A { repo: String, weights: String, #[serde(default)] projector: Option<String> }
-    with(|l| { let a: A = serde_json::from_str(&s(json))?; crate::models::start_download_gguf(a.repo, None, a.weights, a.projector, l.models_dir()) })
 }
 
 #[no_mangle]

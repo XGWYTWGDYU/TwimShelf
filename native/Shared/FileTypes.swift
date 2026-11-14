@@ -2,7 +2,7 @@ import UniformTypeIdentifiers
 
 extension UTType {
     /// Library export package (zip of manifest.json + media/).
-    static let tlpack = UTType(exportedAs: "org.twimshelf.tlpack", conformingTo: .zip)
+    static let tlpack = UTType(exportedAs: "org.twimshelf.tlpack", conformingTo: .data)
 }
 
 /// Whether a stored media path is a video (MP4 or QuickTime); matches `rules::is_video_path`.

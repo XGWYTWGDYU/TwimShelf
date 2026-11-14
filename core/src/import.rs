@@ -83,7 +83,6 @@ impl ImportReport {
         self.first_by_sha.entry(sha.to_string()).or_insert_with(|| src.to_string());
     }
 
-    pub fn file_issue_count(&self) -> usize { self.issues.iter().filter(|i| i.is_file() && i.category != "duplicate" && i.category != "in_bin").count() }
     pub(crate) fn issue(&mut self, category: &str, path: &str, reason: impl Into<String>, same_as: Option<String>) {
         let i = ImportIssue { category: category.into(), path: path.into(), reason: reason.into(), same_as };
         if i.is_file() && category != "duplicate" && category != "in_bin" { self.skipped.push(i.path.clone()); }
