@@ -161,7 +161,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         tokenSearch.onShuffle = { [weak self] in self?.feed.reshuffle() }
         tokenSearch.grouped = feed.grouped
         tokenSearch.onGrouped = { [weak self] on in self?.feed.grouped = on; self?.refreshChrome() }
-        feed.onChipsChanged = { [weak self] in self?.tokenSearch.chipFilterActive = self?.feed.hasChipFilter == true }
+        feed.onSearchKeys = { [weak self] keys, replacing in self?.tokenSearch.search(keys: keys, replacing: replacing) }
+        feed.currentKeys = { [weak self] in self?.tokenSearch.keys ?? [] }
         // a tag chosen on the tags page: its media are shown in 浏览
         NotificationCenter.default.addObserver(forName: MacFeedViewController.showLabelNote, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.root.go(.browse) }
@@ -199,6 +200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         #if DEBUG
         if let out = ProcessInfo.processInfo.environment["TL_FILTER_TEST"], ProcessInfo.processInfo.environment["TL_LIBRARY_DIR"] != nil { runFeedFilterTest(out) }
         if let out = ProcessInfo.processInfo.environment["TL_RESIZE_TEST"] { runResizeBenchmark(out) }
+        // a search first (typed as in the field: "贴文 猫"): the benchmarks then run over its results
+        if let q = ProcessInfo.processInfo.environment["TL_SEARCH"] { tokenSearch.search(keys: TokenQuery.split(q + " ").keys, replacing: true) }
         if let out = ProcessInfo.processInfo.environment["TL_SCROLL_TEST"] { runScrollBenchmark(out) }
         if let out = ProcessInfo.processInfo.environment["TL_RENDER_CARD"] { renderCard(out) }
         if let out = ProcessInfo.processInfo.environment["TL_PANE_TEST"] { runPaneBenchmark(out) }
@@ -323,6 +326,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
     }
 
+    /// This process's physical footprint (what Activity Monitor calls Memory), for the benchmarks.
+    static func debugFootprint() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let r = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) } }
+        return r == KERN_SUCCESS ? info.phys_footprint : 0
+    }
+
     /// Scrolls the feed in 240 steps of 60 pt (≈ fast trackpad scrolling), forcing layout +
     /// display each step, then shuffles; records per-step times.
     /// Scrolls like a fast fling (TL_SCROLL_STEP points per frame, default 60) and records the
@@ -334,7 +345,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             guard let scroll = feed.view.subviews.compactMap({ $0 as? NSScrollView }).first else { return }
             var times: [Double] = []
             var gaps: [Double] = []
-            var blank = 0, i = 0
+            var blank = 0, i = 0, turned = 0
+            let searching = ProcessInfo.processInfo.environment["TL_SEARCH"] != nil
             var last = CACurrentMediaTime()
             var scrollT = 0.0, layoutT = 0.0, displayT = 0.0
             // main-thread time outside the scroll step (CA commits, image completions…): from
@@ -361,6 +373,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                     stepTime += CACurrentMediaTime() - t
                     times.append((CACurrentMediaTime() - t) * 1000)
                     if i > 0 { blank += feed.debugBlankCards() }
+                    // over a search: the pages of the cards turned as well, every few frames
+                    if searching, i % 6 == 3 { turned += feed.debugTurnPages() }
                     i += 1
                     guard i == 240 else { return }
                     timer.invalidate()
@@ -374,7 +388,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                     let split = String(format: " | per frame: scroll %.2fms layout %.2fms display %.2fms images %.2fms; cards filled %d, %.2fms each; between frames %.2fms",
                                        scrollT * 1000 / 240, layoutT * 1000 / 240, displayT * 1000 / 240, MacMediaLoader.shared.debugFinishTime * 1000 / 240, feed.debugConfigures,
                                        feed.debugConfigureTime * 1000 / Double(max(feed.debugConfigures, 1)), busyBetween * 1000 / 240)
-                    try? (report + split).write(toFile: out, atomically: true, encoding: .utf8)
+                    let extra = searching ? String(format: " | search results %d, pages turned %d, footprint %.0f MB", self.feed.resultMediaIds.count, turned, Double(Self.debugFootprint()) / 1_048_576) : ""
+                    try? (report + split + extra).write(toFile: out, atomically: true, encoding: .utf8)
                     NSApp.terminate(nil)
                 }
             }
@@ -763,7 +778,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     NotificationCenter.default.post(name: MacFeedViewController.showLabelNote, object: "猫")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        log.append("after tag card click: place=\(self.root.content.place) chipFilter=\(self.feed.hasChipFilter) exportShown=\(!self.tokenSearch.debugExportButton.isHidden) results=\(self.feed.resultMediaIds.count)")
+                        log.append("after tag card click: place=\(self.root.content.place) search=\(self.tokenSearch.keys) exportShown=\(!self.tokenSearch.debugExportButton.isHidden) results=\(self.feed.resultMediaIds.count)")
                     }
                 }
             }),

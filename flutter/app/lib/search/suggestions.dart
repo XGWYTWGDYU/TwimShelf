@@ -43,6 +43,8 @@ List<SearchSuggestionSection> suggestionSections(
   List<TagCount> tags,
   List<SearchFolder> folders, {
   List<String> history = const [],
+  // 损坏 is offered with the maintenance rows of 关于 (typed, it always works)
+  bool offerDamaged = false,
 }) {
   final typed = raw.trim();
   final present = keys.toSet();
@@ -121,6 +123,7 @@ List<SearchSuggestionSection> suggestionSections(
       .where(
         (kw) =>
             (!negative || kw.excludable) &&
+            (kw != SearchKeyword.damaged || offerDamaged) &&
             !present.contains('${negative ? '-' : ''}${kw.key}') &&
             kw.matchesPrefix(q),
       )

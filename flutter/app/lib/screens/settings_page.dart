@@ -124,7 +124,6 @@ class _SettingsPageState extends State<SettingsPage> {
               trailing: const Icon(Icons.chevron_right),
               onTap: () => push(page()),
             );
-        final bad = s?.bad ?? 0;
         return Scaffold(
           appBar: AppBar(title: Text(L('place.settings'))),
           body: ListView(
@@ -187,13 +186,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ]),
               _Section(title: L('settings.section.browse'), children: [
-                if (prefs.aboutExtras && (bad > 0 || prefs.badOnly))
-                  SwitchListTile(
-                    secondary: const SettingsIcon(Icons.warning, danger: true),
-                    title: Text(L('settings.badOnly', [bad])),
-                    value: prefs.badOnly,
-                    onChanged: withHaptic((v) => prefs.badOnly = v),
-                  ),
                 // iPhone and iPad only
                 if (OS.isIOS) SwitchListTile(
                   secondary: const SettingsIcon(Icons.headphones),

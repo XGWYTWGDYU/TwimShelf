@@ -49,21 +49,14 @@ class Prefs extends ChangeNotifier {
   bool get mascot => _bool('mascot.enabled', false);
   set mascot(bool v) => _set('mascot.enabled', v);
 
-  /// 只看损坏或缺失的媒体 (浏览 and the grids show only those).
-  bool get badOnly => aboutExtras && _bool('filter.bad', false);
-  set badOnly(bool v) => _set('filter.bad', v);
-
   /// 仅用耳机播放声音: this device's own choice, as in the native apps (not synced).
   bool get headphonesOnly => _bool('audio.headphonesOnly', false);
   set headphonesOnly(bool v) => _set('audio.headphonesOnly', v);
 
   /// What ten taps on the icon in 关于 bring out stays out until ten more put it away: the
-  /// maintenance rows there, and 损坏或丢失 wherever it is offered.
+  /// maintenance rows there, 损坏或丢失 wherever it is offered, and 损坏 among the search words.
   bool get aboutExtras => _bool('about.extras', false);
-  set aboutExtras(bool v) {
-    if (!v && _bool('filter.bad', false)) _set('filter.bad', false);
-    _set('about.extras', v);
-  }
+  set aboutExtras(bool v) => _set('about.extras', v);
 
   /// 按帖子分组 in 浏览.
   bool get feedGrouped => _bool('feed.grouped', true);

@@ -20,7 +20,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// Random order from the system RNG; ranks survive reloads until the next reshuffle.
     private var order = FeedOrder()
     /// "Only this author" / "only this tag" filters set from the long-press menus.
-    private var filter = FeedFilter()
     private var pendingInline: DispatchWorkItem?
 
     // Views
@@ -37,10 +36,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private var folding = false
     /// The magnifier was tapped: the bar stays open until this search ends.
     private var unfolded = false
-    private var chipsTop: NSLayoutConstraint!
     private let header = FollowedView()
     /// The filter chips (仅 #标签, 文件夹…) float on their own under the search bar, not inside it.
-    private let chipBar = UIView()
     private let searchField = UISearchTextField()
     private let downloadButton = RoundSearchButton(symbol: "arrow.down", label: L("common.downloadPosts"), identifier: "quickDownload")
     /// 按添加时间排序: with the quick download button, at the same times.
@@ -62,8 +59,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// Tags for the suggestions, read once per search.
     private var tagCache: [TagCount] = []
     private var folderCache: [(name: String, count: Int)] = []
-    private let chipScroll = UIScrollView()
-    private let chipStack = UIStackView()
     /// The L("place.folders") tab: its own navigation stack (folder → media), under the home's bar.
     private let emptyLabel = UILabel()
     private let activityPanel = ActivityPanel()
@@ -95,9 +90,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             MainActor.assumeIsolated {
                 guard let self, let l = n.object as? String else { return }
                 self.onShowBrowse?()
-                self.clearTerms()
-                self.filter.labels = [l]
-                self.renderChips(); self.reload()
+                var f = FeedFilter(); f.labels = [l]
+                self.search(f, replacing: true)
             }
         }
         NotificationCenter.default.addObserver(forName: Self.showFolderNote, object: nil, queue: .main) { [weak self] n in
@@ -112,7 +106,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             }
         }
         NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.renderChips(); self?.reload(); if self?.searching == true { self?.rebuildSuggestions() } }
+            MainActor.assumeIsolated { self?.updateSearchIcon(); self?.reload(); if self?.searching == true { self?.rebuildSuggestions() } }
         }
         buildCollection()
         // a new text size: every card's text is measured again
@@ -194,9 +188,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutSearchChrome()
-        // the settings panel opens over the cards: the grid starts under the bar (and its chips)
-        // (folded, the bar is out of sight: the cards start under the chips, or the tab bar)
-        let last: UIView? = !chipScroll.isHidden ? chipScroll : searchFolded ? nil : searchRow
+        // the settings panel opens over the cards: the grid starts under the bar
+        // (folded, the bar is out of sight: the cards start under the tab bar)
+        let last: UIView? = searchFolded ? nil : searchRow
         // folded: the navigation bar that holds the magnifier adds its own height to the safe area,
         // though it shares the tab bar's row: start under that row, not under the safe area
         let top = last.map { max(0, $0.convert($0.bounds, to: view).maxY + 12 - view.safeAreaInsets.top) }
@@ -342,7 +336,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         searchChrome.frame = CGRect(x: safe.minX + 10, y: view.safeAreaInsets.top + 6,
                                     width: max(0, safe.width - 20), height: 56)
         // folded: the chips (and the cards) start right under the tab bar
-        chipsTop?.constant = (searchFolded ? foldedRowBottom ?? view.safeAreaInsets.top : searchChrome.frame.maxY) + 8
     }
 
     /// Folded: the bottom of the row the tab bar and the magnifier share.
@@ -459,13 +452,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         exportButton.translatesAutoresizingMaskIntoConstraints = false
         searchChrome.addSubview(exportButton)
 
-        chipStack.axis = .horizontal
-        chipStack.spacing = 8
-        chipScroll.showsHorizontalScrollIndicator = false
-        chipScroll.addSubview(chipStack)
-        chipStack.translatesAutoresizingMaskIntoConstraints = false
-        chipScroll.isHidden = true
-
         searchRow.addArrangedSubview(searchField)
         downloadButton.addAction(UIAction { [weak self] _ in self?.showQuickDownload() }, for: .touchUpInside)
         sortButton.addAction(UIAction { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) }, for: .touchUpInside)
@@ -483,12 +469,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(stack)
-        chipBar.translatesAutoresizingMaskIntoConstraints = false
-        chipScroll.translatesAutoresizingMaskIntoConstraints = false
-        chipBar.addSubview(chipScroll)
-        view.addSubview(chipBar)
-        header.follower = chipBar
-        chipsTop = chipBar.topAnchor.constraint(equalTo: view.topAnchor)
 
         headerTrailing = header.trailingAnchor.constraint(equalTo: searchChrome.trailingAnchor)
         headerBesideExit = header.trailingAnchor.constraint(equalTo: exitButton.leadingAnchor, constant: -8)
@@ -510,17 +490,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             stack.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 8),
             stack.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
             searchField.heightAnchor.constraint(equalToConstant: 40),
-            chipsTop,
-            chipBar.leadingAnchor.constraint(equalTo: cornerGuide.leadingAnchor, constant: 12),
-            chipBar.trailingAnchor.constraint(equalTo: cornerGuide.trailingAnchor, constant: -10),
-            chipScroll.topAnchor.constraint(equalTo: chipBar.topAnchor), chipScroll.bottomAnchor.constraint(equalTo: chipBar.bottomAnchor),
-            chipScroll.leadingAnchor.constraint(equalTo: chipBar.leadingAnchor), chipScroll.trailingAnchor.constraint(equalTo: chipBar.trailingAnchor),
-            chipScroll.heightAnchor.constraint(equalToConstant: 32),
-            chipStack.topAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.topAnchor),
-            chipStack.bottomAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.bottomAnchor),
-            chipStack.leadingAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.leadingAnchor),
-            chipStack.trailingAnchor.constraint(equalTo: chipScroll.contentLayoutGuide.trailingAnchor),
-            chipStack.heightAnchor.constraint(equalTo: chipScroll.frameLayoutGuide.heightAnchor),
         ])
 
         // the list under the field while searching: it covers 浏览 (the field floats
@@ -548,7 +517,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                                      probe.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                                      probe.widthAnchor.constraint(equalToConstant: 1), probe.heightAnchor.constraint(equalToConstant: 1)])
         if searchChrome.superview === view { view.bringSubviewToFront(searchChrome) }
-        view.bringSubviewToFront(chipBar)
         searchChrome.bringSubviewToFront(exitButton)
         searchChrome.bringSubviewToFront(exportButton)
         updatePlaceholder()
@@ -596,9 +564,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         searchField.tokens = []
         searchField.text = nil
         query = TokenQuery()
-        filter = FeedFilter()
-        if LibraryPrefs.badOnly && item.bad == nil { LibraryPrefs.badOnly = false }
-        renderChips()
+        updateSearchIcon()
         updateExitButton()
         reload()
     }
@@ -621,13 +587,20 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         }
     }
 
-    /// "在浏览中查看" from the folders: back to 浏览 with that filter.
+    /// "在浏览中查看" from the folders: back to 浏览, searching for what that place shows.
     func showInBrowse(_ f: FeedFilter) {
         onShowBrowse?()
-        clearTerms()
-        filter = f
-        renderChips()
-        reload()
+        search(f, replacing: true)
+    }
+
+    /// A filter (only this author, this tag, this folder, the recent posts…) is a search: its
+    /// capsules go into the field ("名字 用户", "标签名 标签", "文件夹 名字"), after what is
+    /// searched already, or in its place. There are no other filters.
+    private func search(_ f: FeedFilter, replacing: Bool = false) {
+        let old = replacing ? [] : searchField.tokens.compactMap { $0.representedObject as? String }
+        searchField.tokens = TokenQuery.adding(TokenQuery.keys(for: f), to: old).map(makeToken)
+        if replacing { searchField.text = nil }
+        applyTokens()
     }
 
     // MARK: Data
@@ -673,13 +646,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         }
     }
 
-    /// Long-press filters plus the settings filters (unreviewed only, damaged only).
-    private var currentFilter: FeedFilter {
-        var f = filter
-        if LibraryPrefs.badOnly { f.badOnly = true }
-        // conditions from the search field's capsules
-        return query.filter(over: f)
-    }
+    /// What the search field's capsules ask for (the only filters there are).
+    private var currentFilter: FeedFilter { query.filter(over: FeedFilter()) }
 
     /// Where you were in the unfiltered feed before searching or filtering: restored when the
     /// search is closed (the order is stable, so the same position shows the same media).
@@ -842,76 +810,11 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         query = TokenQuery(keys: searchField.tokens.compactMap { $0.representedObject as? String })
     }
 
-    private func filterChip(_ title: String, color: UIColor, id: String, remove: @escaping () -> Void) -> UIButton {
-        var cfg = UIButton.Configuration.filled()
-        cfg.title = title
-        cfg.image = UIImage(systemName: "xmark")
-        cfg.imagePlacement = .trailing
-        cfg.imagePadding = 6
-        cfg.preferredSymbolConfigurationForImage = .init(pointSize: 10, weight: .bold)
-        cfg.cornerStyle = .capsule
-        cfg.baseBackgroundColor = color
-        cfg.contentInsets = .init(top: 6, leading: 10, bottom: 6, trailing: 10)
-        let b = UIButton(configuration: cfg, primaryAction: UIAction { _ in remove() })
-        b.accessibilityIdentifier = id
-        b.accessibilityLabel = L("feed.removeFilter", title)
-        return b
-    }
-
     private var plainSearchIcon: UIView?
     /// Once something is searched for, the mascot mode's search icon.
     private func updateSearchIcon() {
         if plainSearchIcon == nil { plainSearchIcon = searchField.leftView }
         searchField.leftView = Mascot.isOn && !terms.isEmpty ? UIImageView(image: Mascot.icon("search", side: 24)) : plainSearchIcon
-    }
-
-    private func renderChips() {
-        updateSearchIcon()
-        chipStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        if let a = filter.author {
-            chipStack.addArrangedSubview(filterChip(L("feed.chip.author", a.hasPrefix("@") ? a : "@" + a), color: .systemIndigo, id: "chip-author") { [weak self] in
-                self?.filter.author = nil; self?.renderChips(); self?.reload() })
-        }
-        for l in filter.labels {
-            chipStack.addArrangedSubview(filterChip(L("feed.chip.label", l), color: .systemGreen, id: "chip-label-\(l)") { [weak self] in
-                self?.filter.labels.removeAll { $0 == l }; self?.renderChips(); self?.reload() })
-        }
-        if filter.albumOnly {
-            chipStack.addArrangedSubview(filterChip(L("card.album"), color: .systemIndigo, id: "chip-album") { [weak self] in
-                self?.filter.albumOnly = false; self?.renderChips(); self?.reload() })
-        }
-        if filter.looseOnly {
-            chipStack.addArrangedSubview(filterChip(L("card.loose"), color: .systemIndigo, id: "chip-loose") { [weak self] in
-                self?.filter.looseOnly = false; self?.renderChips(); self?.reload() })
-        }
-        if filter.recentOnly {
-            chipStack.addArrangedSubview(filterChip(L("place.recent"), color: .systemOrange, id: "chip-recent") { [weak self] in
-                self?.filter.recentOnly = false; self?.renderChips(); self?.reload() })
-        }
-        if let k = filter.kind {
-            chipStack.addArrangedSubview(filterChip(k == .video ? L("feed.chip.videos") : L("feed.chip.photos"), color: .systemPink, id: "chip-kind") { [weak self] in
-                self?.filter.kind = nil; self?.renderChips(); self?.reload() })
-        }
-        if let f = filter.folder {
-            chipStack.addArrangedSubview(filterChip(L("search.token.folder", f), color: .systemTeal, id: "chip-folder") { [weak self] in
-                self?.filter.folder = nil; self?.renderChips(); self?.reload() })
-        }
-        if LibraryPrefs.badOnly {
-            chipStack.addArrangedSubview(filterChip(L("feed.chip.bad"), color: .systemRed, id: "chip-bad") { LibraryPrefs.badOnly = false })
-        }
-        // the chip row is there only when something filters 浏览
-        let empty = chipStack.arrangedSubviews.isEmpty
-        if chipScroll.isHidden != empty {
-            UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) {
-                self.chipScroll.isHidden = empty
-                self.chipScroll.alpha = empty ? 0 : 1
-                // showing or hiding the row changes no constraint: without this the layout pass
-                // (viewDidLayoutSubviews, which sets the cards' top inset under the row) never
-                // runs, and the first card stays under the chips
-                self.view.setNeedsLayout()
-                self.view.layoutIfNeeded()
-            }
-        }
     }
 
     // MARK: Search mode
@@ -1032,6 +935,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         updateExitButton()
         guard q != query else { return }
         query = q
+        updateSearchIcon()
         reload()
     }
 
@@ -1336,8 +1240,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     func feedCell(_ cell: FeedCell, didTapTag label: String) { addTerm(label) }
     func feedCellDidTapRecent(_ cell: FeedCell) {
-        guard !filter.recentOnly else { return }
-        filter.recentOnly = true; renderChips(); reload()
+        guard !query.recent else { return }
+        var f = FeedFilter(); f.recentOnly = true
+        search(f)
     }
 
     /// Long-press menu of a tag chip.
@@ -1534,9 +1439,12 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     /// Shows only one folder's media (nil = everything).
     func showFolder(_ name: String?) {
-        filter.folder = name
-        renderChips()
-        reload()
+        guard let name else {
+            searchField.tokens = searchField.tokens.filter { !(($0.representedObject as? String)?.hasPrefix("d:") ?? false) }
+            return applyTokens()
+        }
+        var f = FeedFilter(); f.folder = name
+        search(f)
     }
 
     /// "Add to folder" menu: existing folders plus a new one.
@@ -1590,8 +1498,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             do {
                 let name = try Core.renameTag(old, to: new)
                 self?.replaceTerm(old, with: name)
-                if let i = self?.filter.labels.firstIndex(of: old) { self?.filter.labels[i] = name }
-                self?.renderChips()
                 NotificationCenter.default.post(name: .libraryChanged, object: nil)
                 self?.reload(keepPosition: true)
                 self?.toast.show(L("tag.renamed", old, name))
@@ -1603,15 +1509,13 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     // MARK: Filters, deletion, repair
 
     private func onlyAuthor(_ key: String) {
-        filter.author = key
-        renderChips()
-        reload()
+        var f = FeedFilter(); f.author = key
+        search(f)
     }
 
     private func onlyLabel(_ label: String) {
-        if !filter.labels.contains(label) { filter.labels.append(label) }
-        renderChips()
-        reload()
+        var f = FeedFilter(); f.labels = [label]
+        search(f)
     }
 
     private func deleteTag(_ t: TagView, from item: FeedItem) {

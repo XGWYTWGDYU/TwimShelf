@@ -155,6 +155,10 @@ final class SyncService: NSObject, NetServiceDelegate {
 
     /// Starts listening, advertising and browsing. Safe to call repeatedly.
     func start() {
+        #if DEBUG
+        // a test run on a copy of a real library must never sync with that library's devices
+        if ProcessInfo.processInfo.environment["TL_SYNC_OFF"] != nil { return }
+        #endif
         let r = Core.syncStart(accountKey: accountKey ?? "", deviceName: Self.deviceName)
         guard case .success(let port) = r else { return }
         refreshStatus()

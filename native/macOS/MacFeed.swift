@@ -409,7 +409,6 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     /// Random order from the system RNG; ranks survive reloads until the next reshuffle.
     private var order = FeedOrder()
     /// "Only this author" / "only this tag" filters set from the right-click menus.
-    private var filter = FeedFilter()
     private var sectionCount: Int { entries.isEmpty ? 0 : 1 }
     private let toast = MacToast()
     /// Position in the unfiltered feed before a search/filter, restored when it is closed.
@@ -422,6 +421,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
 
     private let scroll = NSScrollView()
     private let collection = ResizingFeedCollectionView()
+    /// The row above the cards (the statistics on its right).
     private let chipBar = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: "")
     private let statsLabel = NSTextField(labelWithString: "")
@@ -499,13 +499,13 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         view = root
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryChanged, object: nil)
         NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.renderChips(); self?.reload() }
+            MainActor.assumeIsolated { self?.reload() }
         }
         NotificationCenter.default.addObserver(forName: Self.showLabelNote, object: nil, queue: .main) { [weak self] n in
             MainActor.assumeIsolated {
                 guard let self, let l = n.object as? String else { return }
-                self.filter.labels = [l]
-                self.renderChips(); self.reload()
+                var f = FeedFilter(); f.labels = [l]
+                self.search(f, replacing: true)
             }
         }
         NotificationCenter.default.addObserver(forName: Self.showFolderNote, object: nil, queue: .main) { [weak self] n in
@@ -519,7 +519,6 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
                 } else { self.toast.show(text) }
             }
         }
-        renderChips()
         reload()
     }
 
@@ -560,11 +559,13 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
 
     // MARK: Data
 
-    private var currentFilter: FeedFilter {
-        var f = filter
-        if LibraryPrefs.badOnly { f.badOnly = true }
-        return query.filter(over: f)
-    }
+    /// What the search's capsules ask for (the only filters there are).
+    private var currentFilter: FeedFilter { query.filter(over: FeedFilter()) }
+
+    /// A filter (only this author, this tag, this folder, the recent posts…) is a search: its
+    /// capsules go into the toolbar's field ("名字 用户", "标签名 标签", "文件夹 名字").
+    var onSearchKeys: ((_ keys: [String], _ replacing: Bool) -> Void)?
+    private func search(_ f: FeedFilter, replacing: Bool = false) { onSearchKeys?(TokenQuery.keys(for: f), replacing) }
 
     private let reloadWork = LatestWork()
     private let sizesWatcher = MediaSizesWatcher()
@@ -703,9 +704,6 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     func reveal(_ item: FeedItem) {
         if allItems.contains(where: { $0.mediaId == item.mediaId }) { return scrollTo(item) }
         pendingReveal = item
-        filter = FeedFilter()
-        if LibraryPrefs.badOnly && item.bad == nil { LibraryPrefs.badOnly = false }
-        renderChips()
         if query != TokenQuery() { onClearSearch?() } else { reload() }
     }
 
@@ -751,48 +749,11 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     func applyQuery(_ q: TokenQuery) {
         guard q != query else { return }
         query = q
-        renderChips()
         reload()
     }
 
     /// A tag to search for, from a card: it becomes a capsule in the toolbar's search field.
     func addTerm(_ raw: String) { onSearchTag?(raw) }
-
-    private func chip(_ title: String, color: NSColor, id: String, remove: @escaping () -> Void) -> NSButton {
-        let b = ClosureButton(title: title, action: remove)
-        b.isBordered = false
-        b.wantsLayer = true
-        b.layer?.cornerRadius = 12
-        b.layer?.backgroundColor = color.cgColor
-        b.attributedTitle = NSAttributedString(string: "  \(title)  ✕  ", attributes: [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
-        b.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        b.setAccessibilityIdentifier(id)
-        return b
-    }
-
-    private func renderChips() {
-        chipBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        if let k = filter.kind { chipBar.addArrangedSubview(chip(k == .video ? L("feed.chip.videos") : L("feed.chip.photos"), color: .systemBlue, id: "chip-kind") { [weak self] in self?.filter.kind = nil; self?.renderChips(); self?.reload() }) }
-        if filter.review == .unreviewed { chipBar.addArrangedSubview(chip(L("place.unreviewed"), color: .systemOrange, id: "chip-review") { [weak self] in self?.filter.review = .any; self?.renderChips(); self?.reload() }) }
-        if let a = filter.author {
-            chipBar.addArrangedSubview(chip(L("feed.chip.author", a.hasPrefix("@") ? a : "@" + a), color: .systemIndigo, id: "chip-author") { [weak self] in self?.filter.author = nil; self?.renderChips(); self?.reload() })
-        }
-        for l in filter.labels {
-            chipBar.addArrangedSubview(chip(L("feed.chip.label", l), color: .systemGreen, id: "chip-label") { [weak self] in self?.filter.labels.removeAll { $0 == l }; self?.renderChips(); self?.reload() })
-        }
-        if filter.review == .reviewed { chipBar.addArrangedSubview(chip(L("place.reviewed"), color: .systemGreen, id: "chip-reviewed") { [weak self] in self?.filter.review = .any; self?.renderChips(); self?.reload() }) }
-        if filter.albumOnly { chipBar.addArrangedSubview(chip(L("card.album"), color: .systemIndigo, id: "chip-album") { [weak self] in self?.filter.albumOnly = false; self?.renderChips(); self?.reload() }) }
-        if filter.looseOnly { chipBar.addArrangedSubview(chip(L("card.loose"), color: .systemIndigo, id: "chip-loose") { [weak self] in self?.filter.looseOnly = false; self?.renderChips(); self?.reload() }) }
-        if filter.recentOnly { chipBar.addArrangedSubview(chip(L("place.recent"), color: .systemOrange, id: "chip-recent") { [weak self] in self?.filter.recentOnly = false; self?.renderChips(); self?.reload() }) }
-        if let f = filter.folder { chipBar.addArrangedSubview(chip(L("search.token.folder", f), color: .systemTeal, id: "chip-folder") { [weak self] in self?.showFolder(nil) }) }
-        if LibraryPrefs.badOnly { chipBar.addArrangedSubview(chip(L("feed.chip.bad"), color: .systemRed, id: "chip-bad") { LibraryPrefs.badOnly = false }) }
-        // the search itself shows as capsules in the toolbar's search field
-        onChipsChanged?()
-    }
-
-    /// A filter chip is on (a tag from the tags page, 仅视频, 未认可…): that is a search too.
-    var hasChipFilter: Bool { !filter.isEmpty || LibraryPrefs.badOnly }
-    var onChipsChanged: (() -> Void)?
 
     // MARK: Collection
 
@@ -818,7 +779,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         card.refresh(e)
         card.onOpen = { [weak self] it in self?.open(it) }
         card.onTag = { [weak self] l in self?.addTerm(l) }
-        card.onRecent = { [weak self] in guard let self, !self.filter.recentOnly else { return }; self.toggleRecentOnly() }
+        card.onRecent = { [weak self] in guard let self, !self.query.recent else { return }; self.toggleRecentOnly() }
         card.onAddTag = { [weak self] card, anchor, rect in self?.showTagPicker(card, anchor: anchor, rect: rect) }
         card.onPage = { [weak self, weak card] in
             if let card { self?.pageChanged(card) }
@@ -1097,6 +1058,12 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         return collection.visibleItems().compactMap { $0 as? FeedCard }
             .filter { $0.view.frame.intersects(visible) && !$0.items.isEmpty && !$0.debugHasImage }.count
     }
+    /// Turns every visible card with several pages one page on (from the last back to the first).
+    func debugTurnPages() -> Int {
+        let cards = collection.visibleItems().compactMap { $0 as? FeedCard }.filter { $0.items.count > 1 }
+        for c in cards { c.show(page: (c.page + 1) % c.items.count) }
+        return cards.count
+    }
     #endif
 
     // MARK: Tag menu (right-click)
@@ -1106,7 +1073,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         let p = collection.convert(view.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
         guard let ip = collection.indexPathForItem(at: p), let card = collection.item(at: ip) as? FeedCard, let item = card.current else { return }
         if !item.isLoose, let key = item.authorKey {
-            menu.addItem(ClosureMenuItem(L("card.menu.onlyAuthor", item.authorDisplay)) { [weak self] in self?.filter.author = key; self?.renderChips(); self?.reload() })
+            menu.addItem(ClosureMenuItem(L("card.menu.onlyAuthor", item.authorDisplay)) { [weak self] in var f = FeedFilter(); f.author = key; self?.search(f) })
             if let sn = item.screenName, let u = URL(string: "https://x.com/\(sn)") {
                 menu.addItem(ClosureMenuItem(L("card.menu.openProfile", sn)) { NSWorkspace.shared.open(u) })
             }
@@ -1177,8 +1144,8 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         let sub = NSMenu()
         sub.addItem(ClosureMenuItem(L("card.menu.onlyTag")) { [weak self] in
             guard let self else { return }
-            if !self.filter.labels.contains(t.label) { self.filter.labels.append(t.label) }
-            self.renderChips(); self.reload()
+            var f = FeedFilter(); f.labels = [t.label]
+            self.search(f)
         })
         sub.addItem(ClosureMenuItem(L("card.menu.searchTag")) { [weak self] in self?.addTerm(t.label) })
         if t.isAI && !t.isUser { sub.addItem(ClosureMenuItem(L("card.menu.approve")) { [weak self] in try? Core.addTag(t.label, to: item.mediaId); self?.reload(keepPosition: true) }) }
@@ -1203,20 +1170,21 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         if on { detachInline() } else { updateInline() }
     }
 
-    /// Shows a collection's media in 浏览 (its 在浏览中查看): its filter as chips.
-    func showFromFolders(_ f: FeedFilter, title: String) {
-        filter = f
-        renderChips()
-        reload()
-    }
+    /// Shows a collection's media in 浏览 (its 在浏览中查看): what it shows, searched for.
+    func showFromFolders(_ f: FeedFilter, title: String) { search(f, replacing: true) }
 
+    /// Searches one folder (nil: the folder capsule goes, the rest of the search stays).
+    var currentKeys: () -> [String] = { [] }
     func showFolder(_ name: String?) {
-        filter.folder = name
-        renderChips()
-        reload()
+        guard let name else { return onSearchKeys?(currentKeys().filter { !$0.hasPrefix("d:") }, true) ?? () }
+        var f = FeedFilter(); f.folder = name
+        search(f)
     }
 
-    func toggleRecentOnly() { filter.recentOnly.toggle(); renderChips(); reload() }
+    func toggleRecentOnly() {
+        guard query.recent else { var f = FeedFilter(); f.recentOnly = true; return search(f) }
+        onSearchKeys?(currentKeys().filter { $0 != SearchKeyword.recent.key }, true)
+    }
     func showMessage(_ text: String) { toast.show(text) }
 
     private func folderMenuItem(_ title: String, media: [String] = [], posts: [String] = []) -> NSMenuItem {
@@ -1256,8 +1224,6 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             do {
                 let name = try Core.renameTag(old, to: new)
                 self.onRenameTerm?(old, name)
-                if let i = self.filter.labels.firstIndex(of: old) { self.filter.labels[i] = name }
-                self.renderChips()
                 NotificationCenter.default.post(name: .libraryChanged, object: nil)
                 self.reload(keepPosition: true)
                 self.toast.show(L("tag.renamed", old, name))

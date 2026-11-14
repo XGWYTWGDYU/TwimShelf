@@ -356,11 +356,11 @@ final class FeedUITests: XCTestCase {
         if !item.waitForExistence(timeout: 3) { print("TREE-AUTHOR", app.debugDescription) }
         XCTAssertTrue(item.exists, "author filter in the long-press menu")
         item.tap()
-        let chip = el("chip-author")
-        XCTAssertTrue(chip.waitForExistence(timeout: 3), "author chip shown")
+        // a filter is a search: "名字 用户" in the field, no chip of its own
+        XCTAssertTrue(searchShows("用户"), "the author searched for in 用户")
+        XCTAssertFalse(el("chip-author").exists)
         snap("only-author")
-        chip.tap()
-        XCTAssertFalse(chip.waitForExistence(timeout: 1))
+        exitSearch()
     }
 
     func testTagChipLongPressFiltersByTag() {
@@ -377,11 +377,12 @@ final class FeedUITests: XCTestCase {
         XCTAssertTrue(only.exists, "tag chip has its own menu")
         snap("tag-menu")
         only.tap()
-        XCTAssertTrue(el("chip-label-收藏").waitForExistence(timeout: 3))
-        // every visible card carries the tag
+        // a filter is a search: "收藏 标签" in the field, no chip of its own
+        XCTAssertTrue(searchShows("标签"), "the tag searched for in 标签")
+        XCTAssertFalse(el("chip-label-收藏").exists)
         let cards = app.collectionViews.firstMatch.cells
         XCTAssertGreaterThan(cards.count, 0)
-        el("chip-label-收藏").tap()
+        exitSearch()
     }
 
     func testSearchResultsEndInsteadOfLooping() {

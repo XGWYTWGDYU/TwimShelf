@@ -58,12 +58,11 @@ enum LibraryPrefs {
     static let changed = Notification.Name("LibraryPrefsChanged")
 
     /// What ten taps on the icon in 关于 bring out stays out until ten more put it away: the
-    /// maintenance rows there, and 损坏或丢失 wherever it is offered.
+    /// maintenance rows there, 损坏或丢失 wherever it is offered, and 损坏 among the search words.
     static var aboutExtras: Bool {
         get { UserDefaults.standard.bool(forKey: "about.extras") }
         set {
             UserDefaults.standard.set(newValue, forKey: "about.extras")
-            if !newValue { UserDefaults.standard.set(false, forKey: "filter.bad") }
             NotificationCenter.default.post(name: changed, object: nil)
         }
     }
@@ -94,16 +93,12 @@ enum LibraryPrefs {
         return max(1, min(maxColumns + (level == 2 ? 2 : 0), Int(width / per)))
     }
 
-    static var badOnly: Bool {
-        get { aboutExtras && UserDefaults.standard.bool(forKey: "filter.bad") }
-        set { UserDefaults.standard.set(newValue, forKey: "filter.bad"); NotificationCenter.default.post(name: changed, object: nil) }
-    }
-
     /// Settings of features that are gone (整理 mode): removed from this device at every launch.
     /// The list only grows and costs one lookup per key, so a device that skips versions (or
     /// comes back years later) is cleaned the same way.
     static func removeRetired() {
-        for k in ["triage.mode", "triage.filter", "triage.recentFolders", "home.backdrop"] { UserDefaults.standard.removeObject(forKey: k) }
+        // filter.bad: 只看损坏 became the search word 损坏
+        for k in ["triage.mode", "triage.filter", "triage.recentFolders", "home.backdrop", "filter.bad"] { UserDefaults.standard.removeObject(forKey: k) }
     }
 
     /// 视频禁用手势: the player leaves out the drags for seeking, volume and brightness (long press for

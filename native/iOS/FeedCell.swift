@@ -125,7 +125,10 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
     private let authorLabel = UILabel()
     private let bodyView = UITextView()
     private let linkButton = UIButton(type: .system)
-    private let tagStack = UIStackView()
+    /// The chips of the tag row, placed by hand (`layoutTags`): a stack view sized by Auto Layout
+    /// kept the width of the page before after a swipe back and stretched one chip across it.
+    private let tagRow = UIView()
+    private var tagChips: [UIButton] = []
     private let tagScroll = UIScrollView()
 
     var currentItem: FeedItem? { items.indices.contains(page) ? items[page] : nil }
@@ -189,22 +192,26 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         linkButton.contentEdgeInsets = .zero
         linkButton.addTarget(self, action: #selector(openLink), for: .touchUpInside)
 
-        tagStack.axis = .horizontal
-        tagStack.spacing = 6
         tagScroll.showsHorizontalScrollIndicator = false
         // the row spans the whole card and its inset moves the chips in: scrolled chips then end at
         // the card's own edge, not at an invisible line 16 pt inside it
         tagScroll.contentInset = UIEdgeInsets(top: 0, left: CardLayout.side, bottom: 0, right: CardLayout.side)
-        tagScroll.addSubview(tagStack)
-        tagStack.translatesAutoresizingMaskIntoConstraints = false
+        tagScroll.addSubview(tagRow)
         [pager, counter, authorLabel, bodyView, linkButton, tagScroll].forEach { contentView.addSubview($0) }
-        NSLayoutConstraint.activate([
-            tagStack.topAnchor.constraint(equalTo: tagScroll.contentLayoutGuide.topAnchor),
-            tagStack.bottomAnchor.constraint(equalTo: tagScroll.contentLayoutGuide.bottomAnchor),
-            tagStack.leadingAnchor.constraint(equalTo: tagScroll.contentLayoutGuide.leadingAnchor),
-            tagStack.trailingAnchor.constraint(equalTo: tagScroll.contentLayoutGuide.trailingAnchor),
-            tagStack.heightAnchor.constraint(equalTo: tagScroll.frameLayoutGuide.heightAnchor),
-        ])
+    }
+
+    /// Each chip at its own width, side by side, the row as tall as the tag row; the "+" a circle.
+    private func layoutTags() {
+        let h = CardLayout.tagsHeight
+        var x: CGFloat = 0
+        for c in tagChips {
+            let w = c.accessibilityIdentifier == "addTag" ? h : ceil(c.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: h)).width)
+            c.frame = CGRect(x: x, y: 0, width: w, height: h)
+            x += w + 6
+        }
+        let width = max(0, x - 6)
+        tagRow.frame = CGRect(x: 0, y: 0, width: width, height: h)
+        tagScroll.contentSize = CGSize(width: width, height: h)
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -224,6 +231,7 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         linkButton.frame = l.link ?? .zero
         // the tags at the bottom of the card (the card is exactly as tall as `CardLayout.height`)
         tagScroll.frame = CGRect(x: 0, y: contentView.bounds.height - CardLayout.bottom - CardLayout.tagsHeight, width: w, height: CardLayout.tagsHeight)
+        layoutTags()
         // past the card's sides and bottom: the glass's own rim light would show there as a line
         captionGlass?.frame = CGRect(x: -3, y: l.pagerHeight, width: w + 6, height: contentView.bounds.height - l.pagerHeight + 3)
     }
@@ -323,18 +331,22 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         linkButton.isHidden = it.url == nil
         setNeedsLayout()
 
-        tagStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        // a reused card keeps the old row's scroll position: the first chip would start cut off
-        tagScroll.setContentOffset(CGPoint(x: -tagScroll.contentInset.left, y: 0), animated: false)
-        if it.isRecent { tagStack.addArrangedSubview(TagChip.recent(target: self, action: #selector(recentTapped))) }
+        tagChips.forEach { $0.removeFromSuperview() }
+        var chips: [UIButton] = []
+        if it.isRecent { chips.append(TagChip.recent(target: self, action: #selector(recentTapped))) }
         for t in it.tags {
             let chip = TagChip.make(t, target: self, action: #selector(tagTapped(_:)), highlight: highlight.tags)
             // Long-press a tag: only this tag, search, endorse, delete.
             chip.menu = delegate?.feedCell(self, menuForTag: t, of: it)
             chip.showsMenuAsPrimaryAction = false
-            tagStack.addArrangedSubview(chip)
+            chips.append(chip)
         }
-        tagStack.addArrangedSubview(TagChip.addButton(target: self, action: #selector(addTagTapped)))
+        chips.append(TagChip.addButton(target: self, action: #selector(addTagTapped)))
+        chips.forEach(tagRow.addSubview)
+        tagChips = chips
+        layoutTags()
+        // a reused card keeps the old row's scroll position: the first chip would start cut off
+        tagScroll.setContentOffset(CGPoint(x: -tagScroll.contentInset.left, y: 0), animated: false)
     }
 
     @objc private func tagTapped(_ b: UIButton) {
@@ -514,8 +526,7 @@ extension TagChip {
         cfg.cornerStyle = .capsule
         cfg.contentInsets = .init(top: 4, leading: 4, bottom: 4, trailing: 4)
         let b = UIButton(configuration: cfg)
-        // a circle as tall as the tags beside it (the row gives every chip its height)
-        b.widthAnchor.constraint(equalTo: b.heightAnchor).isActive = true
+        // a circle as tall as the tags beside it (the row places it so)
         b.accessibilityLabel = L("card.addTag")
         b.accessibilityIdentifier = "addTag"
         b.addTarget(target, action: action, for: .touchUpInside)

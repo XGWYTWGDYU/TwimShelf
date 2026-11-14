@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:twimshelf/search/suggestions.dart';
 import 'package:twimshelf/app/places.dart';
 import 'package:twimshelf/app/prefs.dart';
 import 'package:twimshelf/l10n/l10n.dart';
@@ -71,19 +72,18 @@ void main() {
     expect(gap, greaterThan(tester.getSize(find.byType(ListTile).first).height));
   });
 
-  test('损坏或丢失 and its filter go with the maintenance rows', () {
+  test('损坏或丢失 and the search word 损坏 go with the maintenance rows', () {
     final prefs = Prefs.instance;
+    List<String> offered(bool extras) => suggestionSections('', [], [], [], offerDamaged: extras)
+        .expand((s) => s.rows)
+        .map((i) => i.id)
+        .toList();
     prefs.aboutExtras = false;
     expect(Place.offered, isNot(contains(Place.bad)));
-    prefs.badOnly = true;
-    expect(prefs.badOnly, isFalse);
+    expect(offered(prefs.aboutExtras).any((id) => id.contains('damaged')), isFalse);
     prefs.aboutExtras = true;
     expect(Place.offered, contains(Place.bad));
-    prefs.badOnly = true;
-    expect(prefs.badOnly, isTrue);
-    prefs.aboutExtras = false;
-    prefs.aboutExtras = true;
-    expect(prefs.badOnly, isFalse, reason: 'turned off with the rows, not back on by itself');
+    expect(offered(prefs.aboutExtras).any((id) => id.contains('damaged')), isTrue);
     prefs.aboutExtras = false;
   });
 

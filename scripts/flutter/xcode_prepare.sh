@@ -57,6 +57,10 @@ if [[ -f "$ROOT/flutter/app/$platform/Podfile" ]]; then
   command -v pod >/dev/null || fail "CocoaPods is missing: run ./build.sh --check"
   # CocoaPods reads the engine's files: a fresh Flutter SDK has to fetch them first
   "$FLUTTER" precache --"$platform" || fail "Could not download the Flutter engine"
-  (cd "$ROOT/flutter/app/$platform" && pod install) || fail "pod install failed"
+  # with none of Xcode's build settings in the environment: Xcode exports the app target's
+  # INFOPLIST_FILE to this pre-action, and with it set CocoaPods leaves the pods' own Info.plist
+  # out of their frameworks (media_kit's then fail code signing as "bundle format unrecognized")
+  (cd "$ROOT/flutter/app/$platform" && env -i HOME="$HOME" PATH="$PATH" LANG="$LANG" LC_ALL="$LC_ALL" \
+    PUB_CACHE="$PUB_CACHE" FLUTTER_ROOT="$FLUTTER_ROOT" pod install) || fail "pod install failed"
 fi
 echo "Prepared $platform"

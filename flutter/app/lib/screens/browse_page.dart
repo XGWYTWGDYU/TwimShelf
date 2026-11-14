@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
@@ -50,14 +51,21 @@ class _BrowsePageState extends State<BrowsePage> {
   bool _grouped = Prefs.instance.feedGrouped;
   /// The page each card was left on: a card that scrolled away comes back on it.
   final _cardPages = <String, int>{};
-  TokenQuery _query = TokenQuery();
-  /// What the chips under the search field narrow 浏览 to (only an author, tags, a
-  /// grid's 在浏览中查看); each chip takes its part off again.
-  String? _author;
-  String? _authorDisplay;
-  final List<String> _labels = [];
-  FeedFilter? _shown;
+  // a debug or profile run can start with a search (TL_SEARCH, typed as in the field: "贴文 的"):
+  // how the performance tests work in search results
+  TokenQuery _query = !kReleaseMode && OS.environment['TL_SEARCH'] != null ? TokenQuery.parse(OS.environment['TL_SEARCH']!) : TokenQuery();
   final _addKey = ValueNotifier<String?>(null);
+  /// The search field's capsules from here: every filter of 浏览 (only an author, a tag, a
+  /// grid's 在浏览中查看) is a search, written into the field. There are no other filters.
+  final _setKeys = ValueNotifier<List<String>?>(null);
+
+  /// A filter as capsules, after what is searched already or in its place.
+  void _search(FeedFilter f, {bool replacing = false}) {
+    final keys = TokenQuery.adding(TokenQuery.keysFor(f), replacing ? const [] : _query.keys);
+    _query = TokenQuery(keys: keys);
+    _setKeys.value = keys;
+    _load();
+  }
   int _revision = -1;
   int _generation = 0;
 
@@ -111,15 +119,7 @@ class _BrowsePageState extends State<BrowsePage> {
         return;
       }
       _clearedForReveal = true;
-      setState(() {
-        _query = TokenQuery();
-        _author = null;
-        _labels.clear();
-        _shown = null;
-      });
-      Prefs.instance.badOnly = false;
-      _badOnly = false;
-      _load();
+      _search(FeedFilter(), replacing: true);
       return;
     }
     _pendingReveal = null;
@@ -143,6 +143,7 @@ class _BrowsePageState extends State<BrowsePage> {
     widget.library.filterRequest.removeListener(_showFilter);
     QuickAction.requests.removeListener(_quickDownloadSoon);
     _addKey.dispose();
+    _setKeys.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -166,72 +167,19 @@ class _BrowsePageState extends State<BrowsePage> {
     });
   }
 
-  /// The chips' filter, with 只看损坏 from 设置.
-  FeedFilter get _filter {
-    final j = (_shown ?? FeedFilter()).toJson();
-    if (_author != null) j['author'] = _author;
-    if (_labels.isNotEmpty) j['labels'] = [...(j['labels'] as List? ?? const []), ..._labels];
-    if (Prefs.instance.badOnly) j['bad_only'] = true;
-    return FeedFilter.fromJson(j);
-  }
-
+  /// 在浏览中查看 of a grid, a tag's 只在首页显示…: searched for, in place of the search.
   void _showFilter() {
     final f = widget.library.filterRequest.value;
     if (f == null) return;
     widget.library.filterRequest.value = null;
-    setState(() {
-      _shown = f;
-      _author = null;
-      _labels.clear();
-    });
-    _load();
+    _search(f, replacing: true);
   }
 
   late final _menuHost = CardMenuHost(
-    onlyAuthor: (key, display) {
-      setState(() {
-        _author = key;
-        _authorDisplay = display;
-      });
-      _load();
-    },
-    onlyLabel: (label) {
-      if (!_labels.contains(label)) setState(() => _labels.add(label));
-      _load();
-    },
+    onlyAuthor: (key, display) => _search(FeedFilter(author: key)),
+    onlyLabel: (label) => _search(FeedFilter(labels: [label])),
     addTerm: (term) => _addKey.value = TokenQuery.termKey(term.toLowerCase()),
   );
-
-  /// The chips: each takes its filter off again.
-  List<Widget> _chips() {
-    final shown = _shown;
-    Widget chip(String key, String text, Color color, VoidCallback remove) => Padding(
-          padding: const EdgeInsetsDirectional.only(end: 8),
-          child: InputChip(
-            key: ValueKey(key),
-            label: Text(text),
-            labelStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-            backgroundColor: color,
-            deleteIconColor: Colors.white,
-            side: BorderSide.none,
-            onDeleted: () {
-              setState(remove);
-              _load();
-            },
-            deleteButtonTooltipMessage: L('feed.removeFilter', [text]),
-          ),
-        );
-    return [
-      if (_author != null) chip('chip-author', L('feed.chip.author', [_authorDisplay ?? _author!]), Colors.indigo, () => _author = null),
-      for (final l in _labels) chip('chip-label-$l', L('feed.chip.label', [l]), Colors.green.shade700, () => _labels.remove(l)),
-      if (shown?.loose_only ?? false) chip('chip-loose', L('card.loose'), Colors.indigo, () => _shown = null),
-      if (shown?.album_only ?? false) chip('chip-album', L('card.album'), Colors.indigo, () => _shown = null),
-      if (shown?.recent_only ?? false) chip('chip-recent', L('place.recent'), Colors.orange.shade800, () => _shown = null),
-      if (shown?.kind != null) chip('chip-kind', shown!.kind == MediaKind.video ? L('feed.chip.videos') : L('feed.chip.photos'), Colors.pink, () => _shown = null),
-      if (shown?.folder != null) chip('chip-folder', L('search.token.folder', [shown!.folder!]), Colors.teal, () => _shown = null),
-      if (Prefs.instance.badOnly) chip('chip-bad', L('feed.chip.bad'), Colors.red, () => Prefs.instance.badOnly = false),
-    ];
-  }
 
   static bool get _touchShuffle => OS.isIOS || OS.isAndroid;
 
@@ -242,7 +190,6 @@ class _BrowsePageState extends State<BrowsePage> {
     _load();
   }
 
-  bool _badOnly = Prefs.instance.badOnly;
   int _density = Prefs.instance.densityPortrait * 3 + Prefs.instance.densityLandscape;
   void _prefsChanged() {
     final density = Prefs.instance.densityPortrait * 3 + Prefs.instance.densityLandscape;
@@ -250,9 +197,6 @@ class _BrowsePageState extends State<BrowsePage> {
       _density = density;
       setState(() {});
     }
-    if (Prefs.instance.badOnly == _badOnly) return;
-    _badOnly = Prefs.instance.badOnly;
-    _load();
   }
 
   void _changed() {
@@ -263,7 +207,7 @@ class _BrowsePageState extends State<BrowsePage> {
     _revision = widget.library.revision;
     final gen = ++_generation;
     // a contradiction (视频 -视频) finds nothing, as in the native apps, without asking the core
-    final items = _query.isContradictory ? const <FeedItem>[] : await widget.library.feed(_query.request(newestFirst: Prefs.instance.feedByAdded, over: _filter, wholePosts: _grouped));
+    final items = _query.isContradictory ? const <FeedItem>[] : await widget.library.feed(_query.request(newestFirst: Prefs.instance.feedByAdded, wholePosts: _grouped));
     if (!mounted || gen != _generation) return;
     setState(() {
       _items = Prefs.instance.feedByAdded ? items : _order.apply(items);
@@ -322,8 +266,7 @@ class _BrowsePageState extends State<BrowsePage> {
   Widget build(BuildContext context) {
     final cards = _cards;
     final pad = MediaQuery.paddingOf(context);
-    final chips = _chips();
-    final headerHeight = 64.0 + (chips.isNotEmpty ? 44 : 0);
+    const headerHeight = 64.0;
     final scheme = Theme.of(context).colorScheme;
     // a phone's width leaves the search field its room beside the buttons
     final dense = ShellLayout.of(MediaQuery.sizeOf(context)) == ShellLayout.bar;
@@ -338,6 +281,7 @@ class _BrowsePageState extends State<BrowsePage> {
               fullScreen: ShellLayout.of(MediaQuery.sizeOf(context)) == ShellLayout.bar,
               initialKeys: _query.keys,
               addKey: _addKey,
+              setKeys: _setKeys,
               folders: () => [for (final f in widget.library.folders?.folders ?? const <Folder>[]) (name: f.name, count: f.count)],
               onChanged: (q) {
                 _query = q;
@@ -354,9 +298,8 @@ class _BrowsePageState extends State<BrowsePage> {
                   dense: dense,
                   onPressed: () => exportSearchResult(context, _items, terms: _query.terms),
                 ),
-              // 按添加时间排序, 按帖子分组 and 快捷下载, as native: with nothing searched for and
-              // nothing narrowing 浏览
-              if (_query.keys.isEmpty && chips.isEmpty) ...[
+              // 按添加时间排序, 按帖子分组 and 快捷下载, as native: with nothing searched for
+              if (_query.keys.isEmpty) ...[
                 _RoundButton(
                   key: const ValueKey('sortByAdded'),
                   tooltip: L('feed.sortByAdded'),
@@ -414,12 +357,6 @@ class _BrowsePageState extends State<BrowsePage> {
             );
     // at a phone's width: a capsule of its own, like the bar below (Material 3 Expressive's
     // floating toolbar), with the cards passing under it and the status bar kept readable
-    final chipRow = chips.isEmpty
-        ? null
-        : SizedBox(
-            height: 44,
-            child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(12, 2, 12, 6), children: chips),
-          );
     final Widget floatingHeader = Stack(children: [
       Positioned(
         left: 0,
@@ -448,7 +385,6 @@ class _BrowsePageState extends State<BrowsePage> {
               child: searchRow,
             ),
           ),
-          if (chipRow != null) Padding(padding: const EdgeInsets.only(top: 2), child: chipRow),
         ]),
       ),
     ]);
@@ -463,12 +399,6 @@ class _BrowsePageState extends State<BrowsePage> {
           padding: EdgeInsets.only(top: pad.top),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             searchRow,
-            // the chips, only while something narrows 浏览
-            if (chips.isNotEmpty)
-              SizedBox(
-                height: 44,
-                child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(12, 2, 12, 6), children: chips),
-              ),
           ]),
         ),
       ),
@@ -477,7 +407,7 @@ class _BrowsePageState extends State<BrowsePage> {
     final Widget body = cards == null
             ? const Center(child: CircularProgressIndicator())
             : cards.isEmpty
-                ? Center(child: Padding(padding: const EdgeInsets.all(32), child: Text(_query.keys.isEmpty && _chips().isEmpty ? L('feed.empty.library.app') : L('feed.empty.noMatch'), textAlign: TextAlign.center)))
+                ? Center(child: Padding(padding: const EdgeInsets.all(32), child: Text(_query.keys.isEmpty ? L('feed.empty.library.app') : L('feed.empty.noMatch'), textAlign: TextAlign.center)))
                 : LayoutBuilder(builder: (context, c) {
                     final screen = MediaQuery.sizeOf(context);
                     final columns = Prefs.instance.feedColumns(c.maxWidth, screen.height);
@@ -775,6 +705,9 @@ class _FeedVideo extends StatefulWidget {
   State<_FeedVideo> createState() => _FeedVideoState();
 }
 
+/// For the performance tests: how many video players the feed holds.
+({int playing, int idle}) feedVideoPlayers() => _FeedVideoState.debugPlayers;
+
 class _FeedVideoState extends State<_FeedVideo> {
   static final _playing = <_FeedVideoState>{};
   static final _instances = <_FeedVideoState>{};
@@ -783,6 +716,9 @@ class _FeedVideoState extends State<_FeedVideo> {
   /// second and more, which a scroll felt as a stall every time a video came or went.
   static final _idle = <VideoPlayback>[];
   static bool _viewerOpen = false;
+  /// Players alive (playing, and kept for the next videos): for the performance tests.
+  @visibleForTesting
+  static ({int playing, int idle}) get debugPlayers => (playing: _playing.length, idle: _idle.length);
 
   static Future<void> suspendForViewer() async {
     _viewerOpen = true;

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tl_core/tl_core.dart';
 
+import '../app/prefs.dart';
 import '../l10n/l10n.dart';
 import '../mascot/mascot.dart';
 import '../search/history.dart';
@@ -25,12 +26,16 @@ class CapsuleSearch extends StatefulWidget {
     this.autofocus = false,
     this.trailing,
     this.addKey,
+    this.setKeys,
     this.flat = false,
   });
   /// On a capsule of its own: no fill of its own.
   final bool flat;
   /// Set to a key (a term, a folder…) to add it as a capsule from outside (a card's 搜索此标签).
   final ValueNotifier<String?>? addKey;
+  /// Set to a whole list of capsules to put in the field's place (a filter of 浏览 becomes a
+  /// search: "名字 用户", "文件夹 名字"…); what is being typed stays.
+  final ValueNotifier<List<String>?>? setKeys;
   /// Beside the field in the inline layout (the full-screen page's 完成).
   final Widget Function(List<String> keys)? trailing;
   final void Function(TokenQuery query) onChanged;
@@ -66,6 +71,7 @@ class _CapsuleSearchState extends State<CapsuleSearch> {
     if (widget.inline) unawaited(_loadTags());
     if (_keys.isNotEmpty) _setText('');
     widget.addKey?.addListener(_external);
+    widget.setKeys?.addListener(_replaced);
     _focus.addListener(() {
       if (widget.fullScreen || widget.inline) return;
       if (_focus.hasFocus) {
@@ -90,7 +96,17 @@ class _CapsuleSearchState extends State<CapsuleSearch> {
     _focus.dispose();
     _scroll.dispose();
     widget.addKey?.removeListener(_external);
+    widget.setKeys?.removeListener(_replaced);
     super.dispose();
+  }
+
+  void _replaced() {
+    final k = widget.setKeys?.value;
+    if (k == null) return;
+    widget.setKeys!.value = null;
+    setState(() => _keys = List.of(k));
+    _setText(_typedText);
+    widget.onChanged(query);
   }
 
   void _external() {
@@ -262,7 +278,7 @@ class _CapsuleSearchState extends State<CapsuleSearch> {
 
   List<Widget> _rows(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final sections = suggestionSections(_typedText, _keys, _tags, widget.folders(), history: _history?.items ?? const []);
+    final sections = suggestionSections(_typedText, _keys, _tags, widget.folders(), history: _history?.items ?? const [], offerDamaged: Prefs.instance.aboutExtras);
     final rows = <Widget>[];
     for (final s in sections) {
       if (s.rows.isEmpty) continue;

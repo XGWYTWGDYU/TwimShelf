@@ -291,9 +291,8 @@ final class MacTokenSearch: NSView {
     var sortByAdded = LibraryPrefs.feedByAdded { didSet { updateSortButton() } }
     private func updateSortButton() { sortButton.isOn = sortByAdded }
     /// A filter chip of the page is on (not a capsule of this field): exporting is offered then too.
-    var chipFilterActive = false { didSet { updateExportVisibility() } }
     private func updateExportVisibility() {
-        exportButton.isHidden = exit.isHidden && !chipFilterActive
+        exportButton.isHidden = exit.isHidden
         downloadButton.isHidden = !exportButton.isHidden
         sortButton.isHidden = downloadButton.isHidden
         groupButton.isHidden = downloadButton.isHidden
@@ -393,6 +392,17 @@ final class MacTokenSearch: NSView {
         field.objectValue = tokens + [MacSearchToken(TokenQuery.termKey(t))]
         changed()
     }
+
+    /// A filter of 浏览 (only this author, a tag, a folder, a place shown in 浏览…) as capsules
+    /// (`TokenQuery.keys(for:)`): after what is searched already, or in its place.
+    func search(keys new: [String], replacing: Bool) {
+        let old = replacing ? [] : tokens.map(\.key)
+        field.objectValue = TokenQuery.adding(new, to: old).map { MacSearchToken($0) }
+        changed()
+    }
+
+    /// The keys of the capsules now (a condition can be taken out again).
+    var keys: [String] { tokens.map(\.key) }
 
     /// A tag was renamed: its capsule follows.
     func renameTerm(_ old: String, to new: String) {

@@ -248,4 +248,31 @@ void main() {
       expect(history.items, isEmpty);
     },
   );
+
+  group('every filter is a search', () {
+    test('相册, 已认可 / 未认可 and 损坏 are condition words', () {
+      final q = TokenQuery.parse('相册 未认可 损坏');
+      final f = q.filter().toJson();
+      expect(f['album_only'], isTrue);
+      expect(f['review'], 'unreviewed');
+      expect(f['bad_only'], isTrue);
+      expect(TokenQuery.parse('已认可 未认可').isContradictory, isTrue);
+      expect(TokenQuery.parse('-相册').keys, ['-t:相册'], reason: 'nothing to take away: a word');
+    });
+    test('a filter becomes the capsules that ask for the same', () {
+      expect(TokenQuery.keysFor(FeedFilter(author: '@Al')), ['t:al', 'f:author']);
+      expect(TokenQuery.keysFor(FeedFilter(labels: ['猫'])), ['t:猫', 'f:tags']);
+      expect(TokenQuery.keysFor(FeedFilter(folder: '旅行', kind: MediaKind.video, recent_only: true)), ['d:旅行', 'k:video', 'r:recent']);
+      expect(TokenQuery.keysFor(FeedFilter(loose_only: true, album_only: true, review: ReviewFilter.reviewed, bad_only: true)),
+          ['x:external', 'a:album', 'v:reviewed', 'b:damaged']);
+      // the capsules ask the core for what the filter asked
+      final q = TokenQuery(keys: TokenQuery.keysFor(FeedFilter(folder: '旅行', album_only: true)));
+      expect(q.filter().toJson()['folder'], '旅行');
+      expect(q.filter().toJson()['album_only'], isTrue);
+    });
+    test('added to the search: none twice, one folder at a time', () {
+      expect(TokenQuery.adding(['d:b', 't:x'], ['t:x', 'd:a']), ['t:x', 'd:b']);
+      expect(TokenQuery.adding(['v:reviewed'], ['v:unreviewed']), ['v:reviewed']);
+    });
+  });
 }

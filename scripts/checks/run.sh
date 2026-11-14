@@ -10,7 +10,7 @@ trap 'rm -rf "$out"' EXIT
 swiftc -module-cache-path "$out/cache" -o "$out/key" scripts/checks/external_key_binding/main.swift native/Shared/AI/ExternalModels.swift native/Shared/L10n.swift
 "$out/key"
 
-swiftc -module-cache-path "$out/cache" -parse-as-library -o "$out/queue" native/Shared/L10n.swift scripts/checks/ai_queue_progress/main.swift native/Shared/AI/AutoTagger.swift
+swiftc -module-cache-path "$out/cache" -parse-as-library -o "$out/queue" native/Shared/L10n.swift scripts/checks/ai_queue_progress/main.swift native/Shared/AI/AutoTagger.swift native/Shared/LatestWork.swift
 SCENARIO=unreadable "$out/queue"
 SCENARIO=model "$out/queue"
 

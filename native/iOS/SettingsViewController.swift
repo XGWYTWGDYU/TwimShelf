@@ -114,7 +114,6 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
         if let d = Core.downloadStatus(), !d.running, !d.errors.isEmpty {
             s.append(Section(id: "lastdl", rows: [.navigation(L("settings.lastFailed", d.failed), detail: L("common.view"), icon: .init("exclamationmark.triangle.fill", .systemOrange)) { [weak self] in self?.showErrors(d.errors) }]))
         }
-        let bad = ActivityCenter.shared.stats?.bad ?? 0
         let downloadIcon = Icon("arrow.down.circle.fill", .systemBlue, mascot: Core.downloadStatus()?.running == true ? "bag" : nil)
         let aiIcon = Icon("sparkles", .systemPurple, mascot: AutoTagger.shared.running ? "camera" : nil)
         s += [
@@ -127,9 +126,7 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
                     self?.navigationController?.pushViewController(TagListViewController(style: .insetGrouped), animated: true) },
             ]),
             Section(id: "view", header: L("settings.section.browse"), rows: [
-            ] + (LibraryPrefs.aboutExtras && (bad > 0 || LibraryPrefs.badOnly) ? [
-                .toggle(L("settings.badOnly", bad), LibraryPrefs.badOnly, icon: .init("exclamationmark.triangle.fill", .systemRed), id: "t:bad") { on in LibraryPrefs.badOnly = on },
-            ] : []) + [
+            ] + [
                 .toggle(L("settings.headphonesOnly"), AudioPolicy.headphonesOnly, icon: .init("headphones", .systemPink), id: "t:headphones") { on in AudioPolicy.headphonesOnly = on },
             ] + [
                 .toggle(L("settings.noGestures"), LibraryPrefs.playerGesturesOff, icon: .init("hand.raised.slash.fill", .systemIndigo), id: "t:playerGestures") { on in LibraryPrefs.playerGesturesOff = on },

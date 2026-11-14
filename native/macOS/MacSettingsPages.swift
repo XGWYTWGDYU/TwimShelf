@@ -126,11 +126,6 @@ struct SettingsRootView: View {
             SectionHeading(L("mac.prefs"))
             Card(spacing: 14) {
                 groupLabel(L("settings.section.browse"))
-                if LibraryPrefs.aboutExtras, (stats?.bad ?? 0) > 0 || LibraryPrefs.badOnly {
-                    ToggleRow(symbol: "exclamationmark.triangle.fill", color: .red, title: L("mac.badOnly"), detail: L("mac.badCount", stats?.bad ?? 0),
-                              isOn: Binding(get: { LibraryPrefs.badOnly }, set: { LibraryPrefs.badOnly = $0 }))
-                    RowDivider(inset: 42)
-                }
                 ToggleRow(symbol: "hand.raised.slash.fill", color: .indigo, title: L("settings.noGestures"),
                           isOn: Binding(get: { LibraryPrefs.playerGesturesOff }, set: { LibraryPrefs.playerGesturesOff = $0 }))
 

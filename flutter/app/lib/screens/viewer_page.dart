@@ -1,3 +1,4 @@
+import 'dart:async';
 import '../actions/share_media.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -57,7 +58,8 @@ class _ViewerPageState extends State<ViewerPage> {
   @override
   void initState() {
     super.initState();
-    immersivePages.value++;   // the progress panel steps aside
+    // the progress panel steps aside (after this frame: listeners may not rebuild during a build)
+    scheduleMicrotask(() => immersivePages.value++);
   }
 
   @override
@@ -82,7 +84,7 @@ class _ViewerPageState extends State<ViewerPage> {
 
   @override
   void dispose() {
-    immersivePages.value--;
+    scheduleMicrotask(() => immersivePages.value--);
     _pages.dispose();
     super.dispose();
   }

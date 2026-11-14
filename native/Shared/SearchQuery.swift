@@ -16,10 +16,16 @@ enum SearchKeyword: Hashable {
     case folder
     /// "视频" / "照片": only that kind of media.
     case media(MediaKind)
+    /// "相册": only media brought in from the photo library (the share extension's 从相册导入).
+    case album
+    /// "已认可" / "未认可": media with / without a tag you added or approved.
+    case review(ReviewFilter)
+    /// "损坏": only damaged or missing media.
+    case damaged
 
     struct Info { let word: String; let aliases: [String]; let symbol: String; let hint: String; let excludeHint: String }
 
-    static let all: [SearchKeyword] = [.field(.tags), .field(.text), .field(.author), .scope(.mine), .scope(.ai), .scope(.common), .scope(.both), .media(.video), .media(.photo), .folder, .recent, .external]
+    static let all: [SearchKeyword] = [.field(.tags), .field(.text), .field(.author), .scope(.mine), .scope(.ai), .scope(.common), .scope(.both), .media(.video), .media(.photo), .folder, .recent, .external, .album, .review(.reviewed), .review(.unreviewed), .damaged]
 
     /// The catalog name of the keyword ("search.kw.<id>.word", ".aliases", ".hint", ".exclude").
     var id: String {
@@ -30,6 +36,9 @@ enum SearchKeyword: Hashable {
         case .external: "external"
         case .folder: "folder"
         case .media(let k): k.rawValue
+        case .album: "album"
+        case .review(let r): r.rawValue
+        case .damaged: "damaged"
         }
     }
 
@@ -47,6 +56,10 @@ enum SearchKeyword: Hashable {
         case .folder: "folder"
         case .recent: "clock.badge.checkmark"
         case .external: "square.and.arrow.down"
+        case .album: "photo.on.rectangle"
+        case .review(.unreviewed): "circle.dashed"
+        case .review: "checkmark.circle"
+        case .damaged: "exclamationmark.triangle"
         }
     }
 
@@ -57,8 +70,14 @@ enum SearchKeyword: Hashable {
         return Info(word: L(base + ".word"), aliases: aliases, symbol: symbol, hint: L(base + ".hint"), excludeHint: L(base + ".exclude"))
     }
 
-    /// "全部" means nothing with a minus (the other conditions do).
-    var excludable: Bool { self != .scope(.both) }
+    /// "全部" means nothing with a minus; neither do 相册, 已认可 / 未认可 (the other one is the
+    /// opposite) and 损坏. The other conditions do.
+    var excludable: Bool {
+        switch self {
+        case .scope(.both), .album, .review, .damaged: false
+        default: true
+        }
+    }
 
     /// The keyword a typed word stands for (its word or an alias in the app's language, any case).
     static func from(_ word: String) -> SearchKeyword? {
@@ -76,6 +95,9 @@ enum SearchKeyword: Hashable {
         case .external: "x:external"
         case .folder: TokenQuery.pendingFolder
         case .media(let k): "k:" + k.rawValue
+        case .album: "a:album"
+        case .review(let r): "v:" + r.rawValue
+        case .damaged: "b:damaged"
         }
     }
 }
@@ -101,6 +123,10 @@ struct TokenQuery: Equatable {
     var excludedFolders: [String] = []
     var excludeRecent = false
     var excludeExternal = false
+    var album = false
+    /// 已认可 / 未认可 (both: nothing can match).
+    var reviews: Set<ReviewFilter> = []
+    var damaged = false
 
     static let pendingFolder = "p:folder"
     /// The prefix of a capsule written with a minus: "-t:猫", "-f:author", "-d:旅行".
@@ -156,14 +182,17 @@ struct TokenQuery: Equatable {
     /// same folder with a minus, words to find with every field taken away): nothing can match.
     var isContradictory: Bool {
         let f = searchFields
-        return allowedKinds.isEmpty || (recent && excludeRecent) || (external && excludeExternal)
+        return allowedKinds.isEmpty || (recent && excludeRecent) || (external && excludeExternal) || reviews.count > 1
             || (folder.map { excludedFolders.contains($0) } ?? false)
             || (!terms.isEmpty && !f.tags && !f.text && !f.author)
     }
 
-    /// The conditions of the capsules on top of a page's own filter (its chips).
+    /// The conditions of the capsules on top of a page's own filter (a grid's folder or kind).
     func filter(over base: FeedFilter) -> FeedFilter {
         var f = base
+        if album { f.albumOnly = true }
+        if damaged { f.badOnly = true }
+        if reviews.count == 1, let r = reviews.first { f.review = r }
         if let d = folder { f.folder = d }
         if recent { f.recentOnly = true }
         if external { f.looseOnly = true }
@@ -192,9 +221,44 @@ struct TokenQuery: Equatable {
             else if k == "r:recent" { recent = true }
             else if k == "x:external" { external = true }
             else if k.hasPrefix("k:"), let m = MediaKind(rawValue: String(k.dropFirst(2))) { kinds.insert(m) }
+            else if k == "a:album" { album = true }
+            else if k.hasPrefix("v:"), let r = ReviewFilter(rawValue: String(k.dropFirst(2))), r != .any { reviews.insert(r) }
+            else if k == "b:damaged" { damaged = true }
         }
     }
     init() {}
+
+    /// What a filter asks for, as the capsules of the search field (there are no other filters:
+    /// "only this author" is "名字 用户", "only this tag" is "标签名 标签", a folder is "文件夹 名字").
+    static func keys(for f: FeedFilter) -> [String] {
+        var k: [String] = []
+        if let a = f.author?.trimmingCharacters(in: .whitespaces), !a.isEmpty {
+            k += [termKey(String(a.drop { $0 == "@" }).lowercased()), SearchKeyword.field(.author).key]
+        }
+        let labels = f.labels.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
+        if !labels.isEmpty { k += labels.map(termKey) + [SearchKeyword.field(.tags).key] }
+        if let d = f.folder, !d.isEmpty { k.append(folderKey(d)) }
+        k += f.excludeFolders.filter { !$0.isEmpty }.map { minus + folderKey($0) }
+        if let m = f.kind { k.append(SearchKeyword.media(m).key) }
+        if f.recentOnly { k.append(SearchKeyword.recent.key) }
+        if f.looseOnly { k.append(SearchKeyword.external.key) }
+        if f.albumOnly { k.append(SearchKeyword.album.key) }
+        if f.review != .any { k.append(SearchKeyword.review(f.review).key) }
+        if f.badOnly { k.append(SearchKeyword.damaged.key) }
+        return k
+    }
+
+    /// `old` with the capsules of `new` added: none twice, and one folder at a time (a new folder
+    /// takes the place of the one searched).
+    static func adding(_ new: [String], to old: [String]) -> [String] {
+        var out = old
+        for key in new where !out.contains(key) {
+            if key.hasPrefix("d:") { out.removeAll { $0.hasPrefix("d:") } }
+            if key.hasPrefix("v:") { out.removeAll { $0.hasPrefix("v:") } }
+            out.append(key)
+        }
+        return out
+    }
 
     private mutating func exclude(_ k: String) {
         if k.hasPrefix("f:"), let f = SearchField(rawValue: String(k.dropFirst(2))) { excludedFields.insert(f) }
@@ -339,7 +403,8 @@ enum SearchSuggestions {
         let lone = typed.count == 1 && typed.first.map { TokenQuery.minusSigns.contains($0) } == true
         let negative = lone || TokenQuery.negated(typed) != nil
         let q = (lone ? "" : TokenQuery.negated(typed) ?? typed).lowercased()
-        func matches(_ kw: SearchKeyword) -> Bool { q.isEmpty || ([kw.info.word] + kw.info.aliases).contains { $0.lowercased().hasPrefix(q) } }
+        // 损坏 is offered with the maintenance rows of 关于 (typed, it always works)
+        func matches(_ kw: SearchKeyword) -> Bool { (kw != .damaged || LibraryPrefs.aboutExtras) && (q.isEmpty || ([kw.info.word] + kw.info.aliases).contains { $0.lowercased().hasPrefix(q) }) }
         // right after "文件夹" / "-文件夹": the folders (matching what is typed)
         if let last = keys.last, last == TokenQuery.pendingFolder || last == TokenQuery.minus + TokenQuery.pendingFolder {
             let excluded = last != TokenQuery.pendingFolder
