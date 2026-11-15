@@ -5,7 +5,6 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:tl_core/tl_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:visibility_detector/visibility_detector.dart';
@@ -24,6 +23,7 @@ import '../platform/video.dart';
 import '../search/marks.dart';
 import '../search/query.dart';
 import '../widgets/capsule_search.dart';
+import '../widgets/known_masonry.dart';
 import 'viewer_page.dart';
 import '../app/feed_order.dart';
 import '../widgets/media_image.dart';
@@ -125,7 +125,8 @@ class _BrowsePageState extends State<BrowsePage> {
     _pendingReveal = null;
     _clearedForReveal = false;
     setState(() {
-      if (i > 0) cards.insert(0, cards.removeAt(i));
+      // a new list (not the same one changed): the grid places its cards again
+      if (i > 0) _cards = [cards[i], ...cards.take(i), ...cards.skip(i + 1)];
       _highlight = item.post_id;
     });
     if (_scroll.hasClients) _scroll.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
@@ -412,6 +413,7 @@ class _BrowsePageState extends State<BrowsePage> {
                     final screen = MediaQuery.sizeOf(context);
                     final columns = Prefs.instance.feedColumns(c.maxWidth, screen.height);
                     final side = c.maxWidth > 700 ? 24.0 : 12.0;
+                    final heights = CardHeights.of(context);
                     final footer = Padding(
                       key: const ValueKey('feedEnd'),
                       padding: EdgeInsets.fromLTRB(24, 8, 24, 24 + MediaQuery.paddingOf(context).bottom),
@@ -433,12 +435,15 @@ class _BrowsePageState extends State<BrowsePage> {
                         SliverPadding(
                           // the cards start below the floating search area and pass under it
                           padding: EdgeInsets.fromLTRB(side, top + 4, side, 16),
-                          sliver: SliverMasonryGrid.count(
-                            crossAxisCount: columns,
+                          sliver: SliverKnownMasonry(
+                            columns: columns,
                             mainAxisSpacing: 18,
                             crossAxisSpacing: 14,
-                            childCount: cards.length,
-                            itemBuilder: (context, i) => PostCard(
+                            items: cards,
+                            keyOf: (i) => cards[i].first.media_id,
+                            estimate: (i, width) => heights.of(cards[i], _cardPages[cards[i].first.media_id] ?? 0, width),
+                            estimateKey: heights.key,
+                            delegate: SliverChildBuilderDelegate(childCount: cards.length, (context, i) => PostCard(
                               key: ValueKey(cards[i].first.media_id),
                               library: widget.library,
                               media: cards[i],
@@ -448,7 +453,7 @@ class _BrowsePageState extends State<BrowsePage> {
                               menuHost: _menuHost,
                               marks: _query.marks,
                               onOpen: _open,
-                            ),
+                            )),
                           ),
                         ),
                         SliverToBoxAdapter(child: footer),
@@ -641,6 +646,87 @@ class _PostCardState extends State<PostCard> {
         ),
       ]),
     );
+  }
+}
+
+/// A card's height at a width, worked out from its data the way [PostCard] lays it out: the feed
+/// places every card with it before building any (as native's `CardLayout`). A card that has
+/// been laid out keeps its real height, so this only has to be close, and cheap: the text is
+/// not laid out (a card coming on screen lays its text out anyway), its lines are counted from
+/// the widths of its characters.
+class CardHeights {
+  CardHeights._(this.key, this._metrics);
+
+  factory CardHeights.of(BuildContext context) {
+    final theme = Theme.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    final key = Object.hash(theme.textTheme, scaler, Directionality.of(context));
+    final m = _last != null && _last!.$1 == key ? _last!.$2 : _Metrics(theme.textTheme, scaler, Directionality.of(context));
+    _last = (key, m);
+    return CardHeights._(key, m);
+  }
+
+  static (Object, _Metrics)? _last;
+
+  /// What the heights depend on besides the width.
+  final Object key;
+  final _Metrics _metrics;
+
+  // the card's caption padding, gaps and tag row (PostCard.build)
+  static const _sides = 14.0 * 2, _top = 12.0, _bottom = 12.0, _gap = 6.0, _tagsGap = 10.0, _tags = 28.0;
+  /// Selectable text keeps room for its caret at the end of a line.
+  static const _caret = 3.0;
+
+  double of(List<FeedItem> media, int page, double width) {
+    final first = media.first;
+    final at = page.clamp(0, media.length - 1);
+    final loose = first.post_id.startsWith('loose:');
+    final m = _metrics;
+    var h = width / cardAspectAt(media, at.toDouble()) + _top + (loose ? m.title : m.author);
+    final text = first.text ?? '';
+    if (text.isNotEmpty) h += _gap + m.lines(text, width - _sides - _caret) * m.body;
+    if (first.url != null) h += _gap + m.small;
+    if (media[at].tags.isNotEmpty || !loose) h += _tagsGap + _tags;
+    return h + _bottom;
+  }
+}
+
+/// Line heights and character widths of the card's text styles, measured once.
+class _Metrics {
+  _Metrics(TextTheme t, TextScaler scaler, TextDirection direction) {
+    double measure(InlineSpan span, {bool width = false}) {
+      final p = TextPainter(text: TextSpan(style: t.bodyMedium, children: [span]), textDirection: direction, textScaler: scaler)..layout();
+      final v = width ? p.width : p.height;
+      p.dispose();
+      return v;
+    }
+
+    title = measure(TextSpan(text: 'Ag 相册', style: t.titleSmall));
+    author = measure(TextSpan(children: [TextSpan(text: 'Ag 作者', style: t.titleSmall), TextSpan(text: '  @Ag', style: t.bodySmall)]));
+    small = measure(TextSpan(text: 'Ag 链接', style: t.bodySmall));
+    body = measure(TextSpan(text: 'Ag 文字', style: t.bodyMedium));
+    const latin = 'abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789';
+    narrow = measure(TextSpan(text: latin, style: t.bodyMedium), width: true) / latin.length;
+    const han = '的一是不了人我在有他这为之大来以个中上们';
+    wide = measure(TextSpan(text: han, style: t.bodyMedium), width: true) / han.length;
+  }
+
+  late final double title, author, small, body;
+  /// Average width of a Latin letter, digit or space, and of a CJK character or emoji.
+  late final double narrow, wide;
+
+  /// About how many lines [text] takes at [width] (words are not broken, so a line ends a little early).
+  int lines(String text, double width) {
+    if (width <= 0) return 1;
+    var n = 0;
+    for (final paragraph in text.split('\n')) {
+      var w = 0.0;
+      for (final r in paragraph.runes) {
+        w += r < 0x0500 ? narrow : wide;
+      }
+      n += w == 0 ? 1 : (w / (width * 0.96)).ceil();
+    }
+    return n;
   }
 }
 

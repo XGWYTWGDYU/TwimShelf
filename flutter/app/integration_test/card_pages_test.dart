@@ -3,7 +3,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:integration_test/integration_test.dart';
@@ -16,6 +15,7 @@ import 'package:twimshelf/app/prefs.dart';
 import 'package:twimshelf/l10n/l10n.dart';
 import 'package:twimshelf/screens/browse_page.dart';
 import 'package:twimshelf/widgets/choice_menu.dart';
+import 'package:twimshelf/widgets/known_masonry.dart';
 import 'package:twimshelf/screens/folders_page.dart';
 import 'package:twimshelf/screens/grid_page.dart';
 import 'package:twimshelf/grid/thumb_store.dart';
@@ -60,13 +60,19 @@ void main() {
       t.view.devicePixelRatio = 1;
       await t.pumpWidget(MaterialApp(
         home: Scaffold(
-          body: MasonryGridView.count(
-            crossAxisCount: columns,
-            itemCount: columns == 1 ? 2 : 2,
-            itemBuilder: (context, i) => i == 0
-                ? PostCard(key: ValueKey('card$size'), library: library, media: pages, onOpen: (_) {})
-                : PostCard(key: ValueKey('under$size'), library: library, media: under, onOpen: (_) {}),
-          ),
+          body: CustomScrollView(slivers: [
+            SliverKnownMasonry(
+              columns: columns,
+              mainAxisSpacing: 0,
+              crossAxisSpacing: 0,
+              items: [pages, under],
+              keyOf: (i) => i,
+              estimate: (i, width) => width,
+              delegate: SliverChildBuilderDelegate(childCount: 2, (context, i) => i == 0
+                  ? PostCard(key: ValueKey('card$size'), library: library, media: pages, onOpen: (_) {})
+                  : PostCard(key: ValueKey('under$size'), library: library, media: under, onOpen: (_) {})),
+            ),
+          ]),
         ),
       ));
       await t.pump(const Duration(milliseconds: 100));

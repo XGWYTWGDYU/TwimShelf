@@ -94,7 +94,7 @@ void main() {
       await scrollBy(-1100);
       // TL_ONLY_SCROLL: scrolling alone (no page turns, nothing opened)
       if (Platform.environment['TL_ONLY_SCROLL'] != null) {
-        samples.add({'round': round, 'rss_mb': ProcessInfo.currentRss / 1048576, 'images': 0, 'playing': 0, 'idle': 0});
+        samples.add({'round': round, 'rss_mb': ProcessInfo.currentRss / 1048576, 'images': 0, 'playing': 0, 'idle': 0, 'cards': find.byType(PostCard).evaluate().length, 'image_mb': PaintingBinding.instance.imageCache.currentSizeBytes / 1048576, 'at': lastPosition?.pixels.round() ?? 0});
         continue;
       }
       // a card with several pages: to its last page and back
