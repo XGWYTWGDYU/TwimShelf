@@ -6,28 +6,28 @@
 
 <p align="center"><img src="docs/images/devices.webp" alt="TwimShelf 在 Mac、iPad、Android 和 iPhone 上"></p>
 
-TwimShelf  能把你喜欢的帖子、图片和视频保存到自己的设备上，不必担心作者删帖或注销。资料库存储在本地，多台设备之间通过局域网直接同步
+TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心作者删帖或注销，还可以使用AI标记媒体，在局域网进行p2p同步
 
-后端用 Rust 编写，苹果平台有原生界面版本，其他平台使用 Flutter 版本，两者共用同一个核心和资料库格式。
+后端基于rust，Apple平台有原生前端，Linux/Windows/Android目前仅限Flutter前端，基于MD3+MD3E设计
 
-## 可以做什么
+## 介绍
 
-- **收集媒体**：粘贴链接下载单条帖子，或者导入第三方扩展导出的收藏夹 JSON 批量下载。登录账号后可以保存你有权查看的锁定帖子
-- **浏览与搜索**：首页随机出现已保存的内容，每次打开都有新鲜感；支持按标签、正文、作者等条件组合筛选，照片库的缩放手感向 Apple 相册看齐
-- **AI 标记**：根据媒体和帖子内容自动打标签。可以从内置的模型商店下载本地模型，也可以接入外部 AI 服务，例如 Grok
-- **设备间同步**：在局域网内配对设备后去中心化同步，不需要 iCloud，也不需要付费开发者账号
-- **备份与维护**：可导出媒体，也可以导出完整包做冷备份
-- **Linux 服务器**：Docker 镜像里是服务器和网页版，功能与 App 相同，用浏览器访问，也是一台始终在线的同步设备
-- **浏览器扩展**：在 X 的每条帖子旁加一个下载按钮，一键交给已绑定的电脑或服务器下载，并跟踪到完成
+- **收集媒体**：粘贴链接即可下载帖子，也支持导入第三方扩展导出的收藏夹 JSON 批量下载，对于锁定账户，添加cookie后可以下载你有权查看的锁定帖子
+- **浏览与搜索**：主页采用随机展示，每次打开都有新鲜感。支持按标签、正文、作者等条件组合筛选
+- **AI 标记**：根据媒体和帖子内容自动打标签。可以从内置的模型商店下载本地模型，也可以接入外部 API
+- **设备间同步**：在局域网内去中心化同步，适合一般用户
+- **备份与维护**：可按筛选条件批量导出媒体，也可以导出完整包做冷备份
+- **Linux 服务器**：得益于 Flutter 支持 Web 的特性，可在局域网内的 NAS 或任何 HomeLab 上部署它，并访问 WebUI 前端
+- **浏览器扩展**：在 X 网页上一键下载
 
 ## 注意
 
-程序目前处于早期预览状态，可能存在未知的问题。Linux平台未经验证，也未在MTK设备上进行本地AI推理验证
+程序目前处于早期预览状态，可能存在未知的问题。Linux平台未经验证，Windows平台验证较少，也未在MTK设备上进行本地AI推理验证
 
 
 ## 支持的平台
 
-| 平台 | 版本 | 最低系统 | 安装包 |
+| 平台 | 版本 | 最低系统版本 | 安装包 |
 | --- | --- | --- | --- |
 | macOS | 原生 | macOS 15，Apple Silicon | `.dmg` |
 | iPhone、iPad | 原生 | iOS 18 | 未签名 `.ipa` |
@@ -38,21 +38,20 @@ TwimShelf  能把你喜欢的帖子、图片和视频保存到自己的设备上
 | Linux 服务器 | 服务器 + 网页版 | Docker（x86_64、arm64） | Docker 镜像 `ghcr.io/xgwytwgdyu/twimshelf` |
 | Chrome、Edge 等 | 浏览器扩展 | Chromium 116 | 仓库里的 `extension` 目录 |
 
-苹果平台上推荐使用原生版。Flutter 版主要面向其他平台，同样提供苹果平台的安装包。
 
 ## 下载
 
-在 [Releases](https://github.com/XGWYTWGDYU/TwimShelf/releases/latest) 页面下载。所有安装包都由 [GitHub Actions](.github/workflows/build.yml) 从公开源码自动构建，`SHA256SUMS.txt` 里有校验值。
+在 [Releases](https://github.com/XGWYTWGDYU/TwimShelf/releases/latest) 页面下载。所有安装包都由 [GitHub Actions](.github/workflows/build.yml) 从公开源码自动构建，`SHA256SUMS.txt` 中包含校验值。
 
-- **macOS**：安装包是临时签名（ad-hoc），没有经过公证。首次打开时系统会阻止，使用xattr命令清除隔离标签即可
-- **iPhone、iPad**：`.ipa` 没有签名，需要用自己的证书或侧载工具重新签名后安装
-- **Android**：大多数手机选择 `arm64-v8a`
-- **Windows**：安装程序没有代码签名，SmartScreen 提示时选择「更多信息 › 仍要运行」
+- **macOS**：安装包采用ad-hoc签名，未经公证。首次打开时系统会阻止，使用xattr命令清除隔离标签即可
+- **iPhone、iPad**：`.ipa` 同样没有签名，需要用自己的侧载工具重新签名后安装
+- **Android**：对于现代设备，下载 `arm64-v8a`
+- **Windows**：安装程序没有代码签名，如遇到 SmartScreen 提示时选择「更多信息 › 仍要运行」
 - **Linux**：`chmod +x` 之后直接运行 `.AppImage`
 - **Linux 服务器**：Docker 镜像发布在 GitHub Container Registry，见下文
 - **浏览器扩展**：直接加载仓库里的 `extension` 目录，见下文
 
-从旧版本升级时直接覆盖安装即可，资料库、模型和设置都会保留。
+从旧版本升级时直接覆盖安装即可，资料库不会丢失
 
 ## Linux 服务器（Docker）
 
@@ -70,13 +69,11 @@ docker run -d --name twimshelf --restart unless-stopped -p 2778:2778 -v /srv/twi
 
 ## 浏览器扩展
 
-在 X 的每条帖子旁加一个下载按钮，点一下就交给已绑定的设备下载，并一直跟踪到完成。可以绑定 Windows、Linux、macOS 上的 App（Flutter 版和原生版）和 Linux 服务器；绑定了多台时，点按钮会让你选择发给哪一台，也可以设一台默认设备。
-
-1. **安装**：在 Chrome 或 Edge 打开 `chrome://extensions`，打开「开发者模式」，点「加载已解压的扩展程序」，选择仓库里的 `extension` 目录。不需要构建。
+在帖子旁加下载按钮，点击可发送到绑定的设备下载，支持绑定浏览器扩展的版本有：Windows、Linux、macOS 上的 App（Flutter 版和原生版）和 Linux 服务器
+1. **安装**：在项目GitHub主页点击code➡️download zip，解压后在 Chrome 或 Edge 打开 `chrome://extensions`，打开「开发者模式」，点「加载已解压的扩展程序」，选择解压目录的 `extension` 文件夹，注意，Chromium不会为加载的扩展建立副本，若删除extension文件夹，扩展将失效。扩展也会发布更新，请自行克隆仓库并加载新版本
 2. **绑定**：在 TwimShelf 里打开「设置 → 浏览器扩展 → 绑定浏览器」。
    - 同一台电脑上的 App：在扩展里输入 6 位绑定码。
    - 其他电脑或 Linux 服务器：复制「绑定文本」，粘贴到扩展里。
-3. **使用**：打开 X，点帖子操作栏里的下载按钮。按钮会显示排队、下载中、完成或失败；设备离线时会等它回来再发送。
 
 桌面版 App 打开时才能接收（端口 27800 起，只接受本机和局域网），Linux 服务器随时接收。详见 [extension/README.md](extension/README.md)。
 
@@ -117,10 +114,10 @@ Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都�
 
 ## 参与贡献
 
-欢迎通过 Issue 反馈问题，或者通过 Pull Request 提交改进。涉及数据库或同步协议的修改，请补充能够验证数据一致性的测试。个人签名配置请写进 `config.local.yaml`；请不要提交真实账号凭据、媒体或真实的资料库，测试请使用合成数据（[说明](docs/testdata.md)）。
+欢迎通过 Issue 反馈问题，或者通过 Pull Request 提交改进。个人签名配置请写进 `config.local.yaml`
 
 ## 许可证
 
 项目代码采用 [MIT 许可证](LICENSE)。第三方依赖和应用内下载的模型适用各自的许可证，每个发布版本都附有 `THIRD-PARTY-NOTICES.txt`。
 
-TwimShelf 是独立项目，与 Twitter / X 没有隶属关系。保存内容的权利仍属于各自的权利人，请仅供个人使用，不要用于再分发。
+TwimShelf 是独立项目，与 Twitter / X 没有隶属关系。保存内容的权利仍属于各自的权利人，仅供个人使用，不要用于再分发。
