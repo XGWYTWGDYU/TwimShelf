@@ -146,7 +146,7 @@
 				4F1ED815F92255C48917313D /* Localizable.xcstrings */,
 			);
 			name = ShareSources;
-			path = ../../../native;
+			path = ../../../Apple;
 			sourceTree = "<group>";
 		};
 		331C8082294A63A400263BE5 /* RunnerTests */ = {
@@ -698,7 +698,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../../../native/Shared/tl_core.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../../../Apple/Shared/tl_core.h";
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -884,7 +884,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../../../native/Shared/tl_core.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../../../Apple/Shared/tl_core.h";
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -914,7 +914,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_COMPILATION_MODE = singlefile;
 				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../../../native/Shared/tl_core.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../../../Apple/Shared/tl_core.h";
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

@@ -96,6 +96,24 @@ fn update(f: impl FnOnce(&mut ModelDownloadStatus)) { if let Some(s) = STATUS.lo
 
 pub fn slug(repo: &str) -> String { repo.replace('/', "--") }
 
+/// Hugging Face's address: `https://huggingface.co`, or a mirror's in `HF_ENDPOINT` (the variable
+/// Hugging Face's own tools read; also how the tests stand a local server in for it).
+pub fn hf_endpoint() -> String {
+    std::env::var("HF_ENDPOINT").ok().map(|e| e.trim().trim_end_matches('/').to_string())
+        .filter(|e| e.starts_with("https://") || e.starts_with("http://")).unwrap_or_else(|| "https://huggingface.co".into())
+}
+
+/// The client for Hugging Face: the shared one (HTTPS only), or for a mirror that `HF_ENDPOINT`
+/// sets to a plain-HTTP address (a server on the LAN), one that allows that.
+pub fn hf_client() -> reqwest::Client {
+    if !hf_endpoint().starts_with("http://") { return client(); }
+    static PLAIN: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    PLAIN.get_or_init(|| reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .build().expect("http client")).clone()
+}
+
 /// Files needed to run an MLX model; docs, images and git metadata are skipped.
 fn wanted(name: &str) -> bool {
     if name.contains('/') || name.starts_with('.') { return false; }
@@ -119,7 +137,7 @@ pub fn start_download(repo: String, revision: Option<String>, models_dir: PathBu
 }
 
 async fn download(repo: &str, revision: &str, models_dir: &Path) -> anyhow::Result<()> {
-    let tree: Vec<TreeEntry> = or_cancel(async { client().get(format!("https://huggingface.co/api/models/{repo}/tree/{revision}"))
+    let tree: Vec<TreeEntry> = or_cancel(async { hf_client().get(format!("{}/api/models/{repo}/tree/{revision}", hf_endpoint()))
         .send().await?.error_for_status()?.json().await.context(tr!("models.listFailed")) }).await??;
     let files: Vec<ModelFile> = tree.into_iter().filter(|e| e.kind == "file" && wanted(&e.path))
         .map(|e| ModelFile { name: e.path, size: e.size, sha256: e.lfs.map(|l| l.oid) }).collect();
@@ -163,7 +181,7 @@ async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base:
         let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if have < f.size || f.size == 0 {
             update(|s| s.done_bytes = base + have);
-            let mut rq = client().get(format!("https://huggingface.co/{repo}/resolve/{revision}/{}", f.name));
+            let mut rq = hf_client().get(format!("{}/{repo}/resolve/{revision}/{}", hf_endpoint(), f.name));
             if have > 0 { rq = rq.header("Range", format!("bytes={have}-")); }
             let resp = match or_cancel(rq.send()).await?.and_then(|r| r.error_for_status()) {
                 Ok(r) => r,
@@ -257,7 +275,7 @@ pub fn start_download_gguf(repo: String, revision: Option<String>, weights: Stri
 }
 
 async fn download_gguf(repo: &str, revision: &str, weights: &str, projector: Option<&str>, models_dir: &Path) -> anyhow::Result<()> {
-    let tree: Vec<TreeEntry> = or_cancel(async { client().get(format!("https://huggingface.co/api/models/{repo}/tree/{revision}"))
+    let tree: Vec<TreeEntry> = or_cancel(async { hf_client().get(format!("{}/api/models/{repo}/tree/{revision}", hf_endpoint()))
         .send().await?.error_for_status()?.json().await.context(tr!("models.listFailed")) }).await??;
     let names: Vec<&str> = std::iter::once(weights).chain(projector).collect();
     let files: Vec<ModelFile> = names.iter().map(|n| tree.iter().find(|e| e.kind == "file" && e.path == *n)

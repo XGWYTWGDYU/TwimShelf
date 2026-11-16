@@ -1,4 +1,4 @@
-// C ABI declarations, in native/Shared/tl_core.h order.
+// C ABI declarations, in Apple/Shared/tl_core.h order.
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 

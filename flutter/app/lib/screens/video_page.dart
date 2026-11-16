@@ -155,12 +155,22 @@ class VideoPageState extends State<VideoPage> {
   Future<void> _open() async {
     final v = VideoPlayback();
     setState(() => _video = v);
-    _subs.add(v.position.listen((_) {
+    // the card's frame of this moment shows until this player is past it
+    _bridge = VideoResume.takeFrame(widget.path);
+    _subs.add(v.position.listen((p) {
+      if (_bridge != null && _bridgeFrom != null && p > _bridgeFrom! + const Duration(milliseconds: 40)) _bridge = null;
       if (mounted && !_scrubbing) setState(() {});
+      // while this is the video on screen, its moment is where the feed card goes on from
+      if (mounted && widget.active && (ModalRoute.of(context)?.isCurrent ?? false)) VideoResume.leave(widget.path, p, quiet: true);
     }));
     try {
       await v.setLoop(true);
       await v.open(widget.path, autoplay: false);
+      if (!mounted) return;
+      // the opened video goes on from where its card was
+      final from = VideoResume.take(widget.path, 'viewer');
+      _bridgeFrom = from ?? Duration.zero;
+      if (from != null) await v.seek(from);
       if (!mounted) return;
       _subs.add(v.surfaceController.player.stream.playing.listen((playing) {
         if (mounted) setState(() => _playing = playing);
@@ -291,13 +301,13 @@ class VideoPageState extends State<VideoPage> {
   }
 
   /// The drags belong to a touch screen (a finger or a pen): with a mouse or a trackpad they do
-  /// nothing, on any platform — so a touch-screen Mac or Windows tablet has them, a desktop
+  /// nothing, on any platform — so a touch-screen laptop or tablet has them, a desktop
   /// without one does not (it has the speed menu and the keys instead).
   bool _touch = false;
 
   /// Whether this device lets an app set the screen's brightness for the whole system: iOS and
-  /// iPadOS do; Android once the person allowed changing system settings; Windows on screens
-  /// with a brightness control. Never macOS (and Linux has no such API here).
+  /// iPadOS do; Android once the person allowed changing system settings. Never macOS (and Linux
+  /// has no such API here).
   static bool? _canSetBrightness;
   static Future<bool> _systemBrightness() async {
     if (kIsWeb || OS.isMacOS || OS.isLinux) return false;
@@ -382,6 +392,19 @@ class VideoPageState extends State<VideoPage> {
     _hideHud(after: const Duration(milliseconds: 400));
   }
 
+  Uint8List? _bridge;
+  Duration? _bridgeFrom;
+
+  /// Before the viewer closes: this video's moment and its frame, for the feed card to go on from.
+  Future<void> leaveForCard() async {
+    final v = _video;
+    if (v == null) return;
+    // held at this moment: the frame and the position are the same one (the picture takes a while)
+    await v.pause();
+    VideoResume.leave(widget.path, v.currentPosition);
+    VideoResume.leaveFrame(widget.path, await VideoResume.frameOf(v));
+  }
+
   @override
   void dispose() {
     for (final s in _subs) {
@@ -389,6 +412,8 @@ class VideoPageState extends State<VideoPage> {
     }
     _hide?.cancel();
     _hudTimer?.cancel();
+    final v = _video;
+    if (v != null) debugPrint('TwimShelf video: viewer closes ${widget.path.split('/').last} at ${(v.currentPosition.inMilliseconds / 1000).toStringAsFixed(2)} s');
     unawaited(_video?.dispose());
     super.dispose();
   }
@@ -430,7 +455,10 @@ class VideoPageState extends State<VideoPage> {
               onPanStart: gestures ? (d) => _panStartAt(d, size) : null,
               onPanUpdate: gestures ? (d) => _panUpdate(d, size) : null,
               onPanEnd: gestures ? (_) => _panEnd() : null,
-              child: VideoSurface(controller: v.surfaceController, controls: NoVideoControls, resumeUponEnteringForegroundMode: true, fill: Colors.black),
+              child: Stack(fit: StackFit.expand, children: [
+                VideoSurface(controller: v.surfaceController, controls: NoVideoControls, resumeUponEnteringForegroundMode: true, fill: Colors.black),
+                if (_bridge != null) IgnorePointer(child: Image.memory(_bridge!, fit: BoxFit.contain, gaplessPlayback: true)),
+              ]),
             ),
           ),
         ),

@@ -43,7 +43,6 @@ class SyncModel extends ChangeNotifier {
   static String deviceKind = '';
   static Future<String> _kind() async {
     if (OS.isMacOS) return 'mac';
-    if (OS.isWindows) return 'windows';
     if (OS.isLinux) return 'linux';
     if (OS.isIOS) return await ApplePlatform.instance.deviceKind() ?? 'iphone';
     if (OS.isAndroid) {

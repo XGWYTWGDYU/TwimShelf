@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:twimshelf/widgets/wheel_pager.dart';
 
-final _windows = TargetPlatformVariant.only(TargetPlatform.windows);
+final _linux = TargetPlatformVariant.only(TargetPlatform.linux);
 
 void main() {
   late List<int> steps;
@@ -26,7 +26,7 @@ void main() {
     await wheel(tester, const Offset(30, 0), 3000);
     await wheel(tester, const Offset(-30, 0), 4000);
     expect(steps, [1, -1, 1, -1]);
-  }, variant: _windows);
+  }, variant: _linux);
 
   testWidgets('a run of events and its inertia turn one page; after a pause the next scroll turns', (tester) async {
     await open(tester);
@@ -37,7 +37,7 @@ void main() {
     expect(steps, [1]);
     await wheel(tester, const Offset(0, 20), at += 200);
     expect(steps, [1, 1]);
-  }, variant: _windows);
+  }, variant: _linux);
 
   testWidgets('a trackpad the app sees as one is a wheel too', (tester) async {
     await open(tester);
@@ -46,7 +46,7 @@ void main() {
     await tester.sendEventToBinding(p.panZoomUpdate(const Offset(100, 100), pan: const Offset(-10, 0), timeStamp: const Duration(milliseconds: 16)));
     await tester.sendEventToBinding(p.panZoomUpdate(const Offset(100, 100), pan: const Offset(-40, 0), timeStamp: const Duration(milliseconds: 32)));
     expect(steps, [1]);
-  }, variant: _windows);
+  }, variant: _linux);
 
   testWidgets('at the last page the scroll is left to what is around; a zoomed photo keeps the wheel', (tester) async {
     await open(tester, canStep: (by) => by < 0);
@@ -57,7 +57,7 @@ void main() {
     await open(tester, enabled: false);
     await wheel(tester, const Offset(0, 100), 1000);
     expect(steps, isEmpty);
-  }, variant: _windows);
+  }, variant: _linux);
 
   testWidgets('a card under the mouse scrolls by the wheel, and the list only past its ends', (tester) async {
     final list = ScrollController();
@@ -88,7 +88,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(page, 1);
     expect(list.offset, greaterThan(0), reason: 'past the last page, the list scrolls');
-  }, variant: _windows);
+  }, variant: _linux);
 
   testWidgets('a scroll of the list that reaches a card goes on being the list', (tester) async {
     final list = ScrollController();
@@ -104,7 +104,7 @@ void main() {
     await tester.sendEventToBinding(const PointerScrollEvent(position: Offset(100, 400), scrollDelta: Offset(0, 100), timeStamp: Duration(milliseconds: 1016)));
     await tester.pumpAndSettle();
     expect(list.offset, greaterThan(100));
-  }, variant: _windows);
+  }, variant: _linux);
 
   testWidgets('the PageView itself never moves part of the way', (tester) async {
     final pages = PageController();
@@ -121,7 +121,7 @@ void main() {
     await tester.sendEventToBinding(const PointerScrollEvent(position: Offset(100, 100), scrollDelta: Offset(20, 0), timeStamp: Duration(seconds: 1)));
     await tester.pump();
     expect(pages.page, 1);
-  }, variant: _windows);
+  }, variant: _linux);
 
   testWidgets('a wheel going up does not zoom a photo; Ctrl or a zoomed photo does', (tester) async {
     Future<double> afterWheel({required bool zoomed, required bool ctrl}) async {
@@ -137,7 +137,7 @@ void main() {
     expect(await afterWheel(zoomed: false, ctrl: false), closeTo(1, 0.001));
     expect(await afterWheel(zoomed: false, ctrl: true), greaterThan(1.5));
     expect(await afterWheel(zoomed: true, ctrl: false), greaterThan(1.5));
-  }, variant: _windows);
+  }, variant: _linux);
 
   /// Real input through Remote Desktop from a Mac, as received by the app: ms:amount.
   const recorded = <(String, List<int>, String)>[
@@ -155,7 +155,7 @@ void main() {
         await wheel(tester, Offset(0, double.parse(amount)), 100000 + int.parse(ms));
       }
       expect(steps, expected);
-    }, variant: _windows);
+    }, variant: _linux);
   }
 
   testWidgets('macOS keeps its own scrolling', (tester) async {

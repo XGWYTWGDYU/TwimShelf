@@ -27,6 +27,10 @@ enum ExternalFailureKind {
   cancelled,
   secretsUnavailable,
   unreadable,
+  /// The model answered, but not with a list of tags (or with pieces of its syntax as tags).
+  badTags,
+  /// The model's list holds no tags.
+  noTags,
 }
 
 class ExternalFailure implements Exception {
@@ -42,6 +46,8 @@ class ExternalFailure implements Exception {
     ExternalFailureKind.empty ||
     ExternalFailureKind.invalidResponse => 'models.external.err.empty',
     ExternalFailureKind.unreadable => 'ai.err.unreadable',
+    ExternalFailureKind.badTags => 'ai.err.badReply',
+    ExternalFailureKind.noTags => 'ai.err.noTags',
     _ => 'common.notDone',
   };
   String get message {
@@ -674,33 +680,57 @@ class ExternalAI {
     throw const ExternalFailure(ExternalFailureKind.empty);
   }
 
+  /// A model's reply as tags, by the rules every app shares (scripts/checks/ai_tags/cases.json):
+  /// a JSON array of strings (after a reasoning block or inside a code fence), or, from a reply
+  /// with no JSON in it at all, a list split at commas and the like. Anything else, or a tag that
+  /// is a piece of the reply's syntax (`}`, `harley }`), refuses the whole reply ([badTags]): a
+  /// model saying that is not working, and its other words are no better. An empty list is
+  /// [noTags]. Either way the analysis failed, and nothing is written.
   static List<String> parseTags(String raw) {
-    var value = raw;
-    final end = value.indexOf('</think>');
-    if (end >= 0) value = value.substring(end + 8);
-    List<String>? tags;
-    final a = value.indexOf('['), b = value.lastIndexOf(']');
-    if (a >= 0 && b > a) {
-      try {
-        final list = jsonDecode(value.substring(a, b + 1));
-        if (list is List) tags = list.whereType<String>().toList();
-      } catch (_) {}
+    const bad = ExternalFailure(ExternalFailureKind.badTags);
+    var text = raw;
+    final think = text.lastIndexOf('</think>');
+    if (think >= 0) text = text.substring(think + 8);
+    text = text.trim();
+    if (text.startsWith('```')) {
+      final nl = text.indexOf('\n');
+      text = nl < 0 ? '' : text.substring(nl + 1);
+      if (text.trimRight().endsWith('```')) text = text.trimRight().substring(0, text.trimRight().length - 3);
+      text = text.trim();
     }
-    tags ??= value.split(RegExp('[,\uFF0C\u3001;\uFF1B\n#]'));
-    final seen = <String>{};
-    final result = <String>[];
+    List<String> items;
+    final a = text.indexOf('['), b = text.lastIndexOf(']');
+    if (a >= 0 || b >= 0) {
+      if (a < 0 || b < a) throw bad;
+      final outside = text.substring(0, a) + text.substring(b + 1);
+      if (outside.contains(RegExp(r'[\[\]{}]'))) throw bad;
+      Object? list;
+      try {
+        list = jsonDecode(text.substring(a, b + 1));
+      } catch (_) {
+        throw bad;
+      }
+      if (list is! List || list.any((e) => e is! String)) throw bad;
+      items = list.cast<String>();
+    } else {
+      if (text.contains(RegExp(r'[{}:"]'))) throw bad;
+      items = text.split(RegExp('[,\uFF0C\u3001;\uFF1B\n#]'));
+    }
     final edge = RegExp(
       '^[\\s"\'\u201C\u201D\\[\\]()\uFF08\uFF09\u3002.]+|[\\s"\'\u201C\u201D\\[\\]()\uFF08\uFF09\u3002.]+\$',
     );
-    for (final tag in tags) {
-      final clean = tag.replaceAll(edge, '').toLowerCase();
-      if (clean.isNotEmpty &&
-          clean.characters.length <= 12 &&
-          seen.add(clean)) {
-        result.add(clean);
-      }
+    final fragment = RegExp(r'[{}\[\]<>:"\\`\x00-\x1F\x7F]');
+    final punctuation = RegExp(r'^[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E\s]+$');
+    final seen = <String>{};
+    final result = <String>[];
+    for (final item in items) {
+      final clean = item.replaceAll(edge, '').toLowerCase();
+      if (clean.isEmpty) continue;
+      if (fragment.hasMatch(clean) || punctuation.hasMatch(clean)) throw bad;
+      if (clean.characters.length <= 12 && seen.add(clean)) result.add(clean);
       if (result.length == 12) break;
     }
+    if (result.isEmpty) throw const ExternalFailure(ExternalFailureKind.noTags);
     return result;
   }
 

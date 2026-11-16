@@ -1,5 +1,5 @@
 //! The shared grid engine against recordings of the Photos app: the same fixtures and limits as
-//! the Swift replay tests (native/GridTests), so the Rust port is held to what the native grid was
+//! the Swift replay tests (Apple/GridTests), so the Rust port is held to what the native grid was
 //! measured against. Every recorded frame is replayed by its displayed side; every recorded tile
 //! must be where the engine draws that photo.
 use std::collections::HashMap;
@@ -94,7 +94,7 @@ fn percentile(e: &[f64], p: f64) -> f64 {
 
 #[test]
 fn every_photos_recording_replays_within_the_native_limits() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../native/GridTests/Fixtures");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../Apple/GridTests/Fixtures");
     let mut names: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
     names.sort();
     assert_eq!(names.len(), 9);

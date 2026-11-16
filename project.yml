@@ -6,16 +6,16 @@ options:
 packages:
   # the MLX engine, shared with the Flutter app's Apple runner (it brings mlx-swift-lm and
   # swift-transformers)
-  TLLocalAI: { path: native/TLLocalAI }
+  TLLocalAI: { path: Apple/TLLocalAI }
 # The Xcode project is made from this file (scripts/apply.py runs XcodeGen; it is not in git).
 # bundle ids, version, team, app groups, icon, share extensions: from config.yaml (scripts/apply.py)
 configFiles:
-  Debug: native/Identity.xcconfig
-  Release: native/Identity.xcconfig
+  Debug: Apple/Identity.xcconfig
+  Release: Apple/Identity.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    SWIFT_OBJC_BRIDGING_HEADER: native/Shared/tl_core.h
+    SWIFT_OBJC_BRIDGING_HEADER: Apple/Shared/tl_core.h
     OTHER_LDFLAGS: -ltl_core
     LIBRARY_SEARCH_PATHS: $(BUILT_PRODUCTS_DIR)
     CODE_SIGN_IDENTITY: "-"
@@ -41,7 +41,7 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "18.0"
-    sources: [native/Shared, native/iOS, native/Resources, native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift]
+    sources: [Apple/Shared, Apple/iOS, Apple/Resources, Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift]
     # the share extension is always built; config.yaml decides whether it is signed and embedded
     dependencies: [{ target: TwimShelf-iOSShare, embed: true, codeSign: true }]
     settings:
@@ -56,7 +56,7 @@ targets:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     info:
-      path: native/iOS/Info.plist
+      path: Apple/iOS/Info.plist
       properties: &plist
         CFBundleDisplayName: TwimShelf
         TLAppGroup: $(TL_APP_GROUP_IOS)
@@ -90,7 +90,7 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "15.0"
-    sources: [native/Shared, native/macOS, native/Resources, native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift]
+    sources: [Apple/Shared, Apple/macOS, Apple/Resources, Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift]
     dependencies: [{ target: TwimShelf-macOSShare, embed: true, codeSign: true }]
     settings:
       configs:
@@ -107,7 +107,7 @@ targets:
         CODE_SIGN_IDENTITY: $(TL_MAC_SIGN_IDENTITY)
         DEVELOPMENT_TEAM: $(TL_TEAM)
     info:
-      path: native/macOS/Info.plist
+      path: Apple/macOS/Info.plist
       properties:
         CFBundleDisplayName: TwimShelf
         TLAppGroup: $(TL_APP_GROUP_MAC)
@@ -134,7 +134,7 @@ targets:
     platform: iOS
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
     deploymentTarget: "18.0"
-    sources: [native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift, native/ShareExtension/InfoPlist.xcstrings, native/ShareExtension/iOS, native/Shared/L10n.swift, native/Resources/Localizable.xcstrings, native/Resources/Assets.xcassets]   # the icon in the share menu
+    sources: [Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift, Apple/ShareExtension/InfoPlist.xcstrings, Apple/ShareExtension/iOS, Apple/Shared/L10n.swift, Apple/Resources/Localizable.xcstrings, Apple/Resources/Assets.xcassets]   # the icon in the share menu
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
@@ -143,11 +143,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).ios.share
         PRODUCT_NAME: TwimShelfShare
         CODE_SIGNING_ALLOWED: $(TL_SHARE_SIGNING_IOS)
-        CODE_SIGN_ENTITLEMENTS: native/ShareExtension/iOS/Share.entitlements
+        CODE_SIGN_ENTITLEMENTS: Apple/ShareExtension/iOS/Share.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
     info:
-      path: native/ShareExtension/iOS/Info.plist
+      path: Apple/ShareExtension/iOS/Info.plist
       properties:
         CFBundleDisplayName: Import to TwimShelf
         TLAppName: TwimShelf
@@ -165,7 +165,7 @@ targets:
     platform: macOS
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
     deploymentTarget: "15.0"
-    sources: [native/ShareExtension/ShareCollector.swift, native/ShareExtension/ShareSheet.swift, native/ShareExtension/InfoPlist.xcstrings, native/ShareExtension/macOS, native/Shared/L10n.swift, native/Resources/Localizable.xcstrings, native/Resources/Assets.xcassets]   # the icon in the share menu
+    sources: [Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift, Apple/ShareExtension/InfoPlist.xcstrings, Apple/ShareExtension/macOS, Apple/Shared/L10n.swift, Apple/Resources/Localizable.xcstrings, Apple/Resources/Assets.xcassets]   # the icon in the share menu
     settings:
       configs:
         Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug.share, TL_URL_SCHEME: twimshelf-debug }
@@ -174,14 +174,14 @@ targets:
         PRODUCT_NAME: TwimShelfShare
         CODE_SIGNING_ALLOWED: $(TL_SHARE_SIGNING_MAC)
         ARCHS: arm64
-        CODE_SIGN_ENTITLEMENTS: native/ShareExtension/macOS/Share.entitlements
+        CODE_SIGN_ENTITLEMENTS: Apple/ShareExtension/macOS/Share.entitlements
         TL_URL_SCHEME: twimshelf
         CODE_SIGN_STYLE: $(TL_MAC_SIGN_STYLE)
         CODE_SIGN_IDENTITY: $(TL_MAC_SIGN_IDENTITY)
         DEVELOPMENT_TEAM: $(TL_TEAM)
         ENABLE_APP_SANDBOX: YES
     info:
-      path: native/ShareExtension/macOS/Info.plist
+      path: Apple/ShareExtension/macOS/Info.plist
       properties:
         CFBundleDisplayName: Import to TwimShelf
         TLAppName: TwimShelf
@@ -198,7 +198,7 @@ targets:
     type: bundle.ui-testing
     platform: iOS
     deploymentTarget: "18.0"
-    sources: [native/iOSUITests]
+    sources: [Apple/iOSUITests]
     dependencies: [{ target: TwimShelf-iOS }]
     settings:
       base:
@@ -214,10 +214,10 @@ targets:
     platform: macOS
     deploymentTarget: "15.0"
     sources:
-      - path: native/GridTests
+      - path: Apple/GridTests
         excludes: [Fixtures]
-      - native/Shared/Grid/GridConfig.swift
-      - native/Shared/Grid/ZoomEngine.swift
+      - Apple/Shared/Grid/GridConfig.swift
+      - Apple/Shared/Grid/ZoomEngine.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

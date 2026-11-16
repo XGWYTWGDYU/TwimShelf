@@ -6,8 +6,7 @@ import 'os.dart';
 
 /// Random numbers straight from the operating system, with no generator of the app's own in
 /// between: `arc4random_buf` on Apple's systems (what Swift's `SystemRandomNumberGenerator` calls in
-/// the native apps), `BCryptGenRandom` with the system's preferred generator on Windows, the
-/// `getrandom` system call on Android and Linux. A call that fails throws: nothing falls back to a
+/// the native apps), the `getrandom` system call on Android and Linux. A call that fails throws: nothing falls back to a
 /// weaker source.
 class SystemRandom implements math.Random {
   const SystemRandom();
@@ -17,14 +16,6 @@ class SystemRandom implements math.Random {
   static void Function(Pointer<Uint8>, int) _source() {
     if (OS.isMacOS || OS.isIOS) {
       return DynamicLibrary.process().lookupFunction<Void Function(Pointer<Uint8>, Size), void Function(Pointer<Uint8>, int)>('arc4random_buf');
-    }
-    if (OS.isWindows) {
-      const systemPreferredRng = 2; // BCRYPT_USE_SYSTEM_PREFERRED_RNG
-      final generate = DynamicLibrary.open('bcrypt.dll').lookupFunction<Int32 Function(Pointer<Void>, Pointer<Uint8>, Uint32, Uint32), int Function(Pointer<Void>, Pointer<Uint8>, int, int)>('BCryptGenRandom');
-      return (buffer, length) {
-        final status = generate(nullptr, buffer, length, systemPreferredRng);
-        if (status != 0) throw StateError('BCryptGenRandom: $status');
-      };
     }
     if (OS.isAndroid || OS.isLinux) {
       final getrandom = DynamicLibrary.process().lookupFunction<IntPtr Function(Pointer<Uint8>, Size, Uint32), int Function(Pointer<Uint8>, int, int)>('getrandom');

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:tk="using:CommunityToolkit.WinUI.Controls">
+    <!-- the settings pages' spacing, as in Windows Settings -->
+    <x:Double x:Key="SettingsCardSpacing">4</x:Double>
+    <Style x:Key="SettingsSectionHeaderTextBlockStyle" BasedOn="{StaticResource BodyStrongTextBlockStyle}" TargetType="TextBlock">
+        <Setter Property="Margin" Value="1,30,0,6" />
+    </Style>
+    <Style x:Key="PageTitleTextBlockStyle" BasedOn="{StaticResource TitleTextBlockStyle}" TargetType="TextBlock">
+        <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+    <!-- the item templates of the pages built in code. (Their GridViews keep their own panel, an
+         ItemsWrapGrid: an ItemsPanelTemplate taken from code came back in the AOT build as a plain
+         FrameworkTemplate, and the cast to it failed.) -->
+    <!-- 照片 and the other grids: the picture, a video mark, the count of a post's media (at the
+         bottom: the top right corner is the selection check's) -->
+    <DataTemplate x:Key="GridTileTemplate">
+        <Grid CornerRadius="4" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+            <Image Stretch="UniformToFill" />
+            <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="6" Padding="5,2" CornerRadius="4" Background="#99000000" Visibility="Collapsed">
+                <FontIcon Glyph="&#xE714;" FontSize="11" Foreground="White" />
+            </Border>
+            <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="6" Padding="6,1" CornerRadius="8" Background="#99000000" Visibility="Collapsed">
+                <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="White" />
+            </Border>
+        </Grid>
+    </DataTemplate>
+    <!-- 文件夹: the cover (or a folder glyph), the name, the count -->
+    <DataTemplate x:Key="FolderTileTemplate">
+        <StackPanel Spacing="2">
+            <Grid CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <Image Stretch="UniformToFill" />
+                <FontIcon Glyph="&#xE8B7;" FontSize="40" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            </Grid>
+            <TextBlock Margin="2,6,0,0" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+            <TextBlock Margin="2,0,0,0" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+    </DataTemplate>
+    <!-- 标签 settings: one tag -->
+    <DataTemplate x:Key="TagRowTemplate">
+        <tk:SettingsCard Margin="0,0,0,4"><tk:SettingsCard.HeaderIcon><FontIcon /></tk:SettingsCard.HeaderIcon><Button><FontIcon Glyph="&#xE712;" FontSize="14" /></Button></tk:SettingsCard>
+    </DataTemplate>
+</ResourceDictionary>

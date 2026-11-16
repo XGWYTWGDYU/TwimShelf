@@ -4,3 +4,5 @@
 PRODUCT_BUNDLE_IDENTIFIER = $(TL_FLUTTER_BUNDLE).share
 // off in config.yaml: built, but neither signed nor embedded (scripts/apply.py)
 CODE_SIGNING_ALLOWED = $(TL_SHARE_SIGNING)
+// the core has an Apple Silicon simulator slice only (as the app target)
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = i386 x86_64

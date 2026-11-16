@@ -16,13 +16,12 @@ identity, share extensions, build location and icon. The two are merged when rea
 is written, and nothing made from them is committed.
 
 Writes small generated files that the projects read (never edits code; none of them is in git):
-  native/Identity.xcconfig                    native: bundle ids, version, signing, app groups
+  Apple/Identity.xcconfig                    native: bundle ids, version, signing, app groups
   flutter/app/ios/Flutter/Identity.xcconfig   Flutter iOS
-  flutter/app/macos/Runner/Configs/Identity.xcconfig   Flutter macOS
   flutter/app/android/identity.properties     Android: applicationId, share target
   flutter/app/linux/identity.cmake            Linux: application id, "open with"
   flutter/app/lib/app/identity.g.dart         Dart: the Linux application id
-  flutter/installer/product.json              the Windows setup: "send to"
+  windows/TwimShelf/product.json              the native Windows app's setup: version, "send to"
 config.yaml's version into the files in git that carry one (flutter/app/pubspec.yaml,
 server/Cargo.toml with Cargo.lock, extension/manifest.json): commit them with config.yaml.
 the native Xcode project, from project.yml by XcodeGen (on a Mac, when project.yml changed)
@@ -37,14 +36,14 @@ config.local.yaml) makes AppIconLocal beside it, which the apps then use. Every 
 from the set the apps use.
 Only the Python standard library is used, plus Pillow when icons have to be made.
 """
-import getpass, hashlib, json, os, plistlib, re, shutil, subprocess, sys
+import getpass, hashlib, json, os, plistlib, re, shutil, struct, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FLUTTER = ROOT / 'flutter/app'
-STATE = ROOT / 'native/.applied.json'
+STATE = ROOT / 'Apple/.applied.json'
 ICON = 'icon.png'   # the repository's icon: the source of the committed AppIcon set
-ICONS = 'native/Resources/Assets.xcassets'
+ICONS = 'Apple/Resources/Assets.xcassets'
 
 
 def scalar(value):
@@ -203,13 +202,12 @@ def paths(c):
     for d in (cache, loc['apps']):
         d.mkdir(parents=True, exist_ok=True)
     location = HEADER + f'TL_CACHE_DIR = {cache}\n'
-    write('native/BuildLocation.xcconfig', location)
+    write('Apple/BuildLocation.xcconfig', location)
     # Xcode's Derived Data (products, intermediates, Swift package checkouts, index): the
     # project's own setting for this user (File › Project Settings › Derived Data), which Xcode
     # and xcodebuild both follow. Xcode reads it when it opens the project.
     for workspace, name in (('TwimShelf.xcodeproj/project.xcworkspace', 'native'),
-                            ('flutter/app/ios/Runner.xcworkspace', 'flutter-ios'),
-                            ('flutter/app/macos/Runner.xcworkspace', 'flutter-macos')):
+                            ('flutter/app/ios/Runner.xcworkspace', 'flutter-ios')):
         if not (ROOT / workspace).exists():
             continue
         f = ROOT / workspace / 'xcuserdata' / f'{getpass.getuser()}.xcuserdatad' / 'WorkspaceSettings.xcsettings'
@@ -220,12 +218,10 @@ def paths(c):
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_bytes(plistlib.dumps(settings))
     write('flutter/app/ios/Flutter/BuildLocation.xcconfig', location)
-    write('flutter/app/macos/Runner/Configs/BuildLocation.xcconfig', location)
     flutter = cache / 'flutter'
-    for pkg in ('app', 'installer', 'tl_core', 'tl_native', 'tl_llama'):
+    for pkg in ('app', 'tl_core', 'tl_native', 'tl_llama'):
         link(f'flutter/{pkg}/.dart_tool', flutter / pkg / 'dart_tool')
-        if pkg in ('app', 'installer'):
-            link(f'flutter/{pkg}/build', flutter / pkg / 'build')
+    link('flutter/app/build', flutter / 'app' / 'build')
     link('flutter/app/android/.gradle', flutter / 'app' / 'gradle-project')
     # (not Pods: CocoaPods finds the Flutter files relative to where Pods really is, so it stays
     # beside its project; it is the installed dependency project, not build output)
@@ -234,7 +230,6 @@ def paths(c):
     libs = cache / 'core-libs'
     link('flutter/tl_core/apple', libs / 'apple')
     link('flutter/tl_core/android/src/main/jniLibs', libs / 'android')
-    link('flutter/tl_core/windows/lib', libs / 'windows')
     link('flutter/tl_core/linux/lib', libs / 'linux')
 
 
@@ -254,7 +249,7 @@ def mac_signing(team, identity=''):
 
 
 def native(c):
-    """native/Identity.xcconfig: ids, version, signing, app groups, icon, share extensions."""
+    """Apple/Identity.xcconfig: ids, version, signing, app groups, icon, share extensions."""
     n = c['native']
     check_id('native.bundle_id', n['bundle_id'])
     share_ios, share_mac = bool(n.get('share_extension_ios')), bool(n.get('share_extension_mac'))
@@ -265,16 +260,16 @@ def native(c):
     # no entitlements at all, so that any Apple account (or on the Mac, none) can sign it.
     group_ios = f"group.{n['bundle_id']}" if share_ios else ''
     group_mac = f"{team}.{n['bundle_id']}" if share_mac else ''
-    write('native/Identity.xcconfig', HEADER + '\n'.join([
+    write('Apple/Identity.xcconfig', HEADER + '\n'.join([
         f"TL_BUNDLE_ID = {n['bundle_id']}",
         f"MARKETING_VERSION = {c['version']}",
         f"CURRENT_PROJECT_VERSION = {c['build_number']}",
         f"TL_TEAM = {team}",
         f"TL_APP_ICON = {Path(icon_set(c)).stem}",
         f"TL_APP_GROUP_IOS = {group_ios}",
-        f"TL_IOS_ENTITLEMENTS = {'native/iOS/TwimShelf.entitlements' if share_ios else ''}",
+        f"TL_IOS_ENTITLEMENTS = {'Apple/iOS/TwimShelf.entitlements' if share_ios else ''}",
         f"TL_APP_GROUP_MAC = {group_mac}",
-        f"TL_MAC_ENTITLEMENTS = {'native/macOS/TwimShelf.entitlements' if share_mac else ''}",
+        f"TL_MAC_ENTITLEMENTS = {'Apple/macOS/TwimShelf.entitlements' if share_mac else ''}",
         f"TL_MAC_SIGN_IDENTITY = {identity}",
         f"TL_MAC_SIGN_STYLE = {style}",
         # the share extension is always built; when it is off it is not signed and not embedded
@@ -287,10 +282,10 @@ def native(c):
 
 def native_project(state):
     """TwimShelf.xcodeproj from project.yml (XcodeGen), when it is missing, project.yml changed or
-    a file was added to or removed from native/ (XcodeGen lists every source file by name)."""
+    a file was added to or removed from Apple/ (XcodeGen lists every source file by name)."""
     if sys.platform != 'darwin':
         return
-    names = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'native').rglob('*')
+    names = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'Apple').rglob('*')
                    if p.is_file() and p.name != '.DS_Store' and not p.name.endswith('.xcconfig'))
     stamp = hashlib.sha256((file_hash('project.yml') + '\n' + '\n'.join(names)).encode()).hexdigest()
     if (ROOT / 'TwimShelf.xcodeproj/project.pbxproj').exists() and state.get('project') == stamp:
@@ -330,9 +325,9 @@ def flutter(c):
     check_id('flutter.android_package', f['android_package'], android=True)
     check_id('flutter.desktop_id', f['desktop_id'])
     share = bool(f.get('share_extension'))
-    share_ios, share_mac = bool(f.get('share_extension_ios')), bool(f.get('share_extension_mac'))
+    share_ios = bool(f.get('share_extension_ios'))
     team = f.get('development_team', '')
-    need_team('flutter', team, share_ios or share_mac)
+    need_team('flutter', team, share_ios)
 
     def share_lines(on):
         # the share extension is always built; when it is off it is not signed and not embedded
@@ -346,17 +341,6 @@ def flutter(c):
         f"TL_APP_GROUP = {'group.' + f['apple_bundle_id'] if share_ios else ''}",
         f"TL_ENTITLEMENTS = {'Runner/Runner.entitlements' if share_ios else ''}",
     ] + share_lines(share_ios)) + '\n// where builds go: build.dir in config.yaml\n#include? "BuildLocation.xcconfig"\n')
-    style, identity = mac_signing(team)
-    write('flutter/app/macos/Runner/Configs/Identity.xcconfig', HEADER + '\n'.join([
-        f"PRODUCT_BUNDLE_IDENTIFIER = {f['apple_bundle_id']}",
-        f"DEVELOPMENT_TEAM = {team}",
-        f"TL_FLUTTER_BUNDLE = {f['apple_bundle_id']}",
-        f"TL_APP_GROUP = {team + '.' + f['apple_bundle_id'] if share_mac else ''}",
-        # the Mac runner is always sandboxed: the -share entitlements add its App Group
-        f"TL_ENTITLEMENTS_SUFFIX = {'-share' if share_mac else ''}",
-        f"TL_SIGN_STYLE = {style}",
-        f"TL_SIGN_IDENTITY = {identity}",
-    ] + share_lines(share_mac)) + '\n// where builds go: build.dir in config.yaml\n#include? "BuildLocation.xcconfig"\n')
     write('flutter/app/lib/app/identity.g.dart', HEADER + '\n'.join([
         "const appName = 'TwimShelf';",
         '',
@@ -371,9 +355,45 @@ def flutter(c):
         f'set(TL_APPLICATION_ID "{f["desktop_id"]}")',
         f'set(TL_SHARE_ENABLED {"ON" if share else "OFF"})',
     ]) + '\n')
+
+
+def windows(c):
+    """The native Windows app (windows/TwimShelf): what its setup installs (product.json, beside the
+    program as payload.json), its icon (Assets/AppIcon.ico and .png, from the AppIcon set), and its
+    build folders and the core's library in build.dir. Nothing where the sources have no Windows
+    app (the Docker image copies only what it builds)."""
+    if not (ROOT / 'windows/TwimShelf/TwimShelf.csproj').exists():
+        return
+    w = c.get('windows', {})
     product = {'id': 'TwimShelf', 'name': 'TwimShelf', 'publisher': 'TwimShelf',
-               'executable': 'TwimShelf.exe', 'file': 'TwimShelf', 'version': '0', 'sendTo': share}
-    write('flutter/installer/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
+               'executable': 'TwimShelf.exe', 'file': 'TwimShelf', 'version': str(c['version']),
+               'sendTo': bool(w.get('share_extension', True))}
+    write('windows/TwimShelf/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
+    source = ROOT / icon_set(c)
+    images = []
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        f = source / ('mac-%d.png' % size)
+        if f.exists():
+            images.append((size, f.read_bytes()))
+    if images:
+        offset = 6 + 16 * len(images)
+        entries, blobs = [], []
+        for size, data in images:
+            entries.append(struct.pack('<BBBBHHII', size % 256, size % 256, 0, 0, 1, 32, len(data), offset))
+            blobs.append(data)
+            offset += len(data)
+        assets = ROOT / 'windows/TwimShelf/Assets'
+        assets.mkdir(parents=True, exist_ok=True)
+        ico = struct.pack('<HHH', 0, 1, len(images)) + b''.join(entries + blobs)
+        if not (assets / 'AppIcon.ico').exists() or (assets / 'AppIcon.ico').read_bytes() != ico:
+            (assets / 'AppIcon.ico').write_bytes(ico)
+        png = (source / 'mac-256.png').read_bytes()
+        if not (assets / 'AppIcon.png').exists() or (assets / 'AppIcon.png').read_bytes() != png:
+            (assets / 'AppIcon.png').write_bytes(png)
+    cache = locations(c)['cache']
+    link('windows/TwimShelf/bin', cache / 'windows' / 'bin')
+    link('windows/TwimShelf/obj', cache / 'windows' / 'obj')
+    link('windows/TwimShelf/lib', cache / 'core-libs' / 'windows')
 
 
 # Files in git that carry the version: (file, pattern with the version as its second group, what
@@ -445,6 +465,7 @@ def main():
     if which == 'generate':
         native(c)
         flutter(c)
+        windows(c)
         return
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     if which in ('all', 'native'):
@@ -457,6 +478,8 @@ def main():
     if which in ('all', 'flutter'):
         flutter(c)
         flutter_icons(c, state)
+    if which in ('all', 'windows'):
+        windows(c)
     STATE.parent.mkdir(parents=True, exist_ok=True)
     STATE.write_text(json.dumps(state, indent=2))
 

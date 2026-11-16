@@ -37,7 +37,7 @@ APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool/releases/download/cont
 
 all_targets() {
   case "$OS" in
-    Darwin) echo native-macos native-ios flutter-macos flutter-ios flutter-android ;;
+    Darwin) echo native-macos native-ios flutter-ios flutter-android ;;
     Linux) echo flutter-linux flutter-android ;;
   esac
 }
@@ -218,7 +218,7 @@ build_target() {
         ${TL_UPDATE_REPO:+TL_UPDATE_REPO=$TL_UPDATE_REPO} CODE_SIGNING_ALLOWED=NO build
       local products; products=$(native_products TwimShelf-iOS 'generic/platform=iOS')
       "$ROOT/scripts/package_ipa.sh" "$products/TwimShelf.app" "$DIST/TwimShelf-$v-iOS-unsigned.ipa" ;;
-    flutter-macos|flutter-ios)
+    flutter-ios)
       need_xcode; need_rust; need_flutter; need_flutter_apple
       core_for "${t#flutter-}"
       # without a fresh pod install, the pods' frameworks come out without their Info.plist
@@ -226,11 +226,7 @@ build_target() {
       # and CocoaPods reads the engine's files: a fresh Flutter SDK has to fetch them first
       (cd "$ROOT/flutter/app" && "$FLUTTER" precache --"${t#flutter-}" && "$FLUTTER" pub get && cd "${t#flutter-}" && pod install)
       (cd "$ROOT/flutter/app" && "$FLUTTER" build "${t#flutter-}" --release $( [[ $t == flutter-ios ]] && echo --no-codesign ) $(flutter_defines))
-      if [[ $t == flutter-macos ]]; then
-        "$ROOT/scripts/package_dmg.sh" "$(ls -d "$ROOT"/flutter/app/build/macos/Build/Products/Release/*.app | head -1)" "$DIST/TwimShelf-Flutter-$v-macOS.dmg"
-      else
-        "$ROOT/scripts/package_ipa.sh" "$ROOT/flutter/app/build/ios/iphoneos/Runner.app" "$DIST/TwimShelf-Flutter-$v-iOS-unsigned.ipa"
-      fi ;;
+      "$ROOT/scripts/package_ipa.sh" "$ROOT/flutter/app/build/ios/iphoneos/Runner.app" "$DIST/TwimShelf-Flutter-$v-iOS-unsigned.ipa" ;;
     flutter-android)
       need_rust; need_flutter; need_android
       [[ $OS == Darwin ]] && android_key
@@ -254,7 +250,7 @@ build_target() {
       docker build -f "$ROOT/docker/Dockerfile" --build-arg VERSION="$v" --build-arg RUST_VERSION="$RUST_TOOLCHAIN" --build-arg FLUTTER_VERSION="$FLUTTER_VERSION" -t "twimshelf:$v" -t twimshelf:latest "$ROOT"
       local arch; arch=$(docker image inspect --format '{{.Architecture}}' "twimshelf:$v")
       docker save "twimshelf:$v" | gzip > "$DIST/TwimShelf-$v-docker-linux-$arch.tar.gz" ;;
-    flutter-windows) fail "flutter-windows builds on Windows: build.ps1" ;;
+    windows) fail "the Windows app (native, WinUI 3) builds on Windows: build.ps1 windows" ;;
     *) fail "Unknown target: $t (see --list)" ;;
   esac
   say "Built $t"
@@ -268,11 +264,10 @@ while (( $# )); do
     --list) cat <<EOF
 native-macos     the native Mac app (.dmg)                 macOS with Xcode
 native-ios       the native iPhone/iPad app (unsigned .ipa) macOS with Xcode
-flutter-macos    the Flutter Mac app (.dmg)                macOS with Xcode
 flutter-ios      the Flutter iPhone/iPad app (.ipa)        macOS with Xcode
 flutter-android  the Flutter Android app (.apk per ABI)    macOS or Linux (Windows: build.ps1)
 flutter-linux    the Flutter Linux app (.AppImage)         Linux
-flutter-windows  the Flutter Windows app (setup .exe)      Windows: build.ps1
+windows          the native Windows app (setup .exe)       Windows: build.ps1
 docker           the Linux server + web app (image, .tar.gz) any computer with Docker (not built by default)
 This computer builds by default: $(all_targets)
 EOF
@@ -290,7 +285,7 @@ if [[ $CHECK == 1 ]]; then
   for t in "${TARGETS[@]}"; do
     case "$t" in
       native-*) need_xcode; need_xcodegen; need_rust ;;
-      flutter-macos|flutter-ios) need_xcode; need_rust; need_flutter; need_flutter_apple ;;
+      flutter-ios) need_xcode; need_rust; need_flutter; need_flutter_apple ;;
       flutter-android) need_rust; need_flutter; need_android ;;
       flutter-linux) need_rust; need_flutter; need_linux_desktop ;;
       docker) have docker || MISSING+=(Docker) ;;

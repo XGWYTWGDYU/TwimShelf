@@ -47,7 +47,7 @@ python3 "$ROOT/scripts/apply.py" flutter || fail "Applying config.yaml failed"
 # HEIC build are outside core/src; the header goes into the framework)
 fw="$ROOT/flutter/tl_core/apple/$platform/TlCore.xcframework"
 newest=$(find "$ROOT/core/src" "$ROOT/core/Cargo.toml" "$ROOT/core/build.rs" "$ROOT/core/messages.json" "$ROOT/core/heif" \
-  "$ROOT/Cargo.lock" "$ROOT/rust-toolchain.toml" "$ROOT/native/Shared/tl_core.h" -newer "$fw" -print -quit 2>/dev/null)
+  "$ROOT/Cargo.lock" "$ROOT/rust-toolchain.toml" "$ROOT/Apple/Shared/tl_core.h" -newer "$fw" -print -quit 2>/dev/null)
 if [[ ! -d "$fw" || -n "$newest" ]]; then
   FLUTTER="$FLUTTER" "$ROOT/scripts/flutter/build_core.sh" "$platform" || fail "Building the Rust core failed"
 fi

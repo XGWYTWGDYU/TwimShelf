@@ -1,4 +1,4 @@
-<p align="center"><img src="native/Resources/Assets.xcassets/AppIcon.appiconset/mac-256.png" width="128" alt="TwimShelf"></p>
+<p align="center"><img src="Apple/Resources/Assets.xcassets/AppIcon.appiconset/mac-256.png" width="128" alt="TwimShelf"></p>
 
 <h1 align="center">TwimShelf</h1>
 
@@ -8,13 +8,13 @@
 
 TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心作者删帖或注销，还可以使用AI标记媒体，在局域网进行p2p同步
 
-后端基于rust，Apple平台有原生前端，Linux/Windows/Android目前仅限Flutter前端，基于MD3+MD3E设计
+后端基于rust，Apple平台和Windows有原生前端（Windows 版基于 WinUI 3），Linux/Android目前仅限Flutter前端，基于MD3+MD3E设计
 
 ## 介绍
 
 - **收集媒体**：粘贴链接即可下载帖子，也支持导入第三方扩展导出的收藏夹 JSON 批量下载，对于锁定账户，添加cookie后可以下载你有权查看的锁定帖子
 - **浏览与搜索**：主页采用随机展示，每次打开都有新鲜感。支持按标签、正文、作者等条件组合筛选
-- **AI 标记**：根据媒体和帖子内容自动打标签。可以从内置的模型商店下载本地模型，也可以接入外部 API
+- **AI 标记**：根据媒体和帖子内容自动打标签。可以从内置的模型商店下载本地模型，也可以接入外部 API。连不上 Hugging Face 时，可以用环境变量 `HF_ENDPOINT` 指定镜像地址
 - **设备间同步**：在局域网内去中心化同步，适合一般用户
 - **备份与维护**：可按筛选条件批量导出媒体，也可以导出完整包做冷备份
 - **Linux 服务器**：得益于 Flutter 支持 Web 的特性，可在局域网内的 NAS 或任何 HomeLab 上部署它，并访问 WebUI 前端
@@ -32,9 +32,9 @@ TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心
 | macOS | 原生 | macOS 15，Apple Silicon | `.dmg` |
 | iPhone、iPad | 原生 | iOS 18 | 未签名 `.ipa` |
 | Android | Flutter | Android 12 | `.apk` |
-| Windows | Flutter | Windows 10 1803 | `setup.exe` |
+| Windows | 原生（WinUI 3） | Windows 11 | `setup.exe` |
 | Linux | Flutter | 见[构建指南](BUILDING.md) | `.AppImage` |
-| macOS、iPhone、iPad | Flutter | macOS 15、iOS 18 | `.dmg`、未签名 `.ipa` |
+| iPhone、iPad | Flutter | iOS 18 | 未签名 `.ipa`（方便在苹果设备上测试 Flutter 版） |
 | Linux 服务器 | 服务器 + 网页版 | Docker（x86_64、arm64） | Docker 镜像 `ghcr.io/xgwytwgdyu/twimshelf` |
 | Chrome、Edge 等 | 浏览器扩展 | Chromium 116 | 仓库里的 `extension` 目录 |
 
@@ -69,7 +69,7 @@ docker run -d --name twimshelf --restart unless-stopped -p 2778:2778 -v /srv/twi
 
 ## 浏览器扩展
 
-在帖子旁加下载按钮，点击可发送到绑定的设备下载，支持绑定浏览器扩展的版本有：Windows、Linux、macOS 上的 App（Flutter 版和原生版）和 Linux 服务器
+在帖子旁加下载按钮，点击可发送到绑定的设备下载，支持绑定浏览器扩展的版本有：Windows、Linux、macOS 上的 App 和 Linux 服务器
 1. **安装**：在项目GitHub主页点击code➡️download zip，解压后在 Chrome 或 Edge 打开 `chrome://extensions`，打开「开发者模式」，点「加载已解压的扩展程序」，选择解压目录的 `extension` 文件夹，注意，Chromium不会为加载的扩展建立副本，若删除extension文件夹，扩展将失效。扩展也会发布更新，请自行克隆仓库并加载新版本
 2. **绑定**：在 TwimShelf 里打开「设置 → 浏览器扩展 → 绑定浏览器」。
    - 同一台电脑上的 App：在扩展里输入 6 位绑定码。
@@ -102,9 +102,9 @@ Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都�
 | 目录 | 内容 |
 | --- | --- |
 | `core` | Rust 核心：数据库、下载、导入、同步、搜索、资料库管理（和 `server` 同属根目录的 Cargo workspace） |
-| `native` | 原生苹果版（工程由 XcodeGen 按根目录的 `project.yml` 生成）：`Shared` 共享代码，`iOS`、`macOS` 平台界面，`ShareExtension` 分享扩展，`TLLocalAI` 本地模型引擎 |
+| `Apple` | 原生苹果版（工程由 XcodeGen 按根目录的 `project.yml` 生成）：`Shared` 共享代码，`iOS`、`macOS` 平台界面，`ShareExtension` 分享扩展，`TLLocalAI` 本地模型引擎 |
 | `flutter/app` | Flutter 版应用 |
-| `flutter/installer` | Windows 安装程序 |
+| `windows` | 原生 Windows 版：`TwimShelf`（WinUI 3，.NET，原生 AOT；也是自己的安装和卸载程序），`Setup/stub` 安装包外壳 |
 | `flutter/tl_core`、`tl_native`、`tl_llama` | Flutter 插件：Rust 核心绑定、平台能力、llama.cpp 推理 |
 | `server` | Linux 服务器：把核心通过 HTTP 提供给网页版，以及登录、文件、视频封面 |
 | `docker` | Docker 镜像和 compose 示例 |

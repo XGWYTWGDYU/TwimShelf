@@ -13,8 +13,8 @@ import '../platform/files.dart';
 const _channel = MethodChannel('org.twimshelf/share_inbox');
 
 /// The share button of the viewers. iOS and the Mac: the system's sheet, which holds both copying
-/// and the other apps. Android: its sheet has no copying, so 拷贝 stands beside it. Windows and
-/// Linux have no such sheet: 拷贝 and 复制到.
+/// and the other apps. Android: its sheet has no copying, so 拷贝 stands beside it. Linux has
+/// no such sheet: 拷贝 and 复制到.
 Future<void> shareMedia(BuildContext context, String path, {Rect? anchor}) async {
   if (await ApplePlatform.instance.share([path])) return;
   if (!context.mounted) return;

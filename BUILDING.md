@@ -34,11 +34,10 @@ macOS 和 Linux 上用 `build.sh`，Windows 上用 `build.ps1`。脚本会构建
 | --- | --- | --- |
 | `native-macos` | 原生 Mac 版 `.dmg`（临时签名） | Apple Silicon Mac + Xcode |
 | `native-ios` | 原生 iOS 版未签名 `.ipa` | Mac + Xcode |
-| `flutter-macos` | Flutter Mac 版 `.dmg`（临时签名） | Mac + Xcode |
 | `flutter-ios` | Flutter iOS 版未签名 `.ipa` | Mac + Xcode |
 | `flutter-android` | Android `.apk`，每种 CPU 架构一个 | macOS、Linux 或 Windows |
 | `flutter-linux` | Linux `.AppImage` | Linux |
-| `flutter-windows` | Windows `setup.exe` | Windows（`build.ps1`） |
+| `windows` | 原生 Windows 版 `setup.exe`（WinUI 3） | Windows 11（`build.ps1`） |
 
 构建脚本无法帮你安装的前提条件：
 
@@ -86,10 +85,6 @@ Rust 核心会在构建时自动编译，使用 `rust-toolchain.toml` 固定的 
 
 ```bash
 open flutter/app/ios/Runner.xcworkspace
-```
-
-```bash
-open flutter/app/macos/Runner.xcworkspace
 ```
 
 选择 `Runner` scheme 点击运行即可。scheme 的预处理步骤会准备好配置、Dart 依赖、Rust 核心和 CocoaPods；Flutter SDK、Rust、CocoaPods 和 CMake 需要先装好（`./build.sh --check flutter-ios`）。这些步骤的输出在 `build/cache/logs/xcode-prepare.log` 里。
@@ -199,10 +194,17 @@ security add-generic-password -s "TwimShelf Android release key" -a twimshelf -w
 ### Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File build.ps1 flutter-windows
+powershell -ExecutionPolicy Bypass -File build.ps1 windows
 ```
 
-需要 Windows 10 1803 或更新版本。脚本通过 winget 询问并安装 Visual Studio 生成工具（含 C++）、Rust、Flutter 和 Vulkan SDK。更多说明见 [docs/windows-build.md](docs/windows-build.md)。
+Windows 版是原生的（`windows/TwimShelf`，WinUI 3、.NET 原生 AOT），需要 Windows 11。脚本通过 winget 询问并安装 Visual Studio 生成工具（含 C++）、Rust、`global.json` 指定的 .NET SDK 和 Vulkan SDK。不带参数时还会构建 Android 版（需要 Flutter）。更多说明见 [docs/windows-build.md](docs/windows-build.md)。
+
+下载不了 llama.cpp 源码时（受限网络），先在别处取得 `flutter/tl_llama/src/CMakeLists.txt` 里写的那个版本的源码，再用 `TL_LLAMA_SOURCE` 指向它：
+
+```powershell
+$env:TL_LLAMA_SOURCE = 'D:\src\llama.cpp-0.8.0'
+```
+
 
 ## 配置：config.yaml
 
@@ -215,12 +217,13 @@ Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都�
 | `version`、`build_number` | 所有平台共用的版本号和构建号 |
 | `build.dir` | 构建缓存和产物的位置 |
 | `native.bundle_id` | 原生版的 Bundle ID 前缀：iOS 用 `<前缀>.ios`，Mac 用 `<前缀>.mac` |
-| `flutter.apple_bundle_id` | Flutter 版 iOS 和 macOS 的 Bundle ID |
+| `flutter.apple_bundle_id` | Flutter 版 iOS / iPadOS 的 Bundle ID |
 | `flutter.android_package` | Android 的 applicationId |
 | `flutter.desktop_id` | Linux 的应用 ID |
 | `native.share_extension_ios`、`native.share_extension_mac` | 原生版的分享扩展 |
-| `flutter.share_extension_ios`、`flutter.share_extension_mac` | Flutter 版苹果平台的分享扩展 |
-| `flutter.share_extension` | Android「分享到」、Windows「发送到」、Linux「打开方式」 |
+| `flutter.share_extension_ios` | Flutter 版 iOS 的分享扩展 |
+| `flutter.share_extension` | Android「分享到」、Linux「打开方式」 |
+| `windows.share_extension` | Windows「发送到」 |
 | `native.development_team`、`flutter.development_team` | 开发团队，默认留空 |
 | `native.mac_signing_identity` | Mac 版指定签名身份，默认留空 |
 
@@ -287,7 +290,7 @@ cargo test -p tl-core --locked --features heif
 scripts/checks/run.sh
 ```
 
-界面文字只改 `native/Resources/Localizable.xcstrings`（批量加入可以用 `python3 scripts/catalog.py add`），再运行 `python3 scripts/to_flutter.py` 导出给 Flutter。不要直接改 `flutter/app/assets/l10n` 里的文件，下一次导出会覆盖它们。
+界面文字只改 `Apple/Resources/Localizable.xcstrings`（批量加入可以用 `python3 scripts/catalog.py add`），再运行 `python3 scripts/to_flutter.py` 导出给 Flutter。不要直接改 `flutter/app/assets/l10n` 里的文件，下一次导出会覆盖它们。
 
 Flutter 版：
 
@@ -354,7 +357,7 @@ iOS 真机必须选择 Team，见[用 Xcode 构建和运行](#用-xcode-构建�
 
 llama.cpp 的 Vulkan 后端在带空格的路径里无法构建。请把项目移到不含空格的路径，或者把 `build.dir` 改到不含空格的绝对路径。
 
-**Flutter 的 iOS / macOS 版报错：`did not contain an Info.plist`、`Library 'tl_core' not found`**
+**Flutter 的 iOS 版报错：`did not contain an Info.plist`、`Library 'tl_core' not found`**
 
 依赖没有按顺序准备好。`build.sh` 和 Xcode 的预处理步骤都会自动按顺序执行；如果手动构建，顺序是：
 

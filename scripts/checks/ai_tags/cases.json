@@ -1,0 +1,27 @@
+{
+  "about": "What a vision model's reply becomes: the tags, or why it is refused (bad: not a valid list of tags; none: no tags). The Swift, Dart and C# parsers are checked against these (scripts/checks/run.sh, the Flutter tests, scripts/checks/ai_tags/windows.cs).",
+  "cases": [
+    { "reply": "[\"猫\",\"室内\"]", "tags": ["猫", "室内"] },
+    { "reply": "  [\" CAT \", \"cat\", \"(Wall).\"]  ", "tags": ["cat", "wall"] },
+    { "reply": "我在想</think>[\"海边\",\"蓝天\"]", "tags": ["海边", "蓝天"] },
+    { "reply": "```json\n[\"猫\",\"沙发\"]\n```", "tags": ["猫", "沙发"] },
+    { "reply": "[\"C++\",\"3D\",\"初音 Miku\",\"😺\"]", "tags": ["c++", "3d", "初音 miku", "😺"] },
+    { "reply": "猫，狗、鸟; 鱼\n#天空", "tags": ["猫", "狗", "鸟", "鱼", "天空"] },
+    { "reply": "[\"t0\",\"t1\",\"t2\",\"t3\",\"t4\",\"t5\",\"t6\",\"t7\",\"t8\",\"t9\",\"t10\",\"t11\",\"t12\",\"t13\"]", "tags": ["t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10", "t11"] },
+    { "reply": "[\"猫\",\"abcdefghijklmnop\"]", "tags": ["猫"] },
+    { "reply": "}", "error": "bad" },
+    { "reply": ":", "error": "bad" },
+    { "reply": "macrowingths,harley }", "error": "bad" },
+    { "reply": "[\"}\",\":\",\"猫\"]", "error": "bad" },
+    { "reply": "[\"harley }\",\"猫\"]", "error": "bad" },
+    { "reply": "[\"猫\",12,null]", "error": "bad" },
+    { "reply": "[\"猫\",\"室内\"", "error": "bad" },
+    { "reply": "[\"猫\"] [\"狗\"]", "error": "bad" },
+    { "reply": "{\"tags\":[\"猫\"]}", "error": "bad" },
+    { "reply": "[\"猫\"]}", "error": "bad" },
+    { "reply": "", "error": "none" },
+    { "reply": "   ", "error": "none" },
+    { "reply": "[]", "error": "none" },
+    { "reply": "[\"  \", \"...\"]", "error": "none" }
+  ]
+}

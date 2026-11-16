@@ -12,9 +12,9 @@ class ExtensionReceiver {
   ExtensionReceiver._();
   static final instance = ExtensionReceiver._();
 
-  /// Where it exists: Windows, Linux and macOS, and the server (the web build). Phones and
+  /// Where it exists: Linux and macOS, and the server (the web build). Phones and
   /// tablets do not keep an app running to receive.
-  static bool get offered => OS.isWeb || OS.isMacOS || OS.isWindows || OS.isLinux;
+  static bool get offered => OS.isWeb || OS.isMacOS || OS.isLinux;
 
   int? port;
   String? problem;
@@ -35,7 +35,7 @@ class ExtensionReceiver {
     try {
       port = Core.extensionServe({
         'name': SyncModel.deviceName,
-        'platform': OS.isMacOS ? 'macos' : OS.isWindows ? 'windows' : 'linux',
+        'platform': OS.isMacOS ? 'macos' : 'linux',
         'flavor': 'flutter',
         'route': d.route.wireValue,
         'concurrency': d.concurrency,

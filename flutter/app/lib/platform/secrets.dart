@@ -75,11 +75,11 @@ class PlatformSecretBackend implements SecretBackend {
   }
 }
 
-/// Windows and Linux: the app keeps its secrets itself, in the data folder (`App/secrets.json`),
+/// Linux: the app keeps its secrets itself, in the data folder (`App/secrets.json`),
 /// each value sealed (ChaCha20-Poly1305, by the core) under a key beside it (`App/secrets.key`).
 /// Not real protection — any program that can read the folder can open them — but they are
 /// never plain text, they move with the data folder, and no system keyring is needed (Linux has
-/// none that every desktop provides, and Windows' DPAPI protects nothing from other programs).
+/// none that every desktop provides). The native Windows app keeps them the same way.
 class DataFolderSecretBackend implements SecretBackend {
   DataFolderSecretBackend(this.directory);
   final Future<String> Function() directory;
@@ -182,9 +182,9 @@ class Secrets {
   /// never read or write the user's Keychain or secret service.
   static final SecretStore store = SecretStore(kDebugMode && OS.environment['TL_LIBRARY_DIR'] != null
       ? MemorySecretBackend()
-      // Windows, Linux: in the data folder; Apple: Keychain; Android: Keystore
+      // Linux: in the data folder; Apple: Keychain; Android: Keystore
       // the web build: on the server, beside the library (the server itself syncs with them)
-      : OS.isWindows || OS.isLinux || OS.isWeb
+      : OS.isLinux || OS.isWeb
           ? DataFolderSecretBackend(() async => (await getApplicationSupportDirectory()).path)
           : PlatformSecretBackend());
   static Future<SecretResult<String?>> read(String key) => store.read(key);

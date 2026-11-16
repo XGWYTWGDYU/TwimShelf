@@ -574,7 +574,7 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
             // a mouse does not drag pages
-            if (widget.media.length > 1 && (OS.isMacOS || OS.isWindows || OS.isLinux)) ...[
+            if (widget.media.length > 1 && (OS.isMacOS || OS.isLinux)) ...[
               if (_page > 0) _PageArrow(key: const ValueKey('cardPrev'), left: true, onTap: () => _turn(-1)),
               if (_page < widget.media.length - 1) _PageArrow(key: const ValueKey('cardNext'), left: false, onTap: () => _turn(1)),
             ],
@@ -701,13 +701,13 @@ class _Metrics {
       return v;
     }
 
-    title = measure(TextSpan(text: 'Ag 相册', style: t.titleSmall));
-    author = measure(TextSpan(children: [TextSpan(text: 'Ag 作者', style: t.titleSmall), TextSpan(text: '  @Ag', style: t.bodySmall)]));
-    small = measure(TextSpan(text: 'Ag 链接', style: t.bodySmall));
-    body = measure(TextSpan(text: 'Ag 文字', style: t.bodyMedium));
+    title = measure(TextSpan(text: 'Ag 相册', style: t.titleSmall));   // i18n-exempt: sample text measured for card heights, never shown
+    author = measure(TextSpan(children: [TextSpan(text: 'Ag 作者', style: t.titleSmall), TextSpan(text: '  @Ag', style: t.bodySmall)]));   // i18n-exempt: sample text measured for card heights, never shown
+    small = measure(TextSpan(text: 'Ag 链接', style: t.bodySmall));   // i18n-exempt: sample text measured for card heights, never shown
+    body = measure(TextSpan(text: 'Ag 文字', style: t.bodyMedium));   // i18n-exempt: sample text measured for card heights, never shown
     const latin = 'abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789';
     narrow = measure(TextSpan(text: latin, style: t.bodyMedium), width: true) / latin.length;
-    const han = '的一是不了人我在有他这为之大来以个中上们';
+    const han = '的一是不了人我在有他这为之大来以个中上们';   // i18n-exempt: sample text measured for card heights, never shown
     wide = measure(TextSpan(text: han, style: t.bodyMedium), width: true) / han.length;
   }
 
@@ -808,6 +808,18 @@ class _FeedVideoState extends State<_FeedVideo> {
 
   static Future<void> suspendForViewer() async {
     _viewerOpen = true;
+    // each playing card leaves its moment: the viewer starts the opened video there
+    for (final s in _playing.toList()) {
+      final v = s._video;
+      if (v != null && s._firstFrame) {
+        await v.pause();
+        VideoResume.leave(s.widget.item.path, v.currentPosition);
+        final frame = await VideoResume.frameOf(v);
+        VideoResume.leaveFrame(s.widget.item.path, frame);
+        // and keeps showing that moment itself while the viewer opens over it (not its poster)
+        if (frame != null) s._bridge = frame;
+      }
+    }
     await Future.wait(_playing.toList().map((s) => s._stop()));
   }
 
@@ -820,6 +832,7 @@ class _FeedVideoState extends State<_FeedVideo> {
 
   VideoPlayback? _video;
   String? _poster;
+  Uint8List? _bridge;
   bool _visible = false;
   bool _firstFrame = false;
   StreamSubscription<Duration>? _position;
@@ -855,14 +868,22 @@ class _FeedVideoState extends State<_FeedVideo> {
   Future<void> _start() async {
     _playing.add(this);
     final v = _idle.isNotEmpty ? _idle.removeLast() : VideoPlayback();
-    setState(() => _video = v);
+    final bridge = VideoResume.takeFrame(widget.item.path);
+    setState(() { _video = v; if (bridge != null) _bridge = bridge; });
     try {
       await v.setMuted(true);
       await v.setLoop(true);
+      // from where the viewer left this video (or the start); the viewer's last frame shows
+      // until this player is past that moment (not the poster: an earlier frame)
+      final from = VideoResume.take(widget.item.path, 'card');
       _position = v.position.listen((p) {
-        if (!_firstFrame && p > Duration.zero && mounted) setState(() => _firstFrame = true);
+        if (!_firstFrame && p > (from ?? Duration.zero) + const Duration(milliseconds: 40) && mounted) setState(() { _firstFrame = true; _bridge = null; });
       });
-      await v.open(widget.item.path);
+      await v.open(widget.item.path, autoplay: from == null);
+      if (from != null && _video == v) {
+        await v.seek(from);
+        await v.play();
+      }
       // scrolled away while it opened
       if (_video == v && !_wants) _stop();
     } catch (_) {
@@ -898,6 +919,8 @@ class _FeedVideoState extends State<_FeedVideo> {
   @override
   Widget build(BuildContext context) {
     final v = _video;
+    // the viewer's frame of this video's moment, until this card's player is past it
+    final bridge = _bridge ?? VideoResume.peekFrame(widget.item.path);
     return VisibilityDetector(
       key: ValueKey('feed-video-${widget.item.media_id}'),
       onVisibilityChanged: (info) {
@@ -909,8 +932,10 @@ class _FeedVideoState extends State<_FeedVideo> {
       child: Stack(fit: StackFit.expand, children: [
         if (v != null) VideoSurface(controller: v.surfaceController, controls: NoVideoControls, fill: Colors.transparent),
         if (v == null || !_firstFrame)
-          _poster == null ? const SizedBox.expand() : Image(image: localFileImage(_poster!), fit: BoxFit.contain, gaplessPlayback: true),
-        if (v == null) const Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 56)),
+          bridge != null
+              ? Image.memory(bridge, fit: BoxFit.contain, gaplessPlayback: true)
+              : _poster == null ? const SizedBox.expand() : Image(image: localFileImage(_poster!), fit: BoxFit.contain, gaplessPlayback: true),
+        if (v == null && bridge == null) const Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 56)),
       ]),
     );
   }

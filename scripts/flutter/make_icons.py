@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate every icon the Flutter apps carry, from the AppIcon set the apps use: the committed
-native/Resources/Assets.xcassets/AppIcon.appiconset (made from icon.png), or AppIconLocal beside it
+Apple/Resources/Assets.xcassets/AppIcon.appiconset (made from icon.png), or AppIconLocal beside it
 when config.local.yaml names an icon of your own (TL_ICON_SET, set by scripts/apply.py).
 
 None of what this writes is in git (scripts/checks/icons.py keeps it that way), except the web app's
@@ -11,12 +11,12 @@ build applies config.yaml and something is missing or the source changed.
 
   Android   legacy mipmaps, and the adaptive icon's foreground over a white background
   iOS       the AppIcon set of Runner, opaque
-  macOS     the AppIcon set of Runner, with the Mac icon's own corners
-  in-app    assets/app_icon.png of the app and of the Windows setup
+  in-app    assets/app_icon.png of the app
   web       flutter/app/web: favicon and the installable web app's icons (committed)
   extension extension/icons (committed)
 
-Windows and Linux make theirs at build time from the same set (desktop_assets.py).
+Linux makes its own at build time from the same set (desktop_assets.py); the native Windows app
+its own in scripts/apply.py.
 
   python3 scripts/flutter/make_icons.py                       the icons above
   python3 scripts/flutter/make_icons.py --app-icon icon.png [--set DIR]   an AppIcon set (the
@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 # the committed set (icon.png): the web app's and the extension's icons
-PUBLIC_DIR = ROOT / "native/Resources/Assets.xcassets/AppIcon.appiconset"
+PUBLIC_DIR = ROOT / "Apple/Resources/Assets.xcassets/AppIcon.appiconset"
 
 
 def source_dir():
@@ -49,8 +49,7 @@ def source_dir():
 APP_DIR = ROOT / "flutter/app"
 ANDROID_RES = APP_DIR / "android/app/src/main/res"
 IOS_SET = APP_DIR / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
-MAC_SET = APP_DIR / "macos/Runner/Assets.xcassets/AppIcon.appiconset"
-IN_APP = (APP_DIR / "assets/app_icon.png", ROOT / "flutter/installer/assets/app_icon.png")
+IN_APP = (APP_DIR / "assets/app_icon.png",)
 WEB = APP_DIR / "web"
 # the Mac icon (own corners, transparent margin) at these sizes
 WEB_ROUNDED = {WEB / "favicon.png": 32}
@@ -76,7 +75,7 @@ def catalog(folder):
 
 
 def outputs():
-    files = list(IN_APP) + list(catalog(IOS_SET)) + list(catalog(MAC_SET))
+    files = list(IN_APP) + list(catalog(IOS_SET))
     files += list(WEB_ROUNDED) + list(EXTENSION) + list(WEB_FULL) + list(WEB_MASKABLE)
     for density in ANDROID_LEGACY:
         files += [ANDROID_RES / f"mipmap-{density}/ic_launcher.png", ANDROID_RES / f"mipmap-{density}/ic_launcher_foreground.png"]
@@ -169,8 +168,6 @@ def main():
         resized(image, ANDROID_ADAPTIVE[density]).save(folder / "ic_launcher_foreground.png")
     for path, size in catalog(IOS_SET).items():
         on_white(size).save(path)  # the App Store refuses transparency
-    for path, size in catalog(MAC_SET).items():
-        resized(mac, size).save(path)
     for path in IN_APP:
         path.parent.mkdir(parents=True, exist_ok=True)
         resized(image, 512).save(path)

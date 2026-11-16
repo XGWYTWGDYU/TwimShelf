@@ -7,11 +7,11 @@ import 'apple_platform.dart';
 import 'os.dart';
 
 /// Desktop windows without the system's title bar: the app's own content reaches the top edge.
-/// macOS keeps its traffic lights over the content (the window's corner); Windows and Linux get
-/// the caption buttons drawn here. A drag on the top strip moves the window.
+/// macOS keeps its traffic lights over the content (the window's corner); Linux gets the
+/// caption buttons drawn here. A drag on the top strip moves the window.
 class DesktopWindow {
-  static bool get isDesktop => !kIsWeb && (OS.isMacOS || OS.isWindows || OS.isLinux);
-  static bool get drawsCaption => !kIsWeb && (OS.isWindows || OS.isLinux);
+  static bool get isDesktop => !kIsWeb && (OS.isMacOS || OS.isLinux);
+  static bool get drawsCaption => !kIsWeb && OS.isLinux;
 
   /// The height of the strip that stands in for the title bar.
   static double get stripHeight => !isDesktop ? 0 : (OS.isMacOS ? 28 : 36);
@@ -31,7 +31,7 @@ class DesktopWindow {
 
 /// Where the window's own controls sit, so pages keep clear of them: the leading box (macOS's
 /// traffic lights, a windowed iPad's controls) and the trailing one (the caption buttons on
-/// Windows and Linux). Both empty where there are none.
+/// Linux). Both empty where there are none.
 class WindowChrome {
   static Rect leading(BuildContext context) {
     if (!kIsWeb && OS.isMacOS) return const Rect.fromLTWH(0, 0, 76, 28);
@@ -49,7 +49,7 @@ class WindowChrome {
 }
 
 /// The top strip of a desktop window: drags move the window (a double click zooms it, as the
-/// title bar did), and on Windows and Linux the caption buttons sit at its end. Taps on what is
+/// title bar did), and on Linux the caption buttons sit at its end. Taps on what is
 /// under the strip still reach it (it only takes drags).
 class WindowStrip extends StatelessWidget {
   const WindowStrip({super.key});

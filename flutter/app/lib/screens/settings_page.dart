@@ -227,7 +227,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 if (ExtensionReceiver.offered)
                   nav(const ValueKey('settings-extension'), Icons.extension, L('ext.title'), extensionSummary(), () => const ExtensionPage()),
               ]),
-              // Windows, Linux: where everything is kept
+              // Linux: where everything is kept
               if (DataHome.path != null) DataHomeSection(library: library),
               // GitHub builds only
               if (Updates.enabled)
@@ -349,7 +349,7 @@ class _Stat extends StatelessWidget {
 /// A tablet's or a desktop's screen, whatever size the window has now (a narrowed iPad window
 /// still has the setting: it is for the screen, and the window may widen again).
 bool _largeScreen(BuildContext context) {
-  if (OS.isMacOS || OS.isWindows || OS.isLinux) return true;
+  if (OS.isMacOS || OS.isLinux) return true;
   final display = View.of(context).display;
   return display.size.shortestSide / display.devicePixelRatio >= 600;
 }

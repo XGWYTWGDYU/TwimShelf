@@ -5,7 +5,6 @@ import 'dart:io';
 
 import 'package:audio_session/audio_session.dart' as audio;
 import 'package:ffi/ffi.dart';
-import 'package:win32/win32.dart' as windows;
 import 'os.dart';
 
 abstract interface class HeadphoneRoutes {
@@ -34,7 +33,6 @@ class SystemHeadphoneRoutes implements HeadphoneRoutes {
   Future<bool> current() async {
     try {
       if (OS.isMacOS) return _macHeadphones();
-      if (OS.isWindows) return _windowsHeadphones();
       if (OS.isLinux) {
         final selected = await _pactl(['get-default-sink']);
         final devices = await _pactl(['--format=json', 'list', 'sinks']);
@@ -207,44 +205,6 @@ bool _macHeadphones() => using((arena) {
   return read(device, 0x73737263, scope: 0x6f757470) ==
       0x6864706e; // output data source 'hdpn'
 });
-
-bool _windowsHeadphones() {
-  final initialized = windows.CoInitializeEx(windows.COINIT_MULTITHREADED);
-  windows.IMMDeviceEnumerator? enumerator;
-  windows.IMMDevice? device;
-  windows.IPropertyStore? properties;
-  try {
-    enumerator = windows.createInstance<windows.IMMDeviceEnumerator>(
-      windows.MMDeviceEnumerator,
-    );
-    device = enumerator.getDefaultAudioEndpoint(
-      windows.eRender,
-      windows.eMultimedia,
-    );
-    properties = device?.openPropertyStore(windows.STGM_READ);
-    if (properties == null) return false;
-    return using((arena) {
-      final key = arena<windows.PROPERTYKEY>();
-      key.ref
-        ..fmtid = windows.GUID('{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E}')
-        ..pid = 0;
-      final value = windows.PropVariant<int>.fromPointer(
-        properties!.getValue(key),
-      );
-      try {
-        return const {3, 5}.contains(value.value);
-      } // Headphones / Headset
-      finally {
-        value.free();
-      }
-    });
-  } finally {
-    properties?.release();
-    device?.release();
-    enumerator?.release();
-    if (!initialized.isError) windows.CoUninitialize();
-  }
-}
 
 Future<String?> _pactl(List<String> arguments) async {
   Process? process;

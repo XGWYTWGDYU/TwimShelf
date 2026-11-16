@@ -1,7 +1,7 @@
 //! The photo grid's pinch zoom, shared by every front end: one lattice of cells anchored at the
 //! photo under the fingers, a layer per column count that cross-fades over the others, a
 //! direction-latched choice of the final layer, and a critically damped settle. A line-for-line
-//! port of the Swift `GridConfig` / `ZoomEngine` (native/Shared/Grid), whose constants were measured
+//! port of the Swift `GridConfig` / `ZoomEngine` (Apple/Shared/Grid), whose constants were measured
 //! from the Photos app; `core/tests/grid_engine.rs` replays recorded gestures against both.
 //!
 //! The engine only does geometry: front ends feed it pinch events and frame times and draw the

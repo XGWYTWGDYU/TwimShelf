@@ -2,7 +2,7 @@
 # Builds the Rust core for the Flutter app; all caches and output go to build.dir of config.yaml.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-usage() { echo 'Usage: build_core.sh android|windows|linux|macos|ios [--debug]' >&2; exit 2; }
+usage() { echo 'Usage: build_core.sh android|linux|macos|ios [--debug]' >&2; exit 2; }
 [[ $# -ge 1 && $# -le 2 ]] || usage
 platform=$1
 profile=release
@@ -12,7 +12,7 @@ if [[ $# == 2 ]]; then
   profile=debug
   flags=(--profile dev)
 fi
-case "$platform" in android|windows|linux|macos|ios) ;; *) usage ;; esac
+case "$platform" in android|linux|macos|ios) ;; *) usage ;; esac
 if [[ $profile == release ]]; then
   export CARGO_PROFILE_RELEASE_STRIP=symbols
   export CARGO_PROFILE_RELEASE_DEBUG=0
@@ -26,13 +26,12 @@ fi
 CACHE="$(python3 "$ROOT/scripts/apply.py" where cache)"
 export PATH="$CACHE/sdk/bin:$HOME/.cargo/bin:$PATH:/opt/homebrew/opt/rustup/bin:/usr/local/opt/rustup/bin"
 export CARGO_TARGET_DIR="$CACHE/cargo"
-export XWIN_CACHE_DIR="$CACHE/xwin"
 export ANDROID_HOME="${ANDROID_HOME:-$CACHE/sdk/android}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 if [[ -z "${JAVA_HOME:-}" && -d '/Applications/Android Studio.app/Contents/jbr/Contents/Home' ]]; then
   export JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home'
 fi
-HEADER="$ROOT/native/Shared/tl_core.h"
+HEADER="$ROOT/Apple/Shared/tl_core.h"
 DEST="$ROOT/flutter/tl_core"
 expected=$(awk '/^[a-zA-Z_].*tl_[a-zA-Z0-9_]+\(/ { line=$0; sub(/\(.*/, "", line); sub(/.*[ *]/, "", line); print line }' "$HEADER" | sort -u)
 expected_count=$(printf '%s\n' "$expected" | wc -l | tr -d ' ')
@@ -53,10 +52,6 @@ report() {
   case "$kind" in
     apple)
       symbols=$(xcrun nm --no-llvm-bc --quiet ${arch:+-arch "$arch"} -gU "$file" | awk '{print $NF}' | sed -nE 's/^_(tl_[a-zA-Z0-9_]+)$/\1/p' | sort -u) ;;
-    import)
-      symbols=$("$NM" --defined-only --extern-only "$file" | awk '{print $NF}' | sed -nE 's/^(tl_[a-zA-Z0-9_]+)$/\1/p' | sort -u) ;;
-    windows)
-      symbols=$("$OBJDUMP" -p "$file" | awk '{print $NF}' | sed -nE 's/^(tl_[a-zA-Z0-9_]+)$/\1/p' | sort -u) ;;
     *)
       symbols=$("$NM" --dynamic --defined-only "$file" | awk '{print $NF}' | sed -nE 's/^(tl_[a-zA-Z0-9_]+)$/\1/p' | sort -u) ;;
   esac
@@ -85,26 +80,6 @@ case "$platform" in
       cp "$CARGO_TARGET_DIR/$target/$profile/libtl_core.so" "$DEST/android/src/main/jniLibs/$abi/"
       report "$DEST/android/src/main/jniLibs/$abi/libtl_core.so" elf
     done ;;
-  windows)
-    need cargo-xwin
-    targets x86_64-pc-windows-msvc
-    rustup component add llvm-tools-preview
-    # cargo-xwin reuses the Rust toolchain linker; Xcode supplies clang/LLVM.
-    if [[ $(uname -s) == Darwin ]]; then
-      export PATH="$(dirname "$(xcrun --find clang)"):$PATH"
-    fi
-    export XWIN_CROSS_COMPILER=clang
-    export XWIN_ARCH=x86_64
-    need clang
-    OBJDUMP=$(command -v llvm-objdump || xcrun --find llvm-objdump)
-    NM=$(command -v llvm-nm || xcrun --find llvm-nm)
-    cargo xwin rustc --locked --lib "${flags[@]}" --features heif --target x86_64-pc-windows-msvc --crate-type cdylib
-    mkdir -p "$DEST/windows/lib"
-    for file in tl_core.dll tl_core.dll.lib; do
-      cp "$CARGO_TARGET_DIR/x86_64-pc-windows-msvc/$profile/$file" "$DEST/windows/lib/$file"
-    done
-    report "$DEST/windows/lib/tl_core.dll" windows
-    report "$DEST/windows/lib/tl_core.dll.lib" import ;;
   linux)
     [[ $(uname -s) == Linux ]] || fail 'The Linux core builds on Linux'
     case $(uname -m) in x86_64) target=x86_64-unknown-linux-gnu ;; aarch64|arm64) target=aarch64-unknown-linux-gnu ;; *) fail 'Unsupported Linux architecture' ;; esac

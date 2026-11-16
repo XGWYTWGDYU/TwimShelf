@@ -70,7 +70,7 @@ void main() {
     () async {
       for (final language in ['en', 'ja', 'zh-Hans', 'zh-Hant']) {
         final native = await File(
-          '../../native/Resources/$language.lproj/AIPrompt.txt',
+          '../../Apple/Resources/$language.lproj/AIPrompt.txt',
         ).readAsString();
         expect(await File('assets/ai/$language.txt').readAsString(), native);
         final loaded = await AiPrompt.bundledDefaults(language: language);
@@ -365,22 +365,18 @@ void main() {
       );
     },
   );
-  test('tag parser matches native JSON, think, delimiters, trim, dedupe and limits', () {
-    expect(
-      ExternalAI.parseTags(
-        'reason</think> [" CAT ","cat",1,"(Wall).", "abcdefghijklmnop"]',
-      ),
-      ['cat', 'wall'],
-    );
-    expect(
-      ExternalAI.parseTags("'Cat'\uFF0Cdog\u3001bird; fish\uFF1Bsky\n#sun"),
-      ['cat', 'dog', 'bird', 'fish', 'sky', 'sun'],
-    );
-    expect(
-      ExternalAI.parseTags(List.generate(14, (i) => 't$i').join(',')),
-      hasLength(12),
-    );
-    expect(ExternalAI.parseTags('[1,null]'), isEmpty);
+  test('tag parser follows the rules every app shares', () {
+    // the same cases the Swift and Windows parsers are checked against
+    final cases = (jsonDecode(File('../../scripts/checks/ai_tags/cases.json').readAsStringSync()) as Map)['cases'] as List;
+    for (final c in cases.cast<Map>()) {
+      final reply = c['reply'] as String;
+      final error = c['error'];
+      if (error == null) {
+        expect(ExternalAI.parseTags(reply), c['tags'], reason: reply);
+      } else {
+        expect(() => ExternalAI.parseTags(reply), throwsA(failure(error == 'bad' ? ExternalFailureKind.badTags : ExternalFailureKind.noTags)), reason: reply);
+      }
+    }
   });
   test('HTTP picks first model, sends key and native image body', () async {
     await models.setApiKey(model, 'key');

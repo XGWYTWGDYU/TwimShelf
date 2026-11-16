@@ -147,7 +147,7 @@ class _QuickDownloadCardState extends State<QuickDownloadCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final desktop = OS.isMacOS || OS.isWindows || OS.isLinux;
+    final desktop = OS.isMacOS || OS.isLinux;
     return Material(
       elevation: 8,
       color: theme.colorScheme.surfaceContainerHigh,

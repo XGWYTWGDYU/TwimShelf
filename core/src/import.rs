@@ -415,6 +415,8 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
     for v in posts.values_mut() { v.sort(); }
     rep.folders = posts.len();
     set_progress(|p| p.folders_total = files.len() + posts.len());
+    let flush = lib.group_flush();
+    let mut done = 0;
     for (dir, list) in &posts {
         if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
         // a sidecar at the archive's root: the post is named after the archive
@@ -423,6 +425,8 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
         let folder_path = if dir.is_empty() { ".".to_string() } else { dir.clone() };
         import_post_folder(lib, src, &mut rep, &name, &folder_path, list)?;
         set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
+        done += 1;
+        flush.after(done)?;
     }
     for (path, key) in files {
         if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
@@ -446,9 +450,12 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
             }
         }
         set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
+        done += 1;
+        flush.after(done)?;
     }
     lib.import_into_folder(&mut rep, folder)?;
     lib.finish_report(&mut rep)?;
+    flush.flush()?;
     Ok(rep)
 }
 
@@ -477,14 +484,17 @@ fn run_inner(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
     for (p, why) in &plan.ignored { rep.issue("ignored_location", p, why.clone(), None); }
     rep.folders = plan.posts.len();
     set_progress(|p| p.folders_total = plan.posts.len());
-    for (name, files) in &plan.posts {
+    let flush = lib.group_flush();
+    for (i, (name, files)) in plan.posts.iter().enumerate() {
         if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
         let folder_path = format!("{}{}", if plan.root.is_empty() { String::new() } else { plan.root.join("/") + "/" }, name);
         import_post_folder(lib, src, &mut rep, name, &folder_path, files)?;
         set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
+        flush.after(i + 1)?;
     }
     lib.import_into_folder(&mut rep, folder)?;
     lib.finish_report(&mut rep)?;
+    flush.flush()?;
     Ok(rep)
 }
 

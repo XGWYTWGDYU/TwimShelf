@@ -46,7 +46,7 @@ def export(catalog, out):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("catalog", nargs="?", type=Path,
-                        default=ROOT / "native/Resources/Localizable.xcstrings")
+                        default=ROOT / "Apple/Resources/Localizable.xcstrings")
     parser.add_argument("--out", type=Path, default=ROOT / "flutter/app/assets/l10n")
     args = parser.parse_args()
     with args.catalog.open(encoding="utf-8") as source:

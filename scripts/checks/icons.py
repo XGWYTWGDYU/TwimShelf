@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = "native/Resources/Assets.xcassets/AppIcon.appiconset/"
+SOURCE = "Apple/Resources/Assets.xcassets/AppIcon.appiconset/"
 problems = []
 
 tracked = subprocess.check_output(["git", "ls-files", "-co", "--exclude-standard"], cwd=ROOT, text=True).splitlines()
@@ -17,14 +17,13 @@ for f in tracked:
     if binary and icon and not f.startswith(SOURCE) and f != "icon.png":
         problems.append(f"{f}: an icon in git outside the AppIcon set")
 
-for rc in ("flutter/app/windows/runner/Runner.rc", "flutter/installer/windows/runner/Runner.rc"):
-    if "TL_APP_ICON" not in (ROOT / rc).read_text(encoding="utf-16" if (ROOT / rc).read_bytes()[:2] == b"\xff\xfe" else "utf-8", errors="replace"):
-        problems.append(f"{rc}: its icon is not the generated one")
-for cm in ("flutter/app/windows/runner/CMakeLists.txt", "flutter/installer/windows/runner/CMakeLists.txt"):
-    if "desktop_assets.py" not in (ROOT / cm).read_text(encoding="utf-8"):
-        problems.append(f"{cm}: does not make the icon from the AppIcon set")
-if "desktop_assets.py" not in (ROOT / "build.ps1").read_text(encoding="utf-8"):
-    problems.append("build.ps1: the setup's icon is not made from the AppIcon set")
+# the native Windows app: its icon (the program's and the setup's) is made by apply.py from the set
+if "AppIcon.ico" not in (ROOT / "scripts/apply.py").read_text(encoding="utf-8"):
+    problems.append("scripts/apply.py: does not make the Windows icon from the AppIcon set")
+if "Assets\\AppIcon.ico" not in (ROOT / "windows/TwimShelf/TwimShelf.csproj").read_text(encoding="utf-8"):
+    problems.append("windows/TwimShelf/TwimShelf.csproj: its icon is not the generated one")
+if "AppIcon.ico" not in (ROOT / "build.ps1").read_text(encoding="utf-8"):
+    problems.append("build.ps1: the setup's icon is not the generated one")
 if "icon_set" not in (ROOT / "scripts/flutter/desktop_assets.py").read_text(encoding="utf-8"):
     problems.append("desktop_assets.py: reads something else than the AppIcon set the apps use")
 

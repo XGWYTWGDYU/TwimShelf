@@ -91,7 +91,7 @@ void main() {
   });
 
   testWidgets('拷贝 puts a media file on the clipboard', (t) async {
-    if (!Platform.isAndroid && !Platform.isWindows && !Platform.isLinux) return;
+    if (!Platform.isAndroid && !Platform.isLinux) return;
     await t.runAsync(() async {
       final path = Core.feed(FeedRequest(fuzzy: false)).first.path;
       await const MethodChannel('org.twimshelf/share_inbox').invokeMethod<void>('copyFile', path);

@@ -1,23 +1,28 @@
-# One step from a fresh checkout to installable packages, on Windows 10 1803 or later.
+# One step from a fresh checkout to installable packages, on Windows 11 (the Android app also
+# builds on Windows 10).
 #
 #   powershell -ExecutionPolicy Bypass -File build.ps1                    windows + android
-#   powershell -ExecutionPolicy Bypass -File build.ps1 flutter-windows
+#   powershell -ExecutionPolicy Bypass -File build.ps1 windows            the native Windows app (WinUI 3)
 # Each build applies config.yaml first (names, ids, icons, share).
 #   … -Check     only check the tools      … -Yes     install what is missing without asking
 #
 # Each missing tool is named with what installing it takes; nothing is installed without a yes.
 # Installs use winget (part of Windows 10/11 App Installer). Where things go is build.dir in
-# config.yaml: every cache (Rust, Flutter, Gradle, Dart packages, downloaded SDKs) in <dir>\cache,
-# the setup and APKs in <dir>\apps.
+# config.yaml: every cache (Rust, .NET, Flutter, Gradle, Dart packages, downloaded SDKs) in
+# <dir>\cache, the setup and APKs in <dir>\apps.
 #   FLUTTER_ROOT    an existing Flutter SDK; ANDROID_HOME an existing Android SDK
 #   TL_UPDATE_REPO  owner/name: a GitHub build (检查更新); empty for local builds
 #   TL_VERSION      the version in the packages' file names (default: version in config.yaml)
+#   TL_LLAMA_SOURCE a local llama.cpp checkout of the tag in flutter/tl_llama/src/CMakeLists.txt,
+#                   for networks that cannot download it
 param([string[]]$Targets = @(), [switch]$Check, [switch]$Yes)
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path "$PSScriptRoot").Path
-# pinned: Flutter in .fvmrc, Rust in rust-toolchain.toml (rustup installs that one on first use)
+# pinned: Flutter in .fvmrc, Rust in rust-toolchain.toml (rustup installs that one on first use),
+# .NET in global.json
 $FlutterVersion = (Get-Content "$Root\.fvmrc" -Raw | ConvertFrom-Json).flutter
-# Flutter builds for the machine it runs on: an ARM64 Windows makes the ARM64 app, x64 the x64 one
+$DotNetVersion = (Get-Content "$Root\global.json" -Raw | ConvertFrom-Json).sdk.version
+# builds for the machine they run on: an ARM64 Windows makes the ARM64 app, x64 the x64 one
 $Arm = $env:PROCESSOR_ARCHITECTURE -eq 'ARM64'
 $Arch = if ($Arm) { 'arm64' } else { 'x64' }
 $RustTarget = if ($Arm) { 'aarch64-pc-windows-msvc' } else { 'x86_64-pc-windows-msvc' }
@@ -53,16 +58,6 @@ function Need-VisualStudio {
   }
 
   $vsPath = & $vswhere -latest -products * -property installationPath
-  # ATL (secure storage's Windows plugin uses it): not part of the C++ workload's defaults
-  $atl = if ($Arm) { 'Microsoft.VisualStudio.Component.VC.ATL.ARM64' } else { 'Microsoft.VisualStudio.Component.VC.ATL' }
-  if (-not (& $vswhere -latest -products * -requires $atl -property installationPath)) {
-    Say 'Missing: the C++ ATL of Visual Studio (about 50 MB)'
-    if (Ask "Add it to Visual Studio (component $atl)?") {
-      & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "$vsPath" --add $atl --quiet --norestart --nocache | Out-Null
-    }
-    if (-not (& $vswhere -latest -products * -requires $atl -property installationPath)) { if ($Check) { $script:Missing += 'Visual Studio ATL' } else { Fail 'The C++ ATL is required' } }
-  }
-
   # ARM64 Windows: the crypto library under TLS (ring) needs Visual Studio's own clang there
   if ($Arm) {
     $llvm = "$vsPath\VC\Tools\Llvm\ARM64\bin"
@@ -85,6 +80,21 @@ function Need-Rust {
   Say 'Missing: Rust (about 300 MB)'
   if (Ask 'Install Rust (rustup) with winget?') { winget install --id Rustlang.Rustup -e --accept-source-agreements --accept-package-agreements; Refresh-Path }
   if (-not (Have rustup)) { if ($Check) { $script:Missing += 'Rust' } else { Fail 'Rust is required' } }
+}
+
+function Need-DotNet {
+  # the pinned SDK (global.json): one already installed, or one in <dir>\cache\sdk\dotnet
+  foreach ($d in @("$Cache\sdk\dotnet", $env:DOTNET_ROOT)) {
+    if ($d -and (Test-Path "$d\dotnet.exe") -and ((& "$d\dotnet.exe" --list-sdks) -match "^$([regex]::Escape($DotNetVersion.Split('.')[0]))\.")) { $env:DOTNET_ROOT = $d; $env:Path = "$d;$env:Path"; return }
+  }
+  if ((Have dotnet) -and ((dotnet --list-sdks) -match "^$([regex]::Escape($DotNetVersion.Split('.')[0]))\.")) { return }
+  Say "Missing: .NET SDK $DotNetVersion (about 250 MB)"
+  if (Ask "Download the .NET SDK $DotNetVersion into $Cache\sdk\dotnet?") {
+    $script = "$Cache\sdk\dotnet-install.ps1"
+    Invoke-WebRequest 'https://dot.net/v1/dotnet-install.ps1' -OutFile $script -UseBasicParsing
+    powershell -NoProfile -ExecutionPolicy Bypass -File $script -Version $DotNetVersion -InstallDir "$Cache\sdk\dotnet" -NoPath
+    $env:DOTNET_ROOT = "$Cache\sdk\dotnet"; $env:Path = "$Cache\sdk\dotnet;$env:Path"
+  } elseif ($Check) { $script:Missing += '.NET SDK' } else { Fail 'The .NET SDK is required' }
 }
 
 function Need-Flutter {
@@ -144,42 +154,54 @@ function Build-Core-Windows {
   cargo rustc --locked --lib --release --features heif --target $RustTarget --crate-type cdylib
   $failed = $LASTEXITCODE; Pop-Location
   if ($failed) { Fail 'Building the Rust core failed' }
-  # tl_core\windows\lib is a link into <dir>\cache (scripts\apply.py)
-  Copy-Item "$Cache\cargo\$RustTarget\release\tl_core.dll", "$Cache\cargo\$RustTarget\release\tl_core.dll.lib" "$Root\flutter\tl_core\windows\lib\" -Force
+  # windows\TwimShelf\lib is a link into <dir>\cache (scripts\apply.py)
+  Copy-Item "$Cache\cargo\$RustTarget\release\tl_core.dll" "$Root\windows\TwimShelf\lib\" -Force
+}
+
+# llama.cpp for on-device AI (flutter\tl_llama\src: the C interface and its build), CPU and Vulkan
+function Build-Llama-Windows {
+  $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+  $cmake = "$vs\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+  $build = "$Cache\llama-win-$Arch"
+  # TL_LLAMA_SOURCE: a local llama.cpp checkout of the tag in tl_llama/src/CMakeLists.txt (no download)
+  $source = @()
+  if ($env:TL_LLAMA_SOURCE) { $source += "-DTL_LLAMA_SOURCE=$($env:TL_LLAMA_SOURCE -replace '\\', '/')" }
+  & $cmake -S "$Root\flutter\tl_llama\src" -B $build -G 'Visual Studio 17 2022' -A $(if ($Arm) { 'ARM64' } else { 'x64' }) -Wno-dev @source | Out-Null
+  if ($LASTEXITCODE) { Fail 'Configuring llama.cpp failed' }
+  & $cmake --build $build --config Release --target tl_llama --parallel
+  if ($LASTEXITCODE) { Fail 'Building llama.cpp failed' }
+  Get-ChildItem $build -Recurse -Filter *.dll | Where-Object { $_.FullName -match '\\Release\\' } | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
 }
 
 function Build-Windows {
-  Need-VisualStudio; Need-Rust; Need-Flutter; Need-Vulkan
+  Need-VisualStudio; Need-Rust; Need-DotNet; Need-Vulkan
   $v = Version
   Build-Core-Windows
-  Push-Location "$Root\flutter\app"; & $Flutter pub get; & $Flutter build windows --release (Defines); $failed = $LASTEXITCODE; Pop-Location
+  Build-Llama-Windows
+  # the app, published with Native AOT (it carries the Windows App SDK; nothing to install first)
+  $publish = "$Cache\windows\publish-$Arch"
+  Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
+  $props = @("-p:Version=$v", "-p:Platform=$(if ($Arm) { 'ARM64' } else { 'x64' })")
+  if ($env:TL_UPDATE_REPO) { $props += "-p:TlUpdateRepo=$env:TL_UPDATE_REPO" }
+  Push-Location "$Root\windows\TwimShelf"
+  dotnet publish -c Release -r "win-$Arch" -o $publish @props
+  $failed = $LASTEXITCODE; Pop-Location
   if ($failed) { Fail 'Building the app failed' }
-  Push-Location "$Root\flutter\installer"; & $Flutter pub get; & $Flutter build windows --release; $failed = $LASTEXITCODE; Pop-Location
-  if ($failed) { Fail 'Building the setup app failed' }
-  # the setup: stub + tar(setup app, program, payload.json) + length + marker
+  # the setup: stub + tar(payload) + length + marker; the program is its own setup (--setup)
   $stage = "$Cache\setup\stage"
   Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
-  New-Item -ItemType Directory -Force "$stage\setup", "$stage\payload" | Out-Null
-  Copy-Item "$Root\flutter\installer\build\windows\$Arch\runner\Release\*" "$stage\setup" -Recurse
-  Copy-Item "$Root\flutter\app\build\windows\$Arch\runner\Release\*" "$stage\payload" -Recurse
-  # the Visual C++ runtime goes into the program's own folder (no separate redistributable)
-  $vsdir = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
-  $crt = Get-ChildItem "$vsdir\VC\Redist\MSVC\*\$Arch\Microsoft.VC14*.CRT" -Directory | Select-Object -Last 1
-  if ($crt) { Copy-Item "$($crt.FullName)\*.dll" "$stage\payload"; Copy-Item "$($crt.FullName)\*.dll" "$stage\setup" }
-  $product = Get-Content "$Root\flutter\installer\product.json" -Raw | ConvertFrom-Json
-  $product.version = $v
-  $product | ConvertTo-Json | Set-Content "$stage\payload.json" -Encoding utf8
-  Push-Location $stage; & "$env:SystemRoot\System32\tar.exe" -cf "$Cache\setup\payload.tar" setup payload payload.json; Pop-Location
-  # the stub, with the Visual Studio compiler
+  New-Item -ItemType Directory -Force "$stage\payload" | Out-Null
+  Copy-Item "$publish\*" "$stage\payload" -Recurse
+  Push-Location $stage; & "$env:SystemRoot\System32\tar.exe" -cf "$Cache\setup\payload.tar" payload; Pop-Location
   $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
   $obj = "$Cache\setup\stub"; New-Item -ItemType Directory -Force $obj | Out-Null
-  # the setup file's own icon: from the app's AppIcon set, as everything else
-  python "$Root\scripts\flutter\desktop_assets.py" $obj
-  if ($LASTEXITCODE) { Fail 'Making the setup icon failed' }
+  # the setup file's own icon: the app's (scripts\apply.py made it from the AppIcon set)
+  Copy-Item "$Root\windows\TwimShelf\Assets\AppIcon.ico" "$obj\app_icon.ico" -Force
   $vcvars = if ($Arm) { 'vcvarsarm64.bat' } else { 'vcvars64.bat' }
-  cmd /c "`"$vs\VC\Auxiliary\Build\$vcvars`" && cd /d `"$Root\flutter\installer\stub`" && rc /nologo /i `"$obj`" /fo `"$obj\setup_stub.res`" setup_stub.rc && cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE /Fo`"$obj\\`" /Fe`"$obj\setup_stub.exe`" setup_stub.cpp `"$obj\setup_stub.res`" /link /SUBSYSTEM:WINDOWS shell32.lib user32.lib"
+  cmd /c "`"$vs\VC\Auxiliary\Build\$vcvars`" && cd /d `"$Root\windows\Setup\stub`" && rc /nologo /i `"$obj`" /fo `"$obj\setup_stub.res`" setup_stub.rc && cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE /Fo`"$obj\\`" /Fe`"$obj\setup_stub.exe`" setup_stub.cpp `"$obj\setup_stub.res`" /link /SUBSYSTEM:WINDOWS shell32.lib user32.lib"
   if ($LASTEXITCODE) { Fail 'Building the setup stub failed' }
-  $name = "$($product.file)-Flutter-$v-windows-$Arch-setup.exe"
+  $product = Get-Content "$Root\windows\TwimShelf\product.json" -Raw | ConvertFrom-Json
+  $name = "$($product.file)-$v-windows-$Arch-setup.exe"
   $out = [IO.File]::Create("$Dist\$name")
   foreach ($part in "$obj\setup_stub.exe", "$Cache\setup\payload.tar") { $in = [IO.File]::OpenRead($part); $in.CopyTo($out); $in.Close() }
   $len = (Get-Item "$Cache\setup\payload.tar").Length
@@ -207,24 +229,30 @@ function Build-Android {
   Say 'Built flutter-android'
 }
 
-if (-not $Targets) { $Targets = @('flutter-windows', 'flutter-android') }
+if (-not $Targets) { $Targets = @('windows', 'flutter-android') }
 # config.yaml first: the names, ids and icons, and where builds go
 Need-Winget python 'Python 3' 'Python.Python.3.12'
-python "$Root\scripts\apply.py" flutter
-$Cache = (python "$Root\scripts\apply.py" where cache).Trim()
-$Dist = (python "$Root\scripts\apply.py" where apps).Trim()
-New-Item -ItemType Directory -Force -Path "$Cache\sdk", "$Cache\setup", $Dist | Out-Null
+# -Check only looks: nothing is generated or made (where only reads config.yaml)
+if (-not $Check) {
+  python "$Root\scripts\apply.py" flutter
+  python "$Root\scripts\apply.py" windows
+}
+if (Have python) {
+  $Cache = (python "$Root\scripts\apply.py" where cache).Trim()
+  $Dist = (python "$Root\scripts\apply.py" where apps).Trim()
+}
+if (-not $Check) { New-Item -ItemType Directory -Force -Path "$Cache\sdk", "$Cache\setup", $Dist | Out-Null }
 $env:PUB_CACHE = "$Cache\pub"; $env:GRADLE_USER_HOME = "$Cache\gradle"
 if ($Check) {
   foreach ($t in $Targets) {
-    switch ($t) { 'flutter-windows' { Need-VisualStudio; Need-Rust; Need-Flutter; Need-Vulkan } 'flutter-android' { Need-Rust; Need-Flutter; Need-Android } }
+    switch ($t) { 'windows' { Need-VisualStudio; Need-Rust; Need-DotNet; Need-Vulkan } 'flutter-android' { Need-Rust; Need-Flutter; Need-Android } }
   }
   if ($Missing) { Say "Missing: $($Missing -join ', ')"; exit 1 }
   Say "Everything needed for $($Targets -join ', ') is here"; exit 0
 }
 foreach ($t in $Targets) {
   switch ($t) {
-    'flutter-windows' { Build-Windows }
+    'windows' { Build-Windows }
     'flutter-android' { Build-Android }
     default { Fail "$t builds on macOS or Linux: build.sh" }
   }

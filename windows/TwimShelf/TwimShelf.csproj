@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- TwimShelf for Windows: WinUI 3, unpackaged (no MSIX, no app container), published with
+       Native AOT. The Rust core (tl_core.dll) and llama.cpp (tl_llama.dll) sit beside the exe.
+       Build: build.ps1 windows (it builds the core first and passes the version). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net11.0-windows10.0.26100.0</TargetFramework>
+    <!-- Windows 11: what the Community Toolkit's settings controls actually build against -->
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
+    <RootNamespace>TwimShelf</RootNamespace>
+    <AssemblyName>TwimShelf</AssemblyName>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <!-- needed even unpackaged: it makes the resources (.pri, compiled XAML) a published app loads -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon Condition="Exists('Assets\AppIcon.ico')">Assets\AppIcon.ico</ApplicationIcon>
+    <!-- the version config.yaml gives (scripts/apply.py writes it into product.json), so any build
+         shows it, not only build.ps1's -->
+    <Version Condition="'$(Version)' == '' And Exists('product.json')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)product.json')), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</Version>
+    <Version Condition="'$(Version)' == ''">0.0.0</Version>
+    <Product>TwimShelf</Product>
+    <Company>TwimShelf</Company>
+    <Copyright>TwimShelf contributors</Copyright>
+    <!-- the core's strings and messages decide the language; no satellite resource folders -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- what would only fail at run time under Native AOT fails the build instead -->
+    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL2067;IL2070;IL2072;IL2075;IL2087;IL3050;CsWinRT1028;CsWinRT1030</WarningsAsErrors>
+    <!-- collection expressions here never cross into WinRT (ItemsSource always gets a List) -->
+    <NoWarn>$(NoWarn);CsWinRT1032</NoWarn>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- the core and llama.cpp: build.ps1 puts them in lib, a link into <build.dir>/cache (scripts/apply.py) -->
+    <TlNativeDir Condition="'$(TlNativeDir)' == ''">$(MSBuildThisFileDirectory)lib</TlNativeDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2957" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 检查更新: GitHub builds pass -p:TlUpdateRepo=owner/name; other builds never look -->
+    <AssemblyMetadata Include="UpdateRepo" Value="$(TlUpdateRepo)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the same string catalogs as the other apps (exported from Apple/Resources/Localizable.xcstrings) -->
+    <EmbeddedResource Include="..\..\flutter\app\assets\l10n\*.json" LogicalName="l10n.%(Filename).json" />
+    <!-- the prompts that ship with the app, as in the Flutter app -->
+    <EmbeddedResource Include="..\..\flutter\app\assets\ai\*.txt" LogicalName="ai.%(Filename).txt" />
+    <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- every library there: tl_core.dll, tl_llama.dll and llama.cpp's (ggml, its CPU and Vulkan backends) -->
+    <None Include="$(TlNativeDir)\*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    <!-- what the setup installs (scripts/apply.py writes it from config.yaml) -->
+    <None Include="product.json" Condition="Exists('product.json')" CopyToOutputDirectory="PreserveNewest" Link="payload.json" />
+  </ItemGroup>
+  <!-- The Windows App SDK carries on-device AI runtimes (about 40 MB) for its Windows AI APIs,
+       which this app never calls (its AI is llama.cpp and the core): left out of what is published. -->
+  <Target Name="LeaveOutUnusedRuntimes" AfterTargets="Publish">
+    <Delete Files="$(PublishDir)onnxruntime.dll;$(PublishDir)DirectML.dll" />
+  </Target>
+</Project>

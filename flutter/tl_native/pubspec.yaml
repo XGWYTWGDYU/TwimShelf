@@ -17,9 +17,6 @@ flutter:
       ios:
         pluginClass: TlNativePlugin
         sharedDarwinSource: true
-      macos:
-        pluginClass: TlNativePlugin
-        sharedDarwinSource: true
       android:
         package: org.twimshelf.tl_native
         pluginClass: TlNativePlugin

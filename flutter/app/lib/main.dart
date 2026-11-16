@@ -33,7 +33,7 @@ Future<void> main() async {
   await L10n.load();
   // the web build: the server's folders stand in for the app's own
   if (OS.isWeb) PathProviderPlatform.instance = ServerPaths(await loadServerInfo());
-  // Windows, Linux: everything lives in the data folder the person chose (asked on first start)
+  // Linux: everything lives in the data folder the person chose (asked on first start)
   if (DataHome.locate()) return _start();
   runApp(MaterialApp(
     locale: AppLocale.current,

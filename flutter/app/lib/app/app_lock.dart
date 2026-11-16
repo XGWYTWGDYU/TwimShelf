@@ -40,7 +40,6 @@ class LocalAuthSystem implements AppLockSystem {
 
   @override
   Future<String> methodName() async {
-    if (OS.isWindows) return L('applock.method.hello');
     if (OS.isAndroid) return L('applock.method.android');
     final kinds = await _auth.getAvailableBiometrics();
     if (kinds.contains(BiometricType.face)) return L('applock.method.faceID');
@@ -50,7 +49,7 @@ class LocalAuthSystem implements AppLockSystem {
   }
 }
 
-/// 应用锁 (Face ID, Touch ID, Windows Hello, Android's biometrics): optional, off by default, not on
+/// 应用锁 (Face ID, Touch ID, Android's biometrics): optional, off by default, not on
 /// Linux. It stands in front of the app; it does not encrypt the library's files. Phones and tablets
 /// lock again when the app goes to the background; desktops at each start.
 class AppLock extends ChangeNotifier with WidgetsBindingObserver {

@@ -19,7 +19,7 @@ extension CatalogNames on CatalogEntry {
 }
 
 /// On-device models. Apple devices run MLX (the same engine and the same models as the native
-/// apps, `TLLocalAI` through `tl_native`); Android, Windows and Linux run llama.cpp (`tl_llama`,
+/// apps, `TLLocalAI` through `tl_native`); Android and Linux run llama.cpp (`tl_llama`,
 /// CPU or Vulkan) with GGUF models. Only Apple devices export, import or pull models from other
 /// devices: MLX models run on Apple silicon alone.
 class LocalModels extends ChangeNotifier {
@@ -156,8 +156,8 @@ class LocalModels extends ChangeNotifier {
         final available = await _native.invokeMethod<int>('aiAvailableMemory');
         final need = m.bytes + m.bytes ~/ 4 + 500000000;
         if (available != null && available < need) throw LocalModelError(L('ai.err.memory', [_gb(need), _gb(available)]));
-        final r = await _native.invokeListMethod<String>('aiTags', {'modelDir': m.path, 'path': tmp.path, 'kind': 'photo', 'system': system, 'question': question});
-        return r ?? const [];
+        final raw = await _native.invokeMethod<String>('aiRespond', {'modelDir': m.path, 'path': tmp.path, 'kind': 'photo', 'system': system, 'question': question});
+        return ExternalAI.parseTags(raw ?? '');
       }
       final raw = await LlamaEngine.instance.describe(weights: '${m.path}$sep${m.weights}', projector: '${m.path}$sep${m.projector}', image: tmp.path, system: system, question: question);
       return ExternalAI.parseTags(raw);

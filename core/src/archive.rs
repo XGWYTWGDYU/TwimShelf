@@ -366,7 +366,9 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
     let mut rep = ImportReport::default();
     rep.source = path.to_string_lossy().into_owned();
     crate::import::set_progress(|pr| pr.folders_total = manifest.posts.len());
-    for p in &manifest.posts {
+    let flush = lib.group_flush();
+    for (i, p) in manifest.posts.iter().enumerate() {
+        flush.after(i)?;
         if crate::import::cancelled() { rep.incomplete = Some(tr!("import.cancelled")); break; }
         if p.meta.id.len() > MAX_POST_ID_BYTES { rep.issue("unreadable", &p.meta.id.chars().take(40).collect::<String>(), tr!("pack.badPostId"), None); continue; }
         let mut stored = vec![];
@@ -396,7 +398,8 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
                     if head.len() < 16 { head.extend_from_slice(&buf[..n.min(16 - head.len())]); }
                     h.update(&buf[..n]); w.write_all(&buf[..n]).inspect_err(|e| store_failed = Some(e.to_string()))?;
                 }
-                w.flush().and_then(|_| w.get_ref().sync_all()).inspect_err(|e| store_failed = Some(e.to_string()))?;
+                // in a bulk import the file is flushed with its group (library::GroupFlush)
+                w.flush().and_then(|_| if crate::library::flushing_in_groups() { Ok(()) } else { w.get_ref().sync_all() }).inspect_err(|e| store_failed = Some(e.to_string()))?;
                 Ok(())
             })();
             if let Some(why) = store_failed { rep.incomplete = Some(why); }
@@ -482,6 +485,7 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
     }
     lib.import_into_folder(&mut rep, folder)?;
     lib.finish_report(&mut rep)?;
+    flush.flush()?;
     Ok(rep)
 }
 

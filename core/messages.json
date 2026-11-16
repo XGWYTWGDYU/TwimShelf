@@ -11,11 +11,23 @@
   "zh-Hans": "标签不能为空",
   "zh-Hant": "標籤不能為空"
  },
+ "ai.badTags": {
+  "en": "The model's answer isn't a valid list of tags",
+  "ja": "モデルの回答が有効なタグの一覧ではありません",
+  "zh-Hans": "模型的回答不是有效的标签",
+  "zh-Hant": "模型的回答不是有效的標籤"
+ },
  "ai.crashed": {
   "en": "The app quit unexpectedly during the analysis",
   "ja": "分析中にアプリが予期せず終了しました",
   "zh-Hans": "分析时应用意外退出",
   "zh-Hant": "分析時 App 意外結束"
+ },
+ "ai.noTags": {
+  "en": "The model gave no tags",
+  "ja": "モデルがタグを返しませんでした",
+  "zh-Hans": "模型没有给出标签",
+  "zh-Hant": "模型沒有給出標籤"
  },
  "common.cancelled": {
   "en": "Canceled",

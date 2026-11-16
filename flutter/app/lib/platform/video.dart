@@ -123,6 +123,46 @@ bool headphonesOnlySetting(String? value) {
   }.contains(value.trim().toLowerCase());
 }
 
+/// Where a video was left, by its file: the next player of it starts there. The feed card and the
+/// full-screen player are two players of one video: the card leaves its moment when the viewer
+/// opens, the viewer starts there and leaves its own while it plays, and the card goes on from it.
+abstract final class VideoResume {
+  static final _at = <String, Duration>{};
+
+  static void leave(String path, Duration at, {bool quiet = false}) {
+    if (at <= Duration.zero) return;
+    _at[path] = at;
+    if (!quiet) debugPrint('TwimShelf video: left ${path.split('/').last} at ${(at.inMilliseconds / 1000).toStringAsFixed(2)} s');
+  }
+
+  /// The picture of that moment: shown where the next player of the video will be, until it
+  /// draws (instead of the poster, an early frame, or nothing).
+  static final _frames = <String, Uint8List>{};
+  static void leaveFrame(String path, Uint8List? frame) {
+    if (frame != null && frame.isNotEmpty) _frames[path] = frame;
+  }
+
+  static Uint8List? takeFrame(String path) => _frames.remove(path);
+
+  /// The waiting frame, left in place (a card shows it before its player starts).
+  static Uint8List? peekFrame(String path) => _frames[path];
+
+  /// The frame of a playback as it is now (JPEG), or null.
+  static Future<Uint8List?> frameOf(VideoPlayback v) async {
+    try {
+      return await v.surfaceController.player.screenshot(format: 'image/jpeg').timeout(const Duration(milliseconds: 400));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Duration? take(String path, String who) {
+    final at = _at.remove(path);
+    if (at != null) debugPrint('TwimShelf video: $who starts at ${(at.inMilliseconds / 1000).toStringAsFixed(2)} s');
+    return at;
+  }
+}
+
 /// Widget-free playback/policy controller. Use the re-exported VideoSurface
 /// with surfaceController and NoVideoControls; the owner supplies localized UI.
 class VideoPlayback {
@@ -314,7 +354,7 @@ typedef PosterFrameGrabber = Future<Uint8List?> Function(
 ///
 /// Where the system has a video decoder the app can call (iOS, iPadOS, macOS: AVFoundation;
 /// Android: MediaMetadataRetriever) one frame is decoded there, in parallel, at the size the
-/// largest poster needs, and every size is written at once. Elsewhere (Windows, Linux) a hidden
+/// largest poster needs, and every size is written at once. Elsewhere (Linux) a hidden
 /// media_kit player grabs the frame, one at a time, and the crop happens off the UI isolate.
 /// A cache hit only reads the JPEG's header to check its size.
 class VideoPosters {

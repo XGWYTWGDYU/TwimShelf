@@ -6,7 +6,7 @@ use rusqlite::OptionalExtension;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -268,13 +268,11 @@ fn publish(image: &RgbImage, path: &Path) -> anyhow::Result<()> {
     encoder.set_icc_profile(ColorProfile::new_srgb().encode()?)?;
     encoder.encode_image(image)?;
     writer.flush()?;
-    writer.get_ref().sync_all()?;
     drop(writer);
+    // Not flushed to disk: a thumbnail is a cache. One a power loss leaves empty or of the wrong
+    // size is made again (`fresh` checks both before using it); flushing each one cost a hard
+    // disk tens of milliseconds a thumbnail, most of the time a grid waited for them.
     fs::rename(&temporary.0, path)?;
-    // Best effort durability of the rename; opening directories is not portable.
-    if let Ok(directory) = File::open(directory) {
-        let _ = directory.sync_all();
-    }
     Ok(())
 }
 

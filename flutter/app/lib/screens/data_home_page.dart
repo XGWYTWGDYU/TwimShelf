@@ -13,7 +13,7 @@ import 'package:tl_core/tl_core.dart';
 import '../widgets/text_menu.dart';
 import '../platform/os.dart';
 
-/// First start on Windows and Linux: where the data folder goes.
+/// First start on Linux: where the data folder goes.
 class DataHomeSetupPage extends StatefulWidget {
   const DataHomeSetupPage({super.key, required this.onReady});
   final VoidCallback onReady;
@@ -79,7 +79,7 @@ class _DataHomeSetupPageState extends State<DataHomeSetupPage> {
   }
 }
 
-/// Settings on Windows and Linux: where the data folder is, and moving it.
+/// Settings on Linux: where the data folder is, and moving it.
 class DataHomeSection extends StatefulWidget {
   const DataHomeSection({super.key, required this.library});
   final LibraryModel library;
@@ -95,8 +95,10 @@ class _DataHomeSectionState extends State<DataHomeSection> {
     final target = await getDirectoryPath();
     if (target == null || !mounted) return;
     final messenger = ScaffoldMessenger.of(context);
-    if (DataHome.problem(target) != null) {
-      messenger.showSnackBar(SnackBar(content: Text(L('datahome.notEmpty'))));
+    // never into another library (it would be overwritten): new or empty folders only
+    final problem = DataHome.moveProblem(target);
+    if (problem != null) {
+      messenger.showSnackBar(SnackBar(content: Text(L(problem))));
       return;
     }
     final old = DataHome.path!;

@@ -9,7 +9,7 @@
 use std::sync::OnceLock;
 use crate::download::runtime;
 use crate::models::slug;
-use crate::net::{client, read_limited};
+use crate::net::read_limited;
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -18,7 +18,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const API: &str = "https://huggingface.co/api/models";
+/// The API (Hugging Face, or the mirror in HF_ENDPOINT: `models::hf_endpoint`).
+fn api() -> String { format!("{}/api/models", crate::models::hf_endpoint()) }
 /// One page of results: enough to choose from, small over a metered connection.
 const PAGE: u32 = 30;
 const MAX_ANSWER: usize = 16 << 20;
@@ -237,7 +238,7 @@ fn expand(format: &str) -> &'static [&'static str] {
 }
 
 fn search_url(format: &str, query: &str, limit: u32) -> String {
-    let mut u = url::Url::parse(API).expect("address");
+    let mut u = url::Url::parse(&api()).expect("address");
     {
         let mut q = u.query_pairs_mut();
         if !query.is_empty() { q.append_pair("search", query); }
@@ -250,7 +251,7 @@ fn search_url(format: &str, query: &str, limit: u32) -> String {
 }
 
 fn repo_url(format: &str, repo: &str) -> String {
-    let mut u = url::Url::parse(&format!("{API}/{repo}")).expect("address");
+    let mut u = url::Url::parse(&format!("{}/{repo}", api())).expect("address");
     { let mut q = u.query_pairs_mut(); for e in expand(format) { q.append_pair("expand[]", e); } }
     u.into()
 }
@@ -260,7 +261,7 @@ fn repo_url(format: &str, repo: &str) -> String {
 fn next_page(link: Option<&str>) -> Option<String> {
     link?.split(',').find(|p| p.contains("rel=\"next\""))?.split(';').next()?.trim().strip_prefix('<')?.strip_suffix('>').map(str::to_string)
 }
-fn is_own_page(address: &str) -> bool { address.starts_with("https://huggingface.co/api/models?") }
+fn is_own_page(address: &str) -> bool { address.starts_with(&format!("{}?", api())) }
 
 struct Answer { at: Instant, body: Value, next: Option<String> }
 static CACHE: Mutex<Option<HashMap<String, Answer>>> = Mutex::new(None);
@@ -272,7 +273,7 @@ fn get_json(address: &str) -> anyhow::Result<(Value, Option<String>)> {
         return Ok((a.body.clone(), a.next.clone()));
     }
     let (body, next) = runtime().block_on(async {
-        let resp = tokio::time::timeout(Duration::from_secs(30), client().get(address).send()).await.map_err(|_| anyhow::anyhow!(tr!("hub.err.network")))?.context(tr!("hub.err.network"))?;
+        let resp = tokio::time::timeout(Duration::from_secs(30), crate::models::hf_client().get(address).send()).await.map_err(|_| anyhow::anyhow!(tr!("hub.err.network")))?.context(tr!("hub.err.network"))?;
         match resp.status().as_u16() {
             429 => bail!(tr!("hub.err.rateLimited")),
             401 | 403 | 404 => bail!(tr!("hub.err.notFound")),
@@ -425,10 +426,10 @@ pub fn detail(models_dir: &Path, format: &str, repo: &str) -> anyhow::Result<Hub
     if let Some(reason) = hidden {
         return Ok(HubDetail { repo: info, revision, variants: vec![], skipped: vec![], problem: Some(reason) });
     }
-    let (tree, _) = get_json(&format!("{API}/{repo}/tree/{revision}"))?;
+    let (tree, _) = get_json(&format!("{}/{repo}/tree/{revision}", api()))?;
     let tree: Vec<TreeEntry> = serde_json::from_value(tree).context(tr!("hub.err.answer"))?;
     let vision = if format == "mlx" {
-        let (config, _) = get_json(&format!("https://huggingface.co/{repo}/resolve/{revision}/config.json"))?;
+        let (config, _) = get_json(&format!("{}/{repo}/resolve/{revision}/config.json", crate::models::hf_endpoint()))?;
         Some(config.get("vision_config").map_or(false, |v| !v.is_null()))
     } else { None };
     let (variants, skipped, problem) = offer(format, &info, &tree, vision, &d);

@@ -7,9 +7,8 @@ import '../l10n/l10n.dart';
 import 'os.dart';
 
 /// 下载帖子 on the app's icon: pressing it long on iOS and Android, the Dock's menu on the Mac, the
-/// taskbar's on Windows, the launcher's on Linux. It opens 浏览 with the quick download card.
-/// Windows and Linux hand the request over as an inbox request (`--quick-download`; `ShareInbox`), as
-/// a second start of the program must.
+/// launcher's on Linux. It opens 浏览 with the quick download card. Linux hands the request over
+/// as an inbox request (`--quick-download`; `ShareInbox`), as a second start of the program must.
 class QuickAction {
   QuickAction._();
   static const _download = 'downloadPosts';

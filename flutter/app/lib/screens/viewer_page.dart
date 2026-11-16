@@ -23,7 +23,7 @@ import '../widgets/wheel_pager.dart';
 ///    close on a desktop, where it is easily a stray click)
 ///  * the post's caption over the bottom (cut to three lines, a tap opens all of it), under one
 ///    shade with the bar: counter, share, close
-///  * Windows and Linux: one scroll of the wheel or trackpad, one page (Ctrl + wheel zooms a photo;
+///  * Linux: one scroll of the wheel or trackpad, one page (Ctrl + wheel zooms a photo;
 ///    on a photo already zoomed the wheel goes on zooming)
 ///  * keys: Esc closes, Space plays or pauses, ↑ ↓ the volume, F full screen (desktops)
 class ViewerPage extends StatefulWidget {
@@ -107,6 +107,8 @@ class _ViewerPageState extends State<ViewerPage> {
   Future<void> _close() async {
     if (_closing) return;
     _closing = true;
+    // the video's moment and frame go to its feed card first (it goes on from there)
+    await _video?.leaveForCard();
     if (mounted) Navigator.of(context).pop();
   }
 

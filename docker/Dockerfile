@@ -37,7 +37,7 @@ COPY flutter flutter
 COPY config.yaml config.yaml
 COPY scripts/apply.py scripts/apply.py
 COPY scripts/flutter/make_icons.py scripts/flutter/make_icons.py
-COPY native/Resources/Assets.xcassets/AppIcon.appiconset native/Resources/Assets.xcassets/AppIcon.appiconset
+COPY Apple/Resources/Assets.xcassets/AppIcon.appiconset Apple/Resources/Assets.xcassets/AppIcon.appiconset
 RUN python3 scripts/apply.py generate && python3 scripts/flutter/make_icons.py --in-app
 RUN cd flutter/app && flutter pub get && flutter build web --release --no-wasm-dry-run --no-web-resources-cdn
 

@@ -276,7 +276,7 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
     }
   }
 
-  // trackpad pinch (macOS, Windows precision touchpads, Linux)
+  // trackpad pinch (macOS, Linux)
   void _panZoomStart(PointerPanZoomStartEvent ev) {
     if (wheelPages) return; // a trackpad only scrolls there
     _endStepNow();
@@ -348,7 +348,7 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
   void _signal(PointerSignalEvent ev) {
     if (ev is! PointerScrollEvent) return;
     final keys = HardwareKeyboard.instance;
-    // Windows and Linux: the wheel only scrolls; the size changes by Ctrl + − = and the buttons
+    // Linux: the wheel only scrolls; the size changes by Ctrl + − = and the buttons
     if (wheelPages || !(keys.isControlPressed || keys.isMetaPressed)) {
       _interruptSettle();
       return;

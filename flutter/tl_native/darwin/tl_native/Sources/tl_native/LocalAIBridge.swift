@@ -23,7 +23,8 @@ enum LocalAIBridge {
       #else
       result(nil)
       #endif
-    case "aiTags":
+    case "aiRespond":
+      // the model's reply as it came: Dart parses it (ExternalAI.parseTags), as for every model
       guard let dir = args["modelDir"] as? String, let path = args["path"] as? String, let kind = args["kind"] as? String,
             let system = args["system"] as? String, let question = args["question"] as? String else {
         result(FlutterError(code: "arguments", message: nil, details: nil)); return true
@@ -34,8 +35,7 @@ enum LocalAIBridge {
         }
         do {
           let raw = try await MLXRuntime.shared.respond(modelDir: URL(fileURLWithPath: dir, isDirectory: true), system: system, question: question, image: image)
-          let tags = ModelInput.parseTags(raw)
-          await MainActor.run { result(tags) }
+          await MainActor.run { result(raw) }
         } catch {
           await MainActor.run { result(FlutterError(code: "ai.failed", message: "\(error)", details: nil)) }
         }

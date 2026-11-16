@@ -4,16 +4,15 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider_linux/path_provider_linux.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:path_provider_windows/path_provider_windows.dart';
 import 'package:shared_preferences_linux/shared_preferences_linux.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
-import 'package:shared_preferences_windows/shared_preferences_windows.dart';
 import 'os.dart';
 
-/// The data folder on Windows and Linux: everything the app keeps — the library, its models,
-/// settings, secrets, logs, caches — lives in one folder the person chose, so it can be backed
-/// up, moved or deleted as one thing. The program is in a folder of its own (the installer's or
-/// the AppImage). Only a small pointer to the data folder stays in the system's config folder.
+/// The data folder on Linux: everything the app keeps — the library, its models, settings,
+/// secrets, logs, caches — lives in one folder the person chose, so it can be backed up, moved
+/// or deleted as one thing. The program is in a folder of its own (the AppImage). Only a small
+/// pointer to the data folder stays in the system's config folder. (The native Windows app,
+/// windows/TwimShelf, keeps the same layout there.)
 ///
 /// Every plugin that asks path_provider for a folder is pointed inside the data folder:
 ///   support → `<data>/App` (library, models, settings, secrets), cache → `<data>/Cache`.
@@ -25,25 +24,22 @@ class DataHome {
   DataHome._();
 
   static bool get applies =>
-      !kIsWeb && (OS.isWindows || OS.isLinux) && OS.environment['TL_LIBRARY_DIR'] == null;
+      !kIsWeb && OS.isLinux && OS.environment['TL_LIBRARY_DIR'] == null;
 
   static String? _path;
   static String? get path => _path;
 
   static String get _sep => OS.pathSeparator;
 
-  /// The pointer: `%APPDATA%\TwimShelf\location.json`, `$XDG_CONFIG_HOME/twimshelf/location.json`.
+  /// The pointer: `$XDG_CONFIG_HOME/twimshelf/location.json`.
   static File get _pointer {
-    if (OS.isWindows) {
-      return File('${OS.environment['APPDATA']}\\TwimShelf\\location.json');
-    }
     final config = OS.environment['XDG_CONFIG_HOME'] ?? '${OS.environment['HOME']}/.config';
     return File('$config/twimshelf/location.json');
   }
 
   /// A sensible first suggestion: a folder in Documents.
   static String get suggested {
-    final home = OS.isWindows ? OS.environment['USERPROFILE']! : OS.environment['HOME']!;
+    final home = OS.environment['HOME']!;
     final docs = Directory('$home${_sep}Documents');
     return '${docs.existsSync() ? docs.path : home}${_sep}TwimShelf Data';
   }
@@ -93,20 +89,34 @@ class DataHome {
     PathProviderPlatform.instance = _DataFolderPaths(folder, PathProviderPlatform.instance);
     // shared_preferences asks its own path_provider, not the shared instance
     final prefs = SharedPreferencesStorePlatform.instance;
-    if (prefs is SharedPreferencesWindows) prefs.pathProvider = _WindowsPaths(folder);
     if (prefs is SharedPreferencesLinux) prefs.pathProvider = _LinuxPaths(folder);
+  }
+
+  /// A folder the data can move to: new or empty only, never another library (its files would be
+  /// overwritten before its database refused the copy). Null when it can, else the datahome.* key.
+  static String? moveProblem(String folder) {
+    final d = Directory(folder);
+    if (!d.existsSync()) return null;
+    if (isDataFolder(folder)) return 'datahome.moveExisting';
+    return d.listSync().isEmpty ? null : 'datahome.notEmpty';
   }
 
   /// Moves everything to [target] (new or empty): copied, checked file by file (sizes), then
   /// used from the next start. The old folder is left as it was; the caller offers to delete it
   /// once the app runs from the new place. The database is not copied as files (a running one is
   /// spread over several, and they change between copies): [snapshot] writes a consistent copy
-  /// last. The caller stops what writes first.
+  /// first, and then the files are listed and copied, so every media the copied database refers to
+  /// is among them (a file is always written before the database refers to it). The caller stops
+  /// what writes first.
   static Future<void> moveTo(String target, {required Future<void> Function(String out) snapshot, required String databaseFile, void Function(int done, int total)? progress}) async {
     final from = _path;
     if (from == null) throw StateError('dataHome.none');
-    if (problem(target) != null) throw const FileSystemException('dataHome.notEmpty');
+    if (moveProblem(target) != null) throw FileSystemException(moveProblem(target)!);
     if (target == from || target.startsWith('$from$_sep')) throw const FileSystemException('dataHome.inside');
+    final copy = File('$target$_sep${databaseFile.substring(from.length + 1)}');
+    await copy.parent.create(recursive: true);
+    await snapshot(copy.path);
+    if (!await copy.exists() || await copy.length() == 0) throw FileSystemException('dataHome.copyFailed', copy.path);
     final files = Directory(from).listSync(recursive: true, followLinks: false).whereType<File>().toList();
     var done = 0;
     for (final f in files) {
@@ -121,10 +131,6 @@ class DataHome {
       if (await dst.length() != await f.length()) throw FileSystemException('dataHome.copyFailed', rel);
       progress?.call(++done, files.length);
     }
-    final copy = File('$target$_sep${databaseFile.substring(from.length + 1)}');
-    await copy.parent.create(recursive: true);
-    await snapshot(copy.path);
-    if (!await copy.exists() || await copy.length() == 0) throw FileSystemException('dataHome.copyFailed', copy.path);
     await _writePointer(target);
   }
 
@@ -173,13 +179,6 @@ class _DataFolderPaths extends PathProviderPlatform {
 }
 
 // ignore_for_file: invalid_use_of_visible_for_testing_member
-class _WindowsPaths extends PathProviderWindows {
-  _WindowsPaths(this.root);
-  final String root;
-  @override
-  Future<String?> getApplicationSupportPath() async => '$root\\App';
-}
-
 class _LinuxPaths extends PathProviderLinux {
   _LinuxPaths(this.root);
   final String root;

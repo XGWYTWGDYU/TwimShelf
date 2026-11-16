@@ -18,6 +18,108 @@ impl TempFile {
 }
 impl Drop for TempFile { fn drop(&mut self) { let _ = fs::remove_file(&self.0); } }
 
+// ---------- bulk imports: making them durable in groups ----------
+//
+// Each stored media file used to be flushed to disk on its own, and each post committed with
+// its own flush (`synchronous=FULL`): three or four flushes a post, about a tenth of a second on
+// a hard disk, so a large import crawled. Inside an import (`GroupFlush`) neither happens: the
+// files are written and noted, the commits stay atomic but unflushed (WAL, `synchronous=NORMAL`)
+// and nothing checkpoints on its own. Every group of posts, and at the end, the noted files are
+// flushed (several at once), and only then is the database checkpointed, which is when the
+// group's records become durable. So a record is never durable before its file, and a power
+// loss costs at most the last unfinished group (the files it left behind are unreferenced and
+// cleaned up; the source can be imported again). A share that deletes its source does so only
+// after the import, and so after the last flush.
+
+thread_local! {
+    /// On an import's thread: the library files stored since the last group flush, not yet on disk.
+    static UNFLUSHED: std::cell::RefCell<Option<Vec<PathBuf>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Whether this thread is in a bulk import whose files are flushed in groups.
+pub(crate) fn flushing_in_groups() -> bool { UNFLUSHED.with(|u| u.borrow().is_some()) }
+
+fn note_unflushed(p: &Path) { UNFLUSHED.with(|u| if let Some(v) = u.borrow_mut().as_mut() { v.push(p.to_path_buf()); }) }
+
+/// An analysis's labels as the core accepts them (`apply_ai_tags_at`): at least one, and none
+/// that is a fragment of a reply's syntax (`}`, `harley }`, `:`): a JSON or quoting character,
+/// a control character, or nothing but ASCII punctuation. The apps' parsers refuse these
+/// already (scripts/checks/ai_tags/cases.json); this keeps any caller from recording them.
+pub fn check_ai_labels(labels: &[String]) -> anyhow::Result<()> {
+    let labels: Vec<&str> = labels.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    if labels.is_empty() { anyhow::bail!(tr!("ai.noTags")); }
+    let fragment = |l: &str| l.chars().any(|c| c.is_control() || "{}[]<>:\"\\`".contains(c))
+        || l.chars().all(|c| c.is_ascii_punctuation() || c.is_whitespace());
+    if labels.iter().any(|l| fragment(l)) { anyhow::bail!(tr!("ai.badTags")); }
+    Ok(())
+}
+
+/// Posts between two group flushes of an import.
+pub(crate) const FLUSH_EVERY: usize = 200;
+
+/// A bulk import on this thread (see above); dropping it flushes what is left and puts the
+/// database back to flushing every commit.
+pub(crate) struct GroupFlush<'a> { lib: &'a Library }
+
+impl Library {
+    pub(crate) fn group_flush(&self) -> GroupFlush<'_> {
+        UNFLUSHED.with(|u| *u.borrow_mut() = Some(vec![]));
+        let _ = self.db().conn().execute_batch("PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint=0;");
+        GroupFlush { lib: self }
+    }
+}
+
+impl GroupFlush<'_> {
+    /// Makes everything stored so far durable: the files, then the records (checkpoint).
+    pub(crate) fn flush(&self) -> anyhow::Result<()> {
+        let files = UNFLUSHED.with(|u| u.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default());
+        sync_files(&files)?;
+        // with synchronous=NORMAL a checkpoint syncs the WAL first, then the database
+        self.lib.db().conn().query_row("PRAGMA wal_checkpoint(FULL)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    /// `flush` after every `FLUSH_EVERY` posts (`done`: posts handled so far).
+    pub(crate) fn after(&self, done: usize) -> anyhow::Result<()> {
+        if done > 0 && done % FLUSH_EVERY == 0 { self.flush()?; }
+        Ok(())
+    }
+}
+
+impl Drop for GroupFlush<'_> {
+    fn drop(&mut self) {
+        let _ = self.flush();
+        UNFLUSHED.with(|u| *u.borrow_mut() = None);
+        let _ = self.lib.db().conn().execute_batch("PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000;");
+    }
+}
+
+/// Flushes files to disk, several at a time (a hard disk takes them faster together), then the
+/// folders that received them (where a rename is durable only with its folder). A file gone
+/// meanwhile (deleted again) needs nothing.
+fn sync_files(files: &[PathBuf]) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    if files.is_empty() { return Ok(()); }
+    let next = AtomicUsize::new(0);
+    let failed: Mutex<Option<std::io::Error>> = Mutex::new(None);
+    std::thread::scope(|s| {
+        for _ in 0..files.len().min(8) {
+            s.spawn(|| while let Some(p) = files.get(next.fetch_add(1, Ordering::Relaxed)) {
+                // writing access: Windows flushes only a file opened for writing
+                let r = fs::OpenOptions::new().write(true).open(p).and_then(|f| f.sync_all());
+                if let Err(e) = r { if e.kind() != std::io::ErrorKind::NotFound { *failed.lock().unwrap() = Some(e); } }
+            });
+        }
+    });
+    if let Some(e) = failed.into_inner().unwrap() { return Err(e); }
+    #[cfg(unix)]
+    {
+        let folders: std::collections::BTreeSet<&Path> = files.iter().filter_map(|p| p.parent()).collect();
+        for d in folders { if let Ok(f) = fs::File::open(d) { f.sync_all()?; } }
+    }
+    Ok(())
+}
+
 pub struct Library {
     pub dir: PathBuf,
     store: Mutex<Store>,
@@ -563,8 +665,9 @@ impl Library {
             fs::create_dir_all(dst.parent().unwrap())?;
             db.conn().execute("DELETE FROM verified_media WHERE media_id=?1", [sha])?;
             fs::rename(tmp, &dst)?;
+            if flushing_in_groups() { note_unflushed(&dst); }
             // the rename itself is durable only once its folder is synced
-            if let Ok(d) = fs::File::open(dst.parent().unwrap()) { let _ = d.sync_all(); }
+            else if let Ok(d) = fs::File::open(dst.parent().unwrap()) { let _ = d.sync_all(); }
         }
         Ok(rel)
     }
@@ -701,7 +804,9 @@ impl Library {
                 h.update(&buf[..n]);
                 out.write_all(&buf[..n])?;
             }
-            out.into_inner()?.sync_all()?;
+            let file = out.into_inner()?;
+            // in a bulk import the file is flushed with its group (GroupFlush)
+            if !flushing_in_groups() { file.sync_all()?; }
             if !checked { check(&head)?; }
             Ok(hex::encode(h.finalize()))
         })();
@@ -718,6 +823,9 @@ impl Library {
     }
 
     pub fn apply_ai_tags_at(&self, epoch: u64, media_id: &str, model: &str, labels: &[String], replace_old: bool) -> anyhow::Result<()> {
+        // what a model says is a result only as real tags: nothing, or pieces of its own syntax,
+        // is a failed analysis (the app counts it as one), never tags and never `AiDone`
+        check_ai_labels(labels)?;
         let db = self.db_at(epoch)?;
         if db.media_row(media_id)?.is_none() || db.trash_reg(media_id)?.state != crate::rules::LIVE {
             anyhow::bail!(tr!("library.mediaGone"));
@@ -810,6 +918,53 @@ impl Library {
 
 #[cfg(test)]
 mod tests {
+    /// A model's nonsense is refused before anything is written: no tags, no source, no AiDone.
+    #[test]
+    fn an_analysis_without_real_tags_is_refused() {
+        let ok = |v: &[&str]| check_ai_labels(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>()).is_ok();
+        assert!(ok(&["猫", "室内"]) && ok(&["c++", "3d", "初音 miku", "😺", "mac外国语"]));
+        assert!(!ok(&[]) && !ok(&["  "]));
+        for bad in ["\u{7d}", ":", "harley \u{7d}", "mactw \u{7d}", "[猫]", "a\u{7}b", "..."] { assert!(!ok(&["猫", bad]), "{bad}"); }
+        let d = std::env::temp_dir().join(format!("tl-badtags-{}", rand::random::<u64>()));
+        let lib = Library::open(&d).unwrap();
+        let e = lib.apply_ai_tags_at(lib.epoch(), "missing", "m", &["\u{7d}".into()], false).unwrap_err();
+        assert_eq!(e.to_string(), tr!("ai.badTags").to_string());
+        let e = lib.apply_ai_tags_at(lib.epoch(), "missing", "m", &[], false).unwrap_err();
+        assert_eq!(e.to_string(), tr!("ai.noTags").to_string());
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Inside a bulk import files wait for their group's flush, commits are not flushed one by
+    /// one, and afterwards every commit is flushed again; the records are there either way.
+    #[test]
+    fn an_import_flushes_in_groups_and_then_as_before() {
+        let d = std::env::temp_dir().join(format!("tl-group-{}", rand::random::<u64>()));
+        let lib = Library::open(&d).unwrap();
+        let sync = |lib: &Library| lib.db().conn().query_row("PRAGMA synchronous", [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(sync(&lib), 2);
+        let src = d.join("src.png");
+        {
+            let group = lib.group_flush();
+            assert!(flushing_in_groups());
+            assert_eq!(sync(&lib), 1);
+            for i in 0..3 {
+                std::fs::write(&src, [&b"\x89PNG\r\n\x1a\n"[..], format!("group {i}").as_bytes()].concat()).unwrap();
+                lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
+            }
+            UNFLUSHED.with(|u| assert_eq!(u.borrow().as_ref().unwrap().len(), 3));
+            group.flush().unwrap();
+            UNFLUSHED.with(|u| assert!(u.borrow().as_ref().unwrap().is_empty()));
+            std::fs::write(&src, b"\x89PNG\r\n\x1a\nleft for the end").unwrap();
+            lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
+        }
+        assert!(!flushing_in_groups());
+        assert_eq!(sync(&lib), 2);
+        // the same content again (already stored) notes nothing
+        lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
+        assert_eq!(std::fs::read_dir(d.join("blobs")).unwrap().flatten().map(|e| std::fs::read_dir(e.path()).unwrap().count()).sum::<usize>(), 4);
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
     #[test]
     fn a_right_copy_heals_a_file_that_went_bad_unnoticed() {
         let d = std::env::temp_dir().join(format!("tl-heal-{}", rand::random::<u64>()));

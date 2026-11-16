@@ -3,9 +3,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Windows and Linux: a sideways `PageView` turns by the wheel, one whole page per scroll. A
-/// trackpad is treated as a wheel: there it neither drags nor scrolls the pages part of the way.
-bool get wheelPages => !kIsWeb && (defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.linux);
+/// Linux: a sideways `PageView` turns by the wheel, one whole page per scroll. A trackpad is
+/// treated as a wheel: there it neither drags nor scrolls the pages part of the way.
+bool get wheelPages => !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
 
 /// The `PageView`'s `scrollBehavior`: only fingers drag its pages.
 ScrollBehavior? pageBehavior(BuildContext context) => wheelPages

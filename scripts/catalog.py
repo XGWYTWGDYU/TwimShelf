@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """String catalog maintenance for TwimShelf.
 
-  catalog.py add FILE.json   merge entries into native/Resources/Localizable.xcstrings
+  catalog.py add FILE.json   merge entries into Apple/Resources/Localizable.xcstrings
                              (or core/messages.json with --core)
   catalog.py check           fail on hard-coded user-visible text and incomplete catalogs
 
@@ -19,7 +19,7 @@ test modules. English UI literals cannot be told from identifiers mechanically; 
 import json, os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-XC = os.path.join(ROOT, "native/Resources/Localizable.xcstrings")
+XC = os.path.join(ROOT, "Apple/Resources/Localizable.xcstrings")
 CORE = os.path.join(ROOT, "core/messages.json")
 LANGS = ["en", "zh-Hans", "zh-Hant", "ja"]
 CJK = re.compile(r"[\u3000-\u303f\uff00-\uffef\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
@@ -96,7 +96,7 @@ def add(path, core=False):
 
 
 def swift_files():
-    for base in ["native/Shared", "native/iOS", "native/macOS", "native/ShareExtension"]:
+    for base in ["Apple/Shared", "Apple/iOS", "Apple/macOS", "Apple/ShareExtension"]:
         for dp, _, fs in os.walk(os.path.join(ROOT, base)):
             for f in fs:
                 if f.endswith(".swift"):

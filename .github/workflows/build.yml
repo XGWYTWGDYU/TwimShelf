@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [native-macos, native-ios, flutter-macos, flutter-ios]
+        target: [native-macos, native-ios, flutter-ios]
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install   # the one in rust-toolchain.toml
@@ -106,7 +106,7 @@ jobs:
       - name: Build
         run: ./build.sh --yes ${{ matrix.target }}
       - name: Licenses of everything in the packages
-        if: matrix.target == 'flutter-macos'
+        if: matrix.target == 'flutter-ios'
         run: python3 scripts/third_party_notices.py build/apps/THIRD-PARTY-NOTICES.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -196,13 +196,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json   # the pinned .NET SDK
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            build/cache/pub
-          key: deps-windows-${{ hashFiles('Cargo.lock', 'flutter/app/pubspec.lock') }}
+            ~/.nuget/packages
+          key: deps-windows-${{ hashFiles('Cargo.lock', 'windows/TwimShelf/TwimShelf.csproj') }}
           restore-keys: deps-windows-
       - name: Vulkan SDK (GPU support for on-device AI)
         run: |
@@ -211,10 +214,45 @@ jobs:
           "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
           "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
       - name: Build
-        run: powershell -ExecutionPolicy Bypass -File build.ps1 -Yes flutter-windows
+        run: powershell -ExecutionPolicy Bypass -File build.ps1 -Yes windows
+      - name: Smoke test (install, first start, install again, uninstall)
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem build/apps/TwimShelf-*-windows-x64-setup.exe | Select-Object -First 1).FullName
+          $dir = "$env:LOCALAPPDATA\Programs\TwimShelf"
+          $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\TwimShelf'
+          function Install {
+            $p = Start-Process $setup -ArgumentList '--quiet' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Get-Content "$env:TEMP\twimshelf-setup-error.txt" -ErrorAction SilentlyContinue; throw "setup failed ($($p.ExitCode))" }
+            if (-not (Test-Path "$dir\TwimShelf.exe") -or -not (Test-Path "$dir\install-manifest.json")) { throw 'the program is not installed' }
+            if (-not (Get-ItemProperty $entry -ErrorAction SilentlyContinue)) { throw 'no entry in Settings > Apps' }
+          }
+          Install
+          # the first start, on a throwaway library: the window shows and the app keeps running
+          $lib = "$env:RUNNER_TEMP\smoke\Library"
+          New-Item -ItemType Directory -Force $lib | Out-Null
+          $env:TL_LIBRARY_DIR = $lib; $env:TL_SYNC_OFF = '1'
+          $app = Start-Process "$dir\TwimShelf.exe" -PassThru
+          Start-Sleep 25
+          $log = Get-Content "$lib\logs\windows.log" -ErrorAction SilentlyContinue
+          $log
+          if ($app.HasExited) { throw "the app ended ($($app.ExitCode))" }
+          if (-not ($log -match 'main window shown')) { throw 'the window did not show' }
+          Stop-Process -Id $app.Id -Force; Start-Sleep 2
+          # over itself (an update of the same version), then away again
+          Install
+          New-Item -ItemType File -Force "$dir\not-ours.txt" | Out-Null
+          $p = Start-Process "$dir\TwimShelf.exe" -ArgumentList '--uninstall', '--quiet' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall failed ($($p.ExitCode))" }
+          for ($i = 0; $i -lt 60 -and (Test-Path "$dir\TwimShelf.exe"); $i++) { Start-Sleep 1 }
+          if (Test-Path "$dir\TwimShelf.exe") { throw 'the program is still there' }
+          if (Get-ItemProperty $entry -ErrorAction SilentlyContinue) { throw 'the entry in Settings > Apps is still there' }
+          # files it did not install stay
+          if (-not (Test-Path "$dir\not-ours.txt")) { throw 'the uninstaller removed a file it did not install' }
+          'smoke test passed'
       - uses: actions/upload-artifact@v4
         with:
-          name: flutter-windows
+          name: windows
           path: build/apps/*
           if-no-files-found: error
           retention-days: 30
@@ -296,6 +334,15 @@ jobs:
         with:
           path: packages
           merge-multiple: true
+      - name: The Windows setup for the Flutter app's own updater too
+        # The Flutter Windows app (1.5.4 and earlier) looks for a setup with "Flutter" in its name; this
+        # copy of the native one reaches it, and installs over it (same folder, entry and data).
+        working-directory: packages
+        run: |
+          for f in TwimShelf-"$VERSION"-windows-*-setup.exe; do
+            if [ -e "$f" ]; then cp "$f" "${f/TwimShelf-/TwimShelf-Flutter-}"; fi
+          done
+          ls -la
       - name: Build info and checksums
         working-directory: packages
         run: |

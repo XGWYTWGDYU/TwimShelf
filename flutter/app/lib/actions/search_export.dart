@@ -41,7 +41,7 @@ String searchExportName(List<String> terms) {
 /// desktop, handed on (Files, AirDrop, another app) on phones and tablets; then what was
 /// exported and what was left out, with each media's reason.
 Future<void> exportToFile(BuildContext context, List<String> ids, ExportOptions options, String name) async {
-  final desktop = OS.isMacOS || OS.isWindows || OS.isLinux;
+  final desktop = OS.isMacOS || OS.isLinux;
   String path;
   if (desktop) {
     final loc = await getSaveLocation(suggestedName: name);
@@ -149,7 +149,7 @@ class _ExportDialogState extends State<_ExportDialog> {
 /// Where a file the user asked for goes: a place chosen in a save dialog on a desktop, the
 /// temporary folder (then the share sheet) on phones and tablets. Null when cancelled.
 Future<String?> outputPath(String name) async {
-  if (OS.isMacOS || OS.isWindows || OS.isLinux) return (await getSaveLocation(suggestedName: name))?.path;
+  if (OS.isMacOS || OS.isLinux) return (await getSaveLocation(suggestedName: name))?.path;
   return '${(await getTemporaryDirectory()).path}${OS.pathSeparator}$name';
 }
 
@@ -157,6 +157,6 @@ Future<String?> outputPath(String name) async {
 Future<void> deliver(String path) async {
   // the web build: the browser downloads it from the server
   if (OS.isWeb) return downloadToBrowser(path);
-  if (OS.isMacOS || OS.isWindows || OS.isLinux) return;
+  if (OS.isMacOS || OS.isLinux) return;
   if (!await ApplePlatform.instance.share([path])) await SharePlus.instance.share(ShareParams(files: [XFile(path)]));
 }

@@ -16,17 +16,13 @@ __pycache__/
 # These are links from the Flutter projects into that cache, made by scripts/apply.py.
 /flutter/*/.dart_tool
 /flutter/app/build
-/flutter/installer/build
 /flutter/app/android/.gradle
 /flutter/app/ios/Pods
-/flutter/app/macos/Pods
 /flutter/tl_llama/android/.cxx
 /flutter/tl_core/apple
 /flutter/tl_core/android/src/main/jniLibs
-/flutter/tl_core/windows/lib
 /flutter/tl_core/linux/lib
 /flutter/tl_*/pubspec.lock
-/flutter/installer/pubspec.lock
 /flutter/app/android/local.properties
 # this computer's own values (see config.local.example.yaml) and private files
 /config.local.yaml
@@ -40,16 +36,14 @@ __pycache__/
 !/TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/
 /TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/*
 !/TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
-/native/Identity.xcconfig
-/native/Resources/Assets.xcassets/AppIconLocal.appiconset/
+/Apple/Identity.xcconfig
+/Apple/Resources/Assets.xcassets/AppIconLocal.appiconset/
 /flutter/app/ios/Flutter/Identity.xcconfig
-/flutter/app/macos/Runner/Configs/Identity.xcconfig
 /flutter/app/android/identity.properties
 /flutter/app/linux/identity.cmake
 /flutter/app/lib/app/identity.g.dart
-/flutter/installer/product.json
 **/BuildLocation.xcconfig
-/native/.applied.json
+/Apple/.applied.json
 
 # Rust (the workspace's own target folder; scripts build into build.dir instead)
 /target/
@@ -60,9 +54,14 @@ __pycache__/
 *.keystore
 
 
-# icons: made from native/Resources/Assets.xcassets/AppIcon.appiconset by scripts/flutter/make_icons.py
+# icons: made from Apple/Resources/Assets.xcassets/AppIcon.appiconset by scripts/flutter/make_icons.py
 /flutter/app/android/app/src/main/res/mipmap-*/*.png
 /flutter/app/ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png
-/flutter/app/macos/Runner/Assets.xcassets/AppIcon.appiconset/*.png
 /flutter/app/assets/app_icon.png
-/flutter/installer/assets/app_icon.png
+
+# the native Windows app: made by scripts/apply.py (product.json, the icon) or links into build.dir
+/windows/TwimShelf/product.json
+/windows/TwimShelf/Assets/AppIcon.*
+/windows/TwimShelf/bin
+/windows/TwimShelf/obj
+/windows/TwimShelf/lib

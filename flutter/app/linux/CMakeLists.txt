@@ -177,7 +177,7 @@ install(FILES "${TL_DESKTOP_FILE}" DESTINATION "${CMAKE_INSTALL_PREFIX}/share/ap
 # Generate desktop icons and AppStream metadata in the build tree.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(TL_DESKTOP_ASSETS "${CMAKE_CURRENT_BINARY_DIR}/desktop-assets")
-file(GLOB TL_NATIVE_ICONS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../../native/Resources/Assets.xcassets/AppIcon.appiconset/mac-*.png")
+file(GLOB TL_NATIVE_ICONS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../../Apple/Resources/Assets.xcassets/AppIcon.appiconset/mac-*.png")
 add_custom_command(OUTPUT "${TL_DESKTOP_ASSETS}/${APPLICATION_ID}.metainfo.xml"
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/flutter/desktop_assets.py"
     "${TL_DESKTOP_ASSETS}" --app-id "${APPLICATION_ID}" --app-name "${TL_APP_NAME}" --icon-name "${APP_ICON_NAME}"

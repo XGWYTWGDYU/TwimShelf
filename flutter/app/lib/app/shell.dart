@@ -206,8 +206,8 @@ class _ShellState extends State<Shell> {
   }
 
   /// The bar touches the window's top-leading corner: everything moves below the window's
-  /// controls (a windowed iPad's, macOS's traffic lights, the caption buttons on Windows and
-  /// Linux), and on a desktop the strip there moves the window.
+  /// controls (a windowed iPad's, macOS's traffic lights, the caption buttons on Linux), and on
+  /// a desktop the strip there moves the window.
   Widget _withChrome(Widget child) {
     final top = WindowChrome.top(context);
     if (top == 0) return child;
@@ -331,7 +331,7 @@ class _ShellState extends State<Shell> {
               ),
             ),
           Expanded(
-            // the caption buttons on Windows and Linux sit over the content's top end
+            // the caption buttons on Linux sit over the content's top end
             child: MediaQuery(
               data: mq.copyWith(padding: mq.padding.copyWith(top: mq.padding.top > trailingTop ? mq.padding.top : trailingTop)),
               child: _primaryStacks(_place, ShellLayout.sidebar),

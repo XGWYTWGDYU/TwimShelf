@@ -63,7 +63,7 @@ void main() {
         }
       }
       expect(at, 0);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
   }
 
   testWidgets('random directions and speeds, and both ends of the list', (tester) async {
@@ -84,5 +84,5 @@ void main() {
     }
     await check('past the first');
     expect(at, 0);
-  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 }

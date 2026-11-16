@@ -12,12 +12,12 @@ Outputs are deterministic for the same arguments and ffmpeg version/presence. Th
 
 The UI owner must call `await seedIfRequested()` from `lib/dev/seed.dart` **after Core.open succeeds and before loading feed/stats**. The helper returns immediately outside debug builds. For validation without touching the UI, use `--target lib/dev/seed_smoke.dart`. Its only screen is the catalog-formatted stats line. The helper imports posts and loose files, adds mine/AI/both tags and a collection, and places one item in the bin. The damaged fixture is explicitly flagged through Core.reportBad. The existing core marks recent only during downloads; legacy/loose imports do not create recent entries, so this seed deliberately leaves recent empty (no network downloads or new core API). A marker in the selected library makes subsequent launches skip seeding. Always use a fresh test library, never your personal library. Before importing, the helper refuses a nonempty library (including bin items), so an omitted test-directory override cannot seed an existing personal collection. If initialization was interrupted before its completion marker, start again with a fresh test library.
 
-## macOS
+## Linux
 
 ```
 cd flutter/app
 TL_LIBRARY_DIR=/tmp/tl-test-library TL_IMPORT_DIR=/tmp/tl-seed \
-  flutter run -d macos --target lib/dev/seed_smoke.dart
+  flutter run -d linux --target lib/dev/seed_smoke.dart
 ```
 
 A direct launch of the built executable inherits these same environment variables. Build output goes to build.dir of config.yaml (scripts/apply.py links the Flutter build folders there).
@@ -49,4 +49,4 @@ Alternatively supply `--dart-define=TL_IMPORT_DIR=/data/user/0/<applicationId>/f
 
 ## Release exclusion
 
-Build the isolated host with `flutter build macos --release --target lib/dev/seed_smoke.dart` and inspect App.framework/App for `dev.seed.missingManifest`, `.synthetic-seed-v1` and `synthetic-seed`. The debug-only helper's body and fixture strings must be absent. Do not use --no-tree-shake-icons as evidence about Dart tree shaking: the relevant guard is kDebugMode. No debug seed assets are declared in pubspec.yaml.
+Build the isolated host with `flutter build linux --release --target lib/dev/seed_smoke.dart` and inspect lib/libapp.so for `dev.seed.missingManifest`, `.synthetic-seed-v1` and `synthetic-seed`. The debug-only helper's body and fixture strings must be absent. Do not use --no-tree-shake-icons as evidence about Dart tree shaking: the relevant guard is kDebugMode. No debug seed assets are declared in pubspec.yaml.

@@ -21,7 +21,6 @@
 #   desktop_id: com.example.twimshelf
 #   development_team: ABCDE12345
 #   share_extension_ios: true
-#   share_extension_mac: true
 
 # Android 发布签名（只在本机构建时用；GitHub Actions 用仓库的 Secrets）。
 # 密码存在钥匙串里：security add-generic-password -s "<keychain_service>" -a twimshelf -w

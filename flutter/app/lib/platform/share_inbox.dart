@@ -8,7 +8,6 @@ import 'package:tl_core/tl_core.dart';
 import 'package:tl_native/tl_native.dart';
 
 import '../app/jobs.dart';
-import '../l10n/l10n.dart';
 import 'desktop_inbox.dart';
 import 'desktop_entry.dart';
 import 'shared_links.dart';
@@ -40,7 +39,7 @@ final class ShareNeedsChoice extends ShareInboxEvent {
   final List<String> links;
 }
 
-/// 下载帖子 from the program's icon on Windows and Linux.
+/// 下载帖子 from the program's icon on Linux.
 final class ShareQuickDownload extends ShareInboxEvent {
   const ShareQuickDownload();
 }
@@ -97,7 +96,7 @@ class ShareInbox with WidgetsBindingObserver {
     _started = true;
     WidgetsBinding.instance.addObserver(this);
     final shares = await _shares();
-    if (shares != null && (OS.isWindows || OS.isLinux)) {
+    if (shares != null && OS.isLinux) {
       for (final name in ['Requests', 'Inbox']) {
         final directory = await Directory('${shares.path}/$name')
             .create(recursive: true);
@@ -117,7 +116,6 @@ class ShareInbox with WidgetsBindingObserver {
       try {
         // Registration labels come from the same initialized catalog as the UI.
         if (root == null && OS.isLinux) await installDesktopEntry();
-        if (root == null && OS.isWindows) await _channel.invokeMethod<void>('installJumpList', L('shortcut.downloadPosts'));
       } catch (_) {
         // Registration is recoverable and must not prevent a pending import.
         _emit(const ShareInboxFailure(0));
@@ -194,7 +192,7 @@ class ShareInbox with WidgetsBindingObserver {
       final inbox = Directory('${root.path}/Inbox');
       final links = Directory('${root.path}/Links');
       final announced = <String>{};
-      // Windows finishes deleting a folder a moment later: one just imported may still be listed
+      // a folder can still be listed a moment after it was deleted: one just imported is skipped
       final imported = <String>{};
       while (!_disposed) {
         final ready = <Directory>[];
