@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run by the Flutter app's Xcode schemes before every build: config.yaml, the Dart packages, the
 # Rust core library and the pods are put in place first. It installs no tools: a missing one is
-# named (./build.sh --check flutter-ios or flutter-macos lists them; with --yes it installs them).
+# named (./build.sh --check flutter-ios lists them; with --yes it installs them).
 # Xcode does not show a pre-action's output: it goes to <build.dir>/cache/logs/xcode-prepare.log, and a
 # failure also shows as a notification.
 #   xcode_prepare.sh ios|macos

@@ -26,13 +26,13 @@ print(json.dumps({
                   'signing': 'ad-hoc', 'notarized': False, 'share_extension': get('native.share_extension_mac') == 'true'},
         'iOS': {'minimum_version': '18.0', 'architecture': 'arm64', 'bundle_id': f'{bundle}.ios',
                 'signing': 'unsigned; re-sign to install', 'share_extension': get('native.share_extension_ios') == 'true'},
+        'windows': {'minimum_version': '10.0.22000', 'architecture': 'x64', 'signing': 'unsigned',
+                    'send_to_menu': get('windows.share_extension') == 'true'},
     },
     'flutter': {
-        'macOS': {'bundle_id': get('flutter.apple_bundle_id'), 'signing': 'ad-hoc', 'notarized': False, 'share_extension': get('flutter.share_extension_mac') == 'true'},
         'iOS': {'bundle_id': get('flutter.apple_bundle_id'), 'signing': 'unsigned; re-sign to install', 'share_extension': get('flutter.share_extension_ios') == 'true'},
         'android': {'package': get('flutter.android_package')},
         'linux': {'application_id': get('flutter.desktop_id')},
-        'windows': {'signing': 'unsigned'},
     },
     'bundled_AI_models': False,
 }, indent=2))
