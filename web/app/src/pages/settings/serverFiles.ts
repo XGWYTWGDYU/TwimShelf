@@ -14,7 +14,6 @@ export interface ServerInfo {
 
 export async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
-  if (window.twimshelf) headers.set('authorization', `Bearer ${window.twimshelf.token}`);
   const response = await fetch(url, { ...init, headers });
   if (response.status === 401 && !window.twimshelf) location.href = '/login';
   return response;
@@ -84,8 +83,8 @@ export function dateStamp(): string {
 
 export function openExternal(url: string): void {
   if (!/^https?:\/\//i.test(url)) return;
-  if (window.twimshelf) window.twimshelf.openExternal(url);
-  else window.open(url, '_blank', 'noopener,noreferrer');
+  // the desktop app sends new windows to the system browser
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 let secretWrites: Promise<unknown> = Promise.resolve();

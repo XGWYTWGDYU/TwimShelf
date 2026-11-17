@@ -130,10 +130,9 @@ export function MediaCard({ path, video, icon, title, subtitle, actions, onOpen 
 
   useEffect(() => {
     if (!path || !visible) return;
-    const desktop = window.twimshelf;
     const controller = new AbortController();
     let objectUrl: string | undefined;
-    const options = { signal: controller.signal, headers: desktop ? { authorization: `Bearer ${desktop.token}` } : undefined };
+    const options = { signal: controller.signal };
     const query = new URLSearchParams({ path, side: video ? '384' : '512' });
     const load = async () => {
       let url = `${core.transport.base}/api/${video ? 'poster' : 'scaled'}?${query}`;
@@ -141,13 +140,6 @@ export function MediaCard({ path, video, icon, title, subtitle, actions, onOpen 
         const result = await fetch(url, options);
         if (!result.ok) return;
         url = core.fileUrl(((await result.json()) as { path: string }).path);
-      }
-      if (desktop) {
-        const result = await fetch(url, options);
-        if (!result.ok) return;
-        const blob = await result.blob();
-        if (controller.signal.aborted) return;
-        url = objectUrl = URL.createObjectURL(blob);
       }
       if (!controller.signal.aborted) setResolved({ key, url });
     };
