@@ -15,7 +15,7 @@ foreach (var c in cases)
 {
     var reply = (string)c!["reply"]!;
     string got;
-    try { got = "tags " + string.Join("|", TagReply.Parse(reply)); }
+    try { got = "tags " + string.Join("|", TagReply.Parse(reply, requireArray: (bool?)c["requireArray"] ?? false)); }
     catch (ExternalFailure e) { got = e.Kind == ExternalFailureKind.NoTags ? "error none" : e.Kind == ExternalFailureKind.BadTags ? "error bad" : "error " + e.Kind; }
     var want = c["tags"] is JsonArray t ? "tags " + string.Join("|", t.Select(x => (string)x!)) : "error " + (string)c["error"]!;
     if (got != want) { Console.WriteLine($"ai_tags: {reply}: got {got}, want {want}"); failed++; }

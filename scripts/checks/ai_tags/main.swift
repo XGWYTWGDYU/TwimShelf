@@ -3,13 +3,13 @@
 // Compiled against the real ModelInput.swift: scripts/checks/run.sh
 import Foundation
 
-struct Case: Decodable { let reply: String; let tags: [String]?; let error: String? }
+struct Case: Decodable { let reply: String; let tags: [String]?; let error: String?; let requireArray: Bool? }
 struct File: Decodable { let cases: [Case] }
 let file = try JSONDecoder().decode(File.self, from: Data(contentsOf: URL(fileURLWithPath: "scripts/checks/ai_tags/cases.json")))
 var failed = 0
 for c in file.cases {
     let got: String
-    do { got = "tags \(try ModelInput.parseTags(c.reply))" }
+    do { got = "tags \(try ModelInput.parseTags(c.reply, requireArray: c.requireArray ?? false))" }
     catch ModelInput.TagsError.notTags { got = "error bad" }
     catch ModelInput.TagsError.noTags { got = "error none" }
     let want = c.tags.map { "tags \($0)" } ?? "error \(c.error ?? "?")"

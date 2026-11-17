@@ -107,7 +107,7 @@ public sealed class LocalModels
         try
         {
             var raw = await Llama.Describe(Path.Combine(m.Path, m.Weights ?? ""), Path.Combine(m.Path, m.Projector ?? ""), tmp, system, question);
-            return ExternalAI.ParseTags(raw);
+            return TagReply.Parse(raw, requireArray: true);
         }
         finally { try { File.Delete(tmp); } catch { } }
     }

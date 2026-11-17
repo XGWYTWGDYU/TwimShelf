@@ -121,6 +121,11 @@ pub struct MediaRef {
 #[derive(Debug, serde::Serialize)]
 pub struct AiFailure { pub media_id: String, pub model: String, pub attempts: i64, pub reason: String, pub at: i64 }
 
+pub(crate) fn normalized_tag_label(label: &str) -> Option<String> {
+    let label = label.trim().to_lowercase();
+    (!label.is_empty() && label.chars().count() <= 24).then_some(label)
+}
+
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Store> {
         Ok(Self::open_reporting(path)?.0)
@@ -552,7 +557,7 @@ impl Store {
     /// (callers hold the store lock; wrap in a transaction).
     pub fn retag(&self, media_id: &str, model: &str, labels: &[String], replace_old: bool) -> rusqlite::Result<()> { self.atomic(|| {
         let mut names: Vec<String> = vec![];
-        for l in labels.iter().map(|l| l.trim().to_lowercase()).filter(|l| !l.is_empty() && l.chars().count() <= 24) {
+        for l in labels.iter().filter_map(|label| normalized_tag_label(label)) {
             let c = self.canonical(&l)?;   // a model answering with an old name gets the new one
             if !names.contains(&c) { names.push(c); }
         }

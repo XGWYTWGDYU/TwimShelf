@@ -22,6 +22,19 @@
     { "reply": "", "error": "none" },
     { "reply": "   ", "error": "none" },
     { "reply": "[]", "error": "none" },
-    { "reply": "[\"  \", \"...\"]", "error": "none" }
+    { "reply": "[\"  \", \"...\"]", "error": "none" },
+    {"reply": "<|channel>thought\nMaybe [\"example\"]\n<channel|>\n[\"circle\",\"square\"]", "tags": ["circle", "square"]},
+    {"reply": "Thought with [\"example\"]<channel|>[\"circle\"]", "tags": ["circle"]},
+    {"reply": "<|channel>thought\n[\"example\"]", "error": "bad"},
+    {"reply": "<think>red circle, blue square", "error": "bad"},
+    {"reply": "<think>brief thought</think>", "error": "none"},
+    {"reply": "<think>brief thought</think>red circle, blue square", "error": "bad"},
+    {"reply": "[\"red circle\",\"blue square\"]", "requireArray": true, "tags": ["red circle", "blue square"]},
+    {"reply": "red circle, blue square", "requireArray": true, "error": "bad"},
+    {"reply": "Here are tags: [\"circle\"]", "requireArray": true, "error": "bad"},
+    {"reply": "```json\n[\"circle\"]", "requireArray": true, "error": "bad"},
+    {"reply": "```json\n[\"circle\"]\n```", "requireArray": true, "tags": ["circle"]},
+    {"reply": "<|channel>thought\nMention </think> as text.<channel|>[\"猫\"]", "requireArray": true, "tags": ["猫"]},
+    {"reply": "[\"t0\",\"t1\",\"t2\",\"t3\",\"t4\",\"t5\",\"t6\",\"t7\",\"t8\",\"t9\",\"t10\",\"t11\",\"}\"]", "error": "bad"}
   ]
 }
