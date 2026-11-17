@@ -1,8 +1,11 @@
 // A post in the grid: its picture (with a pager for several), author, text, link and tags.
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Play, Sparkles, Tag } from 'lucide-react';
 import { cardAspectRatio, L, type FeedItem } from '@twimshelf/core';
 import { cachedThumb, sideFor, thumb } from '../../lib/thumbs';
+import { core } from '../../lib/core';
+import { useStore } from '../../lib/hooks';
+import { handedBack, position, savePosition } from '../../lib/videoPositions';
 import type { Post } from './posts';
 import './PostCard.css';
 
@@ -31,6 +34,7 @@ export const PostCard = memo(function PostCard({ post, width, selected, selectin
         onClick={(e) => { if (!(selecting || e.metaKey || e.ctrlKey || e.shiftKey)) onOpen(post, page); }}>
         {selecting && <span className={`card-check${selected ? ' on' : ''}`}>{selected ? '✓' : ''}</span>}
         <Picture item={m} width={width} />
+        {m.kind === 'video' && <CardVideo item={m} />}
         {m.kind === 'video' && <span className="card-play"><Play size={18} fill="currentColor" /></span>}
         {many && <span className="card-pager">{page + 1}/{post.media.length}</span>}
         {many && page > 0 && <button className="card-nav left" onClick={(e) => { e.stopPropagation(); setPage(page - 1); }} aria-label="Previous"><ChevronLeft size={18} /></button>}
@@ -75,4 +79,36 @@ function Picture({ item, width }: { item: FeedItem; width: number }) {
   }, [item, side]);
   if (failed) return <div className="card-missing" />;
   return url ? <img src={url} alt="" draggable={false} decoding="async" /> : <div className="card-placeholder" />;
+}
+
+/** A card's video plays muted while most of the card is on screen; it keeps its place. */
+function CardVideo({ item }: { item: FeedItem }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [on, setOn] = useState(false);
+  const back = useStore(handedBack);
+  useEffect(() => {
+    const el = video.current!.parentElement!;
+    const io = new IntersectionObserver(([e]) => setOn(e.intersectionRatio >= 0.6), { threshold: [0, 0.6, 1] });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  useEffect(() => {
+    const v = video.current!;
+    if (on) {
+      if (v.readyState >= 1 && Math.abs(v.currentTime - position(item.media_id)) > 0.5) v.currentTime = position(item.media_id);
+      void v.play().catch(() => {});
+    } else {
+      v.pause();
+      savePosition(item.media_id, v.currentTime);
+    }
+  }, [on, item.media_id]);
+  useEffect(() => {
+    if (back?.id === item.media_id && video.current) video.current.currentTime = back.at;
+  }, [back, item.media_id]);
+  return (
+    <video ref={video} className="card-video" muted loop playsInline preload="metadata" src={on ? core.fileUrl(item.path) : undefined}
+      onLoadedMetadata={(e) => { e.currentTarget.currentTime = position(item.media_id); }}
+      onTimeUpdate={(e) => savePosition(item.media_id, e.currentTarget.currentTime)}
+      onPlaying={(e) => e.currentTarget.classList.add('playing')} />
+  );
 }

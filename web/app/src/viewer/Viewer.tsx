@@ -9,6 +9,7 @@ import { libraryChanged } from '../lib/library';
 import { toast } from '../components/toast';
 import { TagChip } from '../pages/browse/PostCard';
 import { cachedThumb, sideFor } from '../lib/thumbs';
+import { handBack, position } from '../lib/videoPositions';
 import './Viewer.css';
 
 let cacheDir: Promise<string> | null = null;
@@ -47,7 +48,7 @@ export function Viewer({ items, index, onClose }: { items: FeedItem[]; index: nu
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.closest('input, textarea')) return;
+      if (e.target instanceof Element && e.target.closest('input, textarea')) return;
       switch (e.key) {
         case 'Escape': onClose(); break;
         case 'ArrowLeft': step(-1); break;
@@ -104,8 +105,19 @@ function Media({ item, videoRef }: { item: FeedItem; videoRef: React.RefObject<H
     if (item.kind === 'photo') displayUrl(item).then((u) => live && setFull(u), () => {});
     return () => { live = false; };
   }, [item]);
+  // closing or going on to the next item: the card goes on from here
+  useEffect(() => {
+    const v = videoRef.current;
+    if (item.kind !== 'video' || !v) return;
+    // (a video that never started has nothing to hand back: React mounts twice in development)
+    return () => { if (v.readyState >= 1 && v.currentTime > 0) handBack(item.media_id, v.currentTime); };
+  }, [item, videoRef]);
   if (item.kind === 'video') {
-    return <video ref={videoRef} className="viewer-media" src={core.fileUrl(item.path)} poster={preview} controls autoPlay playsInline />;
+    // goes on from the card's frame; hands its place back to the card when it closes
+    return <video ref={videoRef} className="viewer-media" src={core.fileUrl(item.path)} poster={preview} controls autoPlay playsInline
+      onLoadedMetadata={(e) => { e.currentTarget.currentTime = position(item.media_id); }}
+      onPause={(e) => handBack(item.media_id, e.currentTarget.currentTime)}
+      />;
   }
   return (
     <div className="viewer-photo">
