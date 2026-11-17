@@ -296,7 +296,7 @@ build_target() {
       # the Linux server and the web app; everything is compiled inside the image, so this
       # computer needs only Docker (its own build cache stays in Docker's storage)
       have docker || fail "Docker is needed: https://docs.docker.com/get-docker/ (or OrbStack, Colima)"
-      docker build -f "$ROOT/docker/Dockerfile" --build-arg VERSION="$v" --build-arg RUST_VERSION="$RUST_TOOLCHAIN" --build-arg FLUTTER_VERSION="$FLUTTER_VERSION" -t "twimshelf:$v" -t twimshelf:latest "$ROOT"
+      docker build -f "$ROOT/docker/Dockerfile" --build-arg VERSION="$v" --build-arg RUST_VERSION="$RUST_TOOLCHAIN" --build-arg NODE_VERSION="$(tr -d ' \n' < "$ROOT/.node-version")" -t "twimshelf:$v" -t twimshelf:latest "$ROOT"
       local arch; arch=$(docker image inspect --format '{{.Architecture}}' "twimshelf:$v")
       docker save "twimshelf:$v" | gzip > "$DIST/TwimShelf-$v-docker-linux-$arch.tar.gz" ;;
     windows) fail "the Windows app (native, WinUI 3) builds on Windows: build.ps1 windows" ;;

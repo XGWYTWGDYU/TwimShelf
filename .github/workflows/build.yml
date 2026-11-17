@@ -187,6 +187,36 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  electron-linux:
+    # the Linux desktop app on the React front end (web/), which replaces flutter-linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install   # the one in rust-toolchain.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cache/npm
+            build/cache/electron
+          key: deps-electron-linux-${{ hashFiles('Cargo.lock', 'web/package-lock.json') }}
+          restore-keys: deps-electron-linux-
+      - name: Build
+        run: ./build.sh --yes electron-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electron-linux
+          path: build/apps/*
+          if-no-files-found: error
+          retention-days: 30
+
   windows:
     runs-on: windows-2025
     steps:
@@ -289,9 +319,9 @@ jobs:
           output=--load
           [[ "$RELEASE" == true ]] && output=--push
           rust=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)
-          flutter=$(sed -nE 's/.*"flutter": *"([^"]+)".*/\1/p' .fvmrc)
+          node=$(tr -d ' \n' < .node-version)
           docker buildx build -f docker/Dockerfile --build-arg VERSION="$VERSION" \
-            --build-arg RUST_VERSION="$rust" --build-arg FLUTTER_VERSION="$flutter" \
+            --build-arg RUST_VERSION="$rust" --build-arg NODE_VERSION="$node" \
             --cache-from "type=gha,scope=docker-${{ matrix.arch }}" \
             --cache-to "type=gha,mode=max,scope=docker-${{ matrix.arch }}" \
             -t "$image:$VERSION-${{ matrix.arch }}" $output .
@@ -320,7 +350,7 @@ jobs:
 
   release:
     # after the image is published too: a release without it would leave the version's image unmade
-    needs: [plan, test-core, apple, android, linux, windows, docker-publish]
+    needs: [plan, test-core, apple, android, linux, electron-linux, windows, docker-publish]
     if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-24.04
     permissions:

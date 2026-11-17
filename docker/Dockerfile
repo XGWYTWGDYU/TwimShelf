@@ -1,15 +1,15 @@
 # TwimShelf Linux server: the Rust core and the web app on one port.
 #
-#   ./build.sh docker            (passes the pinned Rust and Flutter versions, see below)
+#   ./build.sh docker            (passes the pinned Rust and Node versions, see below)
 #   docker run -d -p 2778:2778 -v /path/to/data:/data twimshelf
 #
 # /app holds the program (server + web app), /data everything it keeps (see docker/README.md).
 # The version is config.yaml's, as for every other build (./build.sh docker builds and saves it).
-# The tools are the repository's pinned ones: RUST_VERSION from rust-toolchain.toml, FLUTTER_VERSION
-# from .fvmrc (docker build --build-arg RUST_VERSION=… --build-arg FLUTTER_VERSION=… by hand).
+# The tools are the repository's pinned ones: RUST_VERSION from rust-toolchain.toml, NODE_VERSION
+# from .node-version (docker build --build-arg RUST_VERSION=… --build-arg NODE_VERSION=… by hand).
 
 ARG RUST_VERSION
-ARG FLUTTER_VERSION
+ARG NODE_VERSION
 
 # ---- the server: the core with HEIC/AVIF, built from pinned sources ----
 FROM rust:${RUST_VERSION}-bookworm AS server
@@ -23,23 +23,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     export TL_VERSION="$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' config.yaml)" && \
     cargo build -p tl-server --release --locked && cp target/release/twimshelf-server /twimshelf-server
 
-# ---- the web app: the Flutter app built for browsers ----
-FROM debian:bookworm-slim AS web
-ARG FLUTTER_VERSION
-RUN apt-get update && apt-get install -y --no-install-recommends git curl unzip xz-utils ca-certificates python3 python3-pil && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 --branch ${FLUTTER_VERSION} https://github.com/flutter/flutter.git /flutter
-ENV PATH=/flutter/bin:$PATH FLUTTER_SUPPRESS_ANALYTICS=true
-RUN flutter config --no-analytics --enable-web >/dev/null && flutter precache --web
-WORKDIR /src
-COPY flutter flutter
-# the files made from config.yaml (not in git), and the app's icon from the AppIcon set, as every
-# build does
-COPY config.yaml config.yaml
-COPY scripts/apply.py scripts/apply.py
-COPY scripts/flutter/make_icons.py scripts/flutter/make_icons.py
-COPY Apple/Resources/Assets.xcassets/AppIcon.appiconset Apple/Resources/Assets.xcassets/AppIcon.appiconset
-RUN python3 scripts/apply.py generate && python3 scripts/flutter/make_icons.py --in-app
-RUN cd flutter/app && flutter pub get && flutter build web --release --no-wasm-dry-run --no-web-resources-cdn
+# ---- the web app: the React front end (web/) ----
+FROM node:${NODE_VERSION}-bookworm-slim AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+COPY web/packages/core/package.json packages/core/package.json
+COPY web/app/package.json app/package.json
+COPY web/electron/package.json electron/package.json
+# the desktop app's packages (Electron) are not needed here
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --workspace app --include-workspace-root=false --ignore-scripts
+COPY web/tsconfig.base.json ./
+COPY web/packages packages
+COPY web/app app
+RUN npm run build -w app
 
 # ---- what runs ----
 FROM debian:bookworm-slim
@@ -53,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=server /twimshelf-server /app/twimshelf-server
 # `docker exec -it <container> twimshelf passwd`
 RUN ln -s /app/twimshelf-server /usr/local/bin/twimshelf
-COPY --from=web /src/flutter/app/build/web /app/web
+COPY --from=web /src/web/app/dist /app/web
 COPY docker/entrypoint.sh /app/entrypoint.sh
 ENV TL_DATA=/data TL_WEB=/app/web TL_PORT=2778
 VOLUME /data

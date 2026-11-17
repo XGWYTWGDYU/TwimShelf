@@ -12,7 +12,7 @@ build applies config.yaml and something is missing or the source changed.
   Android   legacy mipmaps, and the adaptive icon's foreground over a white background
   iOS       the AppIcon set of Runner, opaque
   in-app    assets/app_icon.png of the app
-  web       flutter/app/web: favicon and the installable web app's icons (committed)
+  web       flutter/app/web and web/app/public: favicon and the web app's icons (committed)
   extension extension/icons (committed)
 
 Linux makes its own at build time from the same set (desktop_assets.py); the native Windows app
@@ -51,11 +51,14 @@ ANDROID_RES = APP_DIR / "android/app/src/main/res"
 IOS_SET = APP_DIR / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
 IN_APP = (APP_DIR / "assets/app_icon.png",)
 WEB = APP_DIR / "web"
+# the React front end (web/app/public): the same favicon and icons the sign-in page shows
+REACT = ROOT / "web/app/public"
 # the Mac icon (own corners, transparent margin) at these sizes
-WEB_ROUNDED = {WEB / "favicon.png": 32}
+WEB_ROUNDED = {WEB / "favicon.png": 32, REACT / "favicon.png": 32}
 EXTENSION = {ROOT / f"extension/icons/icon{n}.png": n for n in (16, 32, 48, 128)}
 # the artwork to the edges, opaque (a web app's icon is masked by the system)
-WEB_FULL = {WEB / "icons/Icon-192.png": 192, WEB / "icons/Icon-512.png": 512}
+WEB_FULL = {WEB / "icons/Icon-192.png": 192, WEB / "icons/Icon-512.png": 512,
+            REACT / "icons/Icon-192.png": 192, REACT / "icons/Icon-512.png": 512}
 # the artwork inside the 80 % safe zone of a maskable icon
 WEB_MASKABLE = {WEB / "icons/Icon-maskable-192.png": 192, WEB / "icons/Icon-maskable-512.png": 512}
 
