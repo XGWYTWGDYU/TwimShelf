@@ -13,6 +13,7 @@ swiftc -module-cache-path "$out/cache" -o "$out/key" scripts/checks/external_key
 swiftc -module-cache-path "$out/cache" -parse-as-library -o "$out/queue" Apple/Shared/L10n.swift scripts/checks/ai_queue_progress/main.swift Apple/Shared/AI/AutoTagger.swift Apple/Shared/LatestWork.swift
 SCENARIO=unreadable "$out/queue"
 SCENARIO=model "$out/queue"
+SCENARIO=single "$out/queue"
 
 # what a model's reply becomes (the same cases as the Flutter tests and the Windows parser)
 swiftc -module-cache-path "$out/cache" -o "$out/tags" scripts/checks/ai_tags/main.swift Apple/TLLocalAI/Sources/TLLocalAI/ModelInput.swift

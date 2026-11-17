@@ -47,10 +47,12 @@ fn note_unflushed(p: &Path) { UNFLUSHED.with(|u| if let Some(v) = u.borrow_mut()
 /// already (scripts/checks/ai_tags/cases.json); this keeps any caller from recording them.
 pub fn check_ai_labels(labels: &[String]) -> anyhow::Result<()> {
     let labels: Vec<&str> = labels.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
-    if labels.is_empty() { anyhow::bail!(tr!("ai.noTags")); }
     let fragment = |l: &str| l.chars().any(|c| c.is_control() || "{}[]<>:\"\\`".contains(c))
         || l.chars().all(|c| c.is_ascii_punctuation() || c.is_whitespace());
     if labels.iter().any(|l| fragment(l)) { anyhow::bail!(tr!("ai.badTags")); }
+    if !labels.iter().any(|l| crate::store::normalized_tag_label(l).is_some()) {
+        anyhow::bail!(tr!("ai.noTags"));
+    }
     Ok(())
 }
 
@@ -923,14 +925,16 @@ mod tests {
     fn an_analysis_without_real_tags_is_refused() {
         let ok = |v: &[&str]| check_ai_labels(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>()).is_ok();
         assert!(ok(&["猫", "室内"]) && ok(&["c++", "3d", "初音 miku", "😺", "mac外国语"]));
-        assert!(!ok(&[]) && !ok(&["  "]));
+        assert!(!ok(&[]) && !ok(&["  "]) && !ok(&["abcdefghijklmnopqrstuvwxyz"]));
         for bad in ["\u{7d}", ":", "harley \u{7d}", "mactw \u{7d}", "[猫]", "a\u{7}b", "..."] { assert!(!ok(&["猫", bad]), "{bad}"); }
         let d = std::env::temp_dir().join(format!("tl-badtags-{}", rand::random::<u64>()));
         let lib = Library::open(&d).unwrap();
         let e = lib.apply_ai_tags_at(lib.epoch(), "missing", "m", &["\u{7d}".into()], false).unwrap_err();
         assert_eq!(e.to_string(), tr!("ai.badTags").to_string());
-        let e = lib.apply_ai_tags_at(lib.epoch(), "missing", "m", &[], false).unwrap_err();
-        assert_eq!(e.to_string(), tr!("ai.noTags").to_string());
+        for labels in [vec![], vec!["abcdefghijklmnopqrstuvwxyz".into()]] {
+            let e = lib.apply_ai_tags_at(lib.epoch(), "missing", "m", &labels, true).unwrap_err();
+            assert_eq!(e.to_string(), tr!("ai.noTags").to_string());
+        }
         std::fs::remove_dir_all(&d).unwrap();
     }
 

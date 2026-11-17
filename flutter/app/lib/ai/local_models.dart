@@ -157,10 +157,10 @@ class LocalModels extends ChangeNotifier {
         final need = m.bytes + m.bytes ~/ 4 + 500000000;
         if (available != null && available < need) throw LocalModelError(L('ai.err.memory', [_gb(need), _gb(available)]));
         final raw = await _native.invokeMethod<String>('aiRespond', {'modelDir': m.path, 'path': tmp.path, 'kind': 'photo', 'system': system, 'question': question});
-        return ExternalAI.parseTags(raw ?? '');
+        return ExternalAI.parseTags(raw ?? '', requireArray: true);
       }
       final raw = await LlamaEngine.instance.describe(weights: '${m.path}$sep${m.weights}', projector: '${m.path}$sep${m.projector}', image: tmp.path, system: system, question: question);
-      return ExternalAI.parseTags(raw);
+      return ExternalAI.parseTags(raw, requireArray: true);
     } finally {
       unawaited(tmp.delete().then((_) {}, onError: (Object _) {}));
     }

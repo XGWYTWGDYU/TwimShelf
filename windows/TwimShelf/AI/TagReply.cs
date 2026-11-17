@@ -53,18 +53,34 @@ public static partial class TagReply
     /// is a piece of the reply's syntax (`}`, `harley }`), refuses the whole reply (BadTags): a
     /// model saying that is not working, and its other words are no better. An empty list is
     /// NoTags. Either way the analysis failed, and nothing is written.
-    public static List<string> Parse(string raw)
+    public static List<string> Parse(string raw, bool requireArray = false)
     {
         static ExternalFailure Bad() => new(ExternalFailureKind.BadTags);
-        var text = raw;
-        var end = text.LastIndexOf("</think>", StringComparison.Ordinal);
-        if (end >= 0) text = text[(end + 8)..];
-        text = text.Trim();
+        var text = raw.Trim();
+        var structured = requireArray;
+        var delimiters = new[] { ("<think>", "</think>"), ("<|channel>thought", "<channel|>") };
+        var explicitDelimiters = delimiters.Where(pair => text.StartsWith(pair.Item1, StringComparison.Ordinal)).ToArray();
+        foreach (var (opening, closing) in explicitDelimiters.Length == 0 ? delimiters : explicitDelimiters)
+        {
+            var end = text.IndexOf(closing, StringComparison.Ordinal);
+            if (end >= 0)
+            {
+                var prefix = text[..end];
+                if (prefix.Contains(opening, StringComparison.Ordinal) && !prefix.StartsWith(opening, StringComparison.Ordinal)) throw Bad();
+                text = text[(end + closing.Length)..].Trim();
+                structured = true;
+                break;
+            }
+            if (text.StartsWith(opening, StringComparison.Ordinal)) throw Bad();
+        }
+        if (new[] { "<think>", "</think>", "<|channel>", "<channel|>" }
+            .Any(marker => text.Contains(marker, StringComparison.Ordinal))) throw Bad();
         if (text.StartsWith("```", StringComparison.Ordinal))
         {
             var nl = text.IndexOf('\n');
             text = nl < 0 ? "" : text[(nl + 1)..].Trim();
             if (text.EndsWith("```", StringComparison.Ordinal)) text = text[..^3].Trim();
+            else if (structured) throw Bad();
         }
         List<string> items;
         int a = text.IndexOf('['), b = text.LastIndexOf(']');
@@ -72,6 +88,7 @@ public static partial class TagReply
         {
             if (a < 0 || b < a) throw Bad();
             var outside = text[..a] + text[(b + 1)..];
+            if (structured && !string.IsNullOrWhiteSpace(outside)) throw Bad();
             if (outside.IndexOfAny(['[', ']', '{', '}']) >= 0) throw Bad();
             JsonNode? node;
             try { node = JsonNode.Parse(text[a..(b + 1)]); } catch { throw Bad(); }
@@ -85,6 +102,7 @@ public static partial class TagReply
         }
         else
         {
+            if (structured && text.Length != 0) throw Bad();
             if (text.IndexOfAny(['{', '}', ':', '"']) >= 0) throw Bad();
             items = [.. Regex.Split(text, "[,，、;；\n#]")];
         }
@@ -98,9 +116,8 @@ public static partial class TagReply
             var punctuation = clean.All(c => (c < 128 && (char.IsPunctuation(c) || char.IsSymbol(c))) || char.IsWhiteSpace(c));
             if (fragment || punctuation) throw Bad();
             if (new StringInfo(clean).LengthInTextElements <= 12 && seen.Add(clean)) result.Add(clean);
-            if (result.Count == 12) break;
         }
         if (result.Count == 0) throw new ExternalFailure(ExternalFailureKind.NoTags);
-        return result;
+        return result.GetRange(0, Math.Min(12, result.Count));
     }
 }

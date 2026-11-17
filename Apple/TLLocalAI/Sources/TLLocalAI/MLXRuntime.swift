@@ -29,7 +29,7 @@ public actor MLXRuntime {
 
     public enum RuntimeError: Error { case simulator, notInstalled(URL) }
 
-    private var tagger: (dir: URL, container: ModelContainer)?
+    private var tagger: (dir: URL, files: TaggerModelFiles, shadow: URL?, container: ModelContainer)?
     private var embedder: (dir: URL, container: EmbedderModelContainer)?
     private var idleUnload: Task<Void, Never>?
     private var busy = false
@@ -61,7 +61,7 @@ public actor MLXRuntime {
 
     private func releaseModels() {
         let before = MLX.Memory.snapshot()
-        tagger = nil
+        releaseTagger()
         embedder = nil
         MLX.GPU.clearCache()
         let after = MLX.Memory.snapshot()
@@ -88,42 +88,28 @@ public actor MLXRuntime {
         guard FileManager.default.fileExists(atPath: dir.appendingPathComponent("config.json").path) else { throw RuntimeError.notInstalled(dir) }
     }
 
-    private func loadTagger(_ dir: URL) async throws -> ModelContainer {
-        if let t = tagger, t.dir == dir { return t.container }
+    private func releaseTagger() {
+        let shadow = tagger?.shadow
         tagger = nil
-        MLX.GPU.clearCache()
-        try Self.check(dir)
-        MLX.GPU.set(cacheLimit: 128 * 1024 * 1024)
-        let c = try await VLMModelFactory.shared.loadContainer(from: Self.withTextConfigFixed(dir), using: LocalTokenizerLoader())
-        tagger = (dir, c)
-        return c
+        if let shadow { try? FileManager.default.removeItem(at: shadow) }
     }
 
-    /// Qwen3-VL keeps `tie_word_embeddings` at the top of config.json; MLXVLM reads it from
-    /// `text_config` alone and takes a missing one as true. For a model whose output layer is its
-    /// own (the 8B: `false` at the top, nothing in `text_config`) it then drops that layer and
-    /// decodes with the input embedding: every answer is garbage ("Mac данные"). Such a model is
-    /// loaded from a folder beside it that links its files and holds a config.json with the value
-    /// copied into `text_config`; the installed files stay as downloaded (they are checked
-    /// against the repo). Any other model loads from its own folder.
-    static func withTextConfigFixed(_ dir: URL) throws -> URL {
-        let fm = FileManager.default
-        guard let data = fm.contents(atPath: dir.appendingPathComponent("config.json").path),
-              var config = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let tie = config["tie_word_embeddings"] as? Bool,
-              var text = config["text_config"] as? [String: Any], text["tie_word_embeddings"] == nil
-        else { return dir }
-        text["tie_word_embeddings"] = tie
-        config["text_config"] = text
-        let shadow = fm.temporaryDirectory.appendingPathComponent("tl-model-config", isDirectory: true)
-            .appendingPathComponent(dir.lastPathComponent, isDirectory: true)
-        try? fm.removeItem(at: shadow)
-        try fm.createDirectory(at: shadow, withIntermediateDirectories: true)
-        for name in try fm.contentsOfDirectory(atPath: dir.path) where name != "config.json" {
-            try fm.createSymbolicLink(at: shadow.appendingPathComponent(name), withDestinationURL: dir.appendingPathComponent(name))
+    private func loadTagger(_ dir: URL) async throws -> ModelContainer {
+        try Self.check(dir)
+        let files = try TaggerModelFiles(directory: dir)
+        if let t = tagger, t.dir == dir, t.files == files { return t.container }
+        releaseTagger()
+        MLX.GPU.clearCache()
+        MLX.GPU.set(cacheLimit: 128 * 1024 * 1024)
+        let shadow = try files.makeShadow(for: dir)
+        do {
+            let container = try await VLMModelFactory.shared.loadContainer(from: shadow ?? dir, using: LocalTokenizerLoader())
+            tagger = (dir, files, shadow, container)
+            return container
+        } catch {
+            if let shadow { try? FileManager.default.removeItem(at: shadow) }
+            throw error
         }
-        try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys]).write(to: shadow.appendingPathComponent("config.json"))
-        return shadow
     }
 
     private func loadEmbedder(_ dir: URL) async throws -> EmbedderModelContainer {

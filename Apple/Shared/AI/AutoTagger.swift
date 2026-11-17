@@ -251,15 +251,20 @@ final class AutoTagger {
                         return
                     }
                     catch let e as AIEngine.EngineError {
-                        // the model or the device, not this image: nothing is counted against it
-                        if counted { await Task.detached { Core.aiAttempt(.undo, mediaId: m.mediaId, model: job.model) }.value }
-                        lastError = e.localizedDescription
-                        post()
-                        return
+                        switch e {
+                        case .badReply, .noTags:
+                            failure = e.localizedDescription
+                        default:
+                            if counted { await Task.detached { Core.aiAttempt(.undo, mediaId: m.mediaId, model: job.model) }.value }
+                            lastError = e.localizedDescription
+                            post()
+                            return
+                        }
                     }
                     catch { failure = error.localizedDescription }
                 } else { failure = L("ai.err.unreadable"); unreadable = true }
                 if let failure {
+                    lastError = failure
                     AppLog.error("ai", L("ai.err.analyze", m.mediaId.prefix(12), failure))
                     if counted { await Task.detached { Core.aiAttempt(.failed, mediaId: m.mediaId, model: job.model, reason: failure) }.value }
                     if !unreadable {

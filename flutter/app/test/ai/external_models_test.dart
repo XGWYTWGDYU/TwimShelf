@@ -371,10 +371,11 @@ void main() {
     for (final c in cases.cast<Map>()) {
       final reply = c['reply'] as String;
       final error = c['error'];
+      final requireArray = c['requireArray'] as bool? ?? false;
       if (error == null) {
-        expect(ExternalAI.parseTags(reply), c['tags'], reason: reply);
+        expect(ExternalAI.parseTags(reply, requireArray: requireArray), c['tags'], reason: reply);
       } else {
-        expect(() => ExternalAI.parseTags(reply), throwsA(failure(error == 'bad' ? ExternalFailureKind.badTags : ExternalFailureKind.noTags)), reason: reply);
+        expect(() => ExternalAI.parseTags(reply, requireArray: requireArray), throwsA(failure(error == 'bad' ? ExternalFailureKind.badTags : ExternalFailureKind.noTags)), reason: reply);
       }
     }
   });

@@ -55,14 +55,29 @@ public enum ModelInput {
     /// is a piece of the reply's syntax (`}`, `harley }`), refuses the whole reply (`notTags`): a
     /// model saying that is not working, and its other words are no better. An empty list is
     /// `noTags`. Either way the analysis failed, and nothing is written.
-    public static func parseTags(_ raw: String) throws -> [String] {
-        var text = raw
-        if let r = text.range(of: "</think>", options: .backwards) { text = String(text[r.upperBound...]) }
-        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    public static func parseTags(_ raw: String, requireArray: Bool = false) throws -> [String] {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var structured = requireArray
+        let delimiters = [("<think>", "</think>"), ("<|channel>thought", "<channel|>")]
+        let explicit = delimiters.filter { text.hasPrefix($0.0) }
+        for (opening, closing) in explicit.isEmpty ? delimiters : explicit {
+            if let end = text.range(of: closing) {
+                let prefix = text[..<end.lowerBound]
+                if prefix.contains(opening) && !prefix.hasPrefix(opening) { throw TagsError.notTags }
+                text = text[end.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+                structured = true
+                break
+            }
+            if text.hasPrefix(opening) { throw TagsError.notTags }
+        }
+        if ["<think>", "</think>", "<|channel>", "<channel|>"].contains(where: text.contains) {
+            throw TagsError.notTags
+        }
         if text.hasPrefix("```") {
             text = text.firstIndex(of: "\n").map { String(text[text.index(after: $0)...]) } ?? ""
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if text.hasSuffix("```") { text.removeLast(3) }
+            else if structured { throw TagsError.notTags }
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         var items: [String]
@@ -70,12 +85,14 @@ public enum ModelInput {
         if a != nil || b != nil {
             guard let a, let b, a < b else { throw TagsError.notTags }
             let outside = String(text[..<a]) + String(text[text.index(after: b)...])
+            if structured && !outside.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw TagsError.notTags }
             if outside.contains(where: { "[]{}".contains($0) }) { throw TagsError.notTags }
             guard let list = try? JSONSerialization.jsonObject(with: Data(text[a...b].utf8)) as? [Any] else { throw TagsError.notTags }
             let strings = list.compactMap { $0 as? String }
             if strings.count != list.count { throw TagsError.notTags }
             items = strings
         } else {
+            if structured && !text.isEmpty { throw TagsError.notTags }
             if text.contains(where: { "{}:\"".contains($0) }) { throw TagsError.notTags }
             items = text.components(separatedBy: CharacterSet(charactersIn: ",，、;；\n#"))   // i18n-exempt: characters the parser recognizes, not text
         }
@@ -88,9 +105,8 @@ public enum ModelInput {
             let punctuation = clean.unicodeScalars.allSatisfy { ($0.isASCII && CharacterSet.punctuationCharacters.union(.symbols).contains($0)) || CharacterSet.whitespaces.contains($0) }
             if fragment || punctuation { throw TagsError.notTags }
             if clean.count <= 12 && seen.insert(clean).inserted { result.append(clean) }
-            if result.count == 12 { break }
         }
         if result.isEmpty { throw TagsError.noTags }
-        return result
+        return Array(result.prefix(12))
     }
 }

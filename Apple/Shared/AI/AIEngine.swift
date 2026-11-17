@@ -183,7 +183,7 @@ actor AIEngine {
         let p = ModelPrompts.prompt(forModel: repo)
         let question = p.question(existing: existing, vocabulary: vocabulary, postText: postText)
         do {
-            return try Self.parseTags(try await runtime.respond(modelDir: try modelDir(repo), system: p.system, question: question, image: image))
+            return try ModelInput.parseTags(try await runtime.respond(modelDir: try modelDir(repo), system: p.system, question: question, image: image), requireArray: true)
         } catch { throw Self.mapped(error, repo) }
     }
 

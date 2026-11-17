@@ -686,16 +686,38 @@ class ExternalAI {
   /// is a piece of the reply's syntax (`}`, `harley }`), refuses the whole reply ([badTags]): a
   /// model saying that is not working, and its other words are no better. An empty list is
   /// [noTags]. Either way the analysis failed, and nothing is written.
-  static List<String> parseTags(String raw) {
+  static List<String> parseTags(String raw, {bool requireArray = false}) {
     const bad = ExternalFailure(ExternalFailureKind.badTags);
-    var text = raw;
-    final think = text.lastIndexOf('</think>');
-    if (think >= 0) text = text.substring(think + 8);
-    text = text.trim();
+    var text = raw.trim();
+    var structured = requireArray;
+    const delimiters = [
+      ('<think>', '</think>'),
+      ('<|channel>thought', '<channel|>'),
+    ];
+    final explicit = delimiters.where((pair) => text.startsWith(pair.$1)).toList();
+    for (final (opening, closing) in explicit.isEmpty ? delimiters : explicit) {
+      final end = text.indexOf(closing);
+      if (end >= 0) {
+        final prefix = text.substring(0, end);
+        if (prefix.contains(opening) && !prefix.startsWith(opening)) throw bad;
+        text = text.substring(end + closing.length).trim();
+        structured = true;
+        break;
+      }
+      if (text.startsWith(opening)) throw bad;
+    }
+    if (['<think>', '</think>', '<|channel>', '<channel|>'].any(text.contains)) {
+      throw bad;
+    }
     if (text.startsWith('```')) {
       final nl = text.indexOf('\n');
       text = nl < 0 ? '' : text.substring(nl + 1);
-      if (text.trimRight().endsWith('```')) text = text.trimRight().substring(0, text.trimRight().length - 3);
+      text = text.trim();
+      if (text.endsWith('```')) {
+        text = text.substring(0, text.length - 3);
+      } else if (structured) {
+        throw bad;
+      }
       text = text.trim();
     }
     List<String> items;
@@ -703,6 +725,7 @@ class ExternalAI {
     if (a >= 0 || b >= 0) {
       if (a < 0 || b < a) throw bad;
       final outside = text.substring(0, a) + text.substring(b + 1);
+      if (structured && outside.trim().isNotEmpty) throw bad;
       if (outside.contains(RegExp(r'[\[\]{}]'))) throw bad;
       Object? list;
       try {
@@ -713,6 +736,7 @@ class ExternalAI {
       if (list is! List || list.any((e) => e is! String)) throw bad;
       items = list.cast<String>();
     } else {
+      if (structured && text.isNotEmpty) throw bad;
       if (text.contains(RegExp(r'[{}:"]'))) throw bad;
       items = text.split(RegExp('[,\uFF0C\u3001;\uFF1B\n#]'));
     }
@@ -728,10 +752,9 @@ class ExternalAI {
       if (clean.isEmpty) continue;
       if (fragment.hasMatch(clean) || punctuation.hasMatch(clean)) throw bad;
       if (clean.characters.length <= 12 && seen.add(clean)) result.add(clean);
-      if (result.length == 12) break;
     }
     if (result.isEmpty) throw const ExternalFailure(ExternalFailureKind.noTags);
-    return result;
+    return result.take(12).toList();
   }
 
   Future<List<String>> tags({
