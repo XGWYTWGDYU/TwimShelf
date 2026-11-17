@@ -69,10 +69,16 @@ function pump(): void {
 }
 
 async function make(item: FeedItem, side: number): Promise<string> {
-  if (item.kind === 'video') {
-    return `${core.transport.base}/api/poster?path=${encodeURIComponent(item.path)}&side=${side}&whole=1`;
+  if (item.kind === 'photo') {
+    const r = await core.read<{ path?: string; video?: boolean }>(core.b.tl_thumbnail(item.media_id, side, await cache()));
+    if (r.path) return core.fileUrl(r.path);
   }
-  const r = await core.read<{ path?: string; video?: boolean }>(core.b.tl_thumbnail(item.media_id, side, await cache()));
-  if (r.path) return core.fileUrl(r.path);
-  return `${core.transport.base}/api/poster?path=${encodeURIComponent(item.path)}&side=${side}&whole=1`;
+  return poster(item.path, side);
+}
+
+/** A video's frame (made once by the server with ffmpeg): `{path}` of a JPEG in its cache. */
+export async function poster(path: string, side: number): Promise<string> {
+  const r = await fetch(`${core.transport.base}/api/poster?path=${encodeURIComponent(path)}&side=${side}&whole=1`, { credentials: 'same-origin' });
+  if (!r.ok) throw new Error(`poster: HTTP ${r.status}`);
+  return core.fileUrl(((await r.json()) as { path: string }).path);
 }
