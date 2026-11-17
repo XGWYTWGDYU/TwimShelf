@@ -1,14 +1,16 @@
-.search { position: relative; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 34px; padding: 4px 12px; border-radius: 17px; background: var(--bg-group); border: 0.5px solid var(--line); cursor: text; }
-.search.focused { border-color: var(--accent); box-shadow: 0 0 0 3px var(--bg-selected); }
-.search-icon { color: var(--fg-2); flex: none; }
-.search input { flex: 1; border: 0; outline: 0; background: none; min-width: 80px; height: 24px; }
-.search-clear { border: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--fg-3); color: var(--bg); display: flex; align-items: center; justify-content: center; padding: 0; }
-.capsule { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 11px; background: var(--accent); color: var(--accent-fg); font-size: 12px; }
-.capsule.excluded { background: var(--danger); text-decoration: line-through; }
-.capsule button { border: 0; background: rgba(255,255,255,0.25); color: inherit; width: 15px; height: 15px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0; }
-.suggest { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--bg-elevated); border-radius: var(--radius); box-shadow: var(--shadow); padding: 5px; z-index: 20; display: flex; flex-direction: column; }
-.suggest-row { display: flex; align-items: center; gap: 9px; border: 0; background: none; padding: 6px 9px; border-radius: 6px; text-align: left; }
-.suggest-row.on { background: var(--bg-selected); }
-.suggest-icon { display: inline-flex; color: var(--accent); }
-.suggest-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.suggest-hint { color: var(--fg-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }
+.search { position: relative; flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 36px; padding: 4px 10px; border-radius: var(--r-md); background: var(--bg-elevated); border: 1px solid var(--line-strong); cursor: text; transition: border-color 140ms, box-shadow 140ms; }
+.search.focused { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-icon { color: var(--fg-3); flex: none; margin-right: 2px; }
+.search input { flex: 1; border: 0; outline: 0; background: none; min-width: 140px; height: 26px; }
+.search input::placeholder { color: var(--fg-3); }
+.search-clear { border: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--line-strong); color: var(--fg-2); display: grid; place-items: center; padding: 0; }
+.capsule { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px 0 9px; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); font-size: var(--text-sm); font-weight: 500; }
+.capsule.excluded { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 24%, transparent); text-decoration: line-through; }
+.capsule button { border: 0; background: none; color: inherit; width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; padding: 0; opacity: 0.7; }
+.capsule button:hover { opacity: 1; background: rgba(0,0,0,0.08); }
+.suggest { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: var(--bg-elevated); border-radius: var(--r-md); box-shadow: var(--shadow-menu); padding: 6px; z-index: 40; display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; animation: pop 0.12s var(--ease); }
+.suggest-row { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 7px 10px; border-radius: var(--r-sm); text-align: left; color: var(--fg); }
+.suggest-row.on { background: var(--bg-hover); }
+.suggest-icon { display: grid; place-items: center; color: var(--fg-3); }
+.suggest-label { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggest-hint { color: var(--fg-3); font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 50%; }

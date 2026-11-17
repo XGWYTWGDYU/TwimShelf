@@ -1,51 +1,120 @@
-/* TwimShelf's look on the web and Electron: close to the native Apple app (system font, quiet
-   grays, one accent), light and dark from the system. Components use only these tokens. */
+/* TwimShelf's look on the web and Electron: quiet neutral surfaces, ink text, one blue accent,
+   violet for AI tags, teal for approved ones; light and dark from the system. Components use only
+   these tokens (spacing on a 4px grid, one type scale, a few radii and shadows). */
 :root {
+  /* type: the system font (no web font download; works offline) */
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans", "Noto Sans CJK SC", sans-serif;
-  --bg: #ffffff;
-  --bg-sidebar: #f3f3f5;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+
+  /* spacing */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* radii */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-pill: 999px;
+
+  /* layout */
+  --sidebar-w: 242px;
+  --viewer-panel-w: 328px;
+
+  /* light: neutral greys */
+  --bg: #fbfbfc;
+  --bg-sidebar: #f3f4f6;
   --bg-elevated: #ffffff;
-  --bg-group: #f5f5f7;
-  --bg-hover: rgba(0, 0, 0, 0.05);
-  --bg-selected: rgba(0, 122, 255, 0.12);
-  --fg: #1d1d1f;
-  --fg-2: #6e6e73;
-  --fg-3: #a1a1a6;
-  --line: rgba(0, 0, 0, 0.1);
-  --accent: #007aff;
+  --bg-subtle: #f1f2f4;
+  --bg-hover: rgba(18, 20, 24, 0.045);
+  --bg-active: rgba(18, 20, 24, 0.08);
+  --bg-selected: rgba(10, 102, 255, 0.09);
+
+  --fg: #141416;
+  --fg-2: #5c5d63;
+  --fg-3: #8d8e95;
+
+  --line: rgba(18, 20, 24, 0.08);
+  --line-strong: rgba(18, 20, 24, 0.14);
+
+  --accent: #0a66ff;
+  --accent-soft: rgba(10, 102, 255, 0.10);
   --accent-fg: #ffffff;
-  --danger: #ff3b30;
-  --success: #34c759;
-  --warning: #ff9500;
-  --shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
-  --radius: 10px;
-  --radius-lg: 14px;
-  --sidebar-w: 230px;
-  color-scheme: light dark;
+  --ai: #7c3aed;
+  --ai-soft: rgba(124, 58, 237, 0.09);
+  --ai-border: rgba(124, 58, 237, 0.24);
+  --approved: #0d9488;
+  --approved-soft: rgba(13, 148, 136, 0.10);
+  --danger: #e11d48;
+  --danger-soft: rgba(225, 29, 72, 0.10);
+  --warning: #d97706;
+  --success: #0d9488;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px var(--line);
+  --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line-strong);
+  --shadow-float: 0 16px 40px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line);
+  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line-strong);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* older names some pages use */
+  --bg-group: var(--bg-subtle);
+  --radius: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --shadow: var(--shadow-menu);
+  color-scheme: light;
 }
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1e1e1e;
-    --bg-sidebar: #262628;
-    --bg-elevated: #2c2c2e;
-    --bg-group: #2a2a2c;
-    --bg-hover: rgba(255, 255, 255, 0.07);
-    --bg-selected: rgba(10, 132, 255, 0.25);
-    --fg: #f5f5f7;
-    --fg-2: #a1a1a6;
-    --fg-3: #6e6e73;
-    --line: rgba(255, 255, 255, 0.12);
-    --accent: #0a84ff;
-    --danger: #ff453a;
-    --success: #30d158;
-    --warning: #ff9f0a;
-    --shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  :root:not([data-theme="light"]) {
+    --bg: #111113;
+    --bg-sidebar: #18181b;
+    --bg-elevated: #1c1c20;
+    --bg-subtle: #232328;
+    --bg-hover: rgba(255, 255, 255, 0.055);
+    --bg-active: rgba(255, 255, 255, 0.10);
+    --bg-selected: rgba(59, 130, 246, 0.16);
+    --fg: #f4f4f5;
+    --fg-2: #a1a1aa;
+    --fg-3: #71717a;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.15);
+    --accent: #3b82f6;
+    --accent-soft: rgba(59, 130, 246, 0.16);
+    --ai: #a78bfa;
+    --ai-soft: rgba(167, 139, 250, 0.14);
+    --ai-border: rgba(167, 139, 250, 0.30);
+    --approved: #2dd4bf;
+    --approved-soft: rgba(45, 212, 191, 0.14);
+    --danger: #fb7185;
+    --danger-soft: rgba(251, 113, 133, 0.14);
+    --success: #2dd4bf;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--line);
+    --shadow-card-hover: 0 14px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--line-strong);
+    --shadow-float: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-strong);
+    --shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-strong);
+    color-scheme: dark;
   }
 }
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { font: 13px/1.4 var(--font); color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; overflow: hidden; }
-button { font: inherit; color: inherit; }
-input, textarea, select { font: inherit; color: inherit; }
+body { font: var(--text-base)/1.45 var(--font); color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; overflow: hidden; }
+button, input, textarea, select { font: inherit; color: inherit; }
 a { color: var(--accent); text-decoration: none; }
 ::selection { background: var(--bg-selected); }
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: var(--r-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-3); }

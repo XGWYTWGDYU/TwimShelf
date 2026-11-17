@@ -1,6 +1,6 @@
 // A post in the grid: its picture (with a pager for several), author, text, link and tags.
 import { memo, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Play, Sparkles, Tag } from 'lucide-react';
+import { BadgeCheck, ChevronLeft, ChevronRight, Play, Sparkles, Tag } from 'lucide-react';
 import { cardAspectRatio, L, type FeedItem } from '@twimshelf/core';
 import { cachedThumb, sideFor, thumb } from '../../lib/thumbs';
 import { core } from '../../lib/core';
@@ -35,7 +35,7 @@ export const PostCard = memo(function PostCard({ post, width, selected, selectin
         {selecting && <span className={`card-check${selected ? ' on' : ''}`}>{selected ? '✓' : ''}</span>}
         <Picture item={m} width={width} />
         {m.kind === 'video' && <CardVideo item={m} />}
-        {m.kind === 'video' && <span className="card-play"><Play size={18} fill="currentColor" /></span>}
+        {m.kind === 'video' && <span className="card-play"><Play size={16} fill="currentColor" /></span>}
         {many && <span className="card-pager">{page + 1}/{post.media.length}</span>}
         {many && page > 0 && <button className="card-nav left" onClick={(e) => { e.stopPropagation(); setPage(page - 1); }} aria-label="Previous"><ChevronLeft size={18} /></button>}
         {many && page < post.media.length - 1 && <button className="card-nav right" onClick={(e) => { e.stopPropagation(); setPage(page + 1); }} aria-label="Next"><ChevronRight size={18} /></button>}
@@ -49,7 +49,7 @@ export const PostCard = memo(function PostCard({ post, width, selected, selectin
         {first.url && <a className="card-link" href={first.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{first.url}</a>}
         {first.tags.length > 0 && (
           <div className="card-tags">
-            {first.tags.map((t) => <TagChip key={t.label + t.origin} label={t.label} ai={(t.origin & 1) === 0} />)}
+            {first.tags.map((t) => <TagChip key={t.label + t.origin} label={t.label} origin={t.origin} />)}
           </div>
         )}
       </div>
@@ -57,10 +57,13 @@ export const PostCard = memo(function PostCard({ post, width, selected, selectin
   );
 });
 
-export function TagChip({ label, ai, onClick }: { label: string; ai: boolean; onClick?: () => void }) {
+/** A tag: yours (blue), an AI's (violet, dashed), or an AI's you approved (teal). */
+export function TagChip({ label, origin, onClick }: { label: string; origin: number; onClick?: () => void }) {
+  const mine = (origin & 1) !== 0, ai = (origin & 2) !== 0;
+  const kind = mine && ai ? 'chip-approved' : ai ? 'chip-ai' : '';
   return (
-    <span className={`chip${ai ? ' chip-ai' : ''}`} onClick={onClick}>
-      {ai ? <Sparkles size={11} /> : <Tag size={11} />}{label}
+    <span className={`chip ${kind}`} onClick={onClick}>
+      {mine && ai ? <BadgeCheck size={11} /> : ai ? <Sparkles size={11} /> : <Tag size={11} />}{label}
     </span>
   );
 }

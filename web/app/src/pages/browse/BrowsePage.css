@@ -1,10 +1,12 @@
-.browse-head { padding: 14px 20px 12px; display: flex; flex-direction: column; gap: 10px; }
-.browse-title { display: flex; align-items: baseline; gap: 10px; }
-.browse-title h1 { margin: 0; font-size: 20px; font-weight: 700; }
-.browse-count { color: var(--fg-2); font-size: 12px; }
-.browse-tools { display: flex; align-items: center; gap: 6px; }
+.browse-head { position: sticky; top: 0; z-index: 20; padding: var(--sp-4) var(--sp-5) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+.browse-title { display: flex; align-items: baseline; gap: var(--sp-3); }
+.browse-title h1 { margin: 0; font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.025em; }
+.browse-count { color: var(--fg-3); font-family: var(--font-mono); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.browse-tools { display: flex; align-items: center; gap: var(--sp-2); }
 .browse-wait { height: 100%; display: flex; flex-direction: column; }
 .browse-wait .center { flex: 1; }
-.select-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px 6px 14px; border-radius: var(--radius); background: var(--bg-selected); }
+.select-bar { position: fixed; bottom: var(--sp-6); left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2); transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: var(--sp-2); padding: 6px 6px 6px var(--sp-4); border-radius: var(--r-pill); background: var(--bg-elevated); box-shadow: var(--shadow-float); animation: rise 0.18s var(--ease); }
+.select-bar > span { font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; padding-right: var(--sp-2); border-right: 1px solid var(--line); }
 .select-actions { display: flex; gap: 6px; align-items: center; }
-.select-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
+.select-actions .btn { border-radius: var(--r-pill); height: 28px; }
+@keyframes rise { from { opacity: 0; transform: translateX(-50%) translateY(16px); } }

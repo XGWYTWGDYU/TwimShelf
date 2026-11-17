@@ -1,12 +1,13 @@
 .menu-scrim { position: fixed; inset: 0; z-index: 150; }
-.menu { position: fixed; min-width: 200px; max-width: 320px; max-height: calc(100vh - 12px); overflow-y: auto; background: var(--bg-elevated); border-radius: 9px; box-shadow: var(--shadow); padding: 5px; animation: fade 0.08s; }
-.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 5px 8px; border-radius: 5px; text-align: left; }
-.menu-item:hover:not(:disabled), .menu-item.on { background: var(--accent); color: var(--accent-fg); }
-.menu-item:hover:not(:disabled) .menu-icon, .menu-item.on .menu-icon { color: inherit; }
+.menu { position: fixed; min-width: 226px; max-width: 320px; max-height: calc(100vh - 12px); overflow-y: auto; background: var(--bg-elevated); border-radius: var(--r-md); box-shadow: var(--shadow-menu); padding: 5px; display: flex; flex-direction: column; gap: 1px; animation: menuIn 0.12s var(--ease); }
+@keyframes menuIn { from { opacity: 0; transform: scale(0.96); } }
+.menu-item { display: flex; align-items: center; gap: 9px; width: 100%; border: 0; background: none; padding: 7px 10px; border-radius: var(--r-sm); text-align: left; color: var(--fg); font-size: var(--text-sm); font-weight: 500; }
+.menu-item:hover:not(:disabled), .menu-item.on { background: var(--bg-hover); }
 .menu-item.danger { color: var(--danger); }
-.menu-item.danger:hover { background: var(--danger); color: #fff; }
+.menu-item.danger:hover { background: var(--danger-soft); }
+.menu-item.danger .menu-icon { color: var(--danger); }
 .menu-item:disabled { opacity: 0.4; }
-.menu-icon { width: 16px; display: inline-flex; color: var(--fg-2); }
+.menu-icon { width: 16px; display: inline-grid; place-items: center; color: var(--fg-3); }
 .menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.menu-more { opacity: 0.6; }
-.menu-sep { height: 0.5px; background: var(--line); margin: 4px 6px; }
+.menu-more { color: var(--fg-3); }
+.menu-sep { height: 1px; background: var(--line); margin: 4px 6px; }

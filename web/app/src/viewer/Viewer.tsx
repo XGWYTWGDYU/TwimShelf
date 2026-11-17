@@ -88,7 +88,7 @@ export function Viewer({ items, index, onClose }: { items: FeedItem[]; index: nu
           </div>
           {item.created_at && <div className="viewer-date">{new Date(item.created_at).toLocaleString()}</div>}
           {item.text && <p className="viewer-text">{item.text}</p>}
-          {item.tags.length > 0 && <div className="card-tags">{item.tags.map((t) => <TagChip key={t.label + t.origin} label={t.label} ai={(t.origin & 1) === 0} />)}</div>}
+          {item.tags.length > 0 && <div className="card-tags">{item.tags.map((t) => <TagChip key={t.label + t.origin} label={t.label} origin={t.origin} />)}</div>}
         </aside>
       )}
     </div>

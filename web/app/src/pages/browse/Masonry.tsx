@@ -21,7 +21,7 @@ export interface MasonryProps<T> {
 
 interface Placed { key: string; index: number; x: number; y: number; h: number }
 
-export function Masonry<T>({ items, keyOf, estimate, render, minColumn = 250, gap = 14, header, scrollerRef, onScroll }: MasonryProps<T>) {
+export function Masonry<T>({ items, keyOf, estimate, render, minColumn = 250, gap = 16, header, scrollerRef, onScroll }: MasonryProps<T>) {
   const scroller = useRef<HTMLDivElement>(null);
   const headerBox = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
