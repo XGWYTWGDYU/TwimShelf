@@ -1,12 +1,14 @@
 // Shared building blocks. Pages build on these so the whole app looks alike; see ui.css.
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { L } from '@twimshelf/core';
+import { ChevronLeft } from 'lucide-react';
 import './ui.css';
 
 export function Page({ title, actions, children, back }: { title: ReactNode; actions?: ReactNode; children: ReactNode; back?: () => void }) {
   return (
     <div className="page">
       <header className="page-head">
-        {back && <button className="icon-btn" onClick={back} aria-label="Back">‹</button>}
+        {back && <button className="icon-btn" onClick={back} aria-label={L('web.back')}><ChevronLeft size={18} /></button>}
         <h1>{title}</h1>
         <div className="page-actions">{actions}</div>
       </header>
@@ -67,7 +69,7 @@ export function Progress({ value }: { value?: number }) {
 }
 
 export function Spinner() {
-  return <span className="spinner" aria-label="Loading" />;
+  return <span className="spinner" aria-label={L('web.loading')} />;
 }
 
 export function Empty({ icon, title, children }: { icon?: ReactNode; title: ReactNode; children?: ReactNode }) {
@@ -77,16 +79,23 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: Reac
 /** A modal dialog; Esc and a click outside close it. */
 export function Dialog({ title, children, actions, onClose, wide }: { title?: ReactNode; children?: ReactNode; actions?: ReactNode; onClose: () => void; wide?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    const previous = document.activeElement;
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close.current(); } };
     window.addEventListener('keydown', key, true);
-    box.current?.focus();
-    return () => window.removeEventListener('keydown', key, true);
-  }, [onClose]);
+    if (!box.current?.contains(document.activeElement)) box.current?.focus();
+    return () => {
+      window.removeEventListener('keydown', key, true);
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
   return (
     <div className="dialog-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`dialog${wide ? ' dialog-wide' : ''}`} ref={box} tabIndex={-1} role="dialog">
-        {title && <h3 className="dialog-title">{title}</h3>}
+      <div className={`dialog${wide ? ' dialog-wide' : ''}`} ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined}>
+        {title && <h3 className="dialog-title" id={titleId}>{title}</h3>}
         {children && <div className="dialog-body">{children}</div>}
         {actions && <div className="dialog-actions">{actions}</div>}
       </div>
