@@ -1,7 +1,7 @@
 // 浏览: the library as a masonry of post cards, filtered by the sidebar's place and the search.
 import { useCallback, useMemo, useState } from 'react';
 import { ArrowDownWideNarrow, Shuffle } from 'lucide-react';
-import { L, type FeedQuery } from '@twimshelf/core';
+import { L, TokenQuery, type FeedQuery } from '@twimshelf/core';
 import { Empty, Spinner } from '../../components/ui';
 import { core } from '../../lib/core';
 import { useAsync, useStore } from '../../lib/hooks';
@@ -24,29 +24,29 @@ function title(r: BrowseRoute): string {
   return L('place.browse');
 }
 
-export function queryFor(r: BrowseRoute, order: { newest: boolean; seed: number | null }): FeedQuery {
-  const terms = (r.q ?? '').split(/\s+/).filter(Boolean);
-  return {
-    terms,
-    newest_first: order.newest,
+/** What to ask the core: the sidebar's place, then the search's words over it. */
+export function queryFor(r: BrowseRoute, order: { newest: boolean; seed: number | null }): FeedQuery | null {
+  const q = TokenQuery.parse(r.q ?? '');
+  if (q.isContradictory) return null;
+  return q.request({
+    newestFirst: order.newest,
     seed: order.seed,
-    whole_posts: !r.kind,
-    fields: { tags: true, text: true, author: true },
-    filter: {
+    wholePosts: !r.kind && !q.kind,
+    over: {
       kind: r.kind ?? null,
       folder: r.folder ?? null,
       loose_only: r.view === 'loose',
       album_only: r.view === 'album',
       review: r.view === 'unreviewed' ? 'unreviewed' : r.view === 'reviewed' ? 'reviewed' : 'any',
     },
-  };
+  });
 }
 
 export default function BrowsePage({ route }: { route: BrowseRoute }) {
   const version = useStore(libraryVersion);
   const [newest, setNewest] = useState(true);
   const [seed, setSeed] = useState<number | null>(null);
-  const feed = useAsync(() => core.feed(queryFor(route, { newest, seed })), [route.q, route.kind, route.folder, route.view, newest, seed, version]);
+  const feed = useAsync(async () => { const q = queryFor(route, { newest, seed }); return q ? core.feed(q) : []; }, [route.q, route.kind, route.folder, route.view, newest, seed, version]);
   const posts = useMemo(() => groupPosts(feed.data ?? []), [feed.data]);
   const [open, setOpen] = useState<{ index: number } | null>(null);
   const items = feed.data ?? [];
