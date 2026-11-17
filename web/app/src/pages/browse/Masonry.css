@@ -1,0 +1,3 @@
+.masonry-scroller { height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.masonry { position: relative; }
+.masonry-cell { position: absolute; top: 0; left: 0; contain: layout style; }

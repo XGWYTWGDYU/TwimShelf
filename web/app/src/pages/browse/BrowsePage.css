@@ -1,0 +1,7 @@
+.browse-head { padding: 14px 20px 12px; display: flex; flex-direction: column; gap: 10px; }
+.browse-title { display: flex; align-items: baseline; gap: 10px; }
+.browse-title h1 { margin: 0; font-size: 20px; font-weight: 700; }
+.browse-count { color: var(--fg-2); font-size: 12px; }
+.browse-tools { display: flex; align-items: center; gap: 6px; }
+.browse-wait { height: 100%; display: flex; flex-direction: column; }
+.browse-wait .center { flex: 1; }
