@@ -19,11 +19,12 @@ function ask<T>(render: (done: (v: T | null) => void) => React.ReactNode): Promi
   });
 }
 
-export function pickFolder(): Promise<string | null> {
-  return ask<string>((done) => <FolderPicker done={done} />);
+/** A folder (or a new one); with `none`, also "not into a folder" (answers ''). */
+export function pickFolder(o: { title?: string; none?: boolean } = {}): Promise<string | null> {
+  return ask<string>((done) => <FolderPicker done={done} title={o.title} none={o.none} />);
 }
 
-function FolderPicker({ done }: { done: (v: string | null) => void }) {
+function FolderPicker({ done, title, none }: { done: (v: string | null) => void; title?: string; none?: boolean }) {
   const f = useStore(folders);
   const [name, setName] = useState('');
   const create = async () => {
@@ -34,8 +35,8 @@ function FolderPicker({ done }: { done: (v: string | null) => void }) {
     done(n);
   };
   return (
-    <Dialog title={L('common.addToFolder')} onClose={() => done(null)}
-      actions={<Button onClick={() => done(null)}>{L('common.cancel')}</Button>}>
+    <Dialog title={title ?? L('common.addToFolder')} onClose={() => done(null)}
+      actions={<>{none && <Button onClick={() => done('')}>{L('common.notIntoFolder')}</Button>}<Button onClick={() => done(null)}>{L('common.cancel')}</Button></>}>
       <div className="picker-list">
         {(f?.folders ?? []).map((x) => (
           <button key={x.name} className="picker-row" onClick={() => done(x.name)}><Folder size={15} /> <span>{x.name}</span><span className="picker-count">{x.count}</span></button>

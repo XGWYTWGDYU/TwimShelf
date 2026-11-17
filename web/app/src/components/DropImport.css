@@ -1,0 +1,3 @@
+.drop-over { position: fixed; inset: 8px; z-index: 120; border: 2px dashed var(--accent); border-radius: var(--radius-lg); background: var(--bg-selected); display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.drop-hint { background: var(--bg-elevated); box-shadow: var(--shadow); padding: 12px 20px; border-radius: 12px; font-size: 15px; font-weight: 600; }
+.drop-busy { position: fixed; right: 20px; bottom: 20px; z-index: 120; width: 240px; display: flex; flex-direction: column; gap: 8px; background: var(--bg-elevated); box-shadow: var(--shadow); border-radius: 12px; padding: 12px 14px; }
