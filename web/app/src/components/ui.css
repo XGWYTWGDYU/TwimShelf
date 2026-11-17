@@ -50,3 +50,11 @@
 .dialog-body { overflow: auto; color: var(--fg); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 @keyframes fade { from { opacity: 0; } }
+.picker-list { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; margin: 0 -6px 10px; }
+.picker-row { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 7px 8px; border-radius: 6px; text-align: left; }
+.picker-row:hover { background: var(--bg-hover); }
+.picker-row span:first-of-type { flex: 1; }
+.picker-count { color: var(--fg-3); font-size: 12px; }
+.picker-new { display: flex; align-items: center; gap: 8px; color: var(--fg-2); }
+.picker-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.picker-chips .chip { border: 0; cursor: default; }

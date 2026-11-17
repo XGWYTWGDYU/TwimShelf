@@ -1,8 +1,11 @@
 // 浏览: the library as a masonry of post cards, filtered by the sidebar's place and the search.
-import { useCallback, useMemo, useState } from 'react';
-import { ArrowDownWideNarrow, Shuffle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDownWideNarrow, FolderPlus, Shuffle, Tags, Trash2, X } from 'lucide-react';
 import { L, TokenQuery, type FeedQuery } from '@twimshelf/core';
-import { Empty, Spinner } from '../../components/ui';
+import { Button, Empty, Spinner } from '../../components/ui';
+import { openMenu } from '../../components/Menu';
+import { runAction } from '../../lib/actions';
+import { cardMenu, selectionMenu, tagMany, toFolder } from './cardMenu';
 import { core } from '../../lib/core';
 import { useAsync, useStore } from '../../lib/hooks';
 import { libraryVersion } from '../../lib/library';
@@ -56,12 +59,63 @@ export default function BrowsePage({ route }: { route: BrowseRoute }) {
     setOpen({ index: Math.max(0, at) });
   }, [items]);
 
+  // selection: ⌘/Ctrl-click toggles a post, Shift-click selects up to it, Esc clears
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const anchor = useRef<number | null>(null);
+  useEffect(() => setSelected(new Set()), [route.q, route.kind, route.folder, route.view]);
+  useEffect(() => {
+    if (!selected.size) return;
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.dialog, .menu, .viewer')) setSelected(new Set()); };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [selected.size]);
+  const select = useCallback((p: Post, e: React.MouseEvent) => {
+    const i = posts.indexOf(p);
+    setSelected((old) => {
+      const next = new Set(old);
+      if (e.shiftKey && anchor.current != null) {
+        const [a, b] = [Math.min(anchor.current, i), Math.max(anchor.current, i)];
+        for (let j = a; j <= b; j++) next.add(posts[j].id);
+      } else if (next.has(p.id)) next.delete(p.id);
+      else next.add(p.id);
+      return next;
+    });
+    anchor.current = i;
+  }, [posts]);
+  const clear = useCallback(() => setSelected(new Set()), []);
+  const chosen = posts.filter((p) => selected.has(p.id));
+  const chosenMedia = chosen.flatMap((p) => p.media.map((m) => m.media_id));
+  const chosenPosts = chosen.map((p) => p.id);
+
+  const host = useMemo(() => ({
+    search: (q: string) => go({ ...route, q }),
+    addTerm: (w: string) => go({ ...route, q: `${route.q ?? ''} ${w}`.trim() }),
+  }), [route]);
+  const context = useCallback(async (p: Post, media: number, e: React.MouseEvent) => {
+    const point = { clientX: e.clientX, clientY: e.clientY };
+    if (selected.size > 1 && selected.has(p.id)) { openMenu(point, selectionMenu(chosenMedia, chosenPosts, clear)); return; }
+    openMenu(point, await cardMenu(p.media[media], p.media, host));
+  }, [selected, chosenMedia, chosenPosts, clear, host]);
+
+  const bar = selected.size > 0 && (
+    <div className="select-bar">
+      <span>{L('common.items', selected.size)}</span>
+      <div className="select-actions">
+        <Button onClick={() => void tagMany(chosenMedia, L('card.menu.tagMedia'))}><Tags size={14} /> {L('common.tags')}</Button>
+        <Button onClick={() => void toFolder({ posts: chosenPosts })}><FolderPlus size={14} /> {L('common.addToFolder')}</Button>
+        <Button kind="danger" onClick={async () => { if (await runAction('trash', { posts: chosenPosts }, (n) => L('trash.moved', n))) clear(); }}><Trash2 size={14} /> {L('common.delete')}</Button>
+        <button className="icon-btn" onClick={clear} aria-label={L('common.deselect')}><X size={16} /></button>
+      </div>
+    </div>
+  );
+
   const header = (
     <div className="browse-head">
       <div className="browse-title">
         <h1>{title(route)}</h1>
         <span className="browse-count">{feed.data ? L('common.items', posts.length) : ''}</span>
       </div>
+      {bar}
       <div className="browse-tools">
         <SearchBar value={route.q ?? ''} onSearch={(q) => go({ ...route, q: q || undefined })} />
         <button className={`icon-btn${newest && seed == null ? ' active' : ''}`} title={L('feed.sortByAdded')}
@@ -80,7 +134,8 @@ export default function BrowsePage({ route }: { route: BrowseRoute }) {
         <div className="browse-wait">{header}<Empty title={L(route.q || route.folder || route.kind || route.view ? 'feed.empty.noMatch' : 'feed.empty.library')} /></div>
       ) : (
         <Masonry items={posts} keyOf={(p) => p.id} estimate={estimateCard} header={header}
-          render={(p, w, i) => <PostCard post={p} width={w} index={i} onOpen={openPost} />} />
+          render={(p, w, i) => <PostCard post={p} width={w} index={i} onOpen={openPost} selected={selected.has(p.id)}
+            selecting={selected.size > 0} onSelect={select} onContext={(post, m, e) => void context(post, m, e)} />} />
       )}
       {open && <Viewer items={items} index={open.index} onClose={() => setOpen(null)} />}
     </>

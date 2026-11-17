@@ -2,6 +2,7 @@
 import { lazy, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Toasts } from './components/toast';
+import { MenuHost } from './components/Menu';
 import { Spinner } from './components/ui';
 import { useRoute } from './lib/router';
 import BrowsePage from './pages/browse/BrowsePage';
@@ -27,6 +28,7 @@ export default function App() {
         </Suspense>
       </main>
       <Toasts />
+      <MenuHost />
     </div>
   );
 }

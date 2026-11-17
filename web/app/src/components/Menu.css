@@ -1,0 +1,12 @@
+.menu-scrim { position: fixed; inset: 0; z-index: 150; }
+.menu { position: fixed; min-width: 200px; max-width: 320px; max-height: calc(100vh - 12px); overflow-y: auto; background: var(--bg-elevated); border-radius: 9px; box-shadow: var(--shadow); padding: 5px; animation: fade 0.08s; }
+.menu-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 5px 8px; border-radius: 5px; text-align: left; }
+.menu-item:hover:not(:disabled), .menu-item.on { background: var(--accent); color: var(--accent-fg); }
+.menu-item:hover:not(:disabled) .menu-icon, .menu-item.on .menu-icon { color: inherit; }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger:hover { background: var(--danger); color: #fff; }
+.menu-item:disabled { opacity: 0.4; }
+.menu-icon { width: 16px; display: inline-flex; color: var(--fg-2); }
+.menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-more { opacity: 0.6; }
+.menu-sep { height: 0.5px; background: var(--line); margin: 4px 6px; }

@@ -21,3 +21,5 @@
 .chip svg { color: var(--accent); }
 .chip-ai { background: rgba(175, 82, 222, 0.12); }
 .chip-ai svg { color: #af52de; }
+.card-check { position: absolute; top: 10px; left: 10px; z-index: 2; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; background: rgba(0,0,0,0.25); color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+.card-check.on { background: var(--accent); }

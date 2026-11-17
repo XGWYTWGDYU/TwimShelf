@@ -11,22 +11,25 @@ export interface PostCardProps {
   width: number;
   index: number;
   selected?: boolean;
+  /** Something is selected: a plain click selects too. */
+  selecting?: boolean;
   onOpen: (post: Post, media: number) => void;
   onSelect?: (post: Post, e: React.MouseEvent) => void;
   onContext?: (post: Post, media: number, e: React.MouseEvent) => void;
 }
 
-export const PostCard = memo(function PostCard({ post, width, selected, onOpen, onSelect, onContext }: PostCardProps) {
+export const PostCard = memo(function PostCard({ post, width, selected, selecting, onOpen, onSelect, onContext }: PostCardProps) {
   const [page, setPage] = useState(0);
   const m = post.media[Math.min(page, post.media.length - 1)];
   const first = post.media[0];
   const many = post.media.length > 1;
   return (
     <article className={`card${selected ? ' selected' : ''}`}
-      onClick={(e) => { if ((e.metaKey || e.ctrlKey || e.shiftKey) && onSelect) onSelect(post, e); }}
+      onClick={(e) => { if ((selecting || e.metaKey || e.ctrlKey || e.shiftKey) && onSelect) { e.preventDefault(); onSelect(post, e); } }}
       onContextMenu={(e) => { if (onContext) { e.preventDefault(); onContext(post, page, e); } }}>
       <div className="card-media" style={{ aspectRatio: String(cardAspectRatio(m)) }}
-        onClick={(e) => { if (!(e.metaKey || e.ctrlKey || e.shiftKey)) onOpen(post, page); }}>
+        onClick={(e) => { if (!(selecting || e.metaKey || e.ctrlKey || e.shiftKey)) onOpen(post, page); }}>
+        {selecting && <span className={`card-check${selected ? ' on' : ''}`}>{selected ? '✓' : ''}</span>}
         <Picture item={m} width={width} />
         {m.kind === 'video' && <span className="card-play"><Play size={18} fill="currentColor" /></span>}
         {many && <span className="card-pager">{page + 1}/{post.media.length}</span>}
