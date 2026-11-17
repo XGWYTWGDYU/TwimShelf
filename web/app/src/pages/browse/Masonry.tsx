@@ -33,6 +33,9 @@ export function Masonry<T>({ items, keyOf, estimate, render, minColumn = 250, ga
 
   useLayoutEffect(() => {
     const el = scroller.current!;
+    // measured now as well: a ResizeObserver reports only with the next frame (none in a hidden tab)
+    setWidth(el.clientWidth);
+    setView((v) => ({ ...v, height: el.clientHeight || v.height }));
     const ro = new ResizeObserver(() => {
       setWidth(el.clientWidth);
       setView((v) => ({ ...v, height: el.clientHeight }));
