@@ -1,0 +1,15 @@
+{
+  "name": "twimshelf-desktop",
+  "productName": "TwimShelf",
+  "private": true,
+  "version": "0.0.0",
+  "description": "TwimShelf desktop app",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
+  }
+}

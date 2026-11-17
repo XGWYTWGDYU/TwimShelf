@@ -5,6 +5,9 @@ import { loadLanguage } from './lib/core';
 import { refreshLibrary } from './lib/library';
 import './theme.css';
 
+// the macOS test build's window has its buttons over the sidebar's top
+if (window.twimshelf?.platform === 'darwin') document.documentElement.classList.add('mac-titlebar');
+
 loadLanguage()
   .catch(() => {})
   .finally(() => {

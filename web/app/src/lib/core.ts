@@ -4,19 +4,19 @@ import en from '@twimshelf/core/src/generated/strings/en.json';
 
 declare global {
   interface Window {
-    /** Set by the Electron app's preload: its local server and token. */
-    twimshelf?: { base: string; token: string; platform: string; openExternal(url: string): void };
+    /** Set by the Electron app's preload. Its window is served by its own local server (signed
+     *  in by a cookie the app sets), so the page talks to it exactly like the web page does. */
+    twimshelf?: { desktop: true; platform: string };
   }
 }
 
-const desktop = window.twimshelf;
+/** The desktop (Electron) app rather than a browser. */
+export const desktop = window.twimshelf?.desktop === true;
 
 export const core = new Core(
   httpTransport({
-    base: desktop?.base ?? '',
-    headers: desktop ? { authorization: `Bearer ${desktop.token}` } : undefined,
     onSignedOut: () => {
-      if (!desktop) location.href = `/login?next=${encodeURIComponent(location.pathname)}`;
+      if (!desktop) location.href = `/login?next=${encodeURIComponent(location.pathname + location.hash)}`;
     },
   }),
 );

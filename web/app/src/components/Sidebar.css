@@ -8,3 +8,7 @@
 .side-icon { display: inline-flex; color: var(--fg-2); }
 .side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-count { font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.mac-titlebar .sidebar { padding-top: 44px; -webkit-app-region: drag; }
+.mac-titlebar .side-item { -webkit-app-region: no-drag; }
+.mac-titlebar .page-head, .mac-titlebar .browse-head { -webkit-app-region: drag; }
+.mac-titlebar .page-head *, .mac-titlebar .browse-head * { -webkit-app-region: no-drag; }

@@ -51,10 +51,18 @@ pub struct Config {
     public: bool,
     /// The window that runs the web app's own background work (see `gate::lease`).
     lease: std::sync::Mutex<Option<(String, std::time::Instant)>>,
+    /// The desktop (Electron) app's server: its window carries this token as a cookie instead of
+    /// signing in (`TL_DESKTOP_TOKEN`, made by the app at each start).
+    desktop: Option<String>,
 }
 
 impl Config {
-    fn dir(&self, name: &str) -> PathBuf { self.data.join(name) }
+    /// A data folder; the desktop app may keep the library and models where the Flutter app had
+    /// them (`TL_LIBRARY`, `TL_MODELS`), so an upgrade finds them.
+    fn dir(&self, name: &str) -> PathBuf {
+        let over = match name { "library" => std::env::var_os("TL_LIBRARY"), "models" => std::env::var_os("TL_MODELS"), _ => None };
+        over.filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| self.data.join(name))
+    }
 }
 
 pub type Shared = Arc<Config>;
@@ -79,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
         web: PathBuf::from(env("TL_WEB", "/app/web")),
         public,
         lease: std::sync::Mutex::new(None),
+        desktop: std::env::var("TL_DESKTOP_TOKEN").ok().filter(|t| t.len() >= 32),
     });
     let port: u16 = env("TL_PORT", "2778").parse()?;
     // the container's health check: is the server answering?
@@ -87,7 +96,8 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(if ok { 0 } else { 1 });
     }
     for d in ["library", "models", "cache", "uploads", "exports", "app"] { std::fs::create_dir_all(config.dir(d))?; }
-    config.auth.prepare(&config.data)?;
+    // the desktop app signs its window in with its token: no web password there
+    if config.desktop.is_none() { config.auth.prepare(&config.data)?; }
     if config.public { eprintln!("access: from anywhere (TL_ALLOW_PUBLIC); put it behind HTTPS"); } else { eprintln!("access: local network only (TL_ALLOW_PUBLIC=true to allow the internet)"); }
 
     // the library is the server's: opened once here (a web client's own `tl_open` is answered
@@ -120,7 +130,14 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::compression::CompressionLayer::new())
         .with_state(config.clone());
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
+    // the desktop app's server ends with the app, even when the app was killed: the app holds
+    // its standard input open, and it closes when the app is gone
+    if config.desktop.is_some() {
+        std::thread::spawn(|| { let mut sink = Vec::new(); let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut sink); std::process::exit(0); });
+    }
+    // the desktop app's server answers only this computer
+    let host = if config.desktop.is_some() { "127.0.0.1" } else { "0.0.0.0" };
+    let listener = tokio::net::TcpListener::bind((host, port)).await?;
     eprintln!("TwimShelf {VERSION} on port {port}, data in {}", config.data.display());
     axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await?;
     Ok(())

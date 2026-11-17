@@ -57,11 +57,22 @@ pub async fn gate(State(cfg): State<Shared>, ConnectInfo(peer): ConnectInfo<Sock
     let path = req.uri().path().to_string();
     if open_path(&path) { return next.run(req).await; }
     if cookie(req.headers(), crate::auth::COOKIE).is_some_and(|c| cfg.auth.valid(&c)) { return next.run(req).await; }
+    if let Some(token) = &cfg.desktop {
+        if cookie(req.headers(), DESKTOP_COOKIE).is_some_and(|c| same(c.as_bytes(), token.as_bytes())) { return next.run(req).await; }
+    }
     // the app's own requests get a plain answer (the page reloads into the sign-in); a page is sent there
     let api = path.starts_with("/api/") || path.starts_with("/f/") || path.starts_with("/gfonts/") || req.method() != Method::GET;
     if api { return (StatusCode::UNAUTHORIZED, "sign in first").into_response(); }
     let next_path = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/");
     Redirect::to(&format!("/login?next={}", urlencode(next_path))).into_response()
+}
+
+/// The desktop app's cookie (see `Config::desktop`).
+pub const DESKTOP_COOKIE: &str = "tl_desktop";
+
+/// Equal, in a time that does not depend on where they differ.
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
 fn urlencode(s: &str) -> String {

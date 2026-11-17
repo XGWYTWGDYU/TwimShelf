@@ -38,7 +38,7 @@ APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool/releases/download/cont
 all_targets() {
   case "$OS" in
     Darwin) echo native-macos native-ios flutter-ios flutter-android ;;
-    Linux) echo flutter-linux flutter-android ;;
+    Linux) echo electron-linux flutter-linux flutter-android ;;
   esac
 }
 
@@ -200,6 +200,46 @@ flutter_defines() {
   echo "${d[@]:-}"
 }
 
+# Node (React front end, Electron): the version in .node-version, from PATH or the build cache
+need_node() {
+  local want; want=$(tr -d ' \n' < "$ROOT/.node-version")
+  if [[ -x "$SDK/node-$want/bin/node" ]]; then export PATH="$SDK/node-$want/bin:$PATH"; fi
+  if have node && [[ $(node -v) == "v$want" ]]; then return 0; fi
+  local os arch; os=$( [[ $OS == Darwin ]] && echo darwin || echo linux ); arch=$(uname -m)
+  [[ $arch == x86_64 ]] && arch=x64; [[ $arch == aarch64 ]] && arch=arm64
+  say "Missing: Node $want"
+  if ask "Download Node $want (about 50 MB) into $SDK?"; then
+    local tar="node-v$want-$os-$arch.tar.xz" tmp; tmp=$(mktemp -d)
+    curl -fL --progress-bar "https://nodejs.org/dist/v$want/$tar" -o "$tmp/$tar"
+    (cd "$tmp" && curl -fsSL "https://nodejs.org/dist/v$want/SHASUMS256.txt" | grep " $tar\$" | shasum -a 256 -c -)
+    mkdir -p "$SDK" && tar -xJf "$tmp/$tar" -C "$SDK" && mv "$SDK/node-v$want-$os-$arch" "$SDK/node-$want" && rm -rf "$tmp"
+    export PATH="$SDK/node-$want/bin:$PATH"
+  fi
+  have node || { [[ $CHECK == 1 ]] && MISSING+=("Node $want") && return 0; fail "Node $want is required"; }
+}
+
+# the React app (web/app/dist), what the server and the desktop app show
+build_web() {
+  need_node
+  export npm_config_cache="$CACHE/npm" ELECTRON_CACHE="$CACHE/electron" electron_config_cache="$CACHE/electron"
+  (cd "$ROOT/web" && npm ci --no-audit --no-fund && npm run check && npm run build)
+}
+
+# the desktop app: React + the server binary in Electron
+build_electron() {   # build_electron <linux|mac>
+  need_rust; build_web
+  # Electron's own binary (npm ci does not run its download step everywhere; cached in $CACHE/electron)
+  (cd "$ROOT/web" && node node_modules/electron/install.js)
+  cargo build --manifest-path "$ROOT/Cargo.toml" -p tl-server --release --locked --target-dir "$CACHE/cargo-target"
+  python3 - "$ROOT/web/electron/product.json" "$(version)" "$(python3 "$ROOT/scripts/apply.py" get flutter.desktop_id)" <<'PY'
+import json, sys
+json.dump({"version": sys.argv[2], "desktopId": sys.argv[3]}, open(sys.argv[1], "w"))
+PY
+  ELECTRON_OUT="$CACHE/electron-out"; local out=$ELECTRON_OUT; rm -rf "$out"
+  (cd "$ROOT/web/electron" && TL_SERVER_BIN="$CACHE/cargo-target/release/twimshelf-server" TL_WEB_DIST="$ROOT/web/app/dist" \
+    TL_ICON="$ROOT/icon.png" TL_ELECTRON_OUT="$out" npx electron-builder --config builder.cjs --"$1" --publish never)
+}
+
 core_for() { FLUTTER="$FLUTTER" "$ROOT/scripts/flutter/build_core.sh" "$1"; }
 
 build_target() {
@@ -243,6 +283,15 @@ build_target() {
       (cd "$ROOT/flutter/app" && "$FLUTTER" pub get && "$FLUTTER" build linux --release $(flutter_defines))
       local arch; arch=$(uname -m); [[ $arch == aarch64 ]] && arch=arm64 || arch=x64
       "$ROOT/scripts/flutter/package_appimage.sh" "$ROOT/flutter/app/build/linux/$arch/release/bundle" "$DIST" "$v" ;;
+    electron-linux)
+      [[ $OS == Linux ]] || fail "electron-linux builds on Linux"
+      build_electron linux
+      cp "$ELECTRON_OUT"/TwimShelf-*.AppImage "$DIST/" ;;
+    electron-macos)
+      # for testing the Linux app's UI on a Mac: not built by default, not published
+      [[ $OS == Darwin ]] || fail "electron-macos builds on macOS"
+      build_electron mac
+      rm -rf "$DIST/TwimShelf Electron.app"; cp -R "$ELECTRON_OUT"/mac*/TwimShelf.app "$DIST/TwimShelf Electron.app" ;;
     docker)
       # the Linux server and the web app; everything is compiled inside the image, so this
       # computer needs only Docker (its own build cache stays in Docker's storage)
@@ -267,6 +316,7 @@ native-ios       the native iPhone/iPad app (unsigned .ipa) macOS with Xcode
 flutter-ios      the Flutter iPhone/iPad app (.ipa)        macOS with Xcode
 flutter-android  the Flutter Android app (.apk per ABI)    macOS or Linux (Windows: build.ps1)
 flutter-linux    the Flutter Linux app (.AppImage)         Linux
+electron-linux   the Linux desktop app, React + Electron (.AppImage)  Linux
 windows          the native Windows app (setup .exe)       Windows: build.ps1
 docker           the Linux server + web app (image, .tar.gz) any computer with Docker (not built by default)
 This computer builds by default: $(all_targets)
@@ -288,6 +338,7 @@ if [[ $CHECK == 1 ]]; then
       flutter-ios) need_xcode; need_rust; need_flutter; need_flutter_apple ;;
       flutter-android) need_rust; need_flutter; need_android ;;
       flutter-linux) need_rust; need_flutter; need_linux_desktop ;;
+      electron-*) need_rust; need_node ;;
       docker) have docker || MISSING+=(Docker) ;;
     esac
   done
