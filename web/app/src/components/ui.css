@@ -1,0 +1,52 @@
+.page { display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.page-head { display: flex; align-items: center; gap: 8px; padding: 14px 24px 10px; min-height: 52px; }
+.page-head h1 { font-size: 20px; font-weight: 700; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-actions { display: flex; gap: 8px; align-items: center; }
+.page-body { flex: 1; overflow: auto; padding: 0 24px 32px; }
+.section { max-width: 720px; margin: 0 auto 22px; }
+.section-title { font-size: 12px; font-weight: 600; color: var(--fg-2); margin: 0 0 6px 12px; }
+.section-box { background: var(--bg-group); border-radius: var(--radius-lg); overflow: hidden; }
+.section-footer { font-size: 12px; color: var(--fg-2); margin: 6px 12px 0; }
+.row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 8px 14px; border: 0; background: none; text-align: left; }
+.row + .row { border-top: 0.5px solid var(--line); }
+.row-click { cursor: default; }
+.row-click:hover { background: var(--bg-hover); }
+.row-danger .row-title { color: var(--danger); }
+.row-icon { display: inline-flex; width: 22px; justify-content: center; color: var(--accent); }
+.row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.row-title { font-size: 13px; }
+.row-subtitle { font-size: 12px; color: var(--fg-2); }
+.row-trailing { color: var(--fg-2); display: inline-flex; align-items: center; gap: 8px; }
+.row-chevron { color: var(--fg-3); font-size: 18px; }
+.btn { border: 0; border-radius: 7px; padding: 5px 12px; background: var(--bg-hover); cursor: default; white-space: nowrap; }
+.btn:hover:not(:disabled) { filter: brightness(0.96); }
+.btn:disabled { opacity: 0.45; }
+.btn-primary { background: var(--accent); color: var(--accent-fg); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-plain { background: none; color: var(--accent); }
+.icon-btn { border: 0; background: none; width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; color: var(--fg-2); }
+.icon-btn:hover { background: var(--bg-hover); color: var(--fg); }
+.icon-btn.active { color: var(--accent); background: var(--bg-selected); }
+.toggle { width: 38px; height: 22px; border-radius: 11px; border: 0; background: var(--fg-3); position: relative; padding: 0; transition: background 0.15s; flex: none; }
+.toggle span { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+.toggle.on { background: var(--success); }
+.toggle.on span { transform: translateX(16px); }
+.toggle:disabled { opacity: 0.4; }
+.field { width: 100%; padding: 6px 10px; border-radius: 7px; border: 0.5px solid var(--line); background: var(--bg-elevated); outline: none; }
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--bg-selected); }
+.progress { height: 4px; border-radius: 2px; background: var(--bg-hover); overflow: hidden; position: relative; }
+.progress > div { height: 100%; background: var(--accent); transition: width 0.2s; }
+.progress-indeterminate { position: absolute; width: 30% !important; animation: slide 1.2s infinite ease-in-out; }
+@keyframes slide { from { left: -30%; } to { left: 100%; } }
+.spinner { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--fg-3); border-top-color: transparent; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 80px 20px; color: var(--fg-2); text-align: center; }
+.empty-icon { font-size: 40px; color: var(--fg-3); }
+.empty-title { font-size: 15px; font-weight: 600; color: var(--fg); }
+.dialog-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 100; animation: fade 0.12s; }
+.dialog { background: var(--bg-elevated); border-radius: var(--radius-lg); box-shadow: var(--shadow); width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; padding: 20px; outline: none; }
+.dialog-wide { width: min(680px, calc(100vw - 32px)); }
+.dialog-title { margin: 0 0 10px; font-size: 15px; font-weight: 700; }
+.dialog-body { overflow: auto; color: var(--fg); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+@keyframes fade { from { opacity: 0; } }

@@ -1,0 +1,10 @@
+.sidebar { width: var(--sidebar-w); flex: none; height: 100%; overflow-y: auto; background: var(--bg-sidebar); border-right: 0.5px solid var(--line); padding: 14px 10px; }
+.side-title { font-size: 11px; font-weight: 600; color: var(--fg-3); margin: 14px 10px 4px; }
+.side-group { display: flex; flex-direction: column; gap: 1px; }
+.side-item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 7px; color: var(--fg); }
+.side-item:hover { background: var(--bg-hover); }
+.side-item.on { background: var(--bg-selected); }
+.side-item.on .side-icon { color: var(--accent); }
+.side-icon { display: inline-flex; color: var(--fg-2); }
+.side-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-count { font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; }

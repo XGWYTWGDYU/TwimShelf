@@ -1,0 +1,10 @@
+{
+  "name": "twimshelf-web",
+  "private": true,
+  "workspaces": ["packages/*", "app", "electron"],
+  "scripts": {
+    "dev": "npm run dev -w app",
+    "build": "npm run build -w app",
+    "check": "tsc -p packages/core && tsc -p app"
+  }
+}

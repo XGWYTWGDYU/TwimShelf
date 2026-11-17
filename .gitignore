@@ -65,3 +65,8 @@ __pycache__/
 /windows/TwimShelf/bin
 /windows/TwimShelf/obj
 /windows/TwimShelf/lib
+/web/node_modules/
+/web/*/node_modules/
+/web/*/dist/
+/web/*/out/
+/web/*/release/

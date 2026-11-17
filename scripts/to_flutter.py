@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export the Apple string catalog to deterministic Flutter language assets.
+"""Export the Apple string catalog to deterministic Flutter and React (web/) language assets.
 
   python3 scripts/to_flutter.py
   python3 scripts/to_flutter.py CATALOG --out OUTPUT_DIRECTORY
@@ -47,10 +47,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("catalog", nargs="?", type=Path,
                         default=ROOT / "Apple/Resources/Localizable.xcstrings")
-    parser.add_argument("--out", type=Path, default=ROOT / "flutter/app/assets/l10n")
+    parser.add_argument("--out", type=Path, action="append",
+                        help="output folder (repeatable); default: Flutter's assets and the React core's")
     args = parser.parse_args()
+    outs = args.out or [ROOT / "flutter/app/assets/l10n", ROOT / "web/packages/core/src/generated/strings"]
     with args.catalog.open(encoding="utf-8") as source:
-        result = export(json.load(source), args.out)
+        catalog = json.load(source)
+    for out in outs:
+        result = export(catalog, out)
     print(f"Exported {len(result['en'])} keys in {len(LANGS)} languages")
 
 
