@@ -187,16 +187,18 @@ public sealed class Installer(Product product)
             {
                 // back as it was: what was added goes, what was moved aside returns
                 foreach (var rel in added) try { File.Delete(Path.Combine(folder, rel)); } catch { }
+                var restored = true;
                 foreach (var rel in movedAside)
-                    try { var dst = Path.Combine(folder, rel); if (File.Exists(dst)) File.Delete(dst); File.Move(Path.Combine(backup, rel), dst); } catch { }
-                try { Directory.Delete(backup, true); } catch { }
+                    try { var dst = Path.Combine(folder, rel); if (File.Exists(dst)) File.Delete(dst); File.Move(Path.Combine(backup, rel), dst); } catch { restored = false; }
+                // (a file that could not go back has its only copy there)
+                if (restored) try { Directory.Delete(backup, true); } catch { }
                 throw;
             }
             try { Directory.Delete(backup, true); } catch { /* in use still: cleared next time */ }
             RemoveEmptyFolders(folder);
         });
         progress.Report(0.95);
-        var exe = Path.Combine(folder, product.Executable);
+        var exe = Path.Combine(folder, Path.GetFileName(product.Executable));
         await Shortcut(StartMenu, exe, folder, "");
         if (desktopShortcut) await Shortcut(Desktop, exe, folder, "");
         else if (File.Exists(Desktop)) File.Delete(Desktop);
@@ -269,10 +271,12 @@ public sealed class Installer(Product product)
                 $files = @((Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json).files) + @('payload.json', 'uninstall')
                 foreach ($f in $files) { $p = Join-Path $root $f; if (-not (Gone $p)) { $left += $f } }
                 if ($left.Count -eq 0 -and -not (Gone $manifest)) { $left += 'install-manifest.json' }
+                Get-ChildItem -LiteralPath $root -Directory -Force -Filter '.setup-backup-*' | ForEach-Object { Gone $_.FullName | Out-Null }
                 Get-ChildItem -LiteralPath $root -Directory -Recurse -Force | Sort-Object { $_.FullName.Length } -Descending | ForEach-Object { if (-not (Get-ChildItem -LiteralPath $_.FullName -Force)) { Remove-Item -LiteralPath $_.FullName -Force } }
                 if (-not (Get-ChildItem -LiteralPath $root -Force)) { Remove-Item -LiteralPath $root -Force }
-            } elseif (-not (Get-ChildItem -LiteralPath $root -Recurse -Force -Filter 'twimshelf-data.json')) {
-                if (-not (Gone $root)) { $left += $root }
+            } else {
+                # no list of what was installed: the program goes, and the folder may hold anything else
+                foreach ($f in @({{Q(Path.GetFileName(product.Executable))}}, 'payload.json')) { $p = Join-Path $root $f; if (-not (Gone $p)) { $left += $f } }
             }
             if ($left.Count -eq 0) {
                 Remove-Item -LiteralPath {{Q(@"HKCU:\" + UninstallKey)}} -Recurse -Force

@@ -145,6 +145,14 @@ impl Store {
     /// Records of a newer app version stored here, not applied yet.
     pub fn pending_op_count(&self) -> rusqlite::Result<i64> { self.conn().query_row("SELECT count(*) FROM op_pending", [], |r| r.get(0)) }
 
+    /// Of those, the ones only a newer version understands (the rest wait for another device's
+    /// clock, which is ahead: updating the app would not help).
+    pub fn newer_op_count(&self) -> rusqlite::Result<i64> {
+        let mut st = self.conn().prepare_cached("SELECT o.body FROM op_pending p JOIN op o ON o.device=p.device AND o.seq=p.seq")?;
+        let bodies = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(bodies.iter().filter(|b| !matches!(serde_json::from_str::<serde_json::Value>(b).map_err(drop).and_then(|v| parse_op(v).map_err(drop)), Ok(op) if !matches!(op, Op::Unknown(_)))).count() as i64)
+    }
+
     /// After an update: applies stored records whose kind this version now understands.
     pub fn retry_pending_ops(&self, blob_exists: impl Fn(&str, &str) -> bool) -> rusqlite::Result<usize> {
         let rows: Vec<(String, i64, String)> = {

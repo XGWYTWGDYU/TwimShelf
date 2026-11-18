@@ -126,7 +126,8 @@ void main() {
     await open(t);
     await t.enterText(find.byKey(_links), _link);
     await t.pump();
-    final modifier = Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
+    // ⌘ on an iPad's keyboard, Ctrl on Android's
+    final modifier = Platform.isIOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
     await t.sendKeyDownEvent(modifier);
     await t.sendKeyEvent(LogicalKeyboardKey.enter);
     await t.sendKeyUpEvent(modifier);
@@ -147,6 +148,9 @@ void main() {
     await pump(t);
     await t.tap(find.byKey(const ValueKey('open')));
     await settle(t);
+    // the field is focused first (a phone does not focus it on opening)
+    await t.showKeyboard(find.byKey(_links));
+    await t.pump();
     Future<void> twice() async {
       await t.tap(find.byKey(_links));
       await t.pump(const Duration(milliseconds: 50));

@@ -28,16 +28,13 @@ class StoragePage extends StatefulWidget {
 Future<Map<String, List<String>>> storagePlaces(String thumbnails) async {
   final app = await TlNative.appPaths();
   final places = <String, List<String>>{
-    // desktops: the folder the program was installed into
-    'app': app.isNotEmpty ? app : [File(OS.resolvedExecutable).parent.path],
+    'app': app,
     'thumbnails': [thumbnails],
     'cache': [],
   };
   final sep = OS.pathSeparator;
   final thumbPath = Directory(thumbnails).absolute.path;
-  // on a desktop the temporary folder is shared with every other program of this user: not ours to count
-  final phone = OS.isIOS || OS.isAndroid;
-  for (final dir in [await getApplicationCacheDirectory(), if (phone) await getTemporaryDirectory()]) {
+  for (final dir in [await getApplicationCacheDirectory(), await getTemporaryDirectory()]) {
     if (!dir.existsSync()) continue;
     // a cache folder holding the thumbnails: its other entries, so nothing counts twice
     if (thumbPath.startsWith('${dir.absolute.path}$sep')) {

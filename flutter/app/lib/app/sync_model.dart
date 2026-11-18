@@ -42,8 +42,6 @@ class SyncModel extends ChangeNotifier {
   /// What this device is, announced with its name so the others show the right type.
   static String deviceKind = '';
   static Future<String> _kind() async {
-    if (OS.isMacOS) return 'mac';
-    if (OS.isLinux) return 'linux';
     if (OS.isIOS) return await ApplePlatform.instance.deviceKind() ?? 'iphone';
     if (OS.isAndroid) {
       final view = WidgetsBinding.instance.platformDispatcher.views.first;
@@ -59,11 +57,6 @@ class SyncModel extends ChangeNotifier {
   Future<void> start() async {
     deviceName = await ApplePlatform.instance.deviceName() ?? deviceName;
     deviceKind = await _kind();
-    // the web build: the device is the server (its name and kind, as it syncs on its own too)
-    if (OS.isWeb) {
-      deviceName = serverInfo.json['device_name'] as String? ?? 'TwimShelf Linux Server';
-      deviceKind = 'linux';
-    }
     await Multicast.acquire();
     final r = await Secrets.read(_keyName);
     accountKey = r is SecretValue<String?> ? r.value : null;
@@ -92,7 +85,7 @@ class SyncModel extends ChangeNotifier {
   void _startCore() {
     try {
       Core.syncStart(accountKey ?? '', deviceName);
-      Core.discoveryStart(OS.isWeb ? serverInfo.json['sync_service'] as String? ?? serviceType : serviceType, deviceName, deviceKind);
+      Core.discoveryStart(serviceType, deviceName, deviceKind);
     } catch (e) {
       note = '$e';
     }
@@ -115,12 +108,21 @@ class SyncModel extends ChangeNotifier {
     } catch (_) {}
   }
 
+  bool _adopting = false;
+
   Future<void> _adopt(String key) async {
-    final w = await Secrets.write(_keyName, key);
-    if (w is SecretsUnavailable) return;
-    accountKey = key;
-    Core.discoveryStop();
-    _startCore();
+    // (asked again every refresh until the key is written)
+    if (_adopting) return;
+    _adopting = true;
+    try {
+      final w = await Secrets.write(_keyName, key);
+      if (w is SecretsUnavailable) return;
+      accountKey = key;
+      Core.discoveryStop();
+      _startCore();
+    } finally {
+      _adopting = false;
+    }
   }
 
   /// The account's other devices found on the network.

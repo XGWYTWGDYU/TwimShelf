@@ -1,17 +1,16 @@
 // Shared building blocks. Pages build on these so the whole app looks alike; see ui.css.
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { L } from '@twimshelf/core';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
+import { Toolbar } from './Toolbar';
 import './ui.css';
 
-export function Page({ title, actions, children, back }: { title: ReactNode; actions?: ReactNode; children: ReactNode; back?: () => void }) {
+export function Page({ title, subtitle, actions, children, back }: {
+  title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode; back?: () => void;
+}) {
   return (
     <div className="page">
-      <header className="page-head">
-        {back && <button className="icon-btn" onClick={back} aria-label={L('web.back')}><ChevronLeft size={18} /></button>}
-        <h1>{title}</h1>
-        <div className="page-actions">{actions}</div>
-      </header>
+      <Toolbar title={title} subtitle={subtitle} back={back}>{actions}</Toolbar>
       <div className="page-body">{children}</div>
     </div>
   );
@@ -39,7 +38,7 @@ export function Row({ icon, title, subtitle, trailing, onClick, danger }: {
         <span className="row-title">{title}</span>
         {subtitle && <span className="row-subtitle">{subtitle}</span>}
       </span>
-      {trailing !== undefined ? <span className="row-trailing">{trailing}</span> : onClick ? <span className="row-chevron">›</span> : null}
+      {trailing !== undefined ? <span className="row-trailing">{trailing}</span> : onClick ? <span className="row-chevron"><ChevronRight size={14} strokeWidth={2.2} /></span> : null}
     </Tag>
   );
 }
@@ -57,10 +56,11 @@ export function Toggle({ checked, onChange, disabled, label }: { checked: boolea
   );
 }
 
-export function TextField({ value, onChange, placeholder, type = 'text', autoFocus, onEnter }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; type?: string; autoFocus?: boolean; onEnter?: () => void;
+export function TextField({ value, onChange, placeholder, type = 'text', autoFocus, selectOnFocus, onEnter }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; type?: string; autoFocus?: boolean; selectOnFocus?: boolean; onEnter?: () => void;
 }) {
   return <input className="field" type={type} value={value} placeholder={placeholder} autoFocus={autoFocus}
+    onFocus={selectOnFocus ? (e) => e.currentTarget.select() : undefined}
     onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) onEnter?.(); }} />;
 }
 
@@ -76,24 +76,34 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: Reac
   return <div className="empty">{icon && <div className="empty-icon">{icon}</div>}<div className="empty-title">{title}</div>{children}</div>;
 }
 
-/** A modal dialog; Esc and a click outside close it. */
-export function Dialog({ title, children, actions, onClose, wide }: { title?: ReactNode; children?: ReactNode; actions?: ReactNode; onClose: () => void; wide?: boolean }) {
+/** The dialogs open now, the newest last: Esc belongs to the one on top. */
+const openDialogs: object[] = [];
+
+/** A modal dialog; Esc closes it, and so does a click outside unless it is `modal` (it asks something). */
+export function Dialog({ title, children, actions, onClose, wide, modal }: { title?: ReactNode; children?: ReactNode; actions?: ReactNode; onClose: () => void; wide?: boolean; modal?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
     const previous = document.activeElement;
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close.current(); } };
+    const self = {};
+    openDialogs.push(self);
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || openDialogs[openDialogs.length - 1] !== self || document.querySelector('.menu-scrim')) return;
+      e.stopPropagation();
+      close.current();
+    };
     window.addEventListener('keydown', key, true);
     if (!box.current?.contains(document.activeElement)) box.current?.focus();
     return () => {
       window.removeEventListener('keydown', key, true);
+      openDialogs.splice(openDialogs.indexOf(self), 1);
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, []);
   return (
-    <div className="dialog-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="dialog-scrim" onMouseDown={(e) => { if (!modal && e.target === e.currentTarget) onClose(); }}>
       <div className={`dialog${wide ? ' dialog-wide' : ''}`} ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={title ? titleId : undefined}>
         {title && <h3 className="dialog-title" id={titleId}>{title}</h3>}
         {children && <div className="dialog-body">{children}</div>}

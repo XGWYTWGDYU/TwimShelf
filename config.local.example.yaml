@@ -18,9 +18,11 @@
 # flutter:
 #   apple_bundle_id: com.example.twimshelf.flutter
 #   android_package: com.example.twimshelf
-#   desktop_id: com.example.twimshelf
 #   development_team: ABCDE12345
 #   share_extension_ios: true
+
+# desktop:
+#   app_id: com.example.twimshelf
 
 # Android 发布签名（只在本机构建时用；GitHub Actions 用仓库的 Secrets）。
 # 密码存在钥匙串里：security add-generic-password -s "<keychain_service>" -a twimshelf -w

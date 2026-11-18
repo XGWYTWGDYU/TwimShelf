@@ -167,14 +167,14 @@ public sealed partial class BrowsePage : UserControl, IShellPage
             running = sb;
             sb.Begin();
         }
-        void Set(bool w)
+        void Set(bool w, bool animate = true)
         {
             if (w == wide) return;
             wide = w;
             _search.Compact = !w;
-            Place(true);
+            Place(animate && !_masonry.IsLayingOut);
         }
-        SizeChanged += (_, _) => Place(false);
+        SizeChanged += (_, _) => { last = _masonry.Scroll.VerticalOffset; travel = 0; Place(false); };
         _buttons.SizeChanged += (_, _) => { if (running == null) Place(false); };
         _masonry.Scroll.ViewChanged += (_, _) =>
         {
@@ -182,6 +182,7 @@ public sealed partial class BrowsePage : UserControl, IShellPage
             var d = y - last;
             last = y;
             if (y < BarSpace || _search.HasFocus) { travel = 0; Set(true); return; }
+            if (_masonry.IsLayingOut) return;
             // a little travel the same way first: small jitters of the wheel or touch don't flicker it
             travel = Math.Sign(d) == Math.Sign(travel) ? travel + d : d;
             if (travel > 24) Set(false);
@@ -263,6 +264,7 @@ public sealed partial class BrowsePage : UserControl, IShellPage
 
     void OnPrefs()
     {
+        _search.UpdateSearchIcon();
         var d = Prefs.Instance.DensityPortrait * 3 + Prefs.Instance.DensityLandscape;
         if (d != _density) { _density = d; UpdateColumns(); }
     }

@@ -63,6 +63,7 @@ final class ActivityCardView: UIView {
     private let bar = SlimProgressBar()
     private var previewPath: String?
     private var kind: Activity.Kind?
+    private var mascotName: String?
 
     init(compact: Bool = false) {
         super.init(frame: .zero)
@@ -114,10 +115,11 @@ final class ActivityCardView: UIView {
         titleLabel.text = a.title
         detailLabel.text = a.detail
         bar.set(a.progress)
-        if kind != a.kind {
+        let mascot: String? = !Mascot.isOn ? nil : a.kind == .download ? "bag" : a.kind == .tagging ? "camera" : nil
+        if kind != a.kind || mascotName != mascot {
             kind = a.kind
+            mascotName = mascot
             // the mascot mode: shopping for a download, the camera for AI tagging
-            let mascot: String? = !Mascot.isOn ? nil : a.kind == .download ? "bag" : a.kind == .tagging ? "camera" : nil
             symbol.image = mascot.map { Mascot.icon($0, side: 40) } ?? UIImage(systemName: Self.symbolName(a.kind))
             // the crab lies on the card as it is, with no tile around it
             thumbHost.backgroundColor = mascot != nil ? .clear : UIColor.tintColor.withAlphaComponent(0.15)
@@ -152,7 +154,7 @@ final class ActivityCardView: UIView {
 final class ActivityPanel: UIView {
     private let stack = UIStackView()
     private var cards: [Activity.Kind: ActivityCardView] = [:]
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -177,12 +179,14 @@ final class ActivityPanel: UIView {
         isHidden = true
         alpha = 0
         accessibilityIdentifier = "activityPanel"
-        observer = NotificationCenter.default.addObserver(forName: ActivityCenter.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.render(ActivityCenter.shared.activities) }
+        observers = [ActivityCenter.changed, Mascot.changed].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.render(ActivityCenter.shared.activities) }
+            }
         }
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { observer.map(NotificationCenter.default.removeObserver) }
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
     func render(_ list: [Activity]) {
         let kinds = Set(list.map(\.kind))

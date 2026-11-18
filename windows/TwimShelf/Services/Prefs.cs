@@ -95,8 +95,6 @@ public sealed class Prefs
     public bool AboutExtras { get => Bool("about.extras", false); set => Set("about.extras", value); }
     /// 按帖子分组 in 浏览.
     public bool FeedGrouped { get => Bool("feed.grouped", true); set => Set("feed.grouped", value); }
-    /// 视频禁用手势.
-    public bool PlayerGesturesOff { get => Bool("player.noGestures", false); set => Set("player.noGestures", value); }
     /// How many cards a row of 浏览 holds: 0 fewer, 1 medium, 2 more. The other apps keep one per
     /// orientation; a Windows window has none, so both are set together and the landscape one read.
     public int DensityPortrait { get => (int)(Long("feed.density.portrait") ?? 1); set => Set("feed.density.portrait", value); }

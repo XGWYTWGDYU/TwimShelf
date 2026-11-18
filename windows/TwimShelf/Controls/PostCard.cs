@@ -38,7 +38,7 @@ public sealed partial class PostCard : UserControl
     readonly HyperlinkButton _link = new() { Padding = new Thickness(0), Margin = new Thickness(0, 4, 0, 0) };
     readonly StackPanel _tags = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
     readonly Grid _tagRow;
-    readonly double _width;
+    double _width;
     CancellationTokenSource? _loading;
     SearchMarks _marks = SearchMarks.None;
 
@@ -70,7 +70,10 @@ public sealed partial class PostCard : UserControl
         // a tap on the media opens the viewer; one on the page arrows only turns the page
         _mediaArea.Tapped += (_, e) => { if (!InsideButton(e.OriginalSource as DependencyObject)) Open?.Invoke(Media[Page]); };
         _mediaArea.PointerWheelChanged += OnWheel;
-        _link.Click += (_, _) => { if (Media.Count > 0 && Media[0].Url is { } u) _ = Windows.System.Launcher.LaunchUriAsync(new Uri(u)); };
+        _link.Click += (_, _) =>
+        {
+            if (Media.Count > 0 && Uri.TryCreate(Media[0].Url, UriKind.Absolute, out var u) && u.Scheme is "http" or "https") _ = Windows.System.Launcher.LaunchUriAsync(u);
+        };
 
         var add = new Button
         {
@@ -205,6 +208,14 @@ public sealed partial class PostCard : UserControl
     /// Height of the card's media for a width: the media's own shape (4:5 until known), kept within reason.
     public static double MediaHeight(FeedItem i, double width) => width / i.CardAspectRatio;
 
+    public void SetWidth(double width)
+    {
+        if (Math.Abs(width - _width) < 0.5) return;
+        _width = width;
+        Width = width;
+        if (Media.Count > 0) _mediaArea.Height = MediaHeight(Media[Page], width);
+    }
+
     public void Bind(List<FeedItem> media, int page, SearchMarks marks, bool highlighted)
     {
         Media = media;
@@ -299,8 +310,8 @@ public sealed partial class PostCard : UserControl
         var p = Math.Clamp(Page + by, 0, Media.Count - 1);
         if (p == Page) return;
         Page = p;
-        PageChanged?.Invoke(p);
         ShowPage();
+        PageChanged?.Invoke(p);
     }
 
     void LoadMedia()

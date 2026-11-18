@@ -8,13 +8,11 @@ import 'package:share_plus/share_plus.dart';
 import '../l10n/l10n.dart';
 import '../platform/apple_platform.dart';
 import '../platform/os.dart';
-import '../platform/files.dart';
 
 const _channel = MethodChannel('org.twimshelf/share_inbox');
 
-/// The share button of the viewers. iOS and the Mac: the system's sheet, which holds both copying
-/// and the other apps. Android: its sheet has no copying, so 拷贝 stands beside it. Linux has
-/// no such sheet: 拷贝 and 复制到.
+/// The share button of the viewers. iOS: the system's sheet, which holds both copying and the
+/// other apps. Android: its sheet has no copying, so 拷贝 stands beside it.
 Future<void> shareMedia(BuildContext context, String path, {Rect? anchor}) async {
   if (await ApplePlatform.instance.share([path])) return;
   if (!context.mounted) return;
@@ -63,14 +61,12 @@ Future<void> _copy(BuildContext context, String path) async {
 }
 
 Future<void> _others(String path, Rect? anchor) async {
-  if (OS.isWeb) return downloadToBrowser(path);
   try {
     await SharePlus.instance.share(ShareParams(files: [XFile(path)], sharePositionOrigin: anchor));
   } catch (_) {}
 }
 
 Future<void> _copyTo(BuildContext context, String path) async {
-  if (OS.isWeb) return downloadToBrowser(path);
   final place = await getSaveLocation(suggestedName: path.split(RegExp(r'[/\\\\]')).last);
   if (place == null) return;
   try {

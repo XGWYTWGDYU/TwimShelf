@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
 import 'package:tl_core/tl_core.dart';
 import 'package:twimshelf/platform/video.dart';
-import 'package:twimshelf/platform/audio_routes.dart';
 
 class FakeRoutes implements HeadphoneRoutes {
   bool connected = false;
@@ -164,26 +163,11 @@ void main() {
       await expectLater(player.play(), throwsStateError);
     },
   );
-  test('unknown settings/routes fail closed; OS route classification is conservative', () {
+  test('unknown settings fail closed', () {
     expect(headphonesOnlySetting(null), isFalse);
     expect(headphonesOnlySetting('0'), isFalse);
     expect(headphonesOnlySetting('true'), isTrue);
     expect(headphonesOnlySetting('unexpected'), isTrue);
-    expect(
-      isPrivateLinuxOutput({'active_port': 'analog-output-headphones'}),
-      isTrue,
-    );
-    expect(
-      isPrivateLinuxOutput({'active_port': 'analog-output-speaker'}),
-      isFalse,
-    );
-    expect(
-      isPrivateLinuxOutput({
-        'properties': {'device.bus': 'usb'},
-      }),
-      isTrue,
-    );
-    expect(isPrivateLinuxOutput({}), isFalse);
   });
   FeedItem item({String id = 'video-1', MediaKind kind = MediaKind.video}) =>
       FeedItem(

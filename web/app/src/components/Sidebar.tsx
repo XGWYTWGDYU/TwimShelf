@@ -1,58 +1,147 @@
-import { Folder, Folders, Image, Images, Layers, Settings, Trash2, Video, Shapes, CircleAlert, CircleCheck, Tags } from 'lucide-react';
-import type { ReactNode } from 'react';
-import { L } from '@twimshelf/core';
+// The sidebar: a source list as the native one (MacSidebarViewController): 资料库 (浏览), 媒体类型,
+// 文件夹 (all folders, then each), 其他 (the collections and the recycle bin), App (设置). Counts on
+// the trailing side; a folder's menu renames or deletes it; the 文件夹 rows offer a new folder.
+// 190–320 px wide (drag its edge), hidden with the toolbar's button, and it folds away by itself
+// when the window gets narrow and comes back when it is wide again (as in Mail).
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { CheckCircle2, Folder, GalleryVerticalEnd, Image, Images, Layers2, PanelLeft, Settings, SquareDashed, TriangleAlert, Trash2, Video, BadgeCheck } from 'lucide-react';
+import { L, store } from '@twimshelf/core';
 import { useStore } from '../lib/hooks';
 import { folders, stats } from '../lib/library';
-import { href, useRoute, type Route } from '../lib/router';
+import { folderRoute, go, href, useRoute, type Route } from '../lib/router';
+import { openMenu, type MenuEntry } from './Menu';
+import { createFolder, deleteFolder, renameFolder } from '../lib/folderActions';
+import { MascotSwap, useMascotPress, type MascotName } from './Mascot';
 import './Sidebar.css';
+
+function readNumber(k: string, d: number): number { try { const v = Number(localStorage.getItem(k)); return v > 0 ? v : d; } catch { return d; } }
+function save(k: string, v: string): void { try { localStorage.setItem(k, v); } catch { /* private window */ } }
+
+/** Shown or hidden (by hand, or by a narrow window). */
+export const sidebarShown = store(true);
+const byHand = { hidden: false };
+export function toggleSidebar(): void {
+  const on = !sidebarShown.get();
+  byHand.hidden = !on;
+  sidebarShown.set(on);
+}
+const width = store(Math.min(320, Math.max(190, readNumber('sidebar.width', 242))));
 
 function same(a: Route, b: Route): boolean {
   return href(a) === href(b);
 }
 
-function Item({ to, icon, label, count }: { to: Route; icon: ReactNode; label: string; count?: number }) {
+function Row({ to, icon, mascotName, label, count, tint, menu }: { to: Route; icon: ReactNode; mascotName?: MascotName; label: string; count?: number | null; tint?: string; menu?: () => MenuEntry[] }) {
   const r = useRoute();
   const on = same(r, to) || (to.page === 'settings' && r.page === 'settings');
+  const { mascot, phase, pulse } = useMascotPress(mascotName);
+  const activate = () => { pulse(); go(to); };
   return (
-    <a className={`side-item${on ? ' on' : ''}`} href={href(to)}>
-      <span className="side-icon">{icon}</span>
+    <div className={`side-row${on ? ' on' : ''}`} role="treeitem" tabIndex={0} aria-selected={on}
+      onMouseDown={(e) => { if (e.button === 0) activate(); }}
+      onClick={(e) => { if (e.detail === 0) activate(); }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        activate();
+      }}
+      onContextMenu={menu ? (e) => openMenu(e, menu()) : undefined}>
+      <span className="side-icon" style={tint ? { color: tint } : undefined}><MascotSwap name={mascot} phase={phase} size={20}>{icon}</MascotSwap></span>
       <span className="side-label">{label}</span>
-      {count !== undefined && <span className="side-count">{count}</span>}
-    </a>
+      {count != null && <span className="side-count">{count}</span>}
+    </div>
   );
 }
+
+function Section({ title, children, menu }: { title: string; children: ReactNode; menu?: () => MenuEntry[] }) {
+  return (
+    <div className="side-section" role="group">
+      <div className="side-title" onContextMenu={menu ? (e) => openMenu(e, menu()) : undefined}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+const newFolderMenu = (): MenuEntry[] => [{ label: L('common.newFolderEllipsis'), run: () => void createFolder().then((n) => n && go(folderRoute(n))) }];
 
 export function Sidebar() {
   const s = useStore(stats);
   const f = useStore(folders);
-  const z = 16;
+  const shown = useStore(sidebarShown);
+  const w = useStore(width);
+  const r = useRoute();
+  const z = 16, sw = 2;
+
+  // folds away by itself in a narrow window (under 900), back when wider than 1000
+  useEffect(() => {
+    let auto = false;
+    const fit = () => {
+      const ww = window.innerWidth;
+      if (ww < 900 && sidebarShown.get() && !byHand.hidden) { auto = true; sidebarShown.set(false); }
+      else if (ww > 1000 && !sidebarShown.get() && auto) { auto = false; sidebarShown.set(true); }
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
+
+  // a folder that was open and is gone: back to all folders
+  useEffect(() => {
+    if (r.page === 'grid' && r.place === 'folder' && f && !f.folders.some((x) => x.name === r.folder)) go({ page: 'folders' });
+  }, [f, r]);
+
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const folderMenu = (name: string) => (): MenuEntry[] => [
+    { label: L('folder.renameShort'), run: () => void renameFolder(name).then((n) => { if (n && r.page === 'grid' && r.folder === name) go(folderRoute(n)); }) },
+    { label: L('folder.deleteNamed', name), run: () => void deleteFolder(name) },
+    'separator',
+    ...newFolderMenu(),
+  ];
+  const trashed = s?.trashed ?? 0;
   return (
-    <nav className="sidebar">
-      <div className="side-group">
-        <Item to={{ page: 'browse' }} icon={<Layers size={z} />} label={L('place.browse')} />
-        <Item to={{ page: 'settings' }} icon={<Settings size={z} />} label={L('place.settings')} />
+    // folds away and comes back with a slide (the split view's animator), its contents keeping
+    // their width meanwhile
+    <div className={`sidebar-fold${shown ? '' : ' folded'}${dragging ? ' dragging' : ''}`} style={{ width: shown ? w : 0 }} aria-hidden={!shown}>
+    <nav className="sidebar" style={{ width: w }} role="tree" aria-label="sidebar">
+      <div className="side-top">
+        <button className="side-toggle" aria-label={L('menu.showSidebar')} title={L('menu.showSidebar')} onClick={toggleSidebar}><PanelLeft size={16} strokeWidth={1.8} /></button>
       </div>
-      <div className="side-title">{L('sidebar.mediaTypes')}</div>
-      <div className="side-group">
-        <Item to={{ page: 'browse', kind: 'photo' }} icon={<Image size={z} />} label={L('place.photos')} count={s?.photos} />
-        <Item to={{ page: 'browse', kind: 'video' }} icon={<Video size={z} />} label={L('place.videos')} count={s?.videos} />
+      <div className="side-scroll">
+        <Section title={L('sidebar.library')}>
+          <Row to={{ page: 'browse' }} mascotName="home" icon={<Layers2 size={z} strokeWidth={sw} />} label={L('place.browse')} />
+        </Section>
+        <Section title={L('sidebar.mediaTypes')}>
+          <Row to={{ page: 'grid', place: 'photos' }} mascotName="image" icon={<Image size={z} strokeWidth={sw} />} label={L('place.photos')} count={f?.photos ?? s?.photos} />
+          <Row to={{ page: 'grid', place: 'videos' }} mascotName="video" icon={<Video size={z} strokeWidth={sw} />} label={L('place.videos')} count={f?.videos ?? s?.videos} />
+        </Section>
+        <Section title={L('place.folders')} menu={newFolderMenu}>
+          <Row to={{ page: 'folders' }} mascotName="folder" icon={<GalleryVerticalEnd size={z} strokeWidth={sw} />} label={L('place.folders')} menu={newFolderMenu} />
+          {f?.folders.map((x) => (
+            <Row key={x.name} to={folderRoute(x.name)} mascotName="folder" icon={<Folder size={z} strokeWidth={sw} />} label={x.name} count={x.count} menu={folderMenu(x.name)} />
+          ))}
+        </Section>
+        <Section title={L('sidebar.other')}>
+          <Row to={{ page: 'grid', place: 'loose' }} icon={<SquareDashed size={z} strokeWidth={sw} />} label={L('place.loose')} />
+          <Row to={{ page: 'grid', place: 'album' }} icon={<Images size={z} strokeWidth={sw} />} label={L('place.album')} />
+          <Row to={{ page: 'grid', place: 'unreviewed' }} icon={<BadgeCheck size={z} strokeWidth={sw} className="seal-open" />} label={L('place.unreviewed')} />
+          <Row to={{ page: 'grid', place: 'reviewed' }} icon={<CheckCircle2 size={z} strokeWidth={sw} />} label={L('place.reviewed')} />
+          {(s?.bad ?? 0) > 0 && <Row to={{ page: 'grid', place: 'bad' }} icon={<TriangleAlert size={z} strokeWidth={sw} />} label={L('place.bad')} count={s?.bad} tint="var(--danger)" />}
+          <Row to={{ page: 'grid', place: 'trash' }} icon={<Trash2 size={z} strokeWidth={sw} />} label={L('place.trash')} count={trashed > 0 ? trashed : null} />
+        </Section>
+        <Section title={L('sidebar.app')}>
+          <Row to={{ page: 'settings' }} mascotName="settings" icon={<Settings size={z} strokeWidth={sw} />} label={L('place.settings')} />
+        </Section>
       </div>
-      <div className="side-title">{L('place.folders')}</div>
-      <div className="side-group">
-        <Item to={{ page: 'folders' }} icon={<Folders size={z} />} label={L('place.folders')} />
-        {f?.folders.map((x) => (
-          <Item key={x.name} to={{ page: 'browse', folder: x.name }} icon={<Folder size={z} />} label={x.name} count={x.count} />
-        ))}
-      </div>
-      <div className="side-title">{L('sidebar.other')}</div>
-      <div className="side-group">
-        <Item to={{ page: 'browse', view: 'loose' }} icon={<Shapes size={z} />} label={L('place.loose')} />
-        <Item to={{ page: 'browse', view: 'album' }} icon={<Images size={z} />} label={L('place.album')} />
-        <Item to={{ page: 'browse', view: 'unreviewed' }} icon={<CircleAlert size={z} />} label={L('place.unreviewed')} />
-        <Item to={{ page: 'browse', view: 'reviewed' }} icon={<CircleCheck size={z} />} label={L('place.reviewed')} />
-        <Item to={{ page: 'tags' }} icon={<Tags size={z} />} label={L('common.tags')} />
-        <Item to={{ page: 'bin' }} icon={<Trash2 size={z} />} label={L('place.trash')} count={s?.trashed || undefined} />
-      </div>
+      <div className="side-resize" onMouseDown={(e) => {
+        drag.current = { x: e.clientX, w };
+        setDragging(true);
+        const move = (ev: MouseEvent) => { if (drag.current) width.set(Math.min(320, Math.max(190, drag.current.w + ev.clientX - drag.current.x))); };
+        const up = () => { drag.current = null; setDragging(false); save('sidebar.width', String(width.get())); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', up);
+      }} />
     </nav>
+    </div>
   );
 }

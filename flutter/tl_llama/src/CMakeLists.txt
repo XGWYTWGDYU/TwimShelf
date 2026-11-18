@@ -1,5 +1,5 @@
-# llama.cpp with a small C interface (tl_llama.cpp) for Dart's FFI. Used by the Android, Windows
-# and Linux builds; the Apple builds run MLX instead (Apple/TLLocalAI).
+# llama.cpp with a small C interface (tl_llama.cpp) for Dart's FFI. Used by the Flutter Android app and
+# the native Windows app (build.ps1); the Apple builds run MLX instead (Apple/TLLocalAI).
 #
 # Backends are loaded at run time (GGML_BACKEND_DL): the CPU one in the variants for each
 # instruction set, and Vulkan where the build has its SDK. A device without a working Vulkan

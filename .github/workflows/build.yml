@@ -76,7 +76,6 @@ jobs:
         run: |
           python3 scripts/checks/icons.py
           python3 scripts/apply.py versions --check
-          python3 scripts/flutter/test_desktop_packaging.py "$RUNNER_TEMP/packaging"
 
   apple:
     runs-on: macos-26
@@ -160,35 +159,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  linux:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup toolchain install   # the one in rust-toolchain.toml
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            build/cache/pub
-          key: deps-linux-${{ hashFiles('Cargo.lock', 'flutter/app/pubspec.lock') }}
-          restore-keys: deps-linux-
-      - name: Build
-        run: |
-          sudo apt-get update -qq
-          ./build.sh --yes flutter-linux
-      - uses: actions/upload-artifact@v4
-        with:
-          name: flutter-linux
-          path: build/apps/*
-          if-no-files-found: error
-          retention-days: 30
-
   electron-linux:
-    # the Linux desktop app on the React front end (web/), which replaces flutter-linux
+    # the Linux desktop app: the React front end (web/) in Electron
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -350,7 +322,7 @@ jobs:
 
   release:
     # after the image is published too: a release without it would leave the version's image unmade
-    needs: [plan, test-core, apple, android, linux, electron-linux, windows, docker-publish]
+    needs: [plan, test-core, apple, android, electron-linux, windows, docker-publish]
     if: needs.plan.outputs.release == 'true'
     runs-on: ubuntu-24.04
     permissions:

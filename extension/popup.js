@@ -139,7 +139,8 @@ function taskRow(x) {
   mark.title = t(label);
   const info = el("div", "grow");
   const link = el("a", "name", shortPost(x.url));
-  link.href = x.url; link.target = "_blank"; link.rel = "noreferrer";
+  if (/^https:\/\//i.test(x.url)) link.href = x.url;
+  link.target = "_blank"; link.rel = "noreferrer";
   info.append(link, el("div", "sub", `${t(label)} · ${x.deviceName}`));
   if (x.error && (x.state === "failed" || x.state === "offline")) info.append(el("div", "err-line", x.error));
   li.append(mark, info);

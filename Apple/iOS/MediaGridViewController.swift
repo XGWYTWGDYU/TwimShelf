@@ -128,7 +128,20 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         // swipe through every media of the grid, photos and videos alike, starting here
         let all = grouped ? entries.flatMap { $0 } : items
         let vc = PhotoViewController(items: all, index: all.firstIndex(of: first) ?? 0)
-        vc.modalPresentationStyle = .fullScreen
+        let source = UIImageView()
+        source.contentMode = .scaleAspectFill
+        source.backgroundColor = .secondarySystemBackground
+        source.clipsToBounds = true
+        source.layer.cornerRadius = GridConfig.cornerRadius
+        vc.setZoomSource { [weak self] item in
+            guard let self else { return nil }
+            let tile = self.entries.first { $0.contains { $0.mediaId == item.mediaId } }?.first
+            if let tile, self.grid.placeViewerSource(source, for: tile.mediaId) { return source }
+            if self.grid.placeViewerSource(source, for: first.mediaId) { return source }
+            source.removeFromSuperview()
+            return nil
+        }
+        vc.onDismissed = { source.removeFromSuperview() }
         present(vc, animated: true)
     }
 

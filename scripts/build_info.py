@@ -32,7 +32,9 @@ print(json.dumps({
     'flutter': {
         'iOS': {'bundle_id': get('flutter.apple_bundle_id'), 'signing': 'unsigned; re-sign to install', 'share_extension': get('flutter.share_extension_ios') == 'true'},
         'android': {'package': get('flutter.android_package')},
-        'linux': {'application_id': get('flutter.desktop_id')},
+    },
+    'desktop': {
+        'linux': {'application_id': get('desktop.app_id'), 'frontend': 'React + Electron'},
     },
     'bundled_AI_models': False,
 }, indent=2))

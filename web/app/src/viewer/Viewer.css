@@ -1,24 +1,58 @@
-.viewer { position: fixed; inset: 0; z-index: 50; display: flex; background: #0a0a0c; color: #f4f4f5; animation: fade 0.16s var(--ease); }
-.viewer-stage { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; padding: 56px 72px 24px; }
-.viewer-photo { position: absolute; inset: 56px 72px 24px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-.viewer-photo .viewer-media { position: absolute; }
-.viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-md); box-shadow: 0 24px 64px rgba(0,0,0,0.65); }
-.viewer-media.loading { opacity: 0; }
-video.viewer-media { width: 100%; height: 100%; box-shadow: none; }
-.viewer-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(255,255,255,0.10); backdrop-filter: blur(8px); color: #fff; display: grid; place-items: center; transition: background 120ms; }
-.viewer-nav:hover { background: rgba(255,255,255,0.22); }
-.viewer-nav.left { left: 18px; }
-.viewer-nav.right { right: 18px; }
-.viewer-top { position: absolute; top: 0; left: 0; right: 0; height: 56px; padding: 0 var(--sp-5); display: flex; justify-content: space-between; align-items: center; background: linear-gradient(rgba(10,10,12,0.72), transparent); z-index: 2; }
-.viewer-pos { font-family: var(--font-mono); font-size: var(--text-sm); color: rgba(255,255,255,0.72); font-variant-numeric: tabular-nums; }
-.viewer-tools { display: flex; gap: 6px; }
-.viewer-btn { width: 32px; height: 32px; border-radius: var(--r-sm); border: 0; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.8); display: inline-grid; place-items: center; transition: background 120ms, color 120ms; }
-.viewer-btn:hover { background: rgba(255,255,255,0.16); color: #fff; }
-.viewer-btn.on { background: var(--accent); color: #fff; }
-.viewer-panel { width: var(--viewer-panel-w); flex: none; background: #141417; border-left: 1px solid rgba(255,255,255,0.1); overflow-y: auto; padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-4); color: #e4e4e7; }
-.viewer-author { display: flex; flex-direction: column; gap: 2px; }
-.viewer-author b { font-weight: 650; font-size: var(--text-md); color: #f4f4f5; }
-.viewer-author span { font-size: var(--text-sm); color: #a1a1aa; }
-.viewer-date { font-family: var(--font-mono); font-size: var(--text-xs); color: #71717a; }
-.viewer-text { margin: 0; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
-.viewer-panel .card-tags { padding-top: var(--sp-4); border-top: 1px solid rgba(255,255,255,0.08); }
+/* The viewer as MacPhotoView lays it out: black, the whole window; the media fill it edge to
+   edge; the counter top left (20 from the edge, 16 below the title bar strip); round arrow buttons
+   40 pt at the sides (20 in); share and close 34 pt in the bottom right corner (20 in, 10 apart);
+   the caption over the bottom. The buttons: a white symbol on dark glass (black 40 %, 55 % while
+   hovered, 70 % pressed) with a hairline white edge (ViewerRoundButton). */
+.viewer { position: fixed; inset: 0; z-index: 50; color: #fff; overflow: hidden; outline: none; --viewer-top: 16px; }
+.viewer-surface { position: absolute; inset: 0; background: #000; overflow: hidden; transform-origin: top left; }
+html .viewer.idle, html .viewer.idle * { cursor: none !important; }
+.viewer-strip { position: absolute; inset: 0; }
+.viewer-page { position: absolute; top: 0; left: 0; height: 100%; will-change: transform; }
+.photo-page { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.photo-frame { position: relative; flex: none; transform-origin: center center; will-change: transform; }
+.photo-img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.photo-img.loading { opacity: 0; }
+.photo-img.square-preview { object-fit: contain; }
+.poster-img { max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain; }
+
+.viewer-round, .viewer-counter, .viewer-corner, .caption { transition: opacity 0.2s; }
+.viewer-counter { position: absolute; top: var(--viewer-top); left: 20px; font: 600 13px/16px var(--font); font-variant-numeric: tabular-nums; color: #fff; text-shadow: 0 0 4px rgba(0, 0, 0, 0.6); pointer-events: none; }
+.viewer-round { position: absolute; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, 0.4); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.18); transition: background 0.12s; }
+.viewer-round:hover { background: rgba(0, 0, 0, 0.55); }
+.viewer-round:active { background: rgba(0, 0, 0, 0.7); }
+.viewer-round.small { position: static; width: 34px; height: 34px; }
+.viewer-prev { left: 20px; top: 50%; margin-top: -20px; }
+.viewer-next { right: 20px; top: 50%; margin-top: -20px; }
+.viewer-corner { position: absolute; right: 20px; bottom: 20px; display: flex; gap: 10px; z-index: 3; }
+
+/* the caption (PostCaptionView): 16 in on the left, up to 680 wide, 28 above and 10 below, no
+   shade — a tight dark edge and a soft halo on the text */
+.caption { position: absolute; left: 0; right: 0; padding: 28px 16px 10px 16px; z-index: 2; transition: opacity 0.22s ease-in-out; }
+.caption-inner { max-width: 680px; display: flex; flex-direction: column; gap: 6px; text-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.7), 0 0 6px rgba(0, 0, 0, 0.5); }
+.caption-author { display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; }
+.caption-name { font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; }
+.caption-handle { font-size: 11px; color: rgba(255, 255, 255, 0.65); overflow: hidden; text-overflow: ellipsis; }
+.caption-text { font-size: 13px; line-height: 17px; color: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }
+.caption-cut { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.caption-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.caption-date { font-size: 10px; color: rgba(255, 255, 255, 0.6); }
+.caption-more { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.8); }
+.caption-link { color: rgb(115, 184, 255); }
+
+/* the player (MacPlayerView): the video fills the page; the controls 24 in from the sides and 20
+   from the bottom, 44 high, 12 apart (16 after the time), white with a shadow, no bar behind */
+.player { position: absolute; inset: 0; background: #000; }
+.player-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.player-square-preview { position: absolute; inset: 0; margin: auto; pointer-events: none; }
+.player-video::-webkit-media-controls { display: none !important; }
+.player-controls { position: absolute; left: 24px; right: 24px; bottom: 20px; height: 44px; padding: 0 14px; display: flex; align-items: center; gap: 12px; filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.6)); transition: opacity 0.3s; z-index: 3; }
+.player-controls.hidden { opacity: 0; pointer-events: none; }
+.player-btn { flex: none; min-width: 26px; height: 26px; padding: 0; border: 0; background: none; color: #fff; display: grid; place-items: center; }
+.player-btn:active { opacity: 0.6; }
+.player-speed { font: 600 12px/1 var(--font); font-variant-numeric: tabular-nums; padding: 0 2px; }
+.player-time { flex: none; margin-right: 4px; font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; color: #fff; white-space: nowrap; }
+.player-bar { position: relative; flex: 1; min-width: 60px; height: 24px; display: flex; align-items: center; touch-action: none; }
+.player-track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.35); overflow: hidden; }
+.player-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #fff; }
+.player-knob { position: absolute; top: 50%; width: 20px; height: 14px; margin: -7px 0 0 -10px; border-radius: 7px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
+.player-hud { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); min-width: 160px; padding: 8px 16px; border-radius: 12px; background: rgba(0, 0, 0, 0.6); font: 600 16px/20px var(--font); font-variant-numeric: tabular-nums; color: #fff; text-align: center; pointer-events: none; z-index: 4; }

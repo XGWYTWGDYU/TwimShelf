@@ -36,7 +36,8 @@ macOS 和 Linux 上用 `build.sh`，Windows 上用 `build.ps1`。脚本会构建
 | `native-ios` | 原生 iOS 版未签名 `.ipa` | Mac + Xcode |
 | `flutter-ios` | Flutter iOS 版未签名 `.ipa` | Mac + Xcode |
 | `flutter-android` | Android `.apk`，每种 CPU 架构一个 | macOS、Linux 或 Windows |
-| `flutter-linux` | Linux `.AppImage` | Linux |
+| `electron-linux` | Linux 桌面版 `.AppImage`（React + Electron） | Linux |
+| `electron-macos` | 同一个桌面版的 Mac 测试包（不默认构建、不发布） | Mac |
 | `windows` | 原生 Windows 版 `setup.exe`（WinUI 3） | Windows 11（`build.ps1`） |
 
 构建脚本无法帮你安装的前提条件：
@@ -131,20 +132,20 @@ Mac 版把 scheme 换成 `TwimShelf-macOS`、destination 换成 `'platform=macOS
 - **构建目录**：镜像另外打包成 `<build.dir>/apps/TwimShelf-<version>-docker-linux-<架构>.tar.gz`，可以拷到别的机器上 `docker load`。
 - **Bundle ID、签名、分享扩展**：服务器用不到，不受影响。
 
-全部编译都在镜像里完成（Rust 服务器和 Flutter 网页版），本机只需要 Docker，不需要 Rust 或 Flutter。Docker 自己的构建缓存放在 Docker（或 OrbStack）的磁盘镜像里，不受 `build.dir` 控制，要换磁盘请在 Docker 的设置里移动它的数据位置。不用脚本时也可以直接构建：
+全部编译都在镜像里完成（Rust 服务器和 React 网页版），本机只需要 Docker，不需要 Rust 或 Node。Docker 自己的构建缓存放在 Docker（或 OrbStack）的磁盘镜像里，不受 `build.dir` 控制，要换磁盘请在 Docker 的设置里移动它的数据位置。不用脚本时也可以直接构建：
 
 ```bash
-docker build -f docker/Dockerfile --build-arg VERSION="$(python3 scripts/apply.py get version)" --build-arg RUST_VERSION="$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)" --build-arg FLUTTER_VERSION="$(sed -nE 's/.*"flutter": *"([^"]+)".*/\1/p' .fvmrc)" -t twimshelf .
+docker build -f docker/Dockerfile --build-arg VERSION="$(python3 scripts/apply.py get version)" --build-arg RUST_VERSION="$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' rust-toolchain.toml)" --build-arg NODE_VERSION="$(tr -d ' \n' < .node-version)" -t twimshelf .
 ```
 
 运行、登录、更新和公网访问见 [docker/README.md](docker/README.md)。
 
 ### 不用 Docker 开发
 
-网页版（构建到 `flutter/app/build/web`，即构建目录里）：
+网页版（React，构建到 `web/app/dist`；Node 的版本在 `.node-version`）。开发时也可以用 `npm run dev`，见 [web/README.md](web/README.md)：
 
 ```bash
-cd flutter/app && flutter build web --release --no-web-resources-cdn
+cd web && npm ci && npm run build
 ```
 
 服务器（Rust 产物放进构建目录）：
@@ -154,12 +155,12 @@ CARGO_TARGET_DIR="$(python3 scripts/apply.py where cache)/cargo" cargo build -p 
 ```
 
 ```bash
-TL_DATA=/某个测试目录 TL_WEB=flutter/app/build/web TL_PORT=2778 "$(python3 scripts/apply.py where cache)/cargo/release/twimshelf-server"
+TL_DATA=/某个测试目录 TL_WEB=web/app/dist TL_PORT=2778 "$(python3 scripts/apply.py where cache)/cargo/release/twimshelf-server"
 ```
 
 `core` 和 `server` 是同一个 Cargo workspace（根目录的 `Cargo.toml`），共用一份 `Cargo.lock`。
 
-服务器报告的版本取自环境变量 `TL_VERSION`（镜像构建时从 `config.yaml` 读取），不设时用 `server/Cargo.toml` 的版本，两者都来自 `config.yaml`。`--no-web-resources-cdn` 让 CanvasKit 跟网页版一起打包，局域网里没有外网也能打开。网页版的远程调用（`flutter/tl_core/lib/src/bindings_web.dart`）和服务器的分发表（`server/src/dispatch.rs`）由 `scripts/gen_web_bindings.py` 从 `bindings.dart` 生成，给核心加了新函数后运行一次。
+服务器报告的版本取自环境变量 `TL_VERSION`（镜像构建时从 `config.yaml` 读取），不设时用 `server/Cargo.toml` 的版本，两者都来自 `config.yaml`。网页版的远程调用（`web/packages/core/src/generated/bindings.ts`）和服务器的分发表（`server/src/dispatch.rs`）由 `scripts/gen_web_bindings.py` 从 `flutter/tl_core/lib/src/bindings.dart` 生成，给核心加了新函数后运行一次。
 
 ## 浏览器扩展
 
@@ -183,13 +184,15 @@ security add-generic-password -s "TwimShelf Android release key" -a twimshelf -w
 
 其他系统上可以自己新建 `flutter/app/android/key.properties`（已被 Git 忽略，内容是 `storeFile`、`storePassword`、`keyAlias`、`keyPassword` 四行）。
 
-### Linux
+### Linux 桌面版
 
 ```bash
-./build.sh flutter-linux
+./build.sh electron-linux
 ```
 
-脚本会用系统的包管理器（apt、dnf 或 pacman）询问并安装 GTK、libmpv、libsecret、Vulkan 等开发包。为了兼容更多发行版，发布版本请在尽量旧的发行版上构建。
+Linux 桌面版是 React 前端（`web/app`，和网页版同一份代码，外观和功能一样）装在 Electron 里（`web/electron`），自带服务器程序，只在本机 127.0.0.1 上运行。脚本需要 Rust 和 `.node-version` 指定的 Node（缺少时询问并下载）。应用的名称、ID（`desktop.app_id`）、版本号和图标都来自 `config.yaml`，由 `scripts/apply.py desktop` 写进 `web/electron/product.json` 和 `icon.png`（都不进 Git）。数据放在 `~/.local/share/TwimShelf`；从原来的 Flutter Linux 版升级时，原来的资料库会被找到并继续使用。
+
+在 Mac 上可以用 `./build.sh electron-macos` 打一个同样的测试包（`TwimShelf Electron.app`，不签名、不发布），只用来在 Mac 上检查桌面版的界面。
 
 ### Windows
 
@@ -219,10 +222,10 @@ Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都�
 | `native.bundle_id` | 原生版的 Bundle ID 前缀：iOS 用 `<前缀>.ios`，Mac 用 `<前缀>.mac` |
 | `flutter.apple_bundle_id` | Flutter 版 iOS / iPadOS 的 Bundle ID |
 | `flutter.android_package` | Android 的 applicationId |
-| `flutter.desktop_id` | Linux 的应用 ID |
+| `desktop.app_id` | Linux 桌面版（Electron）的应用 ID |
 | `native.share_extension_ios`、`native.share_extension_mac` | 原生版的分享扩展 |
 | `flutter.share_extension_ios` | Flutter 版 iOS 的分享扩展 |
-| `flutter.share_extension` | Android「分享到」、Linux「打开方式」 |
+| `flutter.share_extension` | Android「分享到」 |
 | `windows.share_extension` | Windows「发送到」 |
 | `native.development_team`、`flutter.development_team` | 开发团队，默认留空 |
 | `native.mac_signing_identity` | Mac 版指定签名身份，默认留空 |
@@ -274,7 +277,7 @@ iOS 和 Mac 的「分享到 TwimShelf」默认关闭。扩展通过 App Group �
 2. 共享组由 Bundle ID 决定：iOS 使用 `group.<bundle_id>`，Mac 使用 `<Team ID>.<bundle_id>`，不用单独配置。
 3. 重新构建即可。各个工程里一直带着分享扩展：开关只决定它签不签名、嵌不嵌进应用，所以开关时工程文件不会变。
 
-不开分享扩展时，主应用自己的导入功能不受影响。Android「分享到」、Windows「发送到」、Linux「打开方式」不需要 App Group，默认开启。
+不开分享扩展时，主应用自己的导入功能不受影响。Android「分享到」和 Windows「发送到」不需要 App Group，默认开启。
 
 ## 测试
 
@@ -353,7 +356,7 @@ iOS 真机必须选择 Team，见[用 Xcode 构建和运行](#用-xcode-构建�
 
 这是 Apple 的限制，免费账号的描述文件 7 天过期，重新构建安装即可。
 
-**Android、Linux 或 Windows 构建报错：`cannot be built in a path with spaces`**
+**Android 或 Windows 构建报错：`cannot be built in a path with spaces`**
 
 llama.cpp 的 Vulkan 后端在带空格的路径里无法构建。请把项目移到不含空格的路径，或者把 `build.dir` 改到不含空格的绝对路径。
 

@@ -116,7 +116,7 @@ pub fn hf_client() -> reqwest::Client {
 
 /// Files needed to run an MLX model; docs, images and git metadata are skipped.
 fn wanted(name: &str) -> bool {
-    if name.contains('/') || name.starts_with('.') { return false; }
+    if name.contains(['/', '\\', ':']) || name.contains("..") || name.starts_with('.') { return false; }
     let l = name.to_ascii_lowercase();
     l.ends_with(".safetensors") || l.ends_with(".json") || l.ends_with(".jinja") || l.ends_with(".txt") || l.ends_with(".model") || l.ends_with(".tiktoken")
 }
@@ -175,8 +175,10 @@ async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base:
     // failures in a row: any data received starts the count again, so a long download over a
     // flaky connection goes on for as long as it moves
     let mut fails = 0u32;
+    // a server that cannot resume starts the file over each time: that does not go on for ever
+    let mut restarts = 0u32;
     loop {
-        if fails >= 5 { bail!(tr!("models.retriesFailed")); }
+        if fails >= 5 || restarts >= 8 { bail!(tr!("models.retriesFailed")); }
         if fails > 0 { or_cancel(tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(fails)))).await?; }
         let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if have < f.size || f.size == 0 {
@@ -189,12 +191,15 @@ async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base:
                 Err(e) => return Err(e.into()),
             };
             let append = have > 0 && resp.status().as_u16() == 206;
+            if have > 0 && !append { restarts += 1; }
             let mut out = tokio::fs::OpenOptions::new().create(true).write(true).append(append).truncate(!append).open(&part).await?;
             let mut got = if append { have } else { 0 };
             let mut stream = resp.bytes_stream();
             let (mut failed, mut moved) = (false, false);
             while let Some(c) = or_cancel(stream.next()).await? {
                 match c {
+                    // more than the file has: stopped here, and the size check below starts it over
+                    Ok(c) if f.size != 0 && got + c.len() as u64 > f.size => { got += c.len() as u64; break; }
                     Ok(c) => { out.write_all(&c).await?; got += c.len() as u64; moved = true; update(|s| s.done_bytes = base + got); }
                     Err(_) => { failed = true; break; }
                 }
@@ -202,6 +207,7 @@ async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base:
             out.flush().await?;
             out.sync_all().await?;
             drop(out);
+            if f.size != 0 && got > f.size { let _ = fs::remove_file(&part); fails += 1; continue; }
             if failed { fails = if moved { 1 } else { fails + 1 }; continue; }
         }
         let len = fs::metadata(&part)?.len();
@@ -386,7 +392,7 @@ pub fn installed(models_dir: &Path) -> Vec<ModelInfo> {
 }
 
 fn safe_id(id: &str) -> anyhow::Result<&str> {
-    if id.is_empty() || id.contains('/') || id.contains("..") || id.starts_with('.') { bail!(tr!("models.badName")); }
+    if id.is_empty() || id.contains(['/', '\\', ':']) || id.contains("..") || id.starts_with('.') { bail!(tr!("models.badName")); }
     Ok(id)
 }
 

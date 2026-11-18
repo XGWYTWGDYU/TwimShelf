@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:ffi/ffi.dart';
@@ -6,7 +7,7 @@ import 'os.dart';
 
 /// Random numbers straight from the operating system, with no generator of the app's own in
 /// between: `arc4random_buf` on Apple's systems (what Swift's `SystemRandomNumberGenerator` calls in
-/// the native apps), the `getrandom` system call on Android and Linux. A call that fails throws: nothing falls back to a
+/// the native apps), the `getrandom` system call on Android. A call that fails throws: nothing falls back to a
 /// weaker source.
 class SystemRandom implements math.Random {
   const SystemRandom();
@@ -14,10 +15,11 @@ class SystemRandom implements math.Random {
   static final void Function(Pointer<Uint8>, int) _fill = _source();
 
   static void Function(Pointer<Uint8>, int) _source() {
-    if (OS.isMacOS || OS.isIOS) {
+    // iOS, and the Mac the unit tests run on
+    if (OS.isIOS || Platform.isMacOS) {
       return DynamicLibrary.process().lookupFunction<Void Function(Pointer<Uint8>, Size), void Function(Pointer<Uint8>, int)>('arc4random_buf');
     }
-    if (OS.isAndroid || OS.isLinux) {
+    if (OS.isAndroid) {
       final getrandom = DynamicLibrary.process().lookupFunction<IntPtr Function(Pointer<Uint8>, Size, Uint32), int Function(Pointer<Uint8>, int, int)>('getrandom');
       return (buffer, length) {
         var done = 0;

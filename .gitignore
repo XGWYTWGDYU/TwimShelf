@@ -21,7 +21,6 @@ __pycache__/
 /flutter/tl_llama/android/.cxx
 /flutter/tl_core/apple
 /flutter/tl_core/android/src/main/jniLibs
-/flutter/tl_core/linux/lib
 /flutter/tl_*/pubspec.lock
 /flutter/app/android/local.properties
 # this computer's own values (see config.local.example.yaml) and private files
@@ -40,7 +39,6 @@ __pycache__/
 /Apple/Resources/Assets.xcassets/AppIconLocal.appiconset/
 /flutter/app/ios/Flutter/Identity.xcconfig
 /flutter/app/android/identity.properties
-/flutter/app/linux/identity.cmake
 /flutter/app/lib/app/identity.g.dart
 **/BuildLocation.xcconfig
 /Apple/.applied.json

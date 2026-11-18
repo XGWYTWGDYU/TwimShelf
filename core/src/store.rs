@@ -1469,7 +1469,7 @@ impl Store {
             pending_jobs: q("SELECT count(*) FROM job WHERE status='pending'")?, failed_jobs: q("SELECT count(*) FROM job WHERE status='failed'")?,
             trashed: q("SELECT count(*) FROM trash x JOIN media m ON m.id=x.media_id WHERE x.state=1")?,   // as listed (awaited files are not shown)
             bad: q(&format!("SELECT count(*) FROM bad_media b JOIN media m ON m.id=b.media_id WHERE {LIVE_SQL}"))?,
-            newer_ops: q("SELECT count(*) FROM op_pending")? })
+            newer_ops: self.newer_op_count()? })
     }
 
     // ---------- meta, clock and op log ----------

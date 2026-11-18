@@ -1,5 +1,4 @@
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -9,13 +8,11 @@ import 'package:tl_core/tl_core.dart';
 import '../l10n/l10n.dart';
 import '../platform/apple_platform.dart';
 import '../platform/os.dart';
-import '../platform/files.dart';
 import '../widgets/haptics.dart';
 
 /// 导出搜索结果, as the native button beside the search field: the media of the current result
 /// as a .tlpack (with their posts, and tags and folder memberships if chosen) or a plain zip of
-/// the media. Desktops save where the user chooses; phones and tablets hand the file on (save to
-/// Files, AirDrop, another app).
+/// the media, handed on (save to Files, AirDrop, another app).
 Future<void> exportSearchResult(BuildContext context, List<FeedItem> items, {List<String> terms = const []}) async {
   final prefs = await SharedPreferences.getInstance();
   if (!context.mounted) return;
@@ -37,19 +34,10 @@ String searchExportName(List<String> terms) {
   return words.isEmpty ? L('export.search.fileNameAll') : L('export.search.fileName', [words]);
 }
 
-/// Exports [ids] with [options] to a file named [name]: saved where the user chooses on a
-/// desktop, handed on (Files, AirDrop, another app) on phones and tablets; then what was
-/// exported and what was left out, with each media's reason.
+/// Exports [ids] with [options] to a file named [name], handed on (Files, AirDrop, another app)
+/// afterwards; then what was exported and what was left out, with each media's reason.
 Future<void> exportToFile(BuildContext context, List<String> ids, ExportOptions options, String name) async {
-  final desktop = OS.isMacOS || OS.isLinux;
-  String path;
-  if (desktop) {
-    final loc = await getSaveLocation(suggestedName: name);
-    if (loc == null) return;
-    path = loc.path;
-  } else {
-    path = '${(await getTemporaryDirectory()).path}${OS.pathSeparator}$name';
-  }
+  final path = '${(await getTemporaryDirectory()).path}${OS.pathSeparator}$name';
   if (!context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
   messenger.showSnackBar(SnackBar(content: Text(L('export.running', [ids.length])), duration: const Duration(minutes: 10)));
@@ -62,7 +50,7 @@ Future<void> exportToFile(BuildContext context, List<String> ids, ExportOptions 
     return;
   }
   messenger.hideCurrentSnackBar();
-  if (!desktop) await deliver(path);
+  await deliver(path);
   if (!context.mounted) return;
   final skipped = report.skipped;
   var more = '';
@@ -146,17 +134,12 @@ class _ExportDialogState extends State<_ExportDialog> {
       );
 }
 
-/// Where a file the user asked for goes: a place chosen in a save dialog on a desktop, the
-/// temporary folder (then the share sheet) on phones and tablets. Null when cancelled.
+/// Where a file the user asked for goes: the temporary folder (then the share sheet).
 Future<String?> outputPath(String name) async {
-  if (OS.isMacOS || OS.isLinux) return (await getSaveLocation(suggestedName: name))?.path;
   return '${(await getTemporaryDirectory()).path}${OS.pathSeparator}$name';
 }
 
-/// After writing to an [outputPath]: on phones and tablets the file is handed on.
+/// After writing to an [outputPath]: the file is handed on.
 Future<void> deliver(String path) async {
-  // the web build: the browser downloads it from the server
-  if (OS.isWeb) return downloadToBrowser(path);
-  if (OS.isMacOS || OS.isLinux) return;
   if (!await ApplePlatform.instance.share([path])) await SharePlus.instance.share(ShareParams(files: [XFile(path)]));
 }

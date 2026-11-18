@@ -61,7 +61,8 @@ impl GridConfig {
 
     pub fn side(&self, level: usize) -> f64 {
         let n = self.columns[level] as f64;
-        ((self.width - self.gap() * (n - 1.0)) / n * self.scale).floor() / self.scale
+        // (at least a point: a view not laid out yet has no width, and zooming divides by this)
+        (((self.width - self.gap() * (n - 1.0)) / n * self.scale).floor() / self.scale).max(1.0)
     }
     pub fn pitch(&self, level: usize) -> f64 { self.side(level) + self.gap() }
 

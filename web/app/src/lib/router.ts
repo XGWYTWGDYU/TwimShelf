@@ -1,12 +1,18 @@
-// Where the app is: a small router of its own, in the URL hash so a reload stays put.
+// Where the app is: a small router of its own, in the URL hash so a reload stays put. The places
+// are the native sidebar's (LibraryPlace.swift): 浏览 (the cards), the zoomable grids of the media
+// kinds, folders and collections, all folders, and the settings.
 import { store } from '@twimshelf/core';
 import { useStore } from './hooks';
 
+/** A place shown as the zoomable media grid. */
+export type GridPlace = 'photos' | 'videos' | 'folder' | 'loose' | 'album' | 'unreviewed' | 'reviewed' | 'bad' | 'trash';
+const GRID_PLACES: GridPlace[] = ['photos', 'videos', 'folder', 'loose', 'album', 'unreviewed', 'reviewed', 'bad', 'trash'];
+
 export type Route =
   | { page: 'browse'; kind?: 'photo' | 'video'; folder?: string; view?: 'loose' | 'album' | 'unreviewed' | 'reviewed'; q?: string }
+  | { page: 'grid'; place: GridPlace; folder?: string }
   | { page: 'folders' }
   | { page: 'tags' }
-  | { page: 'bin' }
   | { page: 'settings'; sub?: string };
 
 function parse(hash: string): Route {
@@ -16,8 +22,13 @@ function parse(hash: string): Route {
   switch (page) {
     case 'folders': return { page: 'folders' };
     case 'tags': return { page: 'tags' };
-    case 'bin': return { page: 'bin' };
+    case 'bin': return { page: 'grid', place: 'trash' };
     case 'settings': return { page: 'settings', sub: sub || undefined };
+    case 'grid': {
+      const place = (GRID_PLACES as string[]).includes(sub) ? sub as GridPlace : 'photos';
+      const folder = p.get('folder') ?? undefined;
+      return place === 'folder' && folder ? { page: 'grid', place, folder } : { page: 'grid', place: place === 'folder' ? 'photos' : place };
+    }
     default: {
       const r: Route = { page: 'browse' };
       const kind = p.get('kind'); if (kind === 'photo' || kind === 'video') r.kind = kind;
@@ -31,6 +42,7 @@ function parse(hash: string): Route {
 
 export function href(r: Route): string {
   if (r.page === 'settings') return `#/settings${r.sub ? '/' + r.sub : ''}`;
+  if (r.page === 'grid') return `#/grid/${r.place}${r.place === 'folder' && r.folder ? '?folder=' + encodeURIComponent(r.folder) : ''}`;
   if (r.page !== 'browse') return `#/${r.page}`;
   const p = new URLSearchParams();
   if (r.kind) p.set('kind', r.kind);
@@ -47,6 +59,9 @@ window.addEventListener('hashchange', () => route.set(parse(location.hash)));
 export function go(r: Route): void {
   location.hash = href(r);
 }
+
+/** The place of a folder's grid. */
+export const folderRoute = (name: string): Route => ({ page: 'grid', place: 'folder', folder: name });
 
 export function useRoute(): Route {
   return useStore(route);

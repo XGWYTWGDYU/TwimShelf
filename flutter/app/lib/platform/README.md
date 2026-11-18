@@ -13,7 +13,7 @@ if (result is SecretsUnavailable<void>) {
 }
 ```
 
-Import platform/secrets.dart (use an import prefix if your UI also has a Session type). Secrets.read/write/delete return typed results; they never expose backend exception text. Cookie keys are auth_token and ct0. Empty writes delete a key. Reapply both cookies after edits. No plaintext fallback exists, including debug.On Windows and Linux secrets live in the data folder (`DataFolderSecretBackend`), so they move with it.
+Import platform/secrets.dart (use an import prefix if your UI also has a Session type). Secrets.read/write/delete return typed results; they never expose backend exception text. Cookie keys are auth_token and ct0. Empty writes delete a key. Reapply both cookies after edits. No plaintext fallback exists, including debug. Secrets live in the Keychain (iOS) and the Keystore (Android).
 
 ## Android shares (F5a)
 

@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:tl_core/tl_core.dart';
 
@@ -13,15 +12,11 @@ import '../app/shell.dart';
 import '../l10n/l10n.dart';
 import '../mascot/mascot.dart';
 import '../platform/secrets.dart';
-import '../platform/data_home.dart';
 import '../services/updates.dart';
 import '../widgets/choice_menu.dart';
-import 'data_home_page.dart';
 import 'settings/about_page.dart';
 import 'settings/ai_page.dart';
 import 'settings/downloads_page.dart';
-import 'settings/extension_page.dart';
-import '../services/extension_receiver.dart';
 import 'settings/storage_page.dart';
 import 'settings/sync_page.dart';
 import 'settings/tags_page.dart';
@@ -199,8 +194,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   value: prefs.playerGesturesOff,
                   onChanged: withHaptic((v) => prefs.playerGesturesOff = v),
                 ),
-                if (!kIsWeb && (OS.isIOS || OS.isAndroid))
-                  SwitchListTile(
+                SwitchListTile(
                     secondary: const SettingsIcon(Icons.screen_rotation),
                     title: Text(L('settings.autoLandscape')),
                     value: prefs.autoLandscape,
@@ -224,11 +218,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     mascot: library.tagger.running ? 'camera' : null),
                 nav(const ValueKey('settings-sync'), Icons.sync, L('common.lanSync'),
                     library.sync.joined ? L('sync.state.on') : L('sync.state.notJoined'), () => SyncPage(sync: library.sync, onDeleteEverything: _wipe)),
-                if (ExtensionReceiver.offered)
-                  nav(const ValueKey('settings-extension'), Icons.extension, L('ext.title'), extensionSummary(), () => const ExtensionPage()),
               ]),
-              // Linux: where everything is kept
-              if (DataHome.path != null) DataHomeSection(library: library),
               // GitHub builds only
               if (Updates.enabled)
                 _Section(footer: L('update.footer'), children: [
@@ -244,11 +234,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 nav(const ValueKey('settings-storage'), Icons.storage, L('storage.title'), null, () => StoragePage(library: library)),
                 nav(const ValueKey('settings-about'), Icons.info_outline, L('settings.about'), null, () => AboutPage(onExportDiagnostics: _exportDiagnostics, logFile: '${library.directory}${OS.pathSeparator}logs${OS.pathSeparator}diagnostics.log')),
               ]),
-              // the web build: this browser's sign-in
-              if (OS.isWeb)
-                _Section(footer: L('settings.signOut.footer'), children: [
-                  ListTile(key: const ValueKey('settings-signout'), leading: const SettingsIcon(Icons.logout), title: Text(L('settings.signOut')), onTap: signOut),
-                ]),
               _Section(footer: L('settings.wipe.footer'), children: [
                 ListTile(
                   leading: const SettingsIcon(Icons.delete_forever, danger: true),
@@ -278,16 +263,26 @@ class _CookieSectionState extends State<CookieSection> {
   final _ct0 = TextEditingController();
   bool _checking = false;
 
+  @override
+  void dispose() {
+    _auth.dispose();
+    _ct0.dispose();
+    super.dispose();
+  }
+
   void _toast(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
 
   Future<void> _save() async {
+    final cleared = _auth.text.trim().isEmpty && _ct0.text.trim().isEmpty;
     final a = await Secrets.write('auth_token', _auth.text.trim());
     final b = await Secrets.write('ct0', _ct0.text.trim());
+    if (!mounted) return;
     if (a is SecretsUnavailable || b is SecretsUnavailable) return _toast(L('settings.cookie.notSaved'));
     await Session.applyStoredCookies();
+    if (!mounted) return;
     _auth.clear();
     _ct0.clear();
-    _toast(_auth.text.isEmpty && _ct0.text.isEmpty ? L('settings.cookie.saved') : L('settings.cookie.cleared'));
+    _toast(cleared ? L('settings.cookie.cleared') : L('settings.cookie.saved'));
   }
 
   Future<void> _check() async {
@@ -346,10 +341,9 @@ class _Stat extends StatelessWidget {
   }
 }
 
-/// A tablet's or a desktop's screen, whatever size the window has now (a narrowed iPad window
-/// still has the setting: it is for the screen, and the window may widen again).
+/// A tablet's screen, whatever size the window has now (a narrowed iPad window still has the
+/// setting: it is for the screen, and the window may widen again).
 bool _largeScreen(BuildContext context) {
-  if (OS.isMacOS || OS.isLinux) return true;
   final display = View.of(context).display;
   return display.size.shortestSide / display.devicePixelRatio >= 600;
 }

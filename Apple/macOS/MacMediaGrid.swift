@@ -316,6 +316,14 @@ final class MacMediaGridView: NSView {
 
     // MARK: Clicks, selection, menu
 
+    func viewerSourceFrame(for mediaId: String) -> NSRect? {
+        guard window != nil, let scene,
+              let index = scene.tiles.firstIndex(where: { $0.item.mediaId == mediaId }) else { return nil }
+        let frame = scene.engine.restFrame(index, scene.engine.rest)
+        guard frame.intersects(visibleRect) else { return nil }
+        return convert(frame, to: nil)
+    }
+
     fileprivate func index(at p: NSPoint) -> Int? {
         guard let scene, !scene.isAnimating else { return nil }
         return scene.engine.restIndex(at: convert(p, from: document))

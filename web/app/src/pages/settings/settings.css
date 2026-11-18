@@ -1,0 +1,1319 @@
+/* Settings & Tags layout and controls, matching MacSettingsKit.swift dimensions (1 pt = 1 px)
+   and the Antigravity concept's neutral palette and tokens (theme.css).
+   No web-page feel: arrow cursor, no hover lifts/scales/shadows, active feedback only. */
+
+.settings-canvas {
+  max-width: 880px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.section-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.section-heading-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.section-heading-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--fg);
+  margin: 0;
+}
+
+.section-heading-note {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-2);
+  margin: 0;
+}
+
+.section-heading-trailing {
+  padding-right: 14px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-group-footer {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-2);
+  padding: 0 4px;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* Content Card (MacSettingsKit.swift: radius 20, padding 18, spacing 14) */
+.s-card {
+  border-radius: 20px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  width: 100%;
+  min-width: 0;
+}
+
+.s-card.tint-accent, .s-card.tint-blue {
+  background: color-mix(in srgb, var(--accent) 7%, var(--card));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.s-card.tint-purple {
+  background: color-mix(in srgb, var(--ai) 7%, var(--card));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px var(--ai-border);
+}
+.s-card.tint-green, .s-card.tint-teal {
+  background: color-mix(in srgb, var(--approved) 7%, var(--card));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px color-mix(in srgb, var(--approved) 22%, transparent);
+}
+.s-card.tint-orange {
+  background: color-mix(in srgb, var(--orange) 8%, var(--card));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px color-mix(in srgb, var(--orange) 24%, transparent);
+}
+.s-card.tint-red {
+  background: color-mix(in srgb, var(--danger) 7%, var(--card));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px color-mix(in srgb, var(--danger) 24%, transparent);
+}
+
+/* Hero Card (radius 24, padding 22, gap 20) */
+.s-hero {
+  border-radius: 24px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--card)) 0%, color-mix(in srgb, var(--ai) 6%, var(--card)) 55%, var(--card) 100%);
+  box-shadow: var(--shadow-card);
+  width: 100%;
+}
+.s-hero.hero-purple {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--ai) 11%, var(--card)) 0%, color-mix(in srgb, var(--indigo) 6%, var(--card)) 55%, var(--card) 100%);
+}
+.s-hero.hero-green {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--approved) 11%, var(--card)) 0%, color-mix(in srgb, var(--accent) 5%, var(--card)) 55%, var(--card) 100%);
+}
+
+.s-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.s-hero-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin: 0;
+}
+
+/* StatsStrip & BigStat (MacSettingsKit.swift: 34pt bold rounded, icon 11pt + caption) */
+.stats-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.big-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.big-stat-value {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.big-stat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-2);
+}
+
+/* IconTile (size * 0.29 radius) */
+.icon-tile {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.icon-tile.tile-blue, .icon-tile.tile-accent { color: var(--accent); background: var(--accent-soft); }
+.icon-tile.tile-purple { color: var(--ai); background: var(--ai-soft); }
+.icon-tile.tile-teal, .icon-tile.tile-green { color: var(--approved); background: var(--approved-soft); }
+.icon-tile.tile-indigo { color: var(--indigo); background: color-mix(in srgb, var(--indigo) 12%, transparent); }
+.icon-tile.tile-orange, .icon-tile.tile-brown, .icon-tile.tile-yellow { color: var(--orange); background: color-mix(in srgb, var(--orange) 13%, transparent); }
+.icon-tile.tile-red, .icon-tile.tile-pink { color: var(--danger); background: var(--danger-soft); }
+.icon-tile.tile-gray, .icon-tile.tile-secondary { color: var(--fg-2); background: var(--bg-subtle); }
+
+/* Pill (11px semibold, 8px 3px padding, capsule) */
+.s-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--fg-2);
+  background: var(--bg-subtle);
+}
+.s-pill.pill-blue, .s-pill.pill-accent { color: var(--accent); background: var(--accent-soft); }
+.s-pill.pill-purple { color: var(--ai); background: var(--ai-soft); }
+.s-pill.pill-green, .s-pill.pill-teal { color: var(--approved); background: var(--approved-soft); }
+.s-pill.pill-indigo { color: var(--indigo); background: color-mix(in srgb, var(--indigo) 12%, transparent); }
+.s-pill.pill-orange, .s-pill.pill-yellow { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.s-pill.pill-red { color: var(--danger); background: var(--danger-soft); }
+.s-pill.pill-secondary, .s-pill.pill-gray { color: var(--fg-2); background: var(--bg-subtle); }
+
+/* SlimBar (4px height capsule) */
+.slim-bar {
+  height: 4px;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--bg-active);
+  overflow: hidden;
+  position: relative;
+}
+.slim-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.3s ease-out;
+}
+.slim-bar.bar-purple .slim-bar-fill { background: var(--ai); }
+.slim-bar.bar-green .slim-bar-fill, .slim-bar.bar-teal .slim-bar-fill { background: var(--approved); }
+.slim-bar.bar-orange .slim-bar-fill { background: var(--orange); }
+.slim-bar.bar-red .slim-bar-fill { background: var(--danger); }
+.slim-bar-indeterminate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 32%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: slimPass 1.5s infinite ease-in-out;
+}
+@keyframes slimPass { from { left: -32%; } to { left: 100%; } }
+
+/* ProgressRing */
+.progress-ring-wrap {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+.progress-ring-svg {
+  transform: rotate(-90deg);
+  display: block;
+}
+.progress-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+/* CardRow, NavRow, ToggleRow, RowDivider */
+.card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+.card-row-texts {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.card-row-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--fg);
+  line-height: 1.3;
+}
+.card-row.danger .card-row-title {
+  color: var(--danger);
+}
+.card-row-detail {
+  font-size: 11px;
+  color: var(--fg-2);
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+.card-row-trailing {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+.nav-row-btn {
+  display: flex;
+  width: calc(100% + 16px);
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+}
+.nav-row-btn:active {
+  background: var(--bg-active);
+}
+
+.row-divider {
+  height: 1px;
+  background: var(--line);
+  border: 0;
+  margin: 0;
+}
+
+.card-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  margin: 0;
+}
+
+/* NavTile Grid & NavTile (MacSettingsPages.swift: adaptive min 230, gap 14, radius 20) */
+.nav-tiles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.nav-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 16px 22px;
+  border-radius: 20px;
+  border: 0;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  text-align: left;
+  min-width: 0;
+}
+.nav-tile:active {
+  background: var(--bg-active);
+}
+.nav-tile-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+}
+.nav-tile-top-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-3);
+}
+.nav-tile-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.nav-tile-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.25;
+}
+.nav-tile-detail {
+  font-size: 11px;
+  line-height: 15px;
+  min-height: 30px;
+  color: var(--fg-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.nav-tile-bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 10px;
+}
+
+/* OptionCard (MacSettingsKit.swift: min 200, gap 12, padding 14, min-height 132, radius 16) */
+.option-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.option-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  min-height: 132px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  text-align: left;
+}
+.option-card:active {
+  background: var(--bg-active);
+}
+.option-card.selected {
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  border: 2px solid var(--accent);
+  padding: 13px;
+}
+.option-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.option-card-check {
+  color: var(--fg-3);
+  display: inline-grid;
+  place-items: center;
+}
+.option-card.selected .option-card-check {
+  color: var(--accent);
+}
+.option-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.option-card-detail {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-2);
+}
+
+/* ChipButton (MacSettingsKit.swift: 12.5px medium, 12px 6px padding, capsule) */
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--bg-subtle);
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.chip-btn:active {
+  background: var(--bg-active);
+}
+.chip-btn.selected {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.chip-btn.selected:active {
+  filter: brightness(0.92);
+}
+.chip-btn.dashed {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  color: var(--fg-2);
+}
+
+/* Banner (MacSettingsKit.swift: padding 10, radius 12) */
+.s-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--orange) 11%, transparent);
+  width: 100%;
+}
+.s-banner-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--orange);
+  display: inline-grid;
+  place-items: center;
+}
+.s-banner.banner-red {
+  background: var(--danger-soft);
+}
+.s-banner.banner-red .s-banner-icon {
+  color: var(--danger);
+}
+.s-banner.banner-blue {
+  background: var(--accent-soft);
+}
+.s-banner.banner-blue .s-banner-icon {
+  color: var(--accent);
+}
+.s-banner-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ActivityRow (MacSettingsKit.swift: 48x48 thumb radius 10, title 13.5 semibold, detail 11 mono, SlimBar) */
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+.activity-thumb {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+}
+.activity-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.activity-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.activity-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-detail {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* PlaceholderEditor (MacSettingsKit.swift: min-height 110..130, radius 12) */
+.placeholder-editor {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-subtle);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+  outline: none;
+}
+.placeholder-editor:focus {
+  border-color: var(--accent);
+  background: var(--control);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.placeholder-editor::placeholder {
+  color: var(--fg-3);
+}
+
+/* PopupSelect (NSPopUpButton look, opens Menu.tsx openMenuBelow) */
+.popup-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--control-edge);
+  background: var(--control);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 240px;
+  min-width: 96px;
+}
+.popup-select:active:not(:disabled) {
+  background: var(--bg-active);
+}
+.popup-select:disabled {
+  opacity: 0.45;
+}
+.popup-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popup-select-chevrons {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-grid;
+  place-items: center;
+}
+
+/* SegmentedControl (NSSegmentedControl look) */
+.seg-control {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.seg-btn {
+  height: 24px;
+  padding: 0 11px;
+  border-radius: 6px;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.seg-btn.on {
+  background: var(--card);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 0.5px var(--line-strong);
+}
+.seg-btn:active:not(.on) {
+  background: var(--bg-active);
+}
+
+/* CustomSlider (replaces browser <input type="range">) */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+.slider-row-meta {
+  width: 150px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.slider-row-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.slider-row-note {
+  font-size: 11px;
+  color: var(--fg-2);
+}
+.slider-row-value {
+  width: 72px;
+  flex: none;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+
+.custom-slider {
+  flex: 1;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  position: relative;
+  touch-action: none;
+}
+.custom-slider.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.custom-slider-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  position: relative;
+}
+.custom-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.custom-slider-thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(0, 0, 0, 0.15);
+  transform: translate(-50%, -50%);
+}
+.custom-slider:active .custom-slider-thumb {
+  background: #f4f4f5;
+}
+
+/* DropZone (DownloadPageView: dashed border, radius 14, padding 14) */
+.batch-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--line-strong);
+  background: var(--bg-subtle);
+  text-align: left;
+}
+.batch-dropzone.targeted, .batch-dropzone:active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* SecretField row (DownloadPageView: 90px monospace label + field) */
+.secret-field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.secret-field-name {
+  width: 90px;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+/* Dashed Add button (ModelsPageView: minHeight 56, radius 20, dashed border) */
+.dashed-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 56px;
+  border-radius: 20px;
+  border: 1.5px dashed var(--line-strong);
+  background: none;
+  color: var(--fg);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.dashed-add-btn:active {
+  background: var(--bg-active);
+}
+.dashed-add-btn svg {
+  color: var(--accent);
+}
+
+/* Default picker subcard inside AI Hero (MacSettingsModels.swift: radius 14, padding 12) */
+.ai-default-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.ai-default-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 75%, transparent);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+.ai-default-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ai-default-label {
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+/* Pairing code display (MacSettingsSync.swift & MacSettingsExtension.swift) */
+.pairing-code-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  text-align: center;
+}
+.pairing-code-digits {
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.ext-link-box {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* Sync Devices Grid (MacSettingsSync.swift: adaptive min 250, gap 14) */
+.sync-devices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  flex: none;
+}
+.status-dot.online {
+  background: var(--approved);
+}
+
+/* StorageUsageView (Apple/Shared/StorageUsageView.swift: maxWidth 560, ring 200x200, card radius 26) */
+.storage-wrap {
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.storage-ring-box {
+  width: 200px;
+  height: 200px;
+  margin: 16px 0 20px;
+  position: relative;
+}
+.storage-card {
+  width: 100%;
+  border-radius: 26px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.storage-part-row {
+  display: flex;
+  flex-direction: column;
+}
+.storage-part-row + .storage-part-row {
+  border-top: 1px solid var(--line);
+}
+.storage-part-main {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+.storage-check-cell {
+  width: 52px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+.storage-check-circle {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.storage-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.storage-part-toggle {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 0 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.storage-part-toggle:active {
+  background: var(--bg-active);
+}
+.storage-part-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.storage-part-pct {
+  font-size: 13px;
+  color: var(--fg-2);
+}
+.storage-part-bytes {
+  margin-left: auto;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+}
+.storage-part-detail {
+  padding: 0 16px 10px 52px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--fg-2);
+}
+.storage-clear-wrap {
+  padding: 16px;
+  border-top: 1px solid var(--line);
+}
+.storage-clear-btn {
+  width: 100%;
+  min-height: 50px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.storage-clear-btn:active:not(:disabled) {
+  filter: brightness(0.92);
+}
+.storage-clear-btn:disabled {
+  opacity: 0.4;
+}
+.storage-clear-size {
+  font-weight: 400;
+  opacity: 0.82;
+}
+
+/* AboutPageView & ProblemsPageView */
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 32px 0 16px;
+  gap: 6px;
+}
+.about-icon-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  margin-bottom: 12px;
+  border-radius: 28px;
+}
+.about-icon-btn img {
+  width: 128px;
+  height: 128px;
+  border-radius: 28px;
+  display: block;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+.about-app-name {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin: 0;
+}
+.about-tagline {
+  font-size: 13px;
+  color: var(--fg-2);
+  margin: 0;
+}
+.about-version-pill {
+  margin-top: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  color: var(--fg-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.problem-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+}
+.problem-row + .problem-row {
+  border-top: 1px solid var(--line);
+}
+.problem-bar {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: var(--orange);
+  flex: none;
+}
+.problem-bar.error {
+  background: var(--danger);
+}
+
+/* ImportReport table (MacImportReport.swift) */
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0 10px;
+  flex-wrap: wrap;
+}
+.report-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: auto;
+  max-height: 420px;
+  background: var(--card);
+}
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.report-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-subtle);
+  color: var(--fg-2);
+  font-weight: 600;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.report-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.report-table tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-subtle) 45%, transparent);
+}
+
+/* TagCardsView & TagCard (MacPanel.swift: adaptive 190..260, gap 14, radius 18) */
+.tags-canvas {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.tags-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tags-toolbar-row1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tags-search-capsule {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-2);
+}
+.tags-search-capsule:focus-within {
+  border-color: var(--accent);
+  background: var(--control);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.tags-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  font-size: 13px;
+  color: var(--fg);
+}
+.tags-search-clear {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--line-strong);
+  color: var(--card);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+.tags-toolbar-row2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.tags-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--fg-2);
+}
+.tags-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.tags-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.tags-dot.mine { background: var(--tag); }
+.tags-dot.ai { background: var(--ai); }
+.tags-dot.both { background: var(--approved); }
+.tags-summary {
+  font-size: 11px;
+  color: var(--fg-2);
+  margin: 0;
+}
+
+.tags-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+}
+.tag-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 0;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  text-align: left;
+  min-width: 0;
+}
+.tag-card:active {
+  background: var(--bg-active);
+}
+.tag-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+}
+.tag-card-label {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 20px;
+  min-height: 40px;
+  color: var(--fg);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.tag-card-arrow {
+  color: var(--fg-3);
+  flex: none;
+  margin-top: 2px;
+}
+.tag-card-count-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.tag-card-count {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.tag-card-unit {
+  font-size: 13px;
+  color: var(--fg-2);
+}
+.tag-card-bar {
+  height: 8px;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+}
+.tag-card-bar-seg {
+  height: 100%;
+  border-radius: 999px;
+  min-width: 5px;
+}
+.tag-card-bar-seg.mine { background: var(--tag); }
+.tag-card-bar-seg.both { background: var(--approved); }
+.tag-card-bar-seg.ai { background: var(--ai); }
+.tag-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.tag-card-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 存储空间 (StorageUsageView): at most 560 wide and centred; the 200 ring 16 below the toolbar; a
+   card 20 under it (26 rounded, a tone of the text): rows 44 high — a 52 wide column with a round
+   tick in the part's colour (a dot when it cannot be cleared), the name and its share, the size,
+   a chevron that turns — dividers from 52 in, the description opening under a row; the blue
+   "Clear Selected" button 50 high, 16 in; "Measure Again" 16 under the card. */
+.storage-layout { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; padding-bottom: 24px; }
+.storage-ring-wrap { width: 200px; height: 200px; margin-top: 16px; margin-bottom: 20px; }
+.storage-card { align-self: stretch; border-radius: 26px; background: color-mix(in srgb, var(--fg) 5%, transparent); overflow: hidden; margin-bottom: 16px; }
+.storage-group + .storage-group .storage-row { border-top: 0.5px solid var(--line); margin-left: 52px; padding-left: 0; }
+.storage-group + .storage-group .storage-lead { margin-left: -52px; }
+.storage-row { display: flex; align-items: center; min-height: 44px; padding-right: 8px; }
+.storage-lead { width: 52px; height: 44px; flex: none; display: grid; place-items: center; }
+.storage-check { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--fg-2) 60%, transparent); background: none; padding: 0; display: grid; place-items: center; color: #fff; transition: background 0.15s, border-color 0.15s; }
+.storage-check:disabled { opacity: 0.4; }
+.storage-dot { width: 10px; height: 10px; border-radius: 50%; }
+.storage-row-main { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: 4px; border: 0; background: none; padding: 0 8px 0 0; text-align: left; font-size: 13px; color: var(--fg); }
+.storage-row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.storage-row-percent { color: var(--fg-2); flex: 1; }
+.storage-row-size { color: var(--fg-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.storage-chevron { color: var(--fg-3); margin-left: 4px; transition: transform 0.2s ease-in-out; flex: none; }
+.storage-chevron.open { transform: rotate(180deg); }
+.storage-detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.2s ease-in-out; }
+.storage-detail.open { grid-template-rows: 1fr; }
+.storage-detail > div { overflow: hidden; }
+.storage-detail-text { padding: 0 16px 10px 52px; font-size: 13px; line-height: 17px; color: var(--fg-2); }
+.storage-clear-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: calc(100% - 32px); min-height: 50px; margin: 16px; border: 0; border-radius: 25px; background: var(--accent); color: #fff; transition: opacity 0.15s, filter 0.1s; }
+.storage-clear-btn:active:not(:disabled) { filter: brightness(0.9); }
+.storage-clear-btn:disabled { opacity: 0.45; }
+.storage-clear-label { font-size: 17px; font-weight: 600; }
+.storage-clear-size { font-size: 17px; opacity: 0.75; }
+
+/* the system colours the native storage ring uses (SwiftUI's), light and dark */
+:root {
+  --storage-indigo: #5856d6; --storage-orange: #ff9500; --storage-red: #ff3b30; --storage-brown: #a2845e; --storage-blue: #007aff;
+  --storage-teal: #30b0c7; --storage-purple: #af52de; --storage-green: #34c759; --storage-gray: #8e8e93;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --storage-indigo: #5e5ce6; --storage-orange: #ff9f0a; --storage-red: #ff453a; --storage-brown: #ac8e68; --storage-blue: #0a84ff;
+    --storage-teal: #40c8e0; --storage-purple: #bf5af2; --storage-green: #30d158; --storage-gray: #8e8e93;
+  }
+}

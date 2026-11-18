@@ -49,10 +49,9 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         // the taskbar's and Alt+Tab's icon; the title bar shows none
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
-        // made here rather than read back from AppWindow.Presenter: in the AOT build that comes
-        // back as the base AppWindowPresenter, and a cast to OverlappedPresenter fails
-        _presenter = OverlappedPresenter.Create();
-        AppWindow.SetPresenter(_presenter);
+        // the presenter through a cast that asks the object (As): in the AOT build AppWindow.Presenter
+        // comes back as the base AppWindowPresenter, and a plain cast to OverlappedPresenter fails
+        _presenter = WinRT.CastExtensions.As<OverlappedPresenter>(AppWindow.Presenter);
         Theming.Apply(this);
         RestoreSize();
 
@@ -107,7 +106,8 @@ public sealed partial class MainWindow : Window
     {
         var w = Prefs.Instance.Raw("windows.window.width") is { } jw ? (int)jw.GetValue<double>() : 1280;
         var h = Prefs.Instance.Raw("windows.window.height") is { } jh ? (int)jh.GetValue<double>() : 820;
-        var scale = (Content as FrameworkElement)?.XamlRoot?.RasterizationScale ?? 1;
+        // (the content is not there yet: its XamlRoot cannot say)
+        var scale = WindowScale.Of(AppWindow);
         AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(Math.Max(w, 640) * scale), (int)(Math.Max(h, 480) * scale)));
         _presenter.PreferredMinimumWidth = 640;
         _presenter.PreferredMinimumHeight = 480;
@@ -194,14 +194,7 @@ public sealed partial class MainWindow : Window
             Content = grid,
             Tag = p,
         };
-        if (Clawd.On && Clawd.For(p) is { } mascot) item.Icon = Clawd.Icon(mascot);
-        else
-        {
-            // a null brush would hide the glyph: only 损坏或丢失 has a colour of its own
-            var icon = new FontIcon { Glyph = p.Glyph };
-            if (p == Place.Bad) icon.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
-            item.Icon = icon;
-        }
+        item.Icon = PlaceIcon(p);
         ToolTipService.SetToolTip(item, p.Title);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, count == null ? p.Title : L("format.commaJoin", p.Title, count));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, "side-" + p.Id);
@@ -210,6 +203,13 @@ public sealed partial class MainWindow : Window
         else if (p == Place.AllFolders)
             item.ContextFlyout = FolderActions.NewMenu(this);
         return item;
+    }
+
+    static IconElement PlaceIcon(Place p)
+    {
+        var icon = new FontIcon { Glyph = p.Glyph };
+        if (p == Place.Bad) icon.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
+        return icon;
     }
 
     void OnNavSelection(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -221,7 +221,9 @@ public sealed partial class MainWindow : Window
     /// The place shown, clicked again: back to its top (设置 from one of its pages, as the Mac app).
     void OnNavInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
-        if (args.InvokedItemContainer is not NavigationViewItem { Tag: Place p } || p != _place) return;
+        if (args.InvokedItemContainer is not NavigationViewItem item || item.Tag is not Place p) return;
+        if (Clawd.On && Clawd.For(p) is { } name) Clawd.Pulse(item, name, () => PlaceIcon(p));
+        if (p != _place) return;
         for (var i = 0; i < 20 && _page?.CanGoBack == true; i++) _page.GoBack();
     }
 
@@ -324,9 +326,13 @@ public sealed partial class MainWindow : Window
                 });
                 break;
             case ShareQuickDownload:
-                _ = App.ShowWindow();
-                Go(Place.Browse);
-                _browse.QuickDownload();
+                DispatcherQueue.TryEnqueue(async () =>
+                {
+                    // (behind the app lock until it is unlocked)
+                    if (!await App.ShowWindow()) return;
+                    Go(Place.Browse);
+                    _browse.QuickDownload();
+                });
                 break;
         }
     }

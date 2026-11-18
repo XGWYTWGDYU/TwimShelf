@@ -99,6 +99,8 @@ final class MacSidebarViewController: NSViewController, NSOutlineViewDataSource,
         outline.floatsGroupRows = false
         outline.dataSource = self
         outline.delegate = self
+        outline.target = self
+        outline.action = #selector(pulseClickedRow)
         outline.menu = NSMenu()
         outline.menu?.delegate = self
         outline.setAccessibilityIdentifier("sidebar")
@@ -190,15 +192,24 @@ final class MacSidebarViewController: NSViewController, NSOutlineViewDataSource,
         guard let r = item as? Row else { return nil }
         let v = o.makeView(withIdentifier: .init("row"), owner: self) as? SidebarCell ?? SidebarCell()
         v.identifier = .init("row")
-        v.set(title: r.place.title, symbol: r.place.symbol, mascot: Mascot.name(for: r.place), count: r.count, tint: r.place == .bad ? .systemRed : nil)
+        v.set(title: r.place.title, symbol: r.place.symbol, count: r.count, tint: r.place == .bad ? .systemRed : nil)
         v.setAccessibilityIdentifier("side-" + r.place.id)
         return v
     }
 
     func outlineViewSelectionDidChange(_ n: Notification) {
         guard let r = outline.item(atRow: outline.selectedRow) as? Row, r.place != current else { return }
+        pulseRow(outline.selectedRow)
         current = r.place
         onSelect?(r.place)
+    }
+
+    @objc private func pulseClickedRow() { pulseRow(outline.clickedRow) }
+
+    private func pulseRow(_ row: Int) {
+        guard row >= 0, Mascot.isOn, let place = (outline.item(atRow: row) as? Row)?.place,
+              let name = Mascot.name(for: place) else { return }
+        (outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarCell)?.pulse(name)
     }
 
     /// A row's menu: a folder can be deleted; the 文件夹 rows offer a new one.
@@ -229,6 +240,8 @@ extension MacSidebarViewController: NSMenuDelegate {
 /// A sidebar row: symbol, title, and a count on the trailing side.
 private final class SidebarCell: NSTableCellView {
     private let icon = NSImageView()
+    private var normalIcon: NSImage?
+    private var press: MascotPulse?
     private let title = NSTextField(labelWithString: "")
     private let count = NSTextField(labelWithString: "")
 
@@ -253,17 +266,21 @@ private final class SidebarCell: NSTableCellView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func set(title t: String, symbol: String, mascot: String? = nil, count c: Int?, tint: NSColor?) {
+    func set(title t: String, symbol: String, count c: Int?, tint: NSColor?) {
         title.stringValue = t
-        if let mascot, Mascot.isOn {
-            icon.image = Mascot.icon(mascot, side: 20)
-        } else {
-            icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        }
+        press?.cancel()
+        normalIcon = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        icon.image = normalIcon
         icon.contentTintColor = tint     // nil: the accent colour, as sidebar icons should be
         count.stringValue = c.map { "\($0)" } ?? ""
         count.isHidden = c == nil
         setAccessibilityLabel(c.map { L("format.commaJoin", t, $0) } ?? t)
+    }
+
+    func pulse(_ name: String) {
+        press?.cancel()
+        guard let normalIcon else { return }
+        press = MascotPulse(name, side: 20, normal: normalIcon, show: { [weak self] in self?.icon.image = $0 })
     }
 }
 
@@ -312,7 +329,9 @@ final class MacContentController: NSViewController {
         if p.filter != nil || p == .trash {
             // the recycle bin is the same grid, over the binned media
             let g = MacMediaGridPage(title: p.title, filter: p.filter ?? FeedFilter(), folder: p.folderName, bin: p == .trash)
-            g.onOpenMedia = { [weak self] it, list in self?.feed.openMedia(it, in: list) }
+            g.onOpenMedia = { [weak self, weak g] it, list in
+                self?.feed.openMedia(it, in: list) { [weak g] item in g?.viewerSourceFrame(for: item) }
+            }
             g.onShowInBrowse = { [weak self] f, _ in
                 self?.feed.showFromFolders(f, title: p.title)
                 self?.onOpenPlace?(.browse)

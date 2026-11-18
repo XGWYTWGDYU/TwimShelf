@@ -38,14 +38,5 @@ Future<void> deletePath(String path) async {
   }
 }
 
-/// The web build's server makes video posters; the apps make their own (video.dart).
-Future<String?> serverPoster(String path, int side, {required bool whole}) async => null;
-
-/// Only the web build asks the server for a smaller picture.
-Future<Uint8List?> scaledImageBytes(String path, int side) async => null;
-
 /// A file the user picked, as a path the core can read: where it is.
 Future<String> pickedPath(XFile file) async => file.path;
-
-/// The apps save into a folder the user chooses (or share the file): nothing to hand over.
-Future<void> downloadToBrowser(String path) async {}

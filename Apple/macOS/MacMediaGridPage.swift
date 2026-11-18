@@ -124,6 +124,11 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
         onOpenMedia?(first, grouped ? entries.flatMap { $0 } : items)
     }
 
+    func viewerSourceFrame(for item: FeedItem) -> NSRect? {
+        guard let tile = entries.first(where: { $0.contains { $0.mediaId == item.mediaId } })?.first else { return nil }
+        return grid.viewerSourceFrame(for: tile.mediaId)
+    }
+
     func mediaGrid(_ g: MacMediaGridView, didSettleAt level: Int) {
         UserDefaults.standard.set(level, forKey: "mac.grid.level")
         onStateChanged?()

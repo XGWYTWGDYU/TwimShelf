@@ -8,7 +8,7 @@
 
 TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心作者删帖或注销，还可以使用AI标记媒体，在局域网进行p2p同步
 
-后端基于rust，Apple平台和Windows有原生前端（Windows 版基于 WinUI 3），Linux/Android目前仅限Flutter前端，基于MD3+MD3E设计
+后端基于rust，Apple平台和Windows有原生前端（Windows 版基于 WinUI 3）；Linux 桌面版和网页版是 React 前端（桌面版基于 Electron），布局和功能与原生版一致；Android 是 Flutter 前端，基于MD3+MD3E设计
 
 ## 介绍
 
@@ -17,7 +17,7 @@ TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心
 - **AI 标记**：根据媒体和帖子内容自动打标签。可以从内置的模型商店下载本地模型，也可以接入外部 API。连不上 Hugging Face 时，可以用环境变量 `HF_ENDPOINT` 指定镜像地址
 - **设备间同步**：在局域网内去中心化同步，适合一般用户
 - **备份与维护**：可按筛选条件批量导出媒体，也可以导出完整包做冷备份
-- **Linux 服务器**：得益于 Flutter 支持 Web 的特性，可在局域网内的 NAS 或任何 HomeLab 上部署它，并访问 WebUI 前端
+- **Linux 服务器**：可在局域网内的 NAS 或任何 HomeLab 上部署，用浏览器访问网页版前端
 - **浏览器扩展**：在 X 网页上一键下载
 
 ## 注意
@@ -33,7 +33,7 @@ TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心
 | iPhone、iPad | 原生 | iOS 18 | 未签名 `.ipa` |
 | Android | Flutter | Android 12 | `.apk` |
 | Windows | 原生（WinUI 3） | Windows 11 | `setup.exe` |
-| Linux | Flutter | 见[构建指南](BUILDING.md) | `.AppImage` |
+| Linux | React + Electron | x86_64、arm64 | `.AppImage` |
 | iPhone、iPad | Flutter | iOS 18 | 未签名 `.ipa`（方便在苹果设备上测试 Flutter 版） |
 | Linux 服务器 | 服务器 + 网页版 | Docker（x86_64、arm64） | Docker 镜像 `ghcr.io/xgwytwgdyu/twimshelf` |
 | Chrome、Edge 等 | 浏览器扩展 | Chromium 116 | 仓库里的 `extension` 目录 |
@@ -103,7 +103,8 @@ Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都�
 | --- | --- |
 | `core` | Rust 核心：数据库、下载、导入、同步、搜索、资料库管理（和 `server` 同属根目录的 Cargo workspace） |
 | `Apple` | 原生苹果版（工程由 XcodeGen 按根目录的 `project.yml` 生成）：`Shared` 共享代码，`iOS`、`macOS` 平台界面，`ShareExtension` 分享扩展，`TLLocalAI` 本地模型引擎 |
-| `flutter/app` | Flutter 版应用 |
+| `flutter/app` | Flutter 版应用（Android；iOS/iPadOS 仅供测试） |
+| `web` | React 前端：网页版（服务器提供）和 Linux 桌面版（`web/electron`） |
 | `windows` | 原生 Windows 版：`TwimShelf`（WinUI 3，.NET，原生 AOT；也是自己的安装和卸载程序），`Setup/stub` 安装包外壳 |
 | `flutter/tl_core`、`tl_native`、`tl_llama` | Flutter 插件：Rust 核心绑定、平台能力、llama.cpp 推理 |
 | `server` | Linux 服务器：把核心通过 HTTP 提供给网页版，以及登录、文件、视频封面 |

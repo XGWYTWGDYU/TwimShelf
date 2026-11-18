@@ -23,11 +23,13 @@ export function L(key: string, ...args: Array<string | number>): string {
     s = entry[form] ?? entry.other ?? Object.values(entry)[0] ?? key;
   }
   let next = 0;
-  s = s.replace(/%(?:(\d+)\$)?(?:@|lld|ld|d|f|\.\d+f)/g, (_m, pos: string | undefined) => {
+  return s.replace(/%%|%(?:(\d+)\$)?(?:@|lld|ld|d|f|\.(\d+)f)/g, (m, pos: string | undefined, digits: string | undefined) => {
+    if (m === '%%') return '%';
     const i = pos ? Number(pos) - 1 : next++;
-    return args[i] === undefined ? '' : String(args[i]);
+    const value = args[i];
+    if (value === undefined) return '';
+    return digits !== undefined && typeof value === 'number' ? value.toFixed(Number(digits)) : String(value);
   });
-  return s.replace(/%%/g, '%');
 }
 
 /** The best of `available` for the browser's languages (e.g. zh-Hans for zh-CN). */

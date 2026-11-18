@@ -15,6 +15,7 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     var onPiPRestore: (() -> Void)?
     var onPiPEnd: (() -> Void)?
     private let player: AVPlayer
+    private var initialSeekTime: CMTime?
     private let playerLayer = AVPlayerLayer()
     var onMediaGeometryChanged: (() -> Void)?
     private let hud = NSTextField(labelWithString: "")
@@ -36,12 +37,19 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     private var dragStart = NSPoint.zero
     private var startValue: Double = 0
     private var scrubbing = false
-    /// Read once: whether a sideways drag seeks (off with 视频禁用手势; see `LibraryPrefs.playerGesturesOff`).
-    let dragSeeks = !LibraryPrefs.playerGesturesOff
+    /// A sideways drag seeks (from a touch screen only), and ← → seek in the viewer. A Mac has no
+    /// touch gestures to turn off, so the iPhone's 视频禁用手势 is not a setting here.
+    let dragSeeks = true
     /// Shown as a page of the media viewer: no picture in picture, and the viewer handles the keys.
     var embedded = false { didSet { pipButton.isHidden = embedded || pip == nil } }
 
     private var duration: Double { let d = player.currentItem?.duration.seconds ?? 0; return d.isFinite ? d : 0 }
+    var playbackPosition: CMTime { initialSeekTime ?? player.currentTime() }
+
+    func mediaFrame(size: CGSize) -> CGRect {
+        let frame = playerLayer.videoRect
+        return frame.isEmpty ? AVMakeRect(aspectRatio: size, insideRect: bounds) : frame
+    }
 
     /// Share menu for the video file (other apps, AirDrop, Messages…).
     @objc private func shareTapped() { NSSharingServicePicker(items: [fileURL]).show(relativeTo: shareButton.bounds, of: shareButton, preferredEdge: .minY) }
@@ -135,7 +143,12 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
             self?.player.seek(to: .zero); self?.player.play()
         }
         // the card's own player is at its moment already (and with sound now: the viewer's)
-        if startAt > .zero, !isLent { player.seek(to: startAt, toleranceBefore: .zero, toleranceAfter: .zero) }
+        if startAt > .zero, !isLent {
+            initialSeekTime = startAt
+            player.seek(to: startAt, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+                DispatchQueue.main.async { if finished { self?.initialSeekTime = nil } }
+            }
+        }
         if isLent { player.isMuted = false }
         player.playImmediately(atRate: 1)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
@@ -190,6 +203,9 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     func teardown() {
+        // gone from the screen: no timer of this view hides the pointer afterwards
+        hideTimer?.invalidate()
+        holdTimer?.invalidate()
         if !handedBack { player.pause() }
         if let t = timeObserver { player.removeTimeObserver(t); timeObserver = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
@@ -346,8 +362,9 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
 final class MacPhotoView: NSView {
     var onClose: (() -> Void)?
     private let items: [FeedItem]
-    /// Where the first video starts (it was already playing in the feed).
-    private var videoStart: CMTime
+    private var videoPositions: [Int: CMTime] = [:]
+    private let videoPosition: ((FeedItem) -> CMTime)?
+    private let saveVideoPosition: ((FeedItem, CMTime) -> Void)?
     private(set) var index: Int
     private let strip = NSView()
     private var pages: [Int: MacViewerPage] = [:]
@@ -368,13 +385,15 @@ final class MacPhotoView: NSView {
     private let lentIndex: Int
     private let giveBack: ((AVPlayer) -> Void)?
 
-    init(items: [FeedItem], index: Int, videoStart: CMTime = .zero, player: AVPlayer? = nil, giveBack: ((AVPlayer) -> Void)? = nil) {
+    init(items: [FeedItem], index: Int, player: AVPlayer? = nil, giveBack: ((AVPlayer) -> Void)? = nil,
+         videoPosition: ((FeedItem) -> CMTime)? = nil, saveVideoPosition: ((FeedItem, CMTime) -> Void)? = nil) {
         lentPlayer = player
         lentIndex = index
         self.giveBack = giveBack
+        self.videoPosition = videoPosition
+        self.saveVideoPosition = saveVideoPosition
         self.items = items
         self.index = max(0, min(index, items.count - 1))
-        self.videoStart = videoStart
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
@@ -415,8 +434,7 @@ final class MacPhotoView: NSView {
             next.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20), next.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         preparePages()
-        pages[self.index]?.activate(videoStart: videoStart, onClose: { [weak self] in self?.onClose?() }, player: lentPlayer)
-        self.videoStart = .zero     // only the video that was opened goes on from where the feed was
+        activatePage()
         updateChrome()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -424,6 +442,25 @@ final class MacPhotoView: NSView {
     var current: FeedItem { items[index] }
     private var page: MacViewerPage? { pages[index] }
     private var stride: CGFloat { bounds.width + Self.gap }
+
+    var mediaFrame: CGRect {
+        guard let page else { return bounds }
+        let item = current
+        let size = item.width > 0 && item.height > 0 ? CGSize(width: item.width, height: item.height) : bounds.size
+        return page.mediaFrame(in: self, size: size)
+    }
+
+    private func activatePage() {
+        let time = videoPositions[index] ?? videoPosition?(current) ?? .zero
+        page?.activate(videoStart: time, onClose: { [weak self] in self?.onClose?() }, player: index == lentIndex ? lentPlayer : nil)
+    }
+
+    private func rememberCurrentVideo() {
+        guard let player = page?.player else { return }
+        let time = player.playbackPosition
+        videoPositions[index] = time
+        if !player.isLent { saveVideoPosition?(current, time) }
+    }
 
     // MARK: Pages
 
@@ -464,12 +501,12 @@ final class MacPhotoView: NSView {
     /// The strip settled one page further (or back): that page is the current one now.
     private func commit(_ delta: Int) {
         guard delta != 0, items.indices.contains(index + delta) else { offset = 0; layoutPages(); return }
+        rememberCurrentVideo()
         page?.deactivate()
         index += delta
         offset += CGFloat(delta) * stride
         preparePages()
-        // back on the opened video: the card's player again
-        page?.activate(videoStart: .zero, onClose: { [weak self] in self?.onClose?() }, player: index == lentIndex ? lentPlayer : nil)
+        activatePage()
         updateChrome()
         window?.makeFirstResponder(self)
     }
@@ -554,7 +591,7 @@ final class MacPhotoView: NSView {
     private func stopLink() { link?.invalidate(); link = nil }
 
     /// Ends a move at once, where it was going.
-    private func finishMotion() {
+    func finishMotion() {
         guard let m = motion else { return }
         motion = nil
         stopLink()
@@ -688,6 +725,7 @@ final class MacPhotoView: NSView {
     func teardown() {
         finishMotion()
         stopLink()
+        rememberCurrentVideo()
         // closing: the card's player goes back to it (playing on, or paused where it was left)
         if let p = lentPlayer {
             lentPlayer = nil
@@ -788,6 +826,12 @@ final class MacViewerPage: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     var magnification: CGFloat { scroll.magnification }
+
+    func mediaFrame(in view: NSView, size: CGSize) -> CGRect {
+        if let player { return player.convert(player.mediaFrame(size: size), to: view) }
+        let frame = AVMakeRect(aspectRatio: image.image?.size ?? size, insideRect: image.bounds)
+        return image.convert(frame, to: view).intersection(scroll.convert(scroll.bounds, to: view))
+    }
 
     override func layout() {
         super.layout()

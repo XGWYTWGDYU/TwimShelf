@@ -1,12 +1,9 @@
-import 'dart:convert';
 
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:tl_core/tl_core.dart';
 import 'os.dart';
-import 'files.dart' as files;
 
 /// No backend error text is exposed: native errors can include sensitive data.
 sealed class SecretResult<T> {
@@ -75,72 +72,6 @@ class PlatformSecretBackend implements SecretBackend {
   }
 }
 
-/// Linux: the app keeps its secrets itself, in the data folder (`App/secrets.json`),
-/// each value sealed (ChaCha20-Poly1305, by the core) under a key beside it (`App/secrets.key`).
-/// Not real protection — any program that can read the folder can open them — but they are
-/// never plain text, they move with the data folder, and no system keyring is needed (Linux has
-/// none that every desktop provides). The native Windows app keeps them the same way.
-class DataFolderSecretBackend implements SecretBackend {
-  DataFolderSecretBackend(this.directory);
-  final Future<String> Function() directory;
-  Future<void> _tail = Future.value();
-
-  Future<T> _serial<T>(Future<T> Function() f) {
-    final r = _tail.then((_) => f());
-    _tail = r.then<void>((_) {}, onError: (Object _, StackTrace _) {});
-    return r;
-  }
-
-  // (through files.dart: the data folder on this device, or the server's in the web build)
-  Future<(String, String)> _open() async {
-    final dir = await directory();
-    await files.ensureDirectory(dir);
-    final keyPath = '$dir${OS.pathSeparator}secrets.key';
-    var key = await files.readText(keyPath);
-    if (key == null) {
-      key = Core.secretKey();
-      await files.writeText(keyPath, key);
-    }
-    return ('$dir${OS.pathSeparator}secrets.json', key.trim());
-  }
-
-  Future<Map<String, dynamic>> _read(String f) async {
-    final text = await files.readText(f);
-    if (text == null) return {};
-    try {
-      return jsonDecode(text) as Map<String, dynamic>;
-    } catch (_) {
-      // damaged: kept aside, never silently dropped (the app reports secrets as unavailable)
-      await files.movePath(f, '$f.damaged-${DateTime.now().millisecondsSinceEpoch}');
-      throw const _Unavailable();
-    }
-  }
-
-  Future<void> _write(String f, Map<String, dynamic> m) => files.writeText(f, jsonEncode(m));
-
-  @override
-  Future<String?> read(String key) => _serial(() async {
-        final (f, k) = await _open();
-        final blob = (await _read(f))[key] as String?;
-        return blob == null ? null : Core.secretOpen(k, blob);
-      });
-
-  @override
-  Future<void> write(String key, String value) => _serial(() async {
-        final (f, k) = await _open();
-        final m = await _read(f);
-        m[key] = Core.secretSeal(k, value);
-        await _write(f, m);
-      });
-
-  @override
-  Future<void> delete(String key) => _serial(() async {
-        final (f, _) = await _open();
-        final m = await _read(f);
-        if (m.remove(key) != null) await _write(f, m);
-      });
-}
-
 class MemorySecretBackend implements SecretBackend {
   final _values = <String, String>{};
   @override
@@ -149,10 +80,6 @@ class MemorySecretBackend implements SecretBackend {
   Future<void> write(String key, String value) async => _values[key] = value;
   @override
   Future<void> delete(String key) async => _values.remove(key);
-}
-
-class _Unavailable implements Exception {
-  const _Unavailable();
 }
 
 /// Injectable instance used by tests and the static application facade.
@@ -182,11 +109,8 @@ class Secrets {
   /// never read or write the user's Keychain or secret service.
   static final SecretStore store = SecretStore(kDebugMode && OS.environment['TL_LIBRARY_DIR'] != null
       ? MemorySecretBackend()
-      // Linux: in the data folder; Apple: Keychain; Android: Keystore
-      // the web build: on the server, beside the library (the server itself syncs with them)
-      : OS.isLinux || OS.isWeb
-          ? DataFolderSecretBackend(() async => (await getApplicationSupportDirectory()).path)
-          : PlatformSecretBackend());
+      // Apple: Keychain; Android: Keystore
+      : PlatformSecretBackend());
   static Future<SecretResult<String?>> read(String key) => store.read(key);
   static Future<SecretResult<void>> write(String key, String value) =>
       store.write(key, value);

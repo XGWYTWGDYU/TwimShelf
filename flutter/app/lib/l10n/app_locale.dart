@@ -38,17 +38,7 @@ abstract final class AppLocale {
   @visibleForTesting
   static List<String>? fontsFor(String tag, TargetPlatform platform) {
     final byLanguage = switch (platform) {
-      TargetPlatform.windows => const {
-          'zh-Hans': ['Microsoft YaHei UI', 'Microsoft YaHei'],
-          'zh-Hant': ['Microsoft JhengHei UI', 'Microsoft JhengHei'],
-          'ja': ['Yu Gothic UI', 'Meiryo UI', 'Meiryo'],
-        },
-      TargetPlatform.linux => const {
-          'zh-Hans': ['Noto Sans CJK SC', 'Source Han Sans SC', 'Noto Sans SC', 'WenQuanYi Micro Hei'],
-          'zh-Hant': ['Noto Sans CJK TC', 'Source Han Sans TC', 'Noto Sans TC'],
-          'ja': ['Noto Sans CJK JP', 'Source Han Sans JP', 'Noto Sans JP', 'IPAGothic'],
-        },
-      TargetPlatform.macOS || TargetPlatform.iOS => const {
+      TargetPlatform.iOS => const {
           'zh-Hans': ['PingFang SC'],
           'zh-Hant': ['PingFang TC'],
           'ja': ['Hiragino Sans'],

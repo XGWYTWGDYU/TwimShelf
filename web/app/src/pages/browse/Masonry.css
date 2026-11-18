@@ -1,3 +1,6 @@
-.masonry-scroller { height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.masonry-scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 .masonry { position: relative; }
 .masonry-cell { position: absolute; top: 0; left: 0; contain: layout style; }
+.masonry-footer { position: absolute; left: 0; right: 0; height: 56px; }
+.masonry-cell.placed { transition: transform 0.32s cubic-bezier(0.25, 0.9, 0.3, 1); }
+.masonry.resizing .masonry-cell, .masonry.resizing .card-media { transition: none; }

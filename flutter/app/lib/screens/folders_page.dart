@@ -6,6 +6,7 @@ import '../app/library.dart';
 import '../app/prefs.dart';
 import '../app/places.dart';
 import '../l10n/l10n.dart';
+import '../mascot/mascot.dart';
 import '../widgets/core_thumbnail.dart';
 import 'settings_page.dart' show SettingsIcon, SettingsSection;
 import '../actions/folder_actions.dart';
@@ -74,13 +75,18 @@ class FoldersPage extends StatelessWidget {
                 if (!foldersOnly) ...[
                   SettingsSection(title: L('sidebar.mediaTypes'), children: [
                     for (final (p, n) in [(Place.photos, overview?.photos), (Place.videos, overview?.videos)])
-                      ListTile(
-                        key: ValueKey('kind-${p.id}'),
-                        leading: SettingsIcon(p.icon, mascot: p.mascotIcon),
-                        title: Text(p.title),
-                        subtitle: n == null ? null : Text('$n'),
-                        trailing: chevron(),
-                        onTap: () => onOpen(p),
+                      MascotPress(
+                        p.mascotIcon,
+                        key: ValueKey(p.id),
+                        onPressed: () => onOpen(p),
+                        builder: (context, mascot, press) => ListTile(
+                          key: ValueKey('kind-${p.id}'),
+                          leading: SettingsIcon(p.icon, mascot: mascot),
+                          title: Text(p.title),
+                          subtitle: n == null ? null : Text('$n'),
+                          trailing: chevron(),
+                          onTap: press,
+                        ),
                       ),
                   ]),
                   ListenableBuilder(
@@ -89,7 +95,7 @@ class FoldersPage extends StatelessWidget {
                       for (final p in Place.offered)
                         ListTile(
                           key: ValueKey('more-${p.id}'),
-                          leading: SettingsIcon(p.icon, mascot: p.mascotIcon, danger: p == Place.bad),
+                          leading: SettingsIcon(p.icon, danger: p == Place.bad),
                           title: Text(p.title),
                           trailing: chevron(),
                           onTap: () => onOpen(p),

@@ -32,8 +32,7 @@ class ThumbStore {
         : '${(await getApplicationCacheDirectory()).path}${OS.pathSeparator}GridThumbnails';
     await ensureDirectory(base);
     HeifFileImage.cacheDir = base;
-    // the web build: the server makes them (a few at a time), there is no isolate here
-    final n = OS.isWeb ? 6 : math.max(2, math.min(4, OS.numberOfProcessors - 2));
+    final n = math.max(2, math.min(4, OS.numberOfProcessors - 2));
     final workers = await Future.wait([for (var i = 0; i < n; i++) _Worker.spawn()]);
     return ThumbStore._(base, workers);
   }
@@ -75,7 +74,14 @@ class ThumbStore {
   final Set<String> _wantedKeys = {};
 
   /// A picture arrived: the grid draws again.
-  VoidCallback? onLoaded;
+  final Set<VoidCallback> _loadedListeners = {};
+  void addLoadedListener(VoidCallback f) => _loadedListeners.add(f);
+  void removeLoadedListener(VoidCallback f) => _loadedListeners.remove(f);
+  void _notifyLoaded() {
+    for (final f in _loadedListeners.toList()) {
+      f();
+    }
+  }
 
   /// A media could not be decoded (the app marks it damaged).
   void Function(String mediaId)? onFailed;
@@ -99,6 +105,9 @@ class ThumbStore {
   }
 
   bool isFailed(String id) => _failed.contains(id);
+
+  /// The decoded thumbnail already in memory for [id], without queueing a load.
+  ui.Image? peek(String id) => _entries[id]?.large ?? _entries[id]?.small;
 
   /// The best image at hand for a tile [pixels] wide; asks for what is missing.
   ui.Image? image(String id, double pixels, {FeedItem? item}) {
@@ -206,7 +215,7 @@ class ThumbStore {
         _entries[id] = e;
         _bytes += size;
         _trim();
-        onLoaded?.call();
+        _notifyLoaded();
       }
     } catch (_) {
       // the cache file could not be read or shown: nothing is known about the media itself
@@ -214,7 +223,7 @@ class ThumbStore {
     } finally {
       _active.remove(w);
       _running.remove(key);
-      if (!_disposed && generation != _generation) onLoaded?.call();
+      if (!_disposed && generation != _generation) _notifyLoaded();
       endFrame(); // the worker is free: go on with what the last frame lacked
     }
   }
@@ -264,7 +273,7 @@ class ThumbStore {
 
   void dispose() {
     _disposed = true;
-    onLoaded = null;
+    _loadedListeners.clear();
     onFailed = null;
     clear();
     for (final w in _workers) {
@@ -290,7 +299,6 @@ class _Worker {
   final Stream<dynamic>? _replies;
 
   static Future<_Worker> spawn() async {
-    if (OS.isWeb) return _Worker(null, null, null);
     final port = ReceivePort();
     await Isolate.spawn(_main, port.sendPort);
     final replies = port.asBroadcastStream();

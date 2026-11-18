@@ -2,7 +2,7 @@
 # Builds the Rust core for the Flutter app; all caches and output go to build.dir of config.yaml.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-usage() { echo 'Usage: build_core.sh android|linux|macos|ios [--debug]' >&2; exit 2; }
+usage() { echo 'Usage: build_core.sh android|ios [--debug]' >&2; exit 2; }
 [[ $# -ge 1 && $# -le 2 ]] || usage
 platform=$1
 profile=release
@@ -12,7 +12,7 @@ if [[ $# == 2 ]]; then
   profile=debug
   flags=(--profile dev)
 fi
-case "$platform" in android|linux|macos|ios) ;; *) usage ;; esac
+case "$platform" in android|ios) ;; *) usage ;; esac
 if [[ $profile == release ]]; then
   export CARGO_PROFILE_RELEASE_STRIP=symbols
   export CARGO_PROFILE_RELEASE_DEBUG=0
@@ -43,7 +43,6 @@ need cmake
 mkdir -p "$CARGO_TARGET_DIR"
 cd "$ROOT/core"
 targets() { rustup target add "$@"; }
-shared() { cargo rustc --locked --lib "${flags[@]}" --features heif --target "$1" --crate-type cdylib; }
 static() { cargo build --locked --lib "${flags[@]}" --features heif --target "$1"; }
 # Compare the actual symbol names as well as the count. Static archives may contain
 # duplicate undefined references; only unique, externally defined C functions count.
@@ -80,45 +79,21 @@ case "$platform" in
       cp "$CARGO_TARGET_DIR/$target/$profile/libtl_core.so" "$DEST/android/src/main/jniLibs/$abi/"
       report "$DEST/android/src/main/jniLibs/$abi/libtl_core.so" elf
     done ;;
-  linux)
-    [[ $(uname -s) == Linux ]] || fail 'The Linux core builds on Linux'
-    case $(uname -m) in x86_64) target=x86_64-unknown-linux-gnu ;; aarch64|arm64) target=aarch64-unknown-linux-gnu ;; *) fail 'Unsupported Linux architecture' ;; esac
-    NM=$(command -v llvm-nm || command -v nm)
-    targets "$target"
-    shared "$target"
-    mkdir -p "$DEST/linux/lib"
-    cp "$CARGO_TARGET_DIR/$target/$profile/libtl_core.so" "$DEST/linux/lib/"
-    report "$DEST/linux/lib/libtl_core.so" elf ;;
-  macos|ios)
+  ios)
     need xcrun; need xcodebuild
-    # each platform has its own framework (flutter/tl_core/<platform>/TlCore.xcframework links to
-    # it), so a Mac build compiles nothing for iOS and an iOS build nothing for the Mac.
-    # The oldest systems the Flutter app supports (its Podfiles / Xcode projects): without these
-    # the library is built for this Mac's system and would not load on an older one
-    export MACOSX_DEPLOYMENT_TARGET=15.0 IPHONEOS_DEPLOYMENT_TARGET=18.0
-    staging="$CARGO_TARGET_DIR/xcframework/$profile/$platform"
+    # The oldest system the Flutter app supports (its Podfile / Xcode project): without this the
+    # library is built for this Mac's SDK default and might not load on an older one
+    export IPHONEOS_DEPLOYMENT_TARGET=18.0
+    staging="$CARGO_TARGET_DIR/xcframework/$profile/ios"
     rm -rf "$staging"
-    mkdir -p "$staging/headers" "$DEST/apple/$platform"
+    mkdir -p "$staging/headers" "$DEST/apple/ios"
     cp "$HEADER" "$staging/headers/tl_core.h"
-    if [[ $platform == macos ]]; then
-      # Flutter builds a universal Mac app: both architectures in one library
-      targets aarch64-apple-darwin x86_64-apple-darwin
-      for target in aarch64-apple-darwin x86_64-apple-darwin; do static "$target"; done
-      xcrun lipo -create "$CARGO_TARGET_DIR/aarch64-apple-darwin/$profile/libtl_core.a" "$CARGO_TARGET_DIR/x86_64-apple-darwin/$profile/libtl_core.a" -output "$staging/libtl_core.a"
-      xcodebuild -create-xcframework -library "$staging/libtl_core.a" -headers "$staging/headers" -output "$staging/TlCore.xcframework"
-    else
-      # the device and the simulator (Xcode picks by the run destination)
-      targets aarch64-apple-ios aarch64-apple-ios-sim
-      for target in aarch64-apple-ios aarch64-apple-ios-sim; do static "$target"; done
-      xcodebuild -create-xcframework -library "$CARGO_TARGET_DIR/aarch64-apple-ios/$profile/libtl_core.a" -headers "$staging/headers" -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/$profile/libtl_core.a" -headers "$staging/headers" -output "$staging/TlCore.xcframework"
-    fi
-    rm -rf "$DEST/apple/$platform/TlCore.xcframework"
-    cp -R "$staging/TlCore.xcframework" "$DEST/apple/$platform/"
-    if [[ $platform == macos ]]; then
-      report "$DEST/apple/macos/TlCore.xcframework/macos-arm64_x86_64/libtl_core.a" apple arm64
-      report "$DEST/apple/macos/TlCore.xcframework/macos-arm64_x86_64/libtl_core.a" apple x86_64
-    else
-      report "$DEST/apple/ios/TlCore.xcframework/ios-arm64/libtl_core.a" apple arm64
-      report "$DEST/apple/ios/TlCore.xcframework/ios-arm64-simulator/libtl_core.a" apple arm64
-    fi ;;
+    # the device and the simulator (Xcode picks by the run destination)
+    targets aarch64-apple-ios aarch64-apple-ios-sim
+    for target in aarch64-apple-ios aarch64-apple-ios-sim; do static "$target"; done
+    xcodebuild -create-xcframework -library "$CARGO_TARGET_DIR/aarch64-apple-ios/$profile/libtl_core.a" -headers "$staging/headers" -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/$profile/libtl_core.a" -headers "$staging/headers" -output "$staging/TlCore.xcframework"
+    rm -rf "$DEST/apple/ios/TlCore.xcframework"
+    cp -R "$staging/TlCore.xcframework" "$DEST/apple/ios/"
+    report "$DEST/apple/ios/TlCore.xcframework/ios-arm64/libtl_core.a" apple arm64
+    report "$DEST/apple/ios/TlCore.xcframework/ios-arm64-simulator/libtl_core.a" apple arm64 ;;
 esac

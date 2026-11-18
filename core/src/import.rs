@@ -250,6 +250,8 @@ impl Source for DirSource {
             kids.sort();
             for k in kids {
                 let rel = k.strip_prefix(root).unwrap_or(&k).to_string_lossy().into_owned();
+                // relative paths are written with `/` everywhere (a folder on Windows gives `\\`)
+                #[cfg(windows)] let rel = rel.replace('\\', "/");
                 let ft = fs::symlink_metadata(&k)?.file_type();
                 if ft.is_dir() { out.push((rel, true, usize::MAX)); walk(root, &k, files, out)?; }
                 else { out.push((rel, false, files.len())); files.push(k); }
@@ -323,11 +325,13 @@ pub fn import_loose_dir_keep(lib: &Library, dir: &Path, folder: Option<&str>, co
             .map(|i| dir.join(&i.path)).collect();
         fn sweep(d: &Path, keep: &std::collections::HashSet<PathBuf>) -> bool {
             let mut empty = true;
+            // a post's text stays with a media of that post that stayed
+            let keeps_post = keep.iter().any(|k| k.parent() == Some(d));
             for e in fs::read_dir(d).into_iter().flatten().filter_map(|e| e.ok()) {
                 let p = e.path();
                 let ft = match e.file_type() { Ok(t) => t, Err(_) => { empty = false; continue } };
                 if ft.is_dir() { if sweep(&p, keep) { let _ = fs::remove_dir(&p); } else { empty = false; } }
-                else if keep.contains(&p) { empty = false; }
+                else if keep.contains(&p) || (keeps_post && p.file_name().is_some_and(|n| n == SIDECAR_NAME)) { empty = false; }
                 else if fs::remove_file(&p).is_err() { empty = false; }
             }
             empty
@@ -786,7 +790,9 @@ pub fn export_issues(report: &Path, out: &Path) -> anyhow::Result<usize> {
         let name = format!("{}/{}", category_title(&i.category), i.path);
         let copied = match zip_src.as_mut() {
             Some(z) => match index.get(&i.path) {
-                Some(&k) => { zw.start_file(&name, opts)?; std::io::copy(&mut z.by_index(k)?, &mut zw)?; true }
+                // no more than an import would ever take of one file
+                Some(&k) if z.by_index_raw(k)?.size() <= crate::archive::MAX_MEDIA_BYTES => { zw.start_file(&name, opts)?; std::io::copy(&mut z.by_index(k)?.take(crate::archive::MAX_MEDIA_BYTES), &mut zw)?; true }
+                Some(_) => false,
                 None => false,
             },
             None => match open_report_file(&src_path, &i.path) {

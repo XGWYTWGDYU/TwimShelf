@@ -75,7 +75,7 @@ pub fn export(lib: &Library, out: &Path, app_info: &str) -> anyhow::Result<usize
     let mut add = |z: &mut zip::ZipWriter<std::io::BufWriter<File>>, name: &str, bytes: &[u8]| -> anyhow::Result<()> {
         z.start_file(name, o)?; z.write_all(bytes)?; n += 1; Ok(())
     };
-    for f in ["app.log", "app.1.log", "diagnostics.log", "diagnostics.1.log"] {
+    for f in ["app.log", "app.1.log", "windows.log", "windows.log.1", "diagnostics.log", "diagnostics.1.log"] {
         if let Ok(b) = fs::read(logs.join(f)) { add(&mut z, f, &b)?; }
     }
     if let Ok(rd) = fs::read_dir(logs.join("crashes")) {

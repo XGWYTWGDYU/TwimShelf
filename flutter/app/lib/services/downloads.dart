@@ -88,7 +88,7 @@ class FileDownloadQueueStore implements DownloadQueueStore {
   }
 }
 
-/// The queue in a text file through the platform's file access (the server's, in the web build).
+/// The queue in a text file.
 class TextFileDownloadQueueStore implements DownloadQueueStore {
   TextFileDownloadQueueStore(this.path);
   final String path;
@@ -211,11 +211,6 @@ class DownloadService extends ChangeNotifier {
     String? libraryPath,
     void Function(DownloadStatus)? onFinished,
   }) async {
-    if (OS.isWeb) {
-      final service = DownloadService(core: NativeDownloadCore(), store: TextFileDownloadQueueStore('$libraryPath/downloads.queue.json'), onFinished: onFinished);
-      await service.initialize();
-      return service;
-    }
     final root =
         libraryDirectory ??
         Directory(
@@ -305,14 +300,6 @@ class DownloadService extends ChangeNotifier {
   }
 
   Future<void> initialize() => _serial(_load);
-
-  /// The web build: other windows may have changed the queue file since; read it again before
-  /// changing it (the last window to write would otherwise drop the others' links).
-  Future<void> _fresh() async {
-    if (!OS.isWeb) return;
-    _initialized = false;
-    await _load();
-  }
 
   Future<void> _load() async {
     if (_initialized) return;
@@ -431,7 +418,6 @@ class DownloadService extends ChangeNotifier {
 
   Future<void> enqueueLinks(List<String> links, {String? source}) =>
       _serial(() async {
-        await _fresh();
         _ready();
         await _commit(
           queue: _adding(links, source: source),
@@ -446,7 +432,6 @@ class DownloadService extends ChangeNotifier {
   }
 
   Future<void> importBookmarks(String path) => _serial(() async {
-    await _fresh();
     _ready();
     final urls = await core.bookmarks(path);
     await _commit(
@@ -485,7 +470,6 @@ class DownloadService extends ChangeNotifier {
   }
 
   Future<void> start() => _serial(() async {
-    await _fresh();
     _ready();
     if (_queue.isEmpty && (_mode == 'paused' || (_status?.paused ?? 0) > 0)) {
       throw const DownloadServiceException('settings.resume');
@@ -505,14 +489,12 @@ class DownloadService extends ChangeNotifier {
     }
   });
   Future<void> pause() => _serial(() async {
-    await _fresh();
     _ready();
     await _commit(mode: 'paused');
     await core.stop(true);
     await _refresh();
   });
   Future<void> resume() => _serial(() async {
-    await _fresh();
     _ready();
     await core.applyCookies(_route);
     _backgroundExpired = false;
@@ -528,7 +510,6 @@ class DownloadService extends ChangeNotifier {
   });
   /// The data folder is about to move: what runs stops, and goes on from the new place.
   Future<void> pauseForMove() => _serial(() async {
-    await _fresh();
     _ready();
     await core.stop(true);
     await _refresh();
@@ -536,7 +517,6 @@ class DownloadService extends ChangeNotifier {
 
   /// 清除所有数据: nothing left to send, the record of accepted shares gone, the file too.
   Future<void> discardAll() => _serial(() async {
-    await _fresh();
     _ready();
     await _commit(queue: [], shares: {}, mode: 'active');
     await core.stop(false);
@@ -547,7 +527,6 @@ class DownloadService extends ChangeNotifier {
   String? damagedQueue;
 
   Future<void> cancel() => _serial(() async {
-    await _fresh();
     _ready();
     // Explicit cancellation intentionally discards unsent links. Persist that
     // intent before the stop, so a crash cannot start them on the next launch.
@@ -556,7 +535,6 @@ class DownloadService extends ChangeNotifier {
     await _refresh();
   });
   Future<void> poll() => _serial(() async {
-    await _fresh();
     _ready();
     await _refresh();
   });

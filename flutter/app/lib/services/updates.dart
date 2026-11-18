@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -15,9 +14,8 @@ import '../platform/os.dart';
 
 /// 检查更新, in GitHub builds only: they are built with `--dart-define=TL_UPDATE_REPO=owner/name`;
 /// every other build has none and never looks. At most once a day when the app opens, or when
-/// asked in Settings. iOS and iPadOS open the release page; elsewhere the release's installer
-/// is downloaded, checked against the release (size, SHA-256) and started: in one click on Linux
-/// (the AppImage replaces itself); Android downloads the APK as soon as there is one and opens it.
+/// asked in Settings. iOS and iPadOS open the release page; Android downloads the release's APK
+/// (checked against the release: size, SHA-256) and opens it.
 class Updates {
   Updates._();
   static const repo = String.fromEnvironment('TL_UPDATE_REPO');
@@ -27,10 +25,7 @@ class Updates {
 
   /// Installer endings for this platform, preferred first; empty: the release page.
   static List<String> get _suffixes {
-    if (OS.isMacOS) return const ['.dmg'];
     if (OS.isAndroid) return const ['.apk'];
-    // an AppImage replaces itself; installed any other way, the release page
-    if (OS.isLinux && OS.environment['APPIMAGE'] != null) return const ['.AppImage'];
     return const [];
   }
 
@@ -79,14 +74,6 @@ class Updates {
 
   static Future<void> offer(BuildContext context, UpdateInfo info) async {
     final installs = info.asset_url != null;
-    // Android: the APK is fetched at once, so that Install opens it straight away
-    String? apk;
-    if (installs && OS.isAndroid) {
-      try {
-        apk = await _download(info);
-      } catch (_) {}
-      if (!context.mounted) return;
-    }
     final choice = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
@@ -110,10 +97,7 @@ class Updates {
       if (u != null && u.scheme == 'https') await launchUrl(u, mode: LaunchMode.externalApplication);
       return;
     }
-    if (apk != null) {
-      await _openApk(apk);
-      return;
-    }
+    // (fetched only now: nothing large is downloaded before the person says so)
     await _install(context, info);
   }
 
@@ -133,42 +117,13 @@ class Updates {
     });
   }
 
-  /// Puts a downloaded AppImage in the place of [self]. The download may be on another file
-  /// system, where a rename fails: it is copied beside [self] first, and only that last step
-  /// replaces the program, so a full disk leaves the old one as it was.
-  @visibleForTesting
-  static Future<void> replaceAppImage(String file, String self) async {
-    final next = File('$self.update');
-    try {
-      await File(file).copy(next.path);
-      final chmod = await Process.run('chmod', ['+x', next.path]);
-      if (chmod.exitCode != 0) throw FileSystemException('chmod', next.path);
-      await next.rename(self);
-    } catch (_) {
-      if (await next.exists()) await next.delete();
-      rethrow;
-    }
-    await File(file).delete();
-  }
-
   static Future<void> _install(BuildContext context, UpdateInfo info) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(SnackBar(content: Text(L('update.downloading')), duration: const Duration(minutes: 10)));
     try {
       final file = await _download(info);
       messenger.hideCurrentSnackBar();
-      if (OS.isAndroid) {
-        await _openApk(file);
-      } else if (OS.isMacOS) {
-        await Process.run('open', [file]);
-        messenger.showSnackBar(SnackBar(content: Text(L('update.opened.mac'))));
-      } else if (OS.isLinux) {
-        // an AppImage is the app: the new one takes the old one's place, then starts
-        final self = OS.environment['APPIMAGE']!;
-        await replaceAppImage(file, self);
-        await Process.start(self, const [], mode: ProcessStartMode.detached);
-        exit(0);
-      }
+      if (OS.isAndroid) await _openApk(file);
     } catch (e) {
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(SnackBar(content: Text(L('update.failed', ['$e']))));

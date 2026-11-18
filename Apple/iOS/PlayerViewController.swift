@@ -22,11 +22,14 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         var close: () -> Void
         /// It became the page on screen.
         var shown: () -> Void
+        var canShowControls: () -> Bool = { true }
         /// The controls came or went (the viewer's caption follows them).
         var controlsVisible: (Bool) -> Void = { _ in }
         var mediaGeometryChanged: () -> Void = {}
         /// The video was turned on its own (the viewer hides its bar and caption and stops paging).
         var turned: (Bool) -> Void = { _ in }
+        var paused: (CMTime) -> Void = { _ in }
+        var keepsPlayingOnDismiss: () -> Bool = { false }
     }
     var embedding: Embedding?
     var viewerIndex: Int { embedding?.index ?? 0 }
@@ -36,7 +39,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     private static var inPiP: PlayerViewController?
     private let player: AVPlayer
     private let startAt: CMTime
+    private var initialSeekTime: CMTime?
     private let playerLayer = AVPlayerLayer()
+    private let posterView = UIImageView()
+    private var posterObservation: NSKeyValueObservation?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var playbackVisible = false
@@ -135,8 +141,15 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         playerLayer.player = player
         playerLayer.videoGravity = .resizeAspect
         stage.layer.addSublayer(playerLayer)
+        posterView.contentMode = .scaleAspectFit
+        posterView.isHidden = true
+        stage.addSubview(posterView)
         stage.addSubview(volumeView)
         buildControls()
+        if !canShowControls {
+            controls.alpha = 0
+            lockButton.alpha = 0
+        }
         buildGestures()
 
         hud.translatesAutoresizingMaskIntoConstraints = false
@@ -156,7 +169,12 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
                 self.player.play()
             }
         }
-        if startAt > .zero { player.seek(to: startAt, toleranceBefore: .zero, toleranceAfter: .zero) }
+        if startAt > .zero {
+            initialSeekTime = startAt
+            player.seek(to: startAt, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+                DispatchQueue.main.async { if finished { self?.initialSeekTime = nil } }
+            }
+        }
         applyAudioPolicy()
         audioObserver = NotificationCenter.default.addObserver(forName: AudioPolicy.changed, object: nil, queue: .main) { [weak self] _ in self?.applyAudioPolicy() }
         // a page of the viewer starts when it is the page on screen (the next one is made early)
@@ -259,7 +277,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         if let e = embedding {
             resumePlayback()
             updatePlayButton()
-            setControls(visible: true)
+            showPageControls()
             e.shown()
         }
         if !autoTurnChecked { autoTurnChecked = true; autoLandscapeIfWanted() }
@@ -269,7 +287,10 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         super.viewWillDisappear(animated)
         playbackVisible = false
         // turned away from in the viewer: it stops (it plays on if it comes back)
-        if embedding != nil, pip?.isPictureInPictureActive != true, !handedBack { player.pause() }
+        if let embedding, pip?.isPictureInPictureActive != true, !handedBack {
+            if !embedding.keepsPlayingOnDismiss() { player.pause() }
+            embedding.paused(initialSeekTime ?? player.currentTime())
+        }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -277,10 +298,29 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         // a page left in the viewer comes back upright
         if embedding != nil { setQuarterTurns(0, animated: false) }
         // A pager may reuse this controller. Keep its observers until deallocation.
-        if pip?.isPictureInPictureActive == true || Self.inPiP === self || handedBack { return }
+        if pip?.isPictureInPictureActive == true || Self.inPiP === self || handedBack || embedding?.keepsPlayingOnDismiss() == true { return }
         player.pause()
     }
 
+    func mediaFrame(in view: UIView, size: CGSize) -> CGRect {
+        let rect = playerLayer.videoRect
+        return stage.convert(rect.isEmpty ? AVMakeRect(aspectRatio: size, insideRect: stage.bounds) : rect, to: view)
+    }
+
+    func showTransitionPoster(_ image: UIImage) {
+        loadViewIfNeeded()
+        guard !playerLayer.isReadyForDisplay else { return }
+        posterView.image = image
+        posterView.isHidden = false
+        posterObservation = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+            guard layer.isReadyForDisplay else { return }
+            DispatchQueue.main.async {
+                self?.posterView.isHidden = true
+                self?.posterView.image = nil
+                self?.posterObservation = nil
+            }
+        }
+    }
 
     // MARK: Picture in picture
 
@@ -393,7 +433,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         let mute = AudioPolicy.shouldMute(allowSpeaker: allowSpeaker)
         player.isMuted = mute
         if !mute { soundPrompt?.removeFromSuperview(); return }
-        guard soundPrompt == nil else { return }
+        guard canShowControls, soundPrompt == nil else { return }
         let url = url
         Task { [weak self] in
             guard await AudioPolicy.hasAudio(url) else { return }
@@ -403,7 +443,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
 
     /// "没有连接耳机，已静音 · 开启声音": the user may hear this video through the speaker.
     private func showSoundPrompt() {
-        guard soundPrompt == nil, player.isMuted else { return }
+        guard canShowControls, soundPrompt == nil, player.isMuted else { return }
         let label = UILabel()
         label.text = AudioPolicy.promptText
         label.font = .systemFont(ofSize: 14, weight: .semibold)
@@ -448,6 +488,7 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         stage.layoutIfNeeded()
         CATransaction.begin(); CATransaction.setDisableActions(true)
         playerLayer.frame = stage.bounds
+        posterView.frame = stage.bounds
         CATransaction.commit()
         layoutMediaShade()
         embedding?.mediaGeometryChanged()
@@ -660,9 +701,16 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
         return i >= 3600 ? String(format: "%d:%02d:%02d", i / 3600, i / 60 % 60, i % 60) : String(format: "%d:%02d", i / 60, i % 60)
     }
 
+    private var canShowControls: Bool { embedding?.canShowControls() ?? true }
+
+    func showPageControls() {
+        setControls(visible: true)
+        applyAudioPolicy()
+    }
+
     private func setControls(visible: Bool) {
         hideTimer?.invalidate()
-        guard !locked else { return }
+        guard !locked, canShowControls else { return }
         UIView.animate(withDuration: 0.2, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { self.controls.alpha = visible ? 1 : 0; self.lockButton.alpha = visible ? 1 : 0 }
         embedding?.controlsVisible(visible)
         if visible { scheduleHide() }
@@ -905,8 +953,11 @@ final class GradientView: UIView {
 final class PhotoViewController: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate, UIGestureRecognizerDelegate {
     private let items: [FeedItem]
     private var index: Int
-    /// Where the first video starts (it was already playing in the feed).
-    private var videoStart: CMTime
+    private var videoPositions: [Int: CMTime] = [:]
+    var videoPosition: ((FeedItem) -> CMTime)?
+    var saveVideoPosition: ((FeedItem, CMTime) -> Void)?
+    var onDismissed: (() -> Void)?
+    private var hasAppeared = false
     private let bar = UIStackView()
     private let pages = UIPageViewController(transitionStyle: .scroll, navigationOrientation: .horizontal, options: [.interPageSpacing: 16])
     private let counter = UILabel()
@@ -920,20 +971,63 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
 
     /// The feed card's player of the opened video (one player for both), and where it goes back.
     private var lentPlayer: AVPlayer?
-    private weak var lentPage: PlayerViewController?
+    private let lentIndex: Int
+    private var lentPage: PlayerViewController?
     private let giveBack: ((AVPlayer) -> Void)?
 
-    init(items: [FeedItem], index: Int, videoStart: CMTime = .zero, player: AVPlayer? = nil, giveBack: ((AVPlayer) -> Void)? = nil) {
+    init(items: [FeedItem], index: Int, player: AVPlayer? = nil, giveBack: ((AVPlayer) -> Void)? = nil) {
         self.items = items
-        self.index = max(0, min(index, items.count - 1))
-        self.videoStart = videoStart
+        let firstIndex = max(0, min(index, items.count - 1))
+        self.index = firstIndex
+        self.lentIndex = firstIndex
         self.lentPlayer = player
         self.giveBack = giveBack
         super.init(nibName: nil, bundle: nil)
     }
 
+    func setZoomSource(_ source: @escaping (FeedItem) -> UIView?) {
+        modalPresentationStyle = .fullScreen
+        let options = UIViewController.Transition.ZoomOptions()
+        options.alignmentRectProvider = { context in
+            guard let viewer = context.zoomedViewController as? PhotoViewController,
+                  let frame = viewer.mediaFrame, !frame.isEmpty else { return nil }
+            return AVMakeRect(aspectRatio: context.sourceView.bounds.size, insideRect: frame)
+        }
+        options.interactiveDismissShouldBegin = { [weak self] context in
+            context.willBegin && self?.currentPlayer == nil
+                && (self?.pages.viewControllers?.first as? ZoomPage)?.isZoomed != true
+        }
+        preferredTransition = .zoom(options: options) { context in
+            guard let viewer = context.zoomedViewController as? PhotoViewController,
+                  let origin = source(viewer.items[viewer.index]) else { return nil }
+            if !viewer.hasAppeared,
+               let image = (origin as? MediaPageView)?.transitionImage ?? (origin as? UIImageView)?.image {
+                viewer.loadViewIfNeeded()
+                if let player = viewer.currentPlayer { player.showTransitionPoster(image) }
+                else { (viewer.pages.viewControllers?.first as? ZoomPage)?.showTransitionPoster(image) }
+            }
+            return origin
+        }
+    }
+
+    private var mediaFrame: CGRect? {
+        let item = items[index]
+        let size = item.width > 0 && item.height > 0 ? CGSize(width: item.width, height: item.height) : view.bounds.size
+        if let player = currentPlayer { return player.mediaFrame(in: view, size: size) }
+        return (pages.viewControllers?.first as? ZoomPage)?.mediaFrame(in: view, size: size)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if !hasAppeared {
+            hasAppeared = true
+            let video = currentPlayer
+            UIView.animate(withDuration: 0.2) {
+                self.bar.alpha = 1
+                if video == nil { self.captionHost.alpha = 1 }
+            }
+            video?.showPageControls()
+        }
         #if DEBUG
         // tests: the viewer closes by itself after this many seconds (the card ↔ viewer video handoff)
         if let s = ProcessInfo.processInfo.environment["TL_VIEWER_AUTOCLOSE"].flatMap(Double.init) {
@@ -944,12 +1038,21 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // closing: the card's player goes back to it (playing on, or paused where it was left)
-        if isBeingDismissed, let p = lentPlayer {
+        guard isBeingDismissed else { return }
+        if transitionCoordinator?.animate(alongsideTransition: nil, completion: { [weak self] context in
+            if !context.isCancelled { self?.finishDismissal() }
+        }) != true {
+            finishDismissal()
+        }
+    }
+
+    private func finishDismissal() {
+        if let p = lentPlayer {
             lentPlayer = nil
             lentPage?.handBack()
             giveBack?(p)
         }
+        DispatchQueue.main.async { [onDismissed] in onDismissed?() }
     }
     required init?(coder: NSCoder) { fatalError() }
     override var prefersStatusBarHidden: Bool { true }
@@ -991,6 +1094,7 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
         [counter, UIView(), shareButton, closeButton].forEach { bar.addArrangedSubview($0) }
         bar.spacing = 12
         bar.alignment = .center
+        bar.alpha = 0
         bar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(bar)
         NSLayoutConstraint.activate([
@@ -1033,15 +1137,16 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
             p.onShown = { [weak self] in self?.shown(i) }
             return p
         }
-        let start = videoStart
-        videoStart = .zero      // only the video that was opened goes on from where the feed was
-        // the opened video plays on in the card's own player (made once: the page may be made again)
-        let lent = i == index && lentPage == nil ? lentPlayer : nil
-        let p = PlayerViewController(url: items[i].fileURL, startAt: i == index ? start : .zero, player: lent)
+        if i == lentIndex, let lentPage { return lentPage }
+        let item = items[i]
+        let start = videoPositions[i] ?? videoPosition?(item) ?? .zero
+        let lent = i == lentIndex ? lentPlayer : nil
+        let p = PlayerViewController(url: item.fileURL, startAt: start, player: lent)
         if lent != nil { lentPage = p }
         p.embedding = .init(index: i, hasPrevious: i > 0, hasNext: i < items.count - 1,
                             step: { [weak self] d in self?.step(d) }, close: { [weak self] in self?.close() },
                             shown: { [weak self] in self?.shown(i) },
+                            canShowControls: { [weak self] in self?.hasAppeared ?? true },
                             controlsVisible: { [weak self, weak p] on in
                                 guard let self, let p, self.currentPlayer === p else { return }
                                 UIView.animate(withDuration: 0.2) { self.captionHost.alpha = on ? 1 : 0 }
@@ -1049,6 +1154,14 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
                             turned: { [weak self, weak p] _ in
                                 guard let self, let p, self.currentPlayer === p else { return }
                                 self.pageChanged()
+                            },
+                            paused: { [weak self] time in
+                                guard let self else { return }
+                                self.videoPositions[i] = time
+                                if lent == nil { self.saveVideoPosition?(item, time) }
+                            },
+                            keepsPlayingOnDismiss: { [weak self] in
+                                lent != nil && self?.isBeingDismissed == true
                             })
         return p
     }
@@ -1100,7 +1213,7 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
         let shows = PostCaptionView.shows(it)
         caption.rootView = PostCaptionView(item: it, maxExpandedHeight: view.bounds.height * 0.45,
                                            onHeight: { [weak self] h in self?.captionHost.activeHeight = h })
-        captionHost.alpha = video.map { $0.controlsShown ? 1 : 0 } ?? 1
+        captionHost.alpha = hasAppeared && (video?.controlsShown ?? true) ? 1 : 0
         captionHost.isHidden = !shows
     }
 
@@ -1177,6 +1290,15 @@ final class ZoomPage: UIViewController, UIScrollViewDelegate, ViewerPage {
     }
     private let scroll = UIScrollView()
     private let imageView = UIImageView()
+    var isZoomed: Bool { scroll.zoomScale > 1.001 }
+    func showTransitionPoster(_ image: UIImage) {
+        loadViewIfNeeded()
+        if imageView.image == nil { imageView.image = image }
+    }
+    func mediaFrame(in view: UIView, size: CGSize) -> CGRect {
+        let frame = imageView.convert(AVMakeRect(aspectRatio: imageView.image?.size ?? size, insideRect: imageView.bounds), to: view)
+        return frame.intersection(scroll.convert(scroll.bounds, to: view))
+    }
     var onMediaGeometryChanged: (() -> Void)?
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()

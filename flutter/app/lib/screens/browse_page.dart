@@ -28,9 +28,7 @@ import 'viewer_page.dart';
 import '../app/feed_order.dart';
 import '../widgets/media_image.dart';
 import '../widgets/text_menu.dart';
-import '../widgets/wheel_pager.dart';
 import '../platform/os.dart';
-import '../platform/files.dart';
 
 /// 浏览: the library as cards — one per post (or one per media when not grouped) — in columns
 /// whose cards are as tall as their content (text shown in full, no gap where a link is
@@ -248,18 +246,28 @@ class _BrowsePageState extends State<BrowsePage> {
     if (_openingViewer) return;
     _openingViewer = true;
     final (items, index) = viewerList(_cards ?? const [], item);
-    // Release inline decoders before the full-screen player starts, including those
-    // whose visibility callbacks would otherwise arrive during the route animation.
+    final initialRect = _CardMediaState.rectOf(item.media_id);
+    if (item.kind == MediaKind.photo) {
+      final px = (MediaQuery.sizeOf(context).longestSide * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(512, 4096);
+      unawaited(precacheImage(mediaImage(item.path, cacheWidth: px, maxSide: 4096), context, onError: (_, _) {}));
+    }
     try {
-      await _FeedVideoState.suspendForViewer();
+      unawaited(VideoSession.beginViewer(openingPath: item.kind == MediaKind.video ? item.path : null));
       if (!mounted) return;
-      await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => ViewerPage(library: widget.library, items: items, index: index),
-      ));
+      await ViewerPage.push(
+        context,
+        library: widget.library,
+        items: items,
+        index: index,
+        sourceRect: (m) =>
+            _CardMediaState.rectOf(m.media_id) ??
+            (m.media_id == item.media_id ? initialRect : null),
+        sourceBorderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+        cropSource: false,
+        previewCacheWidth: _CardMediaState.cacheWidthOf,
+      );
     } finally {
       _openingViewer = false;
-      _FeedVideoState.resumeAfterViewer();
     }
   }
 
@@ -523,8 +531,6 @@ class _PostCardState extends State<PostCard> {
     super.dispose();
   }
 
-  void _turn(int by) => _pager.animateToPage(_page + by, duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
-
   @override
   Widget build(BuildContext context) {
     final first = widget.media.first;
@@ -552,32 +558,21 @@ class _PostCardState extends State<PostCard> {
           ),
           child: Stack(children: [
             Positioned.fill(
-              child: WheelPager(
-                enabled: widget.media.length > 1,
-                canStep: (by) => _page + by >= 0 && _page + by < widget.media.length,
-                onStep: _turn,
-                child: PageView.builder(
-                  controller: _pager,
-                  scrollBehavior: pageBehavior(context),
-                  itemCount: widget.media.length,
-                  onPageChanged: (p) {
-                    widget.onPage?.call(p);
-                    setState(() => _page = p);
-                  },
-                  itemBuilder: (context, i) => WheelGuard(child: GestureDetector(
-                    onTap: () => widget.onOpen(widget.media[i]),
-                    onLongPressStart: (d) => _menu(widget.media[i], d.globalPosition),
-                    onSecondaryTapUp: (d) => _menu(widget.media[i], d.globalPosition),
-                    child: _CardMedia(item: widget.media[i], library: widget.library, current: i == _page),
-                  )),
+              child: PageView.builder(
+                controller: _pager,
+                itemCount: widget.media.length,
+                onPageChanged: (p) {
+                  widget.onPage?.call(p);
+                  setState(() => _page = p);
+                },
+                itemBuilder: (context, i) => GestureDetector(
+                  onTap: () => widget.onOpen(widget.media[i]),
+                  onLongPressStart: (d) => _menu(widget.media[i], d.globalPosition),
+                  onSecondaryTapUp: (d) => _menu(widget.media[i], d.globalPosition),
+                  child: _CardMedia(item: widget.media[i], library: widget.library, current: i == _page),
                 ),
               ),
             ),
-            // a mouse does not drag pages
-            if (widget.media.length > 1 && (OS.isMacOS || OS.isLinux)) ...[
-              if (_page > 0) _PageArrow(key: const ValueKey('cardPrev'), left: true, onTap: () => _turn(-1)),
-              if (_page < widget.media.length - 1) _PageArrow(key: const ValueKey('cardNext'), left: false, onTap: () => _turn(1)),
-            ],
             if (widget.media.length > 1)
               Positioned(
                 top: 10,
@@ -610,7 +605,10 @@ class _PostCardState extends State<PostCard> {
             if (first.url != null) ...[
               const SizedBox(height: 6),
               InkWell(
-                onTap: () => launchUrl(Uri.parse(first.url!)),
+                onTap: () {
+                  final link = Uri.tryParse(first.url!);
+                  if (link != null && (link.scheme == 'http' || link.scheme == 'https')) launchUrl(link);
+                },
                 child: Text(first.url!, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.primary)),
               ),
             ],
@@ -739,28 +737,7 @@ double cardAspectAt(List<FeedItem> media, double position) {
   return 1 / (ha + (hb - ha) * (p - a));
 }
 
-class _PageArrow extends StatelessWidget {
-  const _PageArrow({super.key, required this.left, required this.onTap});
-  final bool left;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Positioned(
-        left: left ? 8 : null,
-        right: left ? null : 8,
-        top: 0,
-        bottom: 0,
-        child: Center(
-          child: IconButton(
-            style: IconButton.styleFrom(backgroundColor: Colors.black38, foregroundColor: Colors.white),
-            icon: Icon(left ? Icons.chevron_left : Icons.chevron_right),
-            onPressed: onTap,
-          ),
-        ),
-      );
-}
-
-class _CardMedia extends StatelessWidget {
+class _CardMedia extends StatefulWidget {
   const _CardMedia({required this.item, required this.library, required this.current});
   final FeedItem item;
   final LibraryModel library;
@@ -768,19 +745,72 @@ class _CardMedia extends StatelessWidget {
   final bool current;
 
   @override
+  State<_CardMedia> createState() => _CardMediaState();
+}
+
+class _CardMediaState extends State<_CardMedia> {
+  static final _contexts = <String, BuildContext>{};
+  static final _cacheWidths = <String, int>{};
+
+  static Rect? rectOf(String mediaId) {
+    final c = _contexts[mediaId];
+    if (c == null || !c.mounted) return null;
+    final box = c.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  static int? cacheWidthOf(String mediaId) => _cacheWidths[mediaId];
+
+  @override
+  void didUpdateWidget(_CardMedia old) {
+    super.didUpdateWidget(old);
+    if (old.item.media_id != widget.item.media_id && _contexts[old.item.media_id] == context) {
+      _contexts.remove(old.item.media_id);
+    }
+    if (widget.current) _contexts[widget.item.media_id] = context;
+  }
+
+  @override
+  void dispose() {
+    if (_contexts[widget.item.media_id] == context) {
+      _contexts.remove(widget.item.media_id);
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (item.kind == MediaKind.video) return _FeedVideo(item: item, library: library, current: current);
-    return LayoutBuilder(builder: (context, c) {
-      final px = (c.maxWidth * MediaQuery.devicePixelRatioOf(context)).ceil();
-      return Image(image: mediaImage(item.path, cacheWidth: px.clamp(256, 2048), maxSide: 2048), fit: BoxFit.contain, gaplessPlayback: true,
-          errorBuilder: (_, _, _) => Center(child: Icon(Icons.broken_image_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant)));
+    if (widget.current) _contexts[widget.item.media_id] = context;
+    if (widget.item.kind == MediaKind.video) {
+      return _FeedVideo(item: widget.item, library: widget.library, current: widget.current);
+    }
+    final Widget photo = LayoutBuilder(builder: (context, c) {
+      final px = (c.maxWidth * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(256, 2048);
+      _cacheWidths[widget.item.media_id] = px;
+      return Image(
+        image: mediaImage(widget.item.path, cacheWidth: px, maxSide: 2048),
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => Center(
+          child: Icon(Icons.broken_image_outlined, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        ),
+      );
     });
+    return ValueListenableBuilder<String?>(
+      valueListenable: ViewerPage.activeMediaId,
+      child: photo,
+      builder: (context, activeId, child) => Opacity(
+        opacity: activeId == widget.item.media_id ? 0 : 1,
+        child: child,
+      ),
+    );
   }
 }
 
-/// A video in a card: plays muted and looping while at least half of it is on screen, stops
-/// (and lets its player go) once it leaves. Its poster shows until the first frame and whenever
-/// it is not playing. Every video in view plays, however many there are.
+/// A video in a card: shares the same [VideoSession] as the full-screen viewer, plays muted and
+/// looping while at least half of it is on screen, and pauses at its current timestamp and frame
+/// when scrolled out of view.
 class _FeedVideo extends StatefulWidget {
   const _FeedVideo({required this.item, required this.library, required this.current});
   final FeedItem item;
@@ -792,151 +822,68 @@ class _FeedVideo extends StatefulWidget {
 }
 
 /// For the performance tests: how many video players the feed holds.
-({int playing, int idle}) feedVideoPlayers() => _FeedVideoState.debugPlayers;
+({int playing, int idle}) feedVideoPlayers() => VideoSession.debugPlayers;
 
 class _FeedVideoState extends State<_FeedVideo> {
-  static final _playing = <_FeedVideoState>{};
-  static final _instances = <_FeedVideoState>{};
-  /// Players of videos that left the screen, kept for the next ones: creating a player and
-  /// especially disposing of one blocks the UI thread (on iOS the app's main thread) for half a
-  /// second and more, which a scroll felt as a stall every time a video came or went.
-  static final _idle = <VideoPlayback>[];
-  static bool _viewerOpen = false;
-  /// Players alive (playing, and kept for the next videos): for the performance tests.
-  @visibleForTesting
-  static ({int playing, int idle}) get debugPlayers => (playing: _playing.length, idle: _idle.length);
-
-  static Future<void> suspendForViewer() async {
-    _viewerOpen = true;
-    // each playing card leaves its moment: the viewer starts the opened video there
-    for (final s in _playing.toList()) {
-      final v = s._video;
-      if (v != null && s._firstFrame) {
-        await v.pause();
-        VideoResume.leave(s.widget.item.path, v.currentPosition);
-        final frame = await VideoResume.frameOf(v);
-        VideoResume.leaveFrame(s.widget.item.path, frame);
-        // and keeps showing that moment itself while the viewer opens over it (not its poster)
-        if (frame != null) s._bridge = frame;
-      }
-    }
-    await Future.wait(_playing.toList().map((s) => s._stop()));
-  }
-
-  static void resumeAfterViewer() {
-    _viewerOpen = false;
-    for (final s in _instances.toList()) {
-      if (s.mounted && !s._gone) s._update();
-    }
-  }
-
-  VideoPlayback? _video;
-  String? _poster;
-  Uint8List? _bridge;
+  late VideoSession _session = VideoSession.forItem(
+    widget.item,
+    cacheDir: widget.library.thumbs.cacheDir,
+  );
   bool _visible = false;
-  bool _firstFrame = false;
-  StreamSubscription<Duration>? _position;
-
-  @override
-  void initState() {
-    super.initState();
-    _instances.add(this);
-    _loadPoster();
-  }
 
   @override
   void didUpdateWidget(_FeedVideo old) {
     super.didUpdateWidget(old);
-    if (old.current != widget.current || old.item.media_id != widget.item.media_id) _update();
+    if (old.item.path != widget.item.path) {
+      _session.detachCard(this);
+      _session = VideoSession.forItem(
+        widget.item,
+        cacheDir: widget.library.thumbs.cacheDir,
+      );
+    }
+    _sync();
   }
 
-  Future<void> _loadPoster() async {
-    final p = await videoCardPoster(widget.item, 1024, widget.library.thumbs.cacheDir);
-    if (mounted && p != null) setState(() => _poster = p);
-  }
-
-  bool get _wants => !_viewerOpen && !_gone && _visible && widget.current;
-
-  void _update() {
-    if (_wants) {
-      if (_video == null) _start();
+  void _sync() {
+    if (_visible && widget.current) {
+      _session.attachCard(
+        this,
+        item: widget.item,
+        cacheDir: widget.library.thumbs.cacheDir,
+      );
     } else {
-      _stop();
+      _session.detachCard(this);
     }
   }
-
-  Future<void> _start() async {
-    _playing.add(this);
-    final v = _idle.isNotEmpty ? _idle.removeLast() : VideoPlayback();
-    final bridge = VideoResume.takeFrame(widget.item.path);
-    setState(() { _video = v; if (bridge != null) _bridge = bridge; });
-    try {
-      await v.setMuted(true);
-      await v.setLoop(true);
-      // from where the viewer left this video (or the start); the viewer's last frame shows
-      // until this player is past that moment (not the poster: an earlier frame)
-      final from = VideoResume.take(widget.item.path, 'card');
-      _position = v.position.listen((p) {
-        if (!_firstFrame && p > (from ?? Duration.zero) + const Duration(milliseconds: 40) && mounted) setState(() { _firstFrame = true; _bridge = null; });
-      });
-      await v.open(widget.item.path, autoplay: from == null);
-      if (from != null && _video == v) {
-        await v.seek(from);
-        await v.play();
-      }
-      // scrolled away while it opened
-      if (_video == v && !_wants) _stop();
-    } catch (_) {
-      if (_video == v) _stop();
-    }
-  }
-
-  Future<void> _stop() async {
-    final v = _video;
-    if (v == null) return;
-    _position?.cancel();
-    _position = null;
-    _playing.remove(this);
-    _video = null;
-    _firstFrame = false;
-    if (mounted && !_gone) setState(() {});
-    // back to the pool at once (so no more players exist than ever played at once, and none is
-    // disposed of while scrolling); it stops in the background, and the next video waits for that
-    _idle.add(v);
-    unawaited(v.release().catchError((Object _) {}));
-  }
-
-  bool _gone = false;
 
   @override
   void dispose() {
-    _gone = true;
-    _instances.remove(this);
-    _stop();
+    _session.detachCard(this);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final v = _video;
-    // the viewer's frame of this video's moment, until this card's player is past it
-    final bridge = _bridge ?? VideoResume.peekFrame(widget.item.path);
+    // VisibilityDetector stays outside Opacity: RenderOpacity skips painting its subtree when
+    // opacity is 0, which would otherwise make VisibilityDetector report 0% visibility while the
+    // viewer is open and detach the card's VideoSession.
     return VisibilityDetector(
       key: ValueKey('feed-video-${widget.item.media_id}'),
       onVisibilityChanged: (info) {
         final visible = info.visibleFraction >= 0.5;
         if (visible == _visible || !mounted) return;
+        if (!visible && (VideoSession.isViewerOpen || ViewerPage.activeMediaId.value == widget.item.media_id)) return;
         _visible = visible;
-        _update();
+        _sync();
       },
-      child: Stack(fit: StackFit.expand, children: [
-        if (v != null) VideoSurface(controller: v.surfaceController, controls: NoVideoControls, fill: Colors.transparent),
-        if (v == null || !_firstFrame)
-          bridge != null
-              ? Image.memory(bridge, fit: BoxFit.contain, gaplessPlayback: true)
-              : _poster == null ? const SizedBox.expand() : Image(image: localFileImage(_poster!), fit: BoxFit.contain, gaplessPlayback: true),
-        if (v == null && bridge == null) const Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 56)),
-      ]),
+      child: ValueListenableBuilder<String?>(
+        valueListenable: ViewerPage.activeMediaId,
+        child: VideoSessionView(session: _session),
+        builder: (context, activeId, child) => Opacity(
+          opacity: activeId == widget.item.media_id ? 0 : 1,
+          child: child,
+        ),
+      ),
     );
   }
 }

@@ -24,8 +24,6 @@ if "Assets\\AppIcon.ico" not in (ROOT / "windows/TwimShelf/TwimShelf.csproj").re
     problems.append("windows/TwimShelf/TwimShelf.csproj: its icon is not the generated one")
 if "AppIcon.ico" not in (ROOT / "build.ps1").read_text(encoding="utf-8"):
     problems.append("build.ps1: the setup's icon is not the generated one")
-if "icon_set" not in (ROOT / "scripts/flutter/desktop_assets.py").read_text(encoding="utf-8"):
-    problems.append("desktop_assets.py: reads something else than the AppIcon set the apps use")
 
 if problems:
     print("\n".join(problems))

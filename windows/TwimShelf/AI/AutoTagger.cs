@@ -361,7 +361,8 @@ public sealed class AutoTagger
     {
         _paused = false;
         Cancel();
-        while (_task is { } t) await t;
+        // (the task ends before the window's queue clears it: the queue has to get its turn)
+        while (_task is { } t) { await t; await Task.Delay(15); }
     }
 
     public void Close()

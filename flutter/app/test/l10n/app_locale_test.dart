@@ -12,11 +12,7 @@ void main() {
   });
 
   test('the fonts of the language come first', () {
-    expect(AppLocale.fontsFor('zh-Hans', TargetPlatform.windows)!.first, 'Microsoft YaHei UI');
-    expect(AppLocale.fontsFor('zh-Hant', TargetPlatform.windows)!.first, 'Microsoft JhengHei UI');
-    expect(AppLocale.fontsFor('ja', TargetPlatform.windows)!.first, 'Yu Gothic UI');
-    expect(AppLocale.fontsFor('zh-Hans', TargetPlatform.linux)!.first, 'Noto Sans CJK SC');
-    expect(AppLocale.fontsFor('ja', TargetPlatform.macOS)!.first, 'Hiragino Sans');
+    expect(AppLocale.fontsFor('ja', TargetPlatform.iOS)!.first, 'Hiragino Sans');
     expect(AppLocale.fontsFor('zh-Hant', TargetPlatform.iOS)!.first, 'PingFang TC');
     expect(AppLocale.fontsFor('zh-Hans', TargetPlatform.android), isNull, reason: 'Android chooses by language');
   });

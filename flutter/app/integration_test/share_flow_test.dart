@@ -44,7 +44,7 @@ void main() {
   });
 
   testWidgets('the app group the extension writes to is reachable', (t) async {
-    if (!Platform.isIOS && !Platform.isMacOS) return;
+    if (!Platform.isIOS) return;
     final shares = await t.runAsync(TlNative.sharesRoot);
     expect(shares, isNotNull, reason: 'no app group: the extension and the app share nothing');
     final probe = File('$shares/probe');

@@ -163,6 +163,8 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     /// foldable opened up).
     private let railOnly: Bool
     private var lastBrowseTap: Date?
+    private var tabPulses: [ObjectIdentifier: MascotPulse] = [:]
+    private var tabIcons: [ObjectIdentifier: UIImage] = [:]
 
     init(feed: FeedViewController, barOnly: Bool) {
         self.feed = feed
@@ -208,9 +210,8 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         Self.lock(tabs)
         reloadFolders()
         observers.append(NotificationCenter.default.addObserver(forName: Mascot.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateMascotIcons() }
+            MainActor.assumeIsolated { self?.restoreTabIcons() }
         })
-        updateMascotIcons()
         observers.append(NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateOtherPlaces() }
         })
@@ -340,24 +341,39 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         }
     }
 
-    /// The places' icons, or the mascot mode's.
-    private func updateMascotIcons() {
+    private func restoreTabIcons() {
         func visit(_ t: UITab) {
-            let places: [LibraryPlace] = [.browse, .photos, .videos, .allFolders, .settings]
-            if let p = places.first(where: { $0.id == t.identifier }) { t.image = icon(p) }
+            if let icon = tabIcons[ObjectIdentifier(t)] { t.image = icon }
             if let g = t as? UITabGroup { g.children.forEach(visit) }
         }
         tabs.forEach(visit)
-        folderGroup.image = Mascot.isOn ? Mascot.icon("folder", side: 28) : UIImage(systemName: "folder")
+        tabPulses.values.forEach { $0.cancel() }
+        tabPulses.removeAll()
+        tabIcons.removeAll()
     }
 
     private func icon(_ p: LibraryPlace) -> UIImage? {
-        if Mascot.isOn, let name = Mascot.name(for: p) { return Mascot.icon(name, side: 28) }
         return UIImage(systemName: p == .allFolders && railOnly ? "folder" : p.symbol)
+    }
+
+    private func pulse(_ tab: UITab) {
+        guard Mascot.isOn else { return }
+        let places: [LibraryPlace] = [.browse, .photos, .videos, .allFolders, .settings]
+        let name = tab.identifier.hasPrefix("folder:") || tab === folderGroup
+            ? "folder" : places.first { $0.id == tab.identifier }.flatMap { Mascot.name(for: $0) }
+        let key = ObjectIdentifier(tab)
+        guard let name, let normal = tabIcons[key] ?? tab.image else { return }
+        tabPulses[key]?.cancel()
+        tabIcons[key] = normal
+        tabPulses[key] = MascotPulse(name, side: 28, normal: normal, show: { [weak tab] in tab?.image = $0 }, finished: { [weak self] in
+            self?.tabIcons[key] = nil
+            self?.tabPulses[key] = nil
+        })
     }
 
     /// 浏览 tapped twice in a row reshuffles it.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
+        pulse(tab)
         if selectedTab !== tab { UISelectionFeedbackGenerator().selectionChanged() }
         guard tab.identifier == LibraryPlace.browse.id else { lastBrowseTap = nil; return true }
         let now = Date()

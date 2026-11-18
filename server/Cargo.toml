@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 tl-core = { path = "../core" }
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "json", "query", "form"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "net", "signal", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "net", "signal", "process", "sync"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs", "compression-gzip", "set-header"] }
 futures-util = "0.3"

@@ -79,7 +79,8 @@ struct FeedMasonry {
     /// Where pass `s` starts.
     func passTop(_ s: Int) -> CGFloat { metrics.top + CGFloat(s) * passHeight }
 
-    func frame(item: Int, pass: Int) -> CGRect { frames[item].offsetBy(dx: 0, dy: passTop(pass)) }
+    /// (Nothing for an item the plan has not caught up with: the list changed since it was made.)
+    func frame(item: Int, pass: Int) -> CGRect { frames.indices.contains(item) ? frames[item].offsetBy(dx: 0, dy: passTop(pass)) : .zero }
 
     func footerFrame(pass: Int) -> CGRect {
         CGRect(x: 0, y: passTop(pass) + passHeight - metrics.footer, width: metrics.width, height: metrics.footer)

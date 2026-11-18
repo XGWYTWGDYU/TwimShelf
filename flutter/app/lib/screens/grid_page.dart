@@ -14,6 +14,7 @@ import '../grid/zoom_grid.dart';
 import '../l10n/l10n.dart';
 import 'viewer_page.dart';
 import '../app/jobs.dart';
+import '../widgets/media_image.dart';
 
 /// A place's media on the zoomable grid (图片, 视频, a folder, 回收站…): tap opens the viewer
 /// over the same list.
@@ -331,6 +332,7 @@ class _GridPageState extends State<GridPage> {
                   store: widget.library.thumbs,
                   padding: EdgeInsets.only(top: pad.top + 64, bottom: pad.bottom),
                   selected: selected,
+                  hiddenMediaId: ViewerPage.activeMediaId,
                   onZoomLimits: (zoomIn, zoomOut) {
                     if (mounted) {
                       setState(() {
@@ -343,10 +345,29 @@ class _GridPageState extends State<GridPage> {
                     HapticFeedback.mediumImpact();
                     showMediaMenu(context, library: widget.library, item: items[i], position: at, place: widget.place);
                   },
-                  onOpen: (i) => selected != null ? _toggle(i) : Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
-                        fullscreenDialog: true,
-                        builder: (_) => ViewerPage(library: widget.library, items: items, index: i),
-                      )),
+                  onOpen: (i) {
+                    if (selected != null) {
+                      _toggle(i);
+                      return;
+                    }
+                    final tapped = items[i];
+                    if (tapped.kind == MediaKind.photo) {
+                      final px = (MediaQuery.sizeOf(context).longestSide * MediaQuery.devicePixelRatioOf(context)).ceil().clamp(512, 4096);
+                      precacheImage(mediaImage(tapped.path, cacheWidth: px, maxSide: 4096), context, onError: (_, _) {});
+                    }
+                    final initialRect = _grid.currentState?.tileGlobalRect(tapped.media_id);
+                    ViewerPage.push(
+                      context,
+                      library: widget.library,
+                      items: items,
+                      index: i,
+                      sourceRect: (m) =>
+                          _grid.currentState?.tileGlobalRect(m.media_id) ??
+                          (m.media_id == tapped.media_id ? initialRect : null),
+                      sourceBorderRadius: const BorderRadius.all(Radius.circular(4)),
+                      cropSource: true,
+                    );
+                  },
                 ),
               ),
         Positioned(left: 0, right: 0, top: 0, child: floating),

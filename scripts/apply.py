@@ -3,7 +3,8 @@
 
   python3 scripts/apply.py            everything
   python3 scripts/apply.py native     the native Apple apps only (Xcode's pre-build step)
-  python3 scripts/apply.py flutter    the Flutter app only
+  python3 scripts/apply.py flutter    the Flutter app only (iOS and Android)
+  python3 scripts/apply.py desktop    the desktop app only (web/electron: name, id, version, icon)
   python3 scripts/apply.py generate   only the generated files below (no links, icons or projects)
   python3 scripts/apply.py versions [--check]   only the version, in the files in git that carry it
   python3 scripts/apply.py get flutter.share_extension    one value (for build scripts)
@@ -19,11 +20,13 @@ Writes small generated files that the projects read (never edits code; none of t
   Apple/Identity.xcconfig                    native: bundle ids, version, signing, app groups
   flutter/app/ios/Flutter/Identity.xcconfig   Flutter iOS
   flutter/app/android/identity.properties     Android: applicationId, share target
-  flutter/app/linux/identity.cmake            Linux: application id, "open with"
-  flutter/app/lib/app/identity.g.dart         Dart: the Linux application id
+  flutter/app/lib/app/identity.g.dart         Dart: the app's name
+  web/electron/product.json, icon.png         the desktop app (React + Electron): name, id,
+                                              version and build number, its icon
   windows/TwimShelf/product.json              the native Windows app's setup: version, "send to"
 config.yaml's version into the files in git that carry one (flutter/app/pubspec.yaml,
-server/Cargo.toml with Cargo.lock, extension/manifest.json): commit them with config.yaml.
+server/Cargo.toml with Cargo.lock, extension/manifest.json, web/electron/package.json): commit them
+with config.yaml.
 the native Xcode project, from project.yml by XcodeGen (on a Mac, when project.yml changed)
 the build location (build.dir: <dir>/cache for every cache, <dir>/apps for packages):
   the Xcode projects' Derived Data location (per-user project settings, not committed) and
@@ -230,7 +233,6 @@ def paths(c):
     libs = cache / 'core-libs'
     link('flutter/tl_core/apple', libs / 'apple')
     link('flutter/tl_core/android/src/main/jniLibs', libs / 'android')
-    link('flutter/tl_core/linux/lib', libs / 'linux')
 
 
 def need_team(section, team, wanted):
@@ -323,7 +325,6 @@ def flutter(c):
     f = c['flutter']
     check_id('flutter.apple_bundle_id', f['apple_bundle_id'])
     check_id('flutter.android_package', f['android_package'], android=True)
-    check_id('flutter.desktop_id', f['desktop_id'])
     share = bool(f.get('share_extension'))
     share_ios = bool(f.get('share_extension_ios'))
     team = f.get('development_team', '')
@@ -341,20 +342,29 @@ def flutter(c):
         f"TL_APP_GROUP = {'group.' + f['apple_bundle_id'] if share_ios else ''}",
         f"TL_ENTITLEMENTS = {'Runner/Runner.entitlements' if share_ios else ''}",
     ] + share_lines(share_ios)) + '\n// where builds go: build.dir in config.yaml\n#include? "BuildLocation.xcconfig"\n')
-    write('flutter/app/lib/app/identity.g.dart', HEADER + '\n'.join([
-        "const appName = 'TwimShelf';",
-        '',
-        '/// The application id on Linux: menu entry, icon, window class.',
-        f"const desktopId = {json.dumps(f['desktop_id'])};",
-    ]) + '\n')
+    write('flutter/app/lib/app/identity.g.dart', HEADER + "const appName = 'TwimShelf';\n")
     write('flutter/app/android/identity.properties', '# ' + HEADER[3:] + '\n'.join([
         f"applicationId={f['android_package']}",
         f"shareEnabled={'true' if share else 'false'}",
     ]) + '\n')
-    write('flutter/app/linux/identity.cmake', '# ' + HEADER[3:] + '\n'.join([
-        f'set(TL_APPLICATION_ID "{f["desktop_id"]}")',
-        f'set(TL_SHARE_ENABLED {"ON" if share else "OFF"})',
-    ]) + '\n')
+
+
+def desktop(c):
+    """The desktop app (web/electron, React + Electron): what it is called, its application id
+    (menu entry, icon name, window class; on Linux also where the Flutter app it replaces kept its
+    library), the version and build number it shows (About, the packages) and its icon: the AppIcon
+    set the apps use, so an icon of your own reaches it too. Neither file is in git."""
+    if not (ROOT / 'web/electron/package.json').exists():
+        return
+    d = c.get('desktop', {})
+    check_id('desktop.app_id', d['app_id'])
+    product = {'name': 'TwimShelf', 'appId': d['app_id'], 'desktopId': d['app_id'],
+               'version': str(c['version']), 'buildNumber': str(c['build_number'])}
+    write('web/electron/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
+    icon = ROOT / icon_set(c) / 'mac-512.png'
+    target = ROOT / 'web/electron/icon.png'
+    if icon.exists() and (not target.exists() or target.read_bytes() != icon.read_bytes()):
+        target.write_bytes(icon.read_bytes())
 
 
 def windows(c):
@@ -403,6 +413,7 @@ VERSIONED = (
     ('server/Cargo.toml', r'^(version = ")([^"]*)(")', '{version}'),
     ('Cargo.lock', r'^(name = "tl-server"\nversion = ")([^"]*)(")', '{version}'),
     ('extension/manifest.json', r'^(  "version": ")([^"]*)(")', '{version}'),
+    ('web/electron/package.json', r'^(  "version": ")([^"]*)(")', '{version}'),
 )
 
 
@@ -465,6 +476,7 @@ def main():
     if which == 'generate':
         native(c)
         flutter(c)
+        desktop(c)
         windows(c)
         return
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
@@ -478,6 +490,10 @@ def main():
     if which in ('all', 'flutter'):
         flutter(c)
         flutter_icons(c, state)
+    if which == 'desktop':
+        app_icon_sets(c)       # (with 'all' already made above)
+    if which in ('all', 'desktop'):
+        desktop(c)
     if which in ('all', 'windows'):
         windows(c)
     STATE.parent.mkdir(parents=True, exist_ok=True)

@@ -6,18 +6,12 @@ import 'app/app_lock.dart';
 import 'app/library.dart';
 import 'app/prefs.dart';
 import 'platform/apple_platform.dart';
-import 'platform/data_home.dart';
 import 'platform/quick_action.dart';
-import 'screens/data_home_page.dart';
 import 'screens/share_sheet_app.dart';
-import 'platform/desktop_window.dart';
 import 'app/shell.dart';
 import 'l10n/app_locale.dart';
 import 'l10n/l10n.dart';
 import 'platform/os.dart';
-import 'platform/server_paths.dart';
-import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:tl_core/tl_core.dart' show loadServerInfo;
 
 /// Android's share page, on its own see-through window over the app that shared.
 @pragma('vm:entry-point')
@@ -31,25 +25,12 @@ Future<void> shareSheetMain(List<String> args) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await L10n.load();
-  // the web build: the server's folders stand in for the app's own
-  if (OS.isWeb) PathProviderPlatform.instance = ServerPaths(await loadServerInfo());
-  // Linux: everything lives in the data folder the person chose (asked on first start)
-  if (DataHome.locate()) return _start();
-  runApp(MaterialApp(
-    locale: AppLocale.current,
-    supportedLocales: AppLocale.supported,
-    localizationsDelegates: AppLocale.delegates,
-    theme: ThemeData(useMaterial3: true, fontFamilyFallback: AppLocale.fontFallback, colorScheme: ColorScheme.fromSeed(seedColor: defaultSeed)),
-    darkTheme: ThemeData(useMaterial3: true, fontFamilyFallback: AppLocale.fontFallback, colorScheme: ColorScheme.fromSeed(seedColor: defaultSeed, brightness: Brightness.dark)),
-    debugShowCheckedModeBanner: false,
-    home: DataHomeSetupPage(onReady: _start),
-  ));
+  return _start();
 }
 
 Future<void> _start() async {
   await Prefs.load();
   AppLock.instance.start();
-  await DesktopWindow.setUp();
   ApplePlatform.instance.watch();
   // a platform that fails here only goes without the shortcut
   QuickAction.start().catchError((Object e) => debugPrint('quick action: $e'));
@@ -130,7 +111,7 @@ class _TwimShelfAppState extends State<TwimShelfApp> {
           builder: (context, snap) {
             if (snap.hasError) {
               debugPrint('open failed: ${snap.error}\n${snap.stackTrace}');
-              return Scaffold(body: Center(child: Text(OS.isWeb ? '${L('app.openFailed')}\n${snap.error}' : L('app.openFailed'), textAlign: TextAlign.center)));
+              return Scaffold(body: Center(child: Text(L('app.openFailed'), textAlign: TextAlign.center)));
             }
             final lib = snap.data;
             if (lib == null) {

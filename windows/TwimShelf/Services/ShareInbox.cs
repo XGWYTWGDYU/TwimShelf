@@ -218,6 +218,7 @@ public sealed partial class ShareInbox
             var inbox = Path.Combine(Root, "Inbox");
             var links = Path.Combine(Root, "Links");
             var imported = new HashSet<string>();
+            string? failed = null;
             while (!_disposed)
             {
                 var ready = new List<string>();
@@ -288,7 +289,8 @@ public sealed partial class ShareInbox
                 {
                     lock (_batchErrors) _batchErrors[id] = e.Message;
                     try { if (choiceText != null && Directory.Exists(batch) && !File.Exists(choice)) File.WriteAllText(choice, choiceText); } catch { }
-                    throw;
+                    // said at the end: the shares behind this one still come in
+                    failed ??= e.Message;
                 }
             }
             if (Directory.Exists(links))
@@ -307,6 +309,7 @@ public sealed partial class ShareInbox
                     Emit(new ShareLinksReady(id, urls, File.Exists(named) ? File.ReadAllText(named) : null));
                 }
             }
+            if (failed != null) Emit(new ShareInboxFailure(1, failed));
         }
         catch (Exception e)
         {

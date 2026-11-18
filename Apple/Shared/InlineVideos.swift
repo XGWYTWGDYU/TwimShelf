@@ -1,141 +1,281 @@
 import AVFoundation
 
-/// The home feed's autoplaying videos: every video card that is (at least half) in view plays,
-/// muted and looping, each with a player of its own; there is no limit on how many.
-/// A card that leaves gives its player back (paused and emptied), and the next card takes it.
+/// Muted autoplay for the browse feed. A partly visible card can show its paused frame before
+/// it is far enough into view to play. A few recently used players stay paused with their items.
 @MainActor
 final class InlineVideos<Host: AnyObject> {
-    private struct Slot {
+    @MainActor private final class Slot {
         weak var host: Host?
         let player: AVPlayer
+        let mediaId: String
         let url: URL
+        var wantsPlayback: Bool
+        var ready = false
+        var playing = false
+
+        init(host: Host, player: AVPlayer, item: FeedItem, playing: Bool) {
+            self.host = host
+            self.player = player
+            mediaId = item.mediaId
+            url = item.fileURL
+            wantsPlayback = playing
+        }
+
+        func matches(_ item: FeedItem) -> Bool { mediaId == item.mediaId && url == item.fileURL }
     }
+
+    typealias Card = (host: Host, item: FeedItem, playing: Bool)
 
     private var slots: [ObjectIdentifier: Slot] = [:]
     private var idle: [AVPlayer] = []
-    /// Players kept for the next cards (a player without an item holds no decoder).
-    private let keep = 12
-    /// Puts the player on the card and gives it the video; called once per start.
-    private let attach: (Host, AVPlayer, URL) -> Void
-    /// Takes the player off the card (`nil` when the card itself is gone); the key is the card's.
+    private var parked: [Slot] = []
+    private var positions: [String: CMTime] = [:]
+    private let frames = NSCache<NSURL, CGImage>()
+    private var frameRequests: [(url: URL, generator: AVAssetImageGenerator)] = []
+    private let attach: (Host, AVPlayer) -> Void
     private let detach: (ObjectIdentifier, Host?) -> Void
+    private let frameReady: (URL, CGImage) -> Void
     nonisolated(unsafe) private var observer: NSObjectProtocol?
 
-    /// Puts a player that is already playing this card's video back on it (the full-screen player
-    /// gives back the card's own player: no new item, no seek).
-    private let adopt: ((Host, AVPlayer) -> Void)?
-    /// A player given back by the full-screen player, waiting for its card to show again.
-    private var returned: (player: AVPlayer, url: URL)?
+    /// The card's own player stays on the card and is also used by the full-screen viewer.
+    private var lent: Slot?
+    private var returned: Slot?
 
-    init(attach: @escaping (Host, AVPlayer, URL) -> Void, detach: @escaping (ObjectIdentifier, Host?) -> Void, adopt: ((Host, AVPlayer) -> Void)? = nil) {
+    init(attach: @escaping (Host, AVPlayer) -> Void,
+         detach: @escaping (ObjectIdentifier, Host?) -> Void,
+         frameReady: @escaping (URL, CGImage) -> Void) {
         self.attach = attach
         self.detach = detach
-        self.adopt = adopt
+        self.frameReady = frameReady
+        frames.totalCostLimit = 24 * 1024 * 1024
         observer = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] n in
             MainActor.assumeIsolated {
                 guard let self, let item = n.object as? AVPlayerItem,
-                      let p = self.slots.values.first(where: { $0.player.currentItem === item })?.player else { return }
-                p.seek(to: .zero)
-                p.play()
+                      let slot = self.slots.values.first(where: { $0.player.currentItem === item }),
+                      slot.playing else { return }
+                slot.player.seek(to: .zero)
+                slot.player.play()
             }
         }
     }
 
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 
-    var isEmpty: Bool { slots.isEmpty }
+    func position(for mediaId: String) -> CMTime { positions[mediaId] ?? .zero }
+    func frame(for url: URL) -> CGImage? { frames.object(forKey: url as NSURL) }
 
-    /// The player playing on this card, if one is.
-    func player(for host: Host) -> AVPlayer? {
-        guard let s = slots[ObjectIdentifier(host)], s.host === host else { return nil }
-        return s.player
+    func prefetchFrame(for item: FeedItem) {
+        guard item.kind == .video, frameRequests.count < 2 else { return }
+        let url = item.fileURL
+        let time = position(for: item.mediaId)
+        guard time > .zero, frame(for: url) == nil,
+              !frameRequests.contains(where: { $0.url == url }) else { return }
+        generateFrame(at: time, from: AVURLAsset(url: url), url: url)
     }
 
-    /// The player of the first playing card that matches.
-    func player(where match: (Host) -> Bool) -> AVPlayer? {
-        slots.values.first { $0.host.map(match) ?? false }?.player
-    }
-
-    /// Plays exactly these cards' videos: the others stop, the new ones start, the rest go on.
-    func show(_ wanted: [(Host, URL)]) {
-        var going = Set<ObjectIdentifier>()
-        for (h, u) in wanted {
-            let id = ObjectIdentifier(h)
-            if let s = slots[id], s.host === h, s.url == u { going.insert(id) }
+    func savePosition(_ time: CMTime, for mediaId: String) {
+        guard time.isNumeric, time >= .zero, time != position(for: mediaId) else { return }
+        positions[mediaId] = time == .zero ? nil : time
+        // A separate full-screen player may have moved past this parked player.
+        if let index = parked.firstIndex(where: { $0.mediaId == mediaId }) {
+            recycle(parked.remove(at: index).player)
         }
-        for id in Array(slots.keys) where !going.contains(id) { stop(id) }
-        for (h, u) in wanted where !going.contains(ObjectIdentifier(h)) { start(h, u) }
     }
 
-    /// The full-screen player opens this card's video: the card's player, taken off the card as it
-    /// is (still playing, at its moment), or nil when the card plays nothing now.
-    func lend(for host: Host) -> AVPlayer? {
+    /// Keeps partial cards paused. Only videos that already have a position prepare before
+    /// reaching the autoplay threshold, so a fling doesn't start decoding each passing card.
+    func show(_ wanted: [Card]) {
+        let visible = Dictionary(uniqueKeysWithValues: wanted.map { (ObjectIdentifier($0.host), $0) })
+        for (id, slot) in slots {
+            guard let card = visible[id], slot.host === card.host, slot.matches(card.item) else {
+                stop(id)
+                continue
+            }
+            slot.wantsPlayback = card.playing
+            updatePlayback(slot)
+        }
+        if let r = returned, let host = r.host, let card = visible[ObjectIdentifier(host)], r.matches(card.item) {
+            start(card)
+        }
+        for card in wanted where slots[ObjectIdentifier(card.host)] == nil {
+            if card.playing || position(for: card.item.mediaId) > .zero { start(card) }
+        }
+    }
+
+    func lend(for host: Host, item: FeedItem) -> AVPlayer? {
         let id = ObjectIdentifier(host)
-        guard adopt != nil, let s = slots[id], s.host === host else { return nil }
-        // the card keeps showing it (one player can draw on two layers): while the viewer opens
-        // over the feed and closes again, the card shows the moment playing, not its still frame
+        guard let slot = slots[id], slot.host === host, slot.matches(item), slot.ready else { return nil }
         slots.removeValue(forKey: id)
-        NSLog("TwimShelf video: lent to the viewer at %.2f s", s.player.currentTime().seconds)
-        return s.player
+        lent = slot
+        NSLog("TwimShelf video: lent to the viewer at %.2f s", slot.player.currentTime().seconds)
+        return slot.player
     }
 
-    /// `lend(for:)` for the first playing card that matches.
-    func lend(where match: (Host) -> Bool) -> AVPlayer? {
-        guard let h = slots.values.first(where: { $0.host.map(match) ?? false })?.host else { return nil }
-        return lend(for: h)
-    }
-
-    /// The full-screen player is done with a card's player: the card takes it back when it shows
-    /// again (see `show`), and goes on from where it was.
-    func giveBack(_ player: AVPlayer, url: URL) {
-        returned = (player, url)
+    func giveBack(_ player: AVPlayer) {
+        guard let lent, lent.player === player else { return }
+        self.lent = nil
+        player.isMuted = true
+        // as it really is (paused in the viewer, it starts again when the card wants it to)
+        lent.playing = player.rate != 0
+        rememberFrame(lent)
+        returned = lent
         NSLog("TwimShelf video: given back at %.2f s", player.currentTime().seconds)
     }
 
     func stop(where match: (Host) -> Bool) {
-        for (id, s) in slots where s.host.map(match) ?? true { stop(id) }
+        for (id, slot) in slots where slot.host.map(match) ?? true { stop(id) }
     }
 
     func stopAll() {
         for id in Array(slots.keys) { stop(id) }
+        for slot in parked { recycle(slot.player) }
+        parked.removeAll()
     }
 
-    /// A given-back player whose card did not show again: it goes (paused and emptied).
     func dropReturned() {
-        guard let r = returned else { return }
+        guard let slot = returned else { return }
         returned = nil
-        r.player.pause()
-        r.player.replaceCurrentItem(with: nil)
+        detachOriginal(slot)
+        park(slot)
     }
 
-    private func start(_ host: Host, _ url: URL) {
+    private func detachOriginal(_ slot: Slot) {
+        guard let host = slot.host else { return }
         let id = ObjectIdentifier(host)
-        stop(id)
-        // the card's own player, back from the full-screen player: on the card as it is
-        if let r = returned, r.url == url, let adopt {
+        if slots[id] == nil { detach(id, host) }
+    }
+
+    private func start(_ card: Card) {
+        let (host, item, playing) = card
+        let id = ObjectIdentifier(host)
+        let slot: Slot
+        if let previous = returned, previous.matches(item) {
             returned = nil
-            r.player.isMuted = true
-            slots[id] = Slot(host: host, player: r.player, url: url)
-            adopt(host, r.player)
-            NSLog("TwimShelf video: back on the card at %.2f s (same player)", r.player.currentTime().seconds)
+            if previous.host !== host { detachOriginal(previous) }
+            slot = previous
+        } else if let index = parked.firstIndex(where: { $0.matches(item) }) {
+            slot = parked.remove(at: index)
+        } else {
+            let player = idle.popLast() ?? {
+                let player = AVPlayer()
+                player.isMuted = true
+                player.actionAtItemEnd = .none
+                player.automaticallyWaitsToMinimizeStalling = false
+                return player
+            }()
+            slot = Slot(host: host, player: player, item: item, playing: playing)
+        }
+        slot.host = host
+        slot.wantsPlayback = playing
+        slots[id] = slot
+        if slot.ready {
+            attach(host, slot.player)
+            updatePlayback(slot)
             return
         }
-        let p = idle.popLast() ?? {
-            let p = AVPlayer()
-            p.isMuted = true
-            p.actionAtItemEnd = .none
-            p.automaticallyWaitsToMinimizeStalling = false
-            return p
-        }()
-        slots[id] = Slot(host: host, player: p, url: url)
-        attach(host, p, url)
+
+        let asset = AVURLAsset(url: slot.url)
+        Task { [weak self, weak slot] in
+            guard (try? await asset.load(.isPlayable)) == true, let self, let slot,
+                  self.slots[id] === slot else { return }
+            slot.player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+            let time = self.position(for: slot.mediaId)
+            if time > .zero {
+                // Attach the layer only after the seek completes so the first decoded frame
+                // from the new item can never cover the card's still frame.
+                guard await slot.player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero),
+                      self.slots[id] === slot else { return }
+            }
+            guard let host = slot.host else { return }
+            slot.ready = true
+            self.attach(host, slot.player)
+            self.updatePlayback(slot)
+        }
+    }
+
+    private func updatePlayback(_ slot: Slot) {
+        guard slot.ready, slot.playing != slot.wantsPlayback else { return }
+        slot.playing = slot.wantsPlayback
+        if slot.playing {
+            slot.player.play()
+        } else {
+            slot.player.pause()
+            rememberFrame(slot)
+        }
     }
 
     private func stop(_ id: ObjectIdentifier) {
-        guard let s = slots.removeValue(forKey: id) else { return }
-        s.player.pause()
-        s.player.replaceCurrentItem(with: nil)
-        detach(id, s.host)
-        if idle.count < keep { idle.append(s.player) }
+        guard let slot = slots.removeValue(forKey: id) else { return }
+        slot.wantsPlayback = false
+        updatePlayback(slot)
+        detach(id, slot.host)
+        if slot.ready { park(slot) } else { recycle(slot.player) }
+    }
+
+    private func park(_ slot: Slot) {
+        slot.player.pause()
+        slot.playing = false
+        slot.host = nil
+        if let index = parked.firstIndex(where: { $0.mediaId == slot.mediaId }) {
+            recycle(parked.remove(at: index).player)
+        }
+        parked.append(slot)
+        if parked.count > 4 { recycle(parked.removeFirst().player) }
+    }
+
+    private func recycle(_ player: AVPlayer) {
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        if idle.count < 12 { idle.append(player) }
+    }
+
+    /// Keep a small still frame for the next appearance, even after the cell or decoder is reused.
+    private func rememberFrame(_ slot: Slot) {
+        let time = slot.player.currentTime()
+        guard time.isNumeric, let asset = slot.player.currentItem?.asset else { return }
+        savePosition(time, for: slot.mediaId)
+        generateFrame(at: time, from: asset, url: slot.url)
+    }
+
+    private func generateFrame(at time: CMTime, from asset: AVAsset, url: URL) {
+        if let index = frameRequests.firstIndex(where: { $0.url == url }) {
+            frameRequests.remove(at: index).generator.cancelAllCGImageGeneration()
+        }
+        if frameRequests.count >= 4 { frameRequests.removeFirst().generator.cancelAllCGImageGeneration() }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 640, height: 640)
+        generator.requestedTimeToleranceBefore = CMTime(value: 1, timescale: 30)
+        generator.requestedTimeToleranceAfter = .zero
+        frameRequests.append((url, generator))
+        Task { [weak self] in
+            let image = try? await generator.image(at: time).image
+            guard let self, let index = self.frameRequests.firstIndex(where: { $0.generator === generator }) else { return }
+            self.frameRequests.remove(at: index)
+            guard let image else { return }
+            self.frames.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+            self.frameReady(url, image)
+        }
+    }
+}
+
+/// Keep the still frame visible until this particular player has a frame for the card.
+@MainActor
+func attachInlineVideo(_ player: AVPlayer, to layer: AVPlayerLayer) -> NSKeyValueObservation? {
+    guard layer.player !== player else { return nil }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer.opacity = 0
+    layer.player = player
+    CATransaction.commit()
+    return layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak player] layer, _ in
+        guard layer.isReadyForDisplay else { return }
+        DispatchQueue.main.async {
+            guard let player, layer.player === player, layer.isReadyForDisplay else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.opacity = 1
+            CATransaction.commit()
+        }
     }
 }

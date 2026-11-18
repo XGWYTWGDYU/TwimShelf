@@ -1,78 +1,78 @@
-// A virtual masonry grid: cards of different heights in columns, each card into the shortest
-// column. Only the cards near the visible area exist in the DOM, so 5000 posts scroll as smoothly
-// as 50. Heights start as estimates and are corrected as cards are measured.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+// The 浏览 grid (MacFeedMasonryLayout / FeedMasonry): cards as tall as their content in columns of
+// equal width, each card into the shortest column; 20 at the sides, 16 between columns, 18 between
+// cards, the footer under the tallest column. As many columns as cards of about 300 fit (at most
+// 6). Virtual: only the cards near the visible area exist, so 5000 posts scroll as 50. Heights
+// start as estimates and are corrected as cards are measured.
+import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import './Masonry.css';
 
 export interface MasonryProps<T> {
   items: T[];
   keyOf: (item: T) => string;
-  /** A first guess of a card's height at `width`, before it has been measured. */
   estimate: (item: T, width: number) => number;
   render: (item: T, width: number, index: number) => ReactNode;
-  minColumn?: number;
-  gap?: number;
-  /** Something above the grid that scrolls with it (the search bar, a header). */
-  header?: ReactNode;
-  /** Gets the scroller, for keyboard scrolling and restoring a position. */
-  scrollerRef?: (el: HTMLDivElement | null) => void;
-  onScroll?: (top: number) => void;
+  /** Room above the first row (the toolbar the cards scroll under, and 12 more). */
+  top: number;
+  footer?: ReactNode;
+}
+
+export interface MasonryHandle {
+  focus(): void;
+  scrollToTop(): void;
+  scrollToIndex(i: number): void;
 }
 
 interface Placed { key: string; index: number; x: number; y: number; h: number }
 
-export function Masonry<T>({ items, keyOf, estimate, render, minColumn = 250, gap = 16, header, scrollerRef, onScroll }: MasonryProps<T>) {
+const SIDE = 20, COL_GAP = 16, ROW_GAP = 18, FOOTER = 56;
+
+function MasonryInner<T>({ items, keyOf, estimate, render, top, footer }: MasonryProps<T>, ref: React.Ref<MasonryHandle>) {
   const scroller = useRef<HTMLDivElement>(null);
-  const headerBox = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [view, setView] = useState({ top: 0, height: 800 });
-  const [headerH, setHeaderH] = useState(0);
   const measured = useRef(new Map<string, number>());
   const [version, setVersion] = useState(0);
   const pending = useRef(false);
 
+  // while the window is being resized the cards go straight to their places (no glide)
+  const [resizing, setResizing] = useState(false);
+  const resizeTimer = useRef(0);
   useLayoutEffect(() => {
     const el = scroller.current!;
-    // measured now as well: a ResizeObserver reports only with the next frame (none in a hidden tab)
     setWidth(el.clientWidth);
     setView((v) => ({ ...v, height: el.clientHeight || v.height }));
+    let lastW = el.clientWidth;
     const ro = new ResizeObserver(() => {
-      setWidth(el.clientWidth);
-      setView((v) => ({ ...v, height: el.clientHeight }));
+      if (el.clientWidth !== lastW) {
+        lastW = el.clientWidth;
+        setResizing(true);
+        window.clearTimeout(resizeTimer.current);
+        resizeTimer.current = window.setTimeout(() => setResizing(false), 250);
+      }
+      setWidth(el.clientWidth); setView((v) => ({ ...v, height: el.clientHeight }));
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  useLayoutEffect(() => {
-    const el = headerBox.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeaderH(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const padding = 20;
-  const inner = Math.max(0, width - padding * 2);
-  const columns = Math.max(1, Math.floor((inner + gap) / (minColumn + gap)));
-  const colW = columns > 0 ? (inner - gap * (columns - 1)) / columns : inner;
-  // a measured height belongs to a width: a new width measures again
-  const widthKey = Math.round(colW);
+  const columns = Math.max(1, Math.min(6, Math.floor((width - 40) / 300)));
+  const colW = Math.floor((width - SIDE * 2 - (columns - 1) * COL_GAP) / columns);
+  const widthKey = colW;
 
   const layout = useMemo(() => {
-    const tops = new Array(columns).fill(0);
+    const bottoms = new Array(columns).fill(top);
     const placed: Placed[] = new Array(items.length);
     for (let i = 0; i < items.length; i++) {
       const key = keyOf(items[i]);
       const h = measured.current.get(`${key}@${widthKey}`) ?? estimate(items[i], colW);
       let c = 0;
-      for (let j = 1; j < columns; j++) if (tops[j] < tops[c] - 0.5) c = j;
-      placed[i] = { key, index: i, x: padding + c * (colW + gap), y: tops[c], h };
-      tops[c] += h + gap;
+      for (let j = 1; j < columns; j++) if (bottoms[j] < bottoms[c] - 0.5) c = j;
+      placed[i] = { key, index: i, x: SIDE + c * (colW + COL_GAP), y: bottoms[c], h };
+      bottoms[c] += h + ROW_GAP;
     }
-    return { placed, height: Math.max(0, ...tops) };
+    return { placed, height: Math.max(top, ...bottoms) - ROW_GAP };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, columns, colW, widthKey, version]);
+  }, [items, columns, colW, widthKey, version, top]);
 
   const report = useCallback((key: string, h: number) => {
     const k = `${key}@${widthKey}`;
@@ -84,41 +84,55 @@ export function Masonry<T>({ items, keyOf, estimate, render, minColumn = 250, ga
     }
   }, [widthKey]);
 
-  const scroll = useCallback(() => {
-    const el = scroller.current!;
-    setView({ top: el.scrollTop, height: el.clientHeight });
-    onScroll?.(el.scrollTop);
-  }, [onScroll]);
+  useImperativeHandle(ref, () => ({
+    focus() { scroller.current?.focus({ preventScroll: true }); },
+    scrollToTop() { scroller.current?.scrollTo({ top: 0 }); },
+    scrollToIndex(i: number) {
+      const p = layout.placed[i], el = scroller.current;
+      if (p && el) el.scrollTo({ top: Math.max(0, p.y + p.h / 2 - el.clientHeight / 2) });
+    },
+  }), [layout]);
 
-  useEffect(() => { scrollerRef?.(scroller.current); return () => scrollerRef?.(null); }, [scrollerRef]);
-
-  // the cards near the view: a screen above, two below (where the scroll usually goes)
-  const from = view.top - headerH - view.height;
-  const to = view.top - headerH + view.height * 2;
+  const from = view.top - view.height;
+  const to = view.top + view.height * 2;
   const visible = layout.placed.filter((p) => p.y + p.h >= from && p.y <= to);
 
   return (
-    <div className="masonry-scroller" ref={scroller} onScroll={scroll}>
-      <div ref={headerBox}>{header}</div>
-      <div className="masonry" style={{ height: layout.height + padding }}>
+    <div className="masonry-scroller" ref={scroller} tabIndex={-1} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
+      <div className={`masonry${resizing ? ' resizing' : ''}`} style={{ height: layout.height + FOOTER }}>
         {width > 0 && visible.map((p) => (
           <Cell key={p.key} id={p.key} x={p.x} y={p.y} w={colW} report={report}>
             {render(items[p.index], colW, p.index)}
           </Cell>
         ))}
+        {footer && <div className="masonry-footer" style={{ top: layout.height }}>{footer}</div>}
       </div>
     </div>
   );
 }
 
+export const Masonry = forwardRef(MasonryInner) as <T>(p: MasonryProps<T> & { ref?: React.Ref<MasonryHandle> }) => ReturnType<typeof MasonryInner>;
+
+/** The height a card is heading for: a part of it that animates its height says where to
+ *  (`data-target-h`), so the cards under it move once, in step, rather than chasing every frame. */
+function heightOf(el: HTMLElement): number {
+  const t = el.querySelector<HTMLElement>('[data-target-h]');
+  return el.offsetHeight + (t ? Number(t.dataset.targetH) - t.offsetHeight : 0);
+}
+
 function Cell({ id, x, y, w, report, children }: { id: string; x: number; y: number; w: number; report: (k: string, h: number) => void; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
+  // a cell that just appeared is put in place without a glide
+  const [placed, setPlaced] = useState(false);
   useLayoutEffect(() => {
     const el = box.current!;
-    report(id, el.offsetHeight);
-    const ro = new ResizeObserver(() => report(id, el.offsetHeight));
+    report(id, heightOf(el));
+    const ro = new ResizeObserver(() => report(id, heightOf(el)));
     ro.observe(el);
-    return () => ro.disconnect();
+    const mo = new MutationObserver(() => report(id, heightOf(el)));
+    mo.observe(el, { attributes: true, subtree: true, attributeFilter: ['data-target-h'] });
+    const raf = requestAnimationFrame(() => setPlaced(true));
+    return () => { ro.disconnect(); mo.disconnect(); cancelAnimationFrame(raf); };
   }, [id, report]);
-  return <div ref={box} className="masonry-cell" style={{ transform: `translate(${x}px, ${y}px)`, width: w }}>{children}</div>;
+  return <div ref={box} className={`masonry-cell${placed ? ' placed' : ''}`} style={{ transform: `translate(${x}px, ${y}px)`, width: w }}>{children}</div>;
 }

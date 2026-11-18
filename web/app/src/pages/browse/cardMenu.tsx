@@ -1,8 +1,8 @@
 // The card's context menu (as the apps' card_menu.dart) and the selection's.
 import { BadgeCheck, CircleUserRound, CloudDownload, ExternalLink, Filter, FolderInput, FolderMinus, FolderPlus, Layers, Pencil, Search, Sparkles, Tag, TagsIcon, Trash2, X } from 'lucide-react';
-import { L, KEYWORDS, keywordWord, type FeedItem } from '@twimshelf/core';
+import { L, KEYWORDS, keywordWord, type FeedItem, type TagView } from '@twimshelf/core';
 import type { MenuEntry } from '../../components/Menu';
-import { askText, pickFolder, pickTag } from '../../components/pickers';
+import { pickFolder, pickTag, prompt } from '../../components/pickers';
 import { toast } from '../../components/toast';
 import { addTag, isAI, isUser, removeTag, runAction } from '../../lib/actions';
 import { core } from '../../lib/core';
@@ -38,18 +38,7 @@ export async function cardMenu(item: FeedItem, post: FeedItem[], host: CardMenuH
   let inFolders: string[] = [];
   try { inFolders = await core.read<string[]>(core.b.tl_media_folders(item.media_id)); } catch { /* none */ }
 
-  const deleteTag = async (label: string, origin: number) => {
-    await removeTag(item, label);
-    libraryChanged();
-    toast(L('tag.deleted', label), {
-      label: L('common.undo'),
-      run: async () => {
-        if (isAI(origin)) await addTag(item, label, true);
-        if (isUser(origin)) await addTag(item, label);
-        libraryChanged();
-      },
-    });
-  };
+
 
   return [
     ...(!loose && authorKey ? [{ label: L('card.menu.onlyAuthor', authorDisplay), icon: <CircleUserRound size={z} />, run: () => host.search(`${authorKey} ${kw('author')}`) }] : []),
@@ -62,17 +51,7 @@ export async function cardMenu(item: FeedItem, post: FeedItem[], host: CardMenuH
     ...item.tags.map((t) => ({
       label: t.label,
       icon: isAI(t.origin) ? (isUser(t.origin) ? <BadgeCheck size={z} /> : <Sparkles size={z} />) : <Tag size={z} />,
-      children: [
-        { label: L('card.menu.onlyTag'), icon: <Filter size={z} />, run: () => host.search(`${t.label} ${kw('tags')}`) },
-        { label: L('card.menu.searchTag'), icon: <Search size={z} />, run: () => host.addTerm(t.label) },
-        ...(isAI(t.origin) && !isUser(t.origin) ? [{ label: L('card.menu.approve'), icon: <BadgeCheck size={z} />, run: async () => { await addTag(item, t.label); libraryChanged(); } }] : []),
-        { label: L('card.menu.renameTag'), icon: <Pencil size={z} />, run: async () => {
-          const to = await askText(L('card.menu.renameTag'), t.label);
-          if (to && to !== t.label) { await core.read(core.b.tl_rename_tag(t.label, to)); libraryChanged(); }
-        } },
-        'separator' as const,
-        { label: L('card.menu.deleteTag'), icon: <X size={z} />, danger: true, run: () => void deleteTag(t.label, t.origin) },
-      ],
+      children: tagMenu(item, t, host),
     })),
     'separator',
     { label: L('common.addToFolder'), icon: <FolderPlus size={z} />, run: () => void toFolder({ media: [item.media_id] }) },
@@ -99,6 +78,33 @@ export async function cardMenu(item: FeedItem, post: FeedItem[], host: CardMenuH
     'separator',
     { label: L('card.menu.deleteMedia'), icon: <Trash2 size={z} />, danger: true, run: () => void runAction('trash', { media: [item.media_id] }, (n) => L('trash.moved', n)) },
     ...(!loose ? [{ label: L('card.menu.deletePost'), icon: <Trash2 size={z} />, danger: true, run: () => void runAction('trash', { posts: [item.post_id] }, (n) => L('trash.moved', n)) }] : []),
+  ];
+}
+
+/** The menu of one tag of one media (the card menu's tag rows and a right-click on a tag pill). */
+export function tagMenu(item: FeedItem, t: TagView, host: CardMenuHost): MenuEntry[] {
+  const deleteTag = async () => {
+    await removeTag(item, t.label);
+    libraryChanged();
+    toast(L('tag.deleted', t.label), {
+      label: L('common.undo'),
+      run: async () => {
+        if (isAI(t.origin)) await addTag(item, t.label, true);
+        if (isUser(t.origin)) await addTag(item, t.label);
+        libraryChanged();
+      },
+    });
+  };
+  return [
+    { label: L('card.menu.onlyTag'), icon: <Filter size={z} />, run: () => host.search(`${t.label} ${kw('tags')}`) },
+    { label: L('card.menu.searchTag'), icon: <Search size={z} />, run: () => host.addTerm(t.label) },
+    ...(isAI(t.origin) && !isUser(t.origin) ? [{ label: L('card.menu.approve'), icon: <BadgeCheck size={z} />, run: async () => { await addTag(item, t.label); libraryChanged(); } }] : []),
+    { label: L('card.menu.renameTag'), icon: <Pencil size={z} />, run: async () => {
+      const to = await prompt(L('card.menu.renameTag'), { initial: t.label });
+      if (to && to.trim() && to.trim() !== t.label) { await core.read(core.b.tl_rename_tag(t.label, to.trim())); libraryChanged(); }
+    } },
+    'separator',
+    { label: L('card.menu.deleteTag'), icon: <X size={z} />, danger: true, run: () => void deleteTag() },
   ];
 }
 

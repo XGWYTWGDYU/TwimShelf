@@ -67,7 +67,6 @@ public static unsafe class TlCore
     public static void SetLanguage(string tag) => Native.tl_set_language(tag);
     public static void SetAppName(string name) => Native.tl_set_app_name(name);
     public static bool Open(string dir) => Native.tl_open(dir);
-    public static string FxApiUrl(string url) => OkString(Native.tl_fx_api_url(url));
 
     /// The feed, read in the core's compact form (PackedFeed in core/src/library.rs).
     public static List<FeedItem> Feed(FeedRequest request) => UnpackFeed(Ok(Native.tl_feed_packed(Json(request, J.FeedRequest))));

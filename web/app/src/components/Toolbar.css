@@ -1,0 +1,39 @@
+/* The native toolbar: 52 pt, items 36 pt high on capsules of glass, the title 15 pt semibold
+   with an 11 pt subtitle (window.title / window.subtitle), the grid's title on a glass pill 36 pt
+   high with 14 pt padding (MacGlassTitle). */
+.toolbar { position: relative; z-index: 30; flex: none; height: var(--toolbar-h); display: flex; align-items: center; gap: 8px; padding: 0 16px 0 12px; -webkit-app-region: drag; }
+.toolbar > *, .toolbar-items > *, .toolbar-space > * { -webkit-app-region: no-drag; }
+.toolbar-space { flex: 1; min-width: 0; display: flex; justify-content: flex-end; -webkit-app-region: drag; }
+/* over the content (the grid and the cards start below it): a plain bar in the page's colour,
+   no soft fade at the edge */
+.toolbar-overlay { position: absolute; top: 0; left: 0; right: 0; background: var(--bg); }
+/* window buttons of the Mac window sit at the top left when the sidebar is hidden */
+.mac-titlebar .toolbar.sidebar-hidden { padding-left: 84px; }
+/* Linux: the room the window's buttons take, on whichever side the desktop puts them (nothing in
+   full screen, where the system reports no such area) */
+.linux-titlebar { --controls-left: env(titlebar-area-x, 0px); --controls-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
+.linux-titlebar .toolbar { padding-right: calc(16px + var(--controls-right)); }
+.linux-titlebar .toolbar.sidebar-hidden { padding-left: calc(12px + var(--controls-left)); }
+.linux-titlebar .side-top { margin-left: var(--controls-left); }
+.linux-titlebar .viewer-counter { left: calc(20px + var(--controls-left)); }
+.toolbar-titles { min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 4px; }
+.toolbar-title { font-size: 15px; font-weight: 600; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.toolbar-subtitle { font-size: 11px; line-height: 13px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toolbar-pill { height: 36px; max-width: 320px; padding: 0 14px; border-radius: 18px; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.toolbar-pill .toolbar-title { font-size: 13px; line-height: 16px; }
+.toolbar-items { display: flex; align-items: center; gap: 8px; }
+
+/* glass: the capsule material of the macOS 26 toolbar */
+.glass { background: var(--glass); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 0 0 0.5px var(--glass-edge), 0 1px 4px rgba(0, 0, 0, 0.06); }
+.tool-btn { height: 36px; min-width: 36px; padding: 0 10px; border: 0; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--fg); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.tool-btn:active:not(:disabled) { background: color-mix(in srgb, var(--glass) 70%, var(--fg) 12%); }
+.tool-btn:disabled { color: var(--fg-3); }
+.tool-btn.tool-text { padding: 0 14px; }
+.tool-btn.tool-prominent { background: var(--accent); color: #fff; box-shadow: none; }
+.tool-btn.tool-prominent:active { filter: brightness(0.92); background: var(--accent); }
+.tool-btn.on { color: var(--accent); }
+.tool-group { height: 36px; border-radius: 18px; display: inline-flex; align-items: center; overflow: hidden; }
+.tool-seg { width: 38px; height: 36px; border: 0; background: none; display: grid; place-items: center; color: var(--fg); }
+.tool-seg + .tool-seg { box-shadow: -0.5px 0 0 var(--line); }
+.tool-seg:active:not(:disabled) { background: var(--bg-active); }
+.tool-seg:disabled { color: var(--fg-3); }

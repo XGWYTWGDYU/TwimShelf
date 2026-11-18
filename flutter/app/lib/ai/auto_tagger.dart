@@ -12,8 +12,6 @@ import 'external_models.dart';
 import 'local_models.dart';
 import '../widgets/media_image.dart';
 import '../platform/os.dart';
-import '../platform/files.dart';
-import '../platform/lease.dart';
 
 abstract interface class TaggingCore {
   Future<int> epoch();
@@ -194,12 +192,6 @@ Future<Uint8List?> prepareTaggingJpeg(
       return null;
     }
   }
-  // the web build: the server sends it upright and already small (decoding the original in
-  // the page would hold up the screen)
-  if (OS.isWeb) {
-    final small = await scaledImageBytes(path, 896);
-    return small == null ? null : _jpegOf(small);
-  }
   return coreRunAsync(() => _jpeg(path));
 }
 
@@ -281,7 +273,7 @@ class AutoTagger extends ChangeNotifier {
                : _local(models, model.id, jpeg, existing, vocabulary, text)),
        _now = now ?? DateTime.now {
     // iOS ends an app that keeps the GPU busy in the background, as the native apps know
-    if (!kIsWeb && OS.isIOS) {
+    if (OS.isIOS) {
       _lifecycle = AppLifecycleListener(
         onHide: () {
           if (_paused || !running) return;
@@ -362,8 +354,6 @@ class AutoTagger extends ChangeNotifier {
   Future<void> startIfEnabled({bool asked = false}) async {
     if (asked) _stopped = false;
     if (_stopped) return;
-    // with the web app open in several windows, one of them tags (see BackgroundLease)
-    if (!asked && !BackgroundLease.instance.holder) return;
     final id = models.activeTaggerId;
     if (_closed ||
         _paused ||

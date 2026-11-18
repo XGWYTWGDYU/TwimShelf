@@ -1,0 +1,11 @@
+/* MacFoldersOverview: 20 at the sides, 16 between tiles, 22 between rows, 12 above and 24 below;
+   a cover with 8 rounded corners, the name in 13 medium 6 under it, the count in 11 secondary. */
+.folders-page { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.folders-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.folders-tiles { display: grid; column-gap: 16px; row-gap: 22px; padding: 12px 20px 24px; }
+.folder-tile { display: flex; flex-direction: column; min-width: 0; }
+.folder-cover { width: 100%; border-radius: 8px; overflow: hidden; background: var(--placeholder-tile); }
+.folder-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.folder-name { margin: 6px 2px 0; font-size: 13px; font-weight: 500; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.folder-detail { margin: 1px 2px 0; font-size: 11px; line-height: 14px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.folders-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 40px; text-align: center; color: var(--fg-2); pointer-events: none; }

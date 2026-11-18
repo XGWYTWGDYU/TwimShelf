@@ -147,7 +147,6 @@ class _QuickDownloadCardState extends State<QuickDownloadCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final desktop = OS.isMacOS || OS.isLinux;
     return Material(
       elevation: 8,
       color: theme.colorScheme.surfaceContainerHigh,
@@ -156,7 +155,7 @@ class _QuickDownloadCardState extends State<QuickDownloadCard> {
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: CallbackShortcuts(
-          bindings: {SingleActivator(LogicalKeyboardKey.enter, meta: OS.isMacOS, control: !OS.isMacOS): _download},
+          bindings: {SingleActivator(LogicalKeyboardKey.enter, meta: OS.isIOS, control: !OS.isIOS): _download},
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text(L('common.downloadPosts'), style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
@@ -165,7 +164,6 @@ class _QuickDownloadCardState extends State<QuickDownloadCard> {
             Listener(onPointerDown: _pressed, child: TextField(contextMenuBuilder: appTextMenu, 
               key: const ValueKey('quickDownloadLinks'),
               controller: _links,
-              autofocus: desktop,
               minLines: 6,
               maxLines: 6,
               keyboardType: TextInputType.multiline,

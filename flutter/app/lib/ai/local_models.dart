@@ -19,7 +19,7 @@ extension CatalogNames on CatalogEntry {
 }
 
 /// On-device models. Apple devices run MLX (the same engine and the same models as the native
-/// apps, `TLLocalAI` through `tl_native`); Android and Linux run llama.cpp (`tl_llama`,
+/// apps, `TLLocalAI` through `tl_native`); Android runs llama.cpp (`tl_llama`,
 /// CPU or Vulkan) with GGUF models. Only Apple devices export, import or pull models from other
 /// devices: MLX models run on Apple silicon alone.
 class LocalModels extends ChangeNotifier {
@@ -31,7 +31,7 @@ class LocalModels extends ChangeNotifier {
     catalog = entries;
   }
 
-  static bool get apple => !kIsWeb && (OS.isIOS || OS.isMacOS);
+  static bool get apple => OS.isIOS;
   static const _native = MethodChannel('tl/native');
 
   String get format => apple ? 'mlx' : 'gguf';
@@ -44,13 +44,13 @@ class LocalModels extends ChangeNotifier {
   List<ModelInfo> installed = const [];
   ModelDownloadStatus? download;
   Timer? _poll;
-  bool _started = false;
+  Future<void>? _starting;
 
   /// Where models live: beside, not inside, the library (a reset or a test library never makes
   /// them download again), as the native apps keep them.
-  Future<void> start() async {
-    if (_started) return;
-    _started = true;
+  Future<void> start() => _starting ??= _start();
+
+  Future<void> _start() async {
     final dir = OS.environment['TL_MODELS_DIR'] ?? '${(await getApplicationSupportDirectory()).path}${OS.pathSeparator}Models';
     await Directory(dir).create(recursive: true);
     Core.setModelsDirectory(dir);

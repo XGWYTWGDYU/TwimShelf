@@ -182,8 +182,9 @@ public sealed partial class MasonryView : UserControl
 
     PostCard Card(int i)
     {
-        if (_live.TryGetValue(i, out var c)) return c;
+        if (_live.TryGetValue(i, out var c)) { c.SetWidth(_width); return c; }
         c = _pool.Count > 0 ? _pool.Pop() : MakeCard();
+        c.SetWidth(_width);
         c.Bind(_cards[i], PageOf(KeyOf(i)), Marks, Highlight == _cards[i][0].PostId);
         c.Visibility = Visibility.Visible;
         if (_placed.Add(c)) _canvas.Children.Add(c);
@@ -208,6 +209,7 @@ public sealed partial class MasonryView : UserControl
     void Unplace(PostCard c)
     {
         KeepFocus(c);
+        c.Recycle();
         if (_placed.Remove(c)) _canvas.Children.Remove(c);
     }
 
@@ -226,9 +228,10 @@ public sealed partial class MasonryView : UserControl
         KeepFocus(c);
         c.Recycle();
         c.Visibility = Visibility.Collapsed;
-        if (Math.Abs(c.Width - CardWidth) < 0.5) { if (!_pool.Contains(c)) _pool.Push(c); }
-        else Unplace(c);
+        if (!_pool.Contains(c)) _pool.Push(c);
     }
+
+    public bool IsLayingOut => _laying;
 
     public void Layout()
     {
@@ -256,9 +259,7 @@ public sealed partial class MasonryView : UserControl
         {
             _width = width;
             _measured.Clear();
-            foreach (var c in _live.Values) Unplace(c);
-            _live.Clear();
-            while (_pool.Count > 0) Unplace(_pool.Pop());
+            foreach (var c in _live.Values) c.SetWidth(width);
             Forget();
         }
         if (_cards.Count == 0)

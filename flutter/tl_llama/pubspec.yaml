@@ -17,5 +17,3 @@ flutter:
     platforms:
       android:
         ffiPlugin: true
-      linux:
-        ffiPlugin: true

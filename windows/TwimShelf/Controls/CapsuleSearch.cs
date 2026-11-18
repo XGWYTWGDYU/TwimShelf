@@ -23,6 +23,7 @@ public sealed partial class CapsuleSearch : UserControl
     readonly ScrollViewer _chipScroll;
     readonly TextBox _text;
     readonly Button _clear;
+    readonly Border _searchIcon = new() { Width = 18, Margin = new Thickness(12, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
     readonly Popup _popup = new() { IsLightDismissEnabled = false };
     readonly StackPanel _rows = new();
     readonly Border _panel;
@@ -87,8 +88,8 @@ public sealed partial class CapsuleSearch : UserControl
                 new ColumnDefinition { Width = GridLength.Auto },
             },
         };
-        var icon = new FontIcon { Glyph = "", FontSize = 14, Margin = new Thickness(12, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] };
-        grid.Children.Add(icon);
+        UpdateSearchIcon();
+        grid.Children.Add(_searchIcon);
         Grid.SetColumn(_chipScroll, 1);
         grid.Children.Add(_chipScroll);
         Grid.SetColumn(_text, 2);
@@ -275,6 +276,7 @@ public sealed partial class CapsuleSearch : UserControl
 
     void BuildChips()
     {
+        UpdateSearchIcon();
         _chips.Children.Clear();
         foreach (var k in _keys)
         {
@@ -312,6 +314,17 @@ public sealed partial class CapsuleSearch : UserControl
         _clear.Visibility = _keys.Count > 0 || _text.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         DispatcherQueue.TryEnqueue(() => _chipScroll.ChangeView(_chipScroll.ScrollableWidth, null, null, true));
         BuildRows();
+    }
+
+    public void UpdateSearchIcon()
+    {
+        var mascot = Clawd.On && _keys.Count > 0;
+        if (_searchIcon.Child != null && (_searchIcon.Child is ImageIcon) == mascot) return;
+        _searchIcon.Child = mascot ? Clawd.Icon("search", 18) : new FontIcon
+        {
+            Glyph = "", FontSize = 14,
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        };
     }
 
     // ---- suggestions ------------------------------------------------------------------------------

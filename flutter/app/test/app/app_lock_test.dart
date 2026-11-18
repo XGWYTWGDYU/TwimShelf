@@ -115,7 +115,7 @@ void main() {
     expect(t.element(find.byKey(_content)), same(state));
   });
 
-  testWidgets('a desktop does not lock again in the background', (t) async {
+  testWidgets('with relocking off, the background does not lock', (t) async {
     await pump(t, relocks: false);
     await t.pumpWidget(app());
     await t.pumpAndSettle();

@@ -276,7 +276,7 @@ class _LocalModelsSection extends StatelessWidget {
 }
 
 /// MLX models between Apple devices: import a folder or ZIP, export one, pull one from another
-/// Apple device of the account. Not offered on Android or Linux.
+/// Apple device of the account. Not offered on Android.
 class _AppleOnlySection extends StatefulWidget {
   const _AppleOnlySection({required this.local, this.sync});
   final LocalModels local;

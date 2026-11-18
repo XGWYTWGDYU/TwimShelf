@@ -33,12 +33,11 @@ RUST_TOOLCHAIN=$(sed -nE 's/^channel *= *"([^"]+)".*/\1/p' "$ROOT/rust-toolchain
 ANDROID_PLATFORM=android-36
 ANDROID_BUILD_TOOLS=36.0.0
 ANDROID_CMAKE=3.31.6
-APPIMAGETOOL_URL=https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
 
 all_targets() {
   case "$OS" in
     Darwin) echo native-macos native-ios flutter-ios flutter-android ;;
-    Linux) echo electron-linux flutter-linux flutter-android ;;
+    Linux) echo electron-linux flutter-android ;;
   esac
 }
 
@@ -166,20 +165,6 @@ need_flutter_apple() {
   export LANG="${LANG:-en_US.UTF-8}" LC_ALL="${LC_ALL:-en_US.UTF-8}"
 }
 
-need_linux_desktop() {
-  local t
-  for t in clang cmake ninja pkg-config; do
-    need_tool $t "$t" - "clang cmake ninja-build pkg-config" "clang cmake ninja-build pkgconf-pkg-config" "clang cmake ninja pkgconf"
-  done
-  pkg-config --exists gtk+-3.0 || pkg_install "GTK 3 headers" - libgtk-3-dev gtk3-devel gtk3 || true
-  pkg-config --exists mpv || pkg_install "libmpv (video)" - libmpv-dev mpv-libs-devel mpv || true
-  pkg-config --exists libsecret-1 || pkg_install "libsecret (where the app keeps its keys)" - libsecret-1-dev libsecret-devel libsecret || true
-  pkg-config --exists alsa || pkg_install "ALSA headers (the volume)" - libasound2-dev alsa-lib-devel alsa-lib || true
-  { pkg-config --exists vulkan && have glslc; } || pkg_install "Vulkan headers and shader compiler (GPU AI)" - "libvulkan-dev glslc" "vulkan-loader-devel glslc" "vulkan-headers vulkan-icd-loader shaderc" || true
-  pkg-config --exists SPIRV-Headers || pkg_install "SPIR-V headers (GPU AI)" - spirv-headers spirv-headers-devel spirv-headers || true
-  have file || need_tool file file - file file file
-}
-
 version() {
   if [[ -n "${TL_VERSION:-}" ]]; then echo "$TL_VERSION"; else python3 "$ROOT/scripts/apply.py" get version; fi
 }
@@ -231,13 +216,11 @@ build_electron() {   # build_electron <linux|mac>
   # Electron's own binary (npm ci does not run its download step everywhere; cached in $CACHE/electron)
   (cd "$ROOT/web" && node node_modules/electron/install.js)
   cargo build --manifest-path "$ROOT/Cargo.toml" -p tl-server --release --locked --target-dir "$CACHE/cargo-target"
-  python3 - "$ROOT/web/electron/product.json" "$(version)" "$(python3 "$ROOT/scripts/apply.py" get flutter.desktop_id)" <<'PY'
-import json, sys
-json.dump({"version": sys.argv[2], "desktopId": sys.argv[3]}, open(sys.argv[1], "w"))
-PY
+  # name, id, version, build number and icon from config.yaml (product.json, icon.png)
+  python3 "$ROOT/scripts/apply.py" desktop
   ELECTRON_OUT="$CACHE/electron-out"; local out=$ELECTRON_OUT; rm -rf "$out"
   (cd "$ROOT/web/electron" && TL_SERVER_BIN="$CACHE/cargo-target/release/twimshelf-server" TL_WEB_DIST="$ROOT/web/app/dist" \
-    TL_ICON="$ROOT/icon.png" TL_ELECTRON_OUT="$out" npx electron-builder --config builder.cjs --"$1" --publish never)
+    TL_ELECTRON_OUT="$out" npx electron-builder --config builder.cjs --"$1" --publish never)
 }
 
 core_for() { FLUTTER="$FLUTTER" "$ROOT/scripts/flutter/build_core.sh" "$1"; }
@@ -276,13 +259,6 @@ build_target() {
         abi=$(basename "$f" | sed -E 's/app-(.*)-release.apk/\1/')
         cp "$f" "$DIST/TwimShelf-Flutter-$v-android-$abi.apk"
       done ;;
-    flutter-linux)
-      [[ $OS == Linux ]] || fail "flutter-linux builds on Linux"
-      need_rust; need_flutter; need_linux_desktop
-      core_for linux
-      (cd "$ROOT/flutter/app" && "$FLUTTER" pub get && "$FLUTTER" build linux --release $(flutter_defines))
-      local arch; arch=$(uname -m); [[ $arch == aarch64 ]] && arch=arm64 || arch=x64
-      "$ROOT/scripts/flutter/package_appimage.sh" "$ROOT/flutter/app/build/linux/$arch/release/bundle" "$DIST" "$v" ;;
     electron-linux)
       [[ $OS == Linux ]] || fail "electron-linux builds on Linux"
       build_electron linux
@@ -315,7 +291,6 @@ native-macos     the native Mac app (.dmg)                 macOS with Xcode
 native-ios       the native iPhone/iPad app (unsigned .ipa) macOS with Xcode
 flutter-ios      the Flutter iPhone/iPad app (.ipa)        macOS with Xcode
 flutter-android  the Flutter Android app (.apk per ABI)    macOS or Linux (Windows: build.ps1)
-flutter-linux    the Flutter Linux app (.AppImage)         Linux
 electron-linux   the Linux desktop app, React + Electron (.AppImage)  Linux
 windows          the native Windows app (setup .exe)       Windows: build.ps1
 docker           the Linux server + web app (image, .tar.gz) any computer with Docker (not built by default)
@@ -337,7 +312,6 @@ if [[ $CHECK == 1 ]]; then
       native-*) need_xcode; need_xcodegen; need_rust ;;
       flutter-ios) need_xcode; need_rust; need_flutter; need_flutter_apple ;;
       flutter-android) need_rust; need_flutter; need_android ;;
-      flutter-linux) need_rust; need_flutter; need_linux_desktop ;;
       electron-*) need_rust; need_node ;;
       docker) have docker || MISSING+=(Docker) ;;
     esac

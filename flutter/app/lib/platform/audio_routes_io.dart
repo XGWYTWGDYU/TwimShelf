@@ -1,11 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:ffi';
-import 'dart:io';
 
 import 'package:audio_session/audio_session.dart' as audio;
-import 'package:ffi/ffi.dart';
-import 'os.dart';
 
 abstract interface class HeadphoneRoutes {
   Future<bool> current();
@@ -22,7 +17,6 @@ class SystemHeadphoneRoutes implements HeadphoneRoutes {
     );
   }
   late final StreamController<bool> _changes;
-  Timer? _timer;
   StreamSubscription<dynamic>? _devices, _noisy;
   bool? _last;
   bool _closed = false, _sampling = false, _resample = false;
@@ -32,38 +26,22 @@ class SystemHeadphoneRoutes implements HeadphoneRoutes {
   @override
   Future<bool> current() async {
     try {
-      if (OS.isMacOS) return _macHeadphones();
-      if (OS.isLinux) {
-        final selected = await _pactl(['get-default-sink']);
-        final devices = await _pactl(['--format=json', 'list', 'sinks']);
-        if (selected == null || devices == null) return false;
-        final name = selected.trim();
-        for (final sink in jsonDecode(devices) as List) {
-          if ((sink as Map)['name'] == name) {
-            return isPrivateLinuxOutput(Map<String, dynamic>.from(sink));
-          }
-        }
-        return false;
-      }
-      if (OS.isAndroid || OS.isIOS) {
-        final session = await audio.AudioSession.instance;
-        final devices = await session.getDevices(includeInputs: false);
-        return devices.any(
-          (d) =>
-              d.isOutput &&
-              (d.type.name.startsWith('bluetooth') ||
-                  const {
-                    'wiredHeadset',
-                    'wiredHeadphones',
-                    'usbAudio',
-                    'usbHeadset',
-                  }.contains(d.type.name)),
-        );
-      }
+      final session = await audio.AudioSession.instance;
+      final devices = await session.getDevices(includeInputs: false);
+      return devices.any(
+        (d) =>
+            d.isOutput &&
+            (d.type.name.startsWith('bluetooth') ||
+                const {
+                  'wiredHeadset',
+                  'wiredHeadphones',
+                  'usbAudio',
+                  'usbHeadset',
+                }.contains(d.type.name)),
+      );
     } catch (_) {
       return false;
     }
-    return false;
   }
 
   void _emit(bool value) {
@@ -96,36 +74,25 @@ class SystemHeadphoneRoutes implements HeadphoneRoutes {
   void _watch() {
     if (_closed) return;
     unawaited(_sample());
-    if (OS.isAndroid || OS.isIOS) {
-      unawaited(
-        () async {
-          final session = await audio.AudioSession.instance;
-          if (_closed || !_changes.hasListener) return;
-          _devices = session.devicesChangedEventStream.listen((_) {
-            _routeEpoch++;
-            unawaited(_sample());
-          });
-          _noisy = session.becomingNoisyEventStream.listen((_) {
-            _routeEpoch++;
-            _emit(false);
-          });
-        }().catchError((Object _) {
+    unawaited(
+      () async {
+        final session = await audio.AudioSession.instance;
+        if (_closed || !_changes.hasListener) return;
+        _devices = session.devicesChangedEventStream.listen((_) {
+          _routeEpoch++;
+          unawaited(_sample());
+        });
+        _noisy = session.becomingNoisyEventStream.listen((_) {
+          _routeEpoch++;
           _emit(false);
-        }),
-      );
-    } else {
-      _timer = Timer.periodic(
-        OS.isLinux
-            ? const Duration(seconds: 1)
-            : const Duration(milliseconds: 250),
-        (_) => unawaited(_sample()),
-      );
-    }
+        });
+      }().catchError((Object _) {
+        _emit(false);
+      }),
+    );
   }
 
   void _stop() {
-    _timer?.cancel();
-    _timer = null;
     unawaited(_devices?.cancel());
     unawaited(_noisy?.cancel());
   }
@@ -135,90 +102,5 @@ class SystemHeadphoneRoutes implements HeadphoneRoutes {
     _closed = true;
     _stop();
     await _changes.close();
-  }
-}
-
-bool isPrivateLinuxOutput(Map<String, dynamic> sink) {
-  final port = sink['active_port'];
-  final name = port is Map ? port['name'] : port;
-  final props = sink['properties'] as Map? ?? const {};
-  return (name is String && name.toLowerCase().contains('headphone')) ||
-      const {'usb', 'bluetooth'}.contains(props['device.bus']);
-}
-
-final class _AudioAddress extends Struct {
-  @Uint32()
-  external int selector;
-  @Uint32()
-  external int scope;
-  @Uint32()
-  external int element;
-}
-
-typedef _GetAudioDataNative = Int32 Function(
-  Uint32,
-  Pointer<_AudioAddress>,
-  Uint32,
-  Pointer<Void>,
-  Pointer<Uint32>,
-  Pointer<Void>,
-);
-typedef _GetAudioData = int Function(
-  int,
-  Pointer<_AudioAddress>,
-  int,
-  Pointer<Void>,
-  Pointer<Uint32>,
-  Pointer<Void>,
-);
-
-final class _MacAudio {
-  static final get =
-      DynamicLibrary.open(
-        '/System/Library/Frameworks/CoreAudio.framework/CoreAudio',
-      ).lookupFunction<_GetAudioDataNative, _GetAudioData>(
-        'AudioObjectGetPropertyData',
-      );
-}
-
-bool _macHeadphones() => using((arena) {
-  final address = arena<_AudioAddress>(),
-      size = arena<Uint32>(),
-      value = arena<Uint32>();
-  int? read(int object, int selector, {int scope = 0x676c6f62}) {
-    address.ref
-      ..selector = selector
-      ..scope = scope
-      ..element = 0;
-    size.value = 4;
-    return _MacAudio.get(object, address, 0, nullptr, size, value.cast()) == 0
-        ? value.value
-        : null;
-  }
-
-  final device = read(1, 0x644f7574); // default output ('dOut')
-  if (device == null || device == 0) return false;
-  final transport = read(device, 0x7472616e); // 'tran'
-  if (const {0x626c7565, 0x626c6561, 0x75736220}.contains(transport)) {
-    return true;
-  }
-  return read(device, 0x73737263, scope: 0x6f757470) ==
-      0x6864706e; // output data source 'hdpn'
-});
-
-Future<String?> _pactl(List<String> arguments) async {
-  Process? process;
-  try {
-    process = await Process.start('pactl', arguments);
-    final output = process.stdout
-        .transform(const Utf8Decoder(allowMalformed: true))
-        .join()
-        .catchError((Object _) => '');
-    unawaited(process.stderr.drain<void>().catchError((Object _) {}));
-    final code = await process.exitCode.timeout(const Duration(seconds: 2));
-    return code == 0 ? await output : null;
-  } catch (_) {
-    process?.kill();
-    return null;
   }
 }

@@ -205,7 +205,10 @@ impl Transport for ReqwestTransport {
                 )
             })
             .collect();
-        let body = response.text().unwrap_or_default();
+        // (no answer here is anywhere near this long)
+        let mut bytes = Vec::new();
+        let _ = std::io::Read::read_to_end(&mut std::io::Read::take(response, 32 << 20), &mut bytes);
+        let body = String::from_utf8_lossy(&bytes).into_owned();
         Ok(HttpResponse {
             status,
             headers,

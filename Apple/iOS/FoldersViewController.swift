@@ -27,6 +27,7 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var observers: [NSObjectProtocol] = []
+    private var kindPress: MascotPulse?
     private var loading = false
 
     override func viewDidLoad() {
@@ -143,7 +144,7 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
         let kindCell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
             guard case let .kind(k, n) = item else { return }
             var c = UIListContentConfiguration.subtitleCell()
-            c.image = Mascot.isOn ? Mascot.icon(k == .video ? "video" : "image", side: 32) : UIImage(systemName: k == .video ? "video.fill" : "photo.fill")
+            c.image = UIImage(systemName: k == .video ? "video.fill" : "photo.fill")
             c.imageProperties.tintColor = k == .video ? .systemPink : .systemBlue
             c.text = k == .video ? L("place.videos") : L("place.photos")
             c.textProperties.font = .preferredFont(forTextStyle: .headline)
@@ -256,7 +257,17 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
         switch item {
         case .folder(let f): open(MediaGridViewController(title: f.name, filter: FeedFilter(folder: f.name), folder: f.name))
         case .newFolder, .empty: createFolder()
-        case .kind(let k, _): open(MediaGridViewController(title: k == .video ? L("place.videos") : L("place.photos"), filter: FeedFilter(kind: k)))
+        case .kind(let k, _):
+            if Mascot.isOn, let cell = cv.cellForItem(at: ip), let normal = UIImage(systemName: k == .video ? "video.fill" : "photo.fill") {
+                kindPress?.cancel()
+                kindPress = MascotPulse(k == .video ? "video" : "image", side: 32, normal: normal, show: { [weak cell, weak cv] image in
+                    // the cell may have gone on to show another row
+                    guard let cell, cv?.indexPath(for: cell) == ip, var content = cell.contentConfiguration as? UIListContentConfiguration else { return }
+                    content.image = image
+                    cell.contentConfiguration = content
+                })
+            }
+            open(MediaGridViewController(title: k == .video ? L("place.videos") : L("place.photos"), filter: FeedFilter(kind: k)))
         case .more(let m, _):
             switch m {
             case .loose: open(MediaGridViewController(title: L("place.loose"), filter: FeedFilter(looseOnly: true)))

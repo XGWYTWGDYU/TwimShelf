@@ -50,12 +50,12 @@ class LocalAuthSystem implements AppLockSystem {
 }
 
 /// 应用锁 (Face ID, Touch ID, Android's biometrics): optional, off by default, not on
-/// Linux. It stands in front of the app; it does not encrypt the library's files. Phones and tablets
-/// lock again when the app goes to the background; desktops at each start.
+/// It stands in front of the app; it does not encrypt the library's files. It locks again when the
+/// app goes to the background.
 class AppLock extends ChangeNotifier with WidgetsBindingObserver {
   AppLock({required this.system, required this.relocks});
 
-  static bool get offered => !OS.isLinux;
+  static bool get offered => true;
   static final instance = AppLock(system: LocalAuthSystem(), relocks: OS.isIOS || OS.isAndroid);
 
   final AppLockSystem system;

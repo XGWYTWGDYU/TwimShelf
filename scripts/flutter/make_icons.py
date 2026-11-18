@@ -12,11 +12,10 @@ build applies config.yaml and something is missing or the source changed.
   Android   legacy mipmaps, and the adaptive icon's foreground over a white background
   iOS       the AppIcon set of Runner, opaque
   in-app    assets/app_icon.png of the app
-  web       flutter/app/web and web/app/public: favicon and the web app's icons (committed)
+  web       web/app/public: the React app's favicon and icons (committed)
   extension extension/icons (committed)
 
-Linux makes its own at build time from the same set (desktop_assets.py); the native Windows app
-its own in scripts/apply.py.
+The desktop app (web/electron) and the native Windows app get theirs from scripts/apply.py.
 
   python3 scripts/flutter/make_icons.py                       the icons above
   python3 scripts/flutter/make_icons.py --app-icon icon.png [--set DIR]   an AppIcon set (the
@@ -50,17 +49,13 @@ APP_DIR = ROOT / "flutter/app"
 ANDROID_RES = APP_DIR / "android/app/src/main/res"
 IOS_SET = APP_DIR / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
 IN_APP = (APP_DIR / "assets/app_icon.png",)
-WEB = APP_DIR / "web"
 # the React front end (web/app/public): the same favicon and icons the sign-in page shows
 REACT = ROOT / "web/app/public"
 # the Mac icon (own corners, transparent margin) at these sizes
-WEB_ROUNDED = {WEB / "favicon.png": 32, REACT / "favicon.png": 32}
+WEB_ROUNDED = {REACT / "favicon.png": 32}
 EXTENSION = {ROOT / f"extension/icons/icon{n}.png": n for n in (16, 32, 48, 128)}
 # the artwork to the edges, opaque (a web app's icon is masked by the system)
-WEB_FULL = {WEB / "icons/Icon-192.png": 192, WEB / "icons/Icon-512.png": 512,
-            REACT / "icons/Icon-192.png": 192, REACT / "icons/Icon-512.png": 512}
-# the artwork inside the 80 % safe zone of a maskable icon
-WEB_MASKABLE = {WEB / "icons/Icon-maskable-192.png": 192, WEB / "icons/Icon-maskable-512.png": 512}
+WEB_FULL = {REACT / "icons/Icon-192.png": 192, REACT / "icons/Icon-512.png": 512}
 
 ANDROID_LEGACY = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 ANDROID_ADAPTIVE = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
@@ -79,7 +74,7 @@ def catalog(folder):
 
 def outputs():
     files = list(IN_APP) + list(catalog(IOS_SET))
-    files += list(WEB_ROUNDED) + list(EXTENSION) + list(WEB_FULL) + list(WEB_MASKABLE)
+    files += list(WEB_ROUNDED) + list(EXTENSION) + list(WEB_FULL)
     for density in ANDROID_LEGACY:
         files += [ANDROID_RES / f"mipmap-{density}/ic_launcher.png", ANDROID_RES / f"mipmap-{density}/ic_launcher_foreground.png"]
     return files
@@ -186,12 +181,6 @@ def main():
         clean(resized(public_mac, size), path)
     for path, size in WEB_FULL.items():
         clean(resized(public_image, size).convert("RGB"), path)
-    edge = public_image.getpixel((4, public_image.height // 2))[:3] + (255,)
-    for path, size in WEB_MASKABLE.items():
-        canvas = Image.new("RGBA", (size, size), edge)
-        inner = round(size * 0.8)
-        canvas.alpha_composite(resized(public_image, inner), ((size - inner) // 2, (size - inner) // 2))
-        clean(canvas.convert("RGB"), path)
     print(f"config: {len(outputs())} icons made from {source.name}")
 
 

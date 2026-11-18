@@ -10,7 +10,7 @@ services:
     # build:
     #   context: ..
     #   dockerfile: docker/Dockerfile
-    #   args: { RUST_VERSION: "<rust-toolchain.toml>", FLUTTER_VERSION: "<.fvmrc>" }
+    #   args: { RUST_VERSION: "<rust-toolchain.toml>", NODE_VERSION: "<.node-version>" }
     container_name: twimshelf
     restart: unless-stopped
     # LAN sync with the phone/Mac apps finds devices by mDNS (multicast), which only reaches the

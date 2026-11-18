@@ -527,7 +527,7 @@ impl SyncNode {
             loop {
                 match model_wait(ch.recv()).await? {
                     Msg::ModelFile { name, size } => {
-                        if name.contains('/') || name.contains("..") || !crate::models::is_wanted_file(&name) { bail!(tr!("sync.badFileName", name = name)); }
+                        if name.contains(['/', '\\', ':']) || name.contains("..") || !crate::models::is_wanted_file(&name) { bail!(tr!("sync.badFileName", name = name)); }
                         let mut f = tokio::fs::File::create(staging.join(&name)).await?;
                         let mut left = size;
                         while left > 0 {
@@ -907,7 +907,7 @@ impl SyncNode {
                 }
                 Msg::Plan { files, bytes } => {
                     // the files this peer has of the ones asked (another session's share stays counted)
-                    if let Some(t) = self.transfer.lock().unwrap().as_mut() { t.total = t.total.saturating_sub(asked.len() as u64) + files; t.total_bytes += bytes; }
+                    if let Some(t) = self.transfer.lock().unwrap().as_mut() { t.total = t.total.saturating_sub(asked.len() as u64).saturating_add(files); t.total_bytes = t.total_bytes.saturating_add(bytes); }
                 }
                 Msg::NoBlob { .. } => { if let Some(t) = self.transfer.lock().unwrap().as_mut() { t.total = t.total.saturating_sub(1); } }
                 Msg::BlobsEnd => return Ok(()),

@@ -20,6 +20,8 @@ final class FeedCard: NSCollectionViewItem {
     let mediaView = SwipeMediaView()
     let mediaImage = ImageLayerView()
     let playerLayer = AVPlayerLayer()
+    private var inlineReadiness: NSKeyValueObservation?
+    private var resumeImage: NSImage?
     private let playBadge = NSImageView()
     private let badBadge = NSTextField(labelWithString: L("card.badge.damaged"))
     private let counter = NSTextField(labelWithString: "")
@@ -32,6 +34,17 @@ final class FeedCard: NSCollectionViewItem {
     private var tags: TagStripView { tagScroll.strip }
 
     var current: FeedItem? { items.indices.contains(page) ? items[page] : nil }
+
+    var viewerSourceFrame: NSRect? {
+        guard let item = current, mediaView.window != nil else { return nil }
+        let bounds = mediaView.bounds
+        let size = mediaImage.image?.size
+            ?? (item.width > 0 && item.height > 0 ? CGSize(width: item.width, height: item.height) : bounds.size)
+        let video = playerLayer.videoRect
+        let frame = video.isEmpty ? AVMakeRect(aspectRatio: size, insideRect: bounds) : video
+        guard !frame.isEmpty, frame.intersects(mediaView.visibleRect) else { return nil }
+        return mediaView.convert(frame, to: nil)
+    }
 
     override func loadView() {
         let root = MacCardView()
@@ -150,7 +163,8 @@ final class FeedCard: NSCollectionViewItem {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        playerLayer.player = nil
+        setInlinePlayer(nil)
+        resumeImage = nil
         mediaImage.image = nil
         MacMediaLoader.shared.cancel(imageToken); imageToken = nil
         tagScroll.scrollToStart()
@@ -195,12 +209,28 @@ final class FeedCard: NSCollectionViewItem {
         showCaption()
     }
 
-    var showsInlineVideo = false { didSet { playBadge.isHidden = current?.kind != .video || showsInlineVideo } }
+    func showInlineStill(_ image: CGImage?) {
+        guard let image else { return }
+        let still = NSImage(cgImage: image, size: .zero)
+        resumeImage = still
+        mediaImage.image = still
+        playBadge.isHidden = true
+    }
+
+    func setInlinePlayer(_ player: AVPlayer?) {
+        if let player {
+            if let observation = attachInlineVideo(player, to: playerLayer) { inlineReadiness = observation }
+        } else {
+            inlineReadiness = nil
+            playerLayer.player = nil
+        }
+        playBadge.isHidden = current?.kind != .video || player != nil || resumeImage != nil
+    }
 
     private func show() {
         guard let it = current else { return }
-        playerLayer.player = nil
-        showsInlineVideo = false
+        resumeImage = nil
+        setInlinePlayer(nil)
         MacMediaLoader.shared.cancel(imageToken)
         let id = it.mediaId
         badBadge.isHidden = it.bad == nil
@@ -216,7 +246,7 @@ final class FeedCard: NSCollectionViewItem {
                 let fade = CATransition(); fade.type = .fade; fade.duration = 0.15
                 self.mediaImage.layer?.add(fade, forKey: "fade")
             }
-            self.mediaImage.image = img
+            self.mediaImage.image = self.resumeImage ?? img
             self.imageToken = nil
         }
         showCaption()
@@ -305,7 +335,7 @@ final class FeedCard: NSCollectionViewItem {
         mediaImage.layer?.add(a, forKey: "bounce")
     }
     @objc private func clicked() { if let c = current { onOpen?(c) } }
-    @objc private func openLink() { if let s = current?.url, let u = URL(string: s) { NSWorkspace.shared.open(u) } }
+    @objc private func openLink() { if let s = current?.url, let u = URL(string: s), ["http", "https"].contains(u.scheme?.lowercased()) { NSWorkspace.shared.open(u) } }
 
 }
 
@@ -416,6 +446,8 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     private var lastUnfiltered = true
     /// The player or photo viewer covering the feed (nil when browsing).
     private var viewer: NSView?
+    private var viewerSource: ((FeedItem) -> NSRect?)?
+    private var isClosingViewer = false
     /// A player that went to picture in picture: kept alive while its floating window plays.
     private var pipPlayer: MacPlayerView?
 
@@ -426,26 +458,13 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     private let emptyLabel = NSTextField(labelWithString: "")
     private let statsLabel = NSTextField(labelWithString: "")
     /// Every video card at least half in view plays, muted, with a player of its own.
-    private lazy var inline = InlineVideos<FeedCard>(
-        attach: { [weak self] card, player, url in
-            #if DEBUG
-            self?.debugInlineSwaps += 1
-            #endif
-            player.replaceCurrentItem(with: AVPlayerItem(url: url))
-            card.playerLayer.player = player
-            card.showsInlineVideo = true
-            player.play()
-        },
-        detach: { _, card in
-            card?.playerLayer.player = nil
-            card?.showsInlineVideo = false
-        },
-        // the card's own player, back from the viewer: on the card, muted, going on
-        adopt: { card, player in
-            card.playerLayer.player = player
-            card.showsInlineVideo = true
-            player.isMuted = true
-            player.play()
+    private lazy var inline: InlineVideos<FeedCard> = InlineVideos(
+        attach: { [weak self] card, player in self?.attachInline(card, player) },
+        detach: { _, card in card?.setInlinePlayer(nil) },
+        frameReady: { [weak self] url, image in
+            for case let card as FeedCard in self?.collection.visibleItems() ?? [] where card.current?.fileURL == url {
+                card.showInlineStill(image)
+            }
         })
     private var generation = 0
 
@@ -784,13 +803,15 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         let e = entries[ip.item % entries.count]
         card.startPage = cardPages.page(of: entryKey(e), count: e.count)
         card.refresh(e)
-        card.onOpen = { [weak self] it in self?.open(it) }
+        card.onOpen = { [weak self, weak card] it in self?.open(it, from: card) }
         card.onTag = { [weak self] l in self?.addTerm(l) }
         card.onRecent = { [weak self] in guard let self, !self.query.recent else { return }; self.toggleRecentOnly() }
         card.onAddTag = { [weak self] card, anchor, rect in self?.showTagPicker(card, anchor: anchor, rect: rect) }
         card.onPage = { [weak self, weak card] in
-            if let card { self?.pageChanged(card) }
-            self?.updateInline()
+            guard let self, let card else { return }
+            if let item = card.current { card.showInlineStill(self.inline.frame(for: item.fileURL)) }
+            self.pageChanged(card)
+            self.updateInline()
         }
         return card
     }
@@ -799,27 +820,29 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     /// A card came on screen: re-check which video plays (a short result list never scrolls).
     private var pendingInline: DispatchWorkItem?
     func collectionView(_ cv: NSCollectionView, willDisplay item: NSCollectionViewItem, forRepresentedObjectAt ip: IndexPath) {
-        pendingInline?.cancel()
-        let w = DispatchWorkItem { [weak self] in self?.updateInline() }
+        if let card = item as? FeedCard, let media = card.current, media.kind == .video {
+            card.showInlineStill(inline.frame(for: media.fileURL))
+        }
+        scheduleInlineUpdate()
+    }
+
+    private func scheduleInlineUpdate() {
+        guard pendingInline == nil else { return }
+        let w = DispatchWorkItem { [weak self] in
+            self?.pendingInline = nil
+            self?.updateInline()
+        }
         pendingInline = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: w)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: w)
     }
 
     func collectionView(_ cv: NSCollectionView, didEndDisplaying item: NSCollectionViewItem, forRepresentedObjectAt ip: IndexPath) {
         if let card = item as? FeedCard { inline.stop { $0 === card } }
     }
 
-    /// While scrolling: load pictures a screen ahead, and choose the autoplay video only once the
-    /// scroll pauses (swapping players at every scroll event during a fling cost frames and made
-    /// cards flash between poster and video).
     @objc private func scrolled() {
         prefetchAhead()
-        pendingInline?.cancel()
-        let visible = scroll.contentView.documentVisibleRect
-        inline.stop { !$0.view.frame.intersects(visible) }
-        let w = DispatchWorkItem { [weak self] in self?.updateInline() }
-        pendingInline = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: w)
+        scheduleInlineUpdate()
     }
 
     private var lastPrefetchY: CGFloat = .nan
@@ -836,19 +859,28 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         let ips = attrs.filter { $0.representedElementCategory == .item }.compactMap(\.indexPath)
             .sorted { down ? $0 > $1 : $0 < $1 }
         MacMediaLoader.shared.prefetch(ips.compactMap { entries[$0.item % entries.count].first }, maxPixel: FeedCard.decodePixels)
+        for ip in ips {
+            let items = entries[ip.item % entries.count]
+            guard !items.isEmpty else { continue }
+            let page = cardPages.page(of: entryKey(items), count: items.count)
+            inline.prefetchFrame(for: items[page])
+        }
     }
 
     /// Muted autoplay for every video card at least half in view.
     private func updateInline() {
+        guard viewer == nil else { return }
         // not while a collection covers 浏览
         if covered { detachInline(); return }
         let visible = scroll.contentView.documentVisibleRect
-        var wanted: [(FeedCard, URL)] = []
+        var wanted: [InlineVideos<FeedCard>.Card] = []
         for case let card as FeedCard in collection.visibleItems() {
             guard let item = card.current, item.kind == .video else { continue }
-            let f = card.view.frame.intersection(visible)
-            let r = f.isNull ? 0 : (f.width * f.height) / max(card.view.frame.width * card.view.frame.height, 1)
-            if r >= 0.5 { wanted.append((card, item.fileURL)) }
+            let media = card.mediaView.convert(card.mediaView.bounds, to: collection)
+            let f = media.intersection(visible)
+            guard !f.isEmpty else { continue }
+            let ratio = (f.width * f.height) / max(media.width * media.height, 1)
+            wanted.append((card, item, ratio >= 0.5))
         }
         inline.show(wanted)
         // a player given back for a card no longer in view goes
@@ -859,16 +891,37 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         inline.stopAll()
     }
 
+    private func attachInline(_ card: FeedCard, _ player: AVPlayer) {
+        #if DEBUG
+        debugInlineSwaps += 1
+        #endif
+        if let item = card.current { card.showInlineStill(inline.frame(for: item.fileURL)) }
+        card.setInlinePlayer(player)
+    }
+
     /// Opens a media inside the main window (never a new window): the player or photo viewer
     /// covers the feed until it is closed.
     /// Opens a media of another list (a grid of the 文件夹 page): ← → goes through that list.
-    func openMedia(_ item: FeedItem, in list: [FeedItem]) { open(item, list: list) }
+    func openMedia(_ item: FeedItem, in list: [FeedItem], source: ((FeedItem) -> NSRect?)? = nil) {
+        open(item, list: list, source: source)
+    }
 
-    private func open(_ item: FeedItem, list: [FeedItem]? = nil) {
+    private func open(_ item: FeedItem, list: [FeedItem]? = nil, from card: FeedCard? = nil,
+                      source: ((FeedItem) -> NSRect?)? = nil) {
+        guard viewer == nil else { return }
         // the viewer takes the card's own player (one player for both: nothing starts again)
-        let lent = item.kind == .video ? inline.lend { $0.current?.mediaId == item.mediaId } : nil
-        let t = lent?.currentTime() ?? .zero
-        let giveBack: (AVPlayer) -> Void = { [weak self] p in self?.inline.giveBack(p, url: item.fileURL) }
+        let fromBrowse = list == nil
+        let lent = fromBrowse && item.kind == .video ? card.flatMap { inline.lend(for: $0, item: item) } : nil
+        let t = fromBrowse ? inline.position(for: item.mediaId) : .zero
+        let giveBack: (AVPlayer) -> Void = { [weak self] p in self?.inline.giveBack(p) }
+        let sourceFrame: (FeedItem) -> NSRect? = { [weak self, weak card] current in
+            if let source { return source(current) ?? source(item) }
+            let visible = self?.collection.visibleItems().compactMap { $0 as? FeedCard } ?? []
+            let tapped = card?.current?.mediaId == item.mediaId ? card?.viewerSourceFrame : nil
+            if current.mediaId == item.mediaId, let tapped { return tapped }
+            let matching = visible.first { $0.current?.mediaId == current.mediaId }
+            return matching?.viewerSourceFrame ?? tapped
+        }
         detachInline()
         if let p = pipPlayer { p.teardown(); pipPlayer = nil }
         let v: NSView
@@ -893,38 +946,107 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             let listed = list ?? entries.flatMap { $0 }
             let group = listed.contains { $0.mediaId == item.mediaId } ? listed : allItems.filter { $0.postId == item.postId }.sorted { $0.ordinal < $1.ordinal }
             // photos and videos alike: the viewer shows a video as a page, playing from where it was
-            let ph = MacPhotoView(items: group.isEmpty ? [item] : group, index: group.firstIndex { $0.mediaId == item.mediaId } ?? 0, videoStart: t, player: lent, giveBack: giveBack)
-            ph.onClose = { [weak self, weak ph] in ph?.teardown(); self?.closeViewer() }
+            let ph = MacPhotoView(items: group.isEmpty ? [item] : group, index: group.firstIndex { $0.mediaId == item.mediaId } ?? 0,
+                                  player: lent, giveBack: giveBack,
+                                  videoPosition: fromBrowse ? { [weak self] in self?.inline.position(for: $0.mediaId) ?? .zero } : nil,
+                                  saveVideoPosition: fromBrowse ? { [weak self] in self?.inline.savePosition($1, for: $0.mediaId) } : nil)
+            ph.onClose = { [weak self] in self?.closeViewer() }
             v = ph
         }
-        showViewer(v)
+        showViewer(v, source: sourceFrame, initialFrame: sourceFrame(item))
     }
 
-    private func showViewer(_ v: NSView) {
+    private func showViewer(_ v: NSView, source: ((FeedItem) -> NSRect?)? = nil, initialFrame: NSRect? = nil) {
         viewer?.removeFromSuperview()
         viewer = v
+        viewerSource = source
+        isClosingViewer = false
         v.translatesAutoresizingMaskIntoConstraints = false
         // the whole window (over the sidebar too), not only 浏览's pane
         let host = viewerHost?() ?? view
         host.addSubview(v)
         NSLayoutConstraint.activate([v.topAnchor.constraint(equalTo: host.topAnchor), v.bottomAnchor.constraint(equalTo: host.bottomAnchor),
                                      v.leadingAnchor.constraint(equalTo: host.leadingAnchor), v.trailingAnchor.constraint(equalTo: host.trailingAnchor)])
-        v.alphaValue = 0
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.18; $0.timingFunction = .springy; v.animator().alphaValue = 1 }
         // Media gets the whole window: hide the toolbar (it overlapped the viewer's close button)
         // and the undo toast; the viewer itself covers the rest of the feed.
         setImmersive(true)
         toast.isHidden = true
         view.window?.makeFirstResponder(v)
+        host.layoutSubtreeIfNeeded()
+        animateViewer(v, source: initialFrame, opening: true)
     }
 
     private func closeViewer(keepPlayer: Bool = false) {
-        guard let v = viewer else { return }
-        viewer = nil
+        guard let v = viewer, !isClosingViewer else { return }
+        isClosingViewer = true
+        let mediaViewer = v as? MacPhotoView
+        mediaViewer?.finishMotion()
         setImmersive(false)
-        NSAnimationContext.runAnimationGroup({ $0.duration = 0.15; $0.timingFunction = .springy; v.animator().alphaValue = 0 }) { v.removeFromSuperview() }
-        view.window?.makeFirstResponder(responderAfterViewer?() ?? collection)
-        DispatchQueue.main.async { self.updateInline() }
+        v.superview?.layoutSubtreeIfNeeded()
+        let source = mediaViewer.flatMap { viewerSource?($0.current) }
+        animateViewer(v, source: source, opening: false) { [weak self, weak v] in
+            guard let self, let v, self.viewer === v else { return }
+            (v as? MacPhotoView)?.teardown()
+            v.removeFromSuperview()
+            self.viewer = nil
+            self.viewerSource = nil
+            self.isClosingViewer = false
+            self.view.window?.makeFirstResponder(self.responderAfterViewer?() ?? self.collection)
+            self.updateInline()
+        }
+    }
+
+    private func animateViewer(_ viewer: NSView, source: NSRect?, opening: Bool, completion: @escaping () -> Void = {}) {
+        let media = (viewer as? MacPhotoView)?.mediaFrame ?? viewer.bounds
+        guard let source, !source.isEmpty, !media.isEmpty, let layer = viewer.layer,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            if opening { viewer.alphaValue = 0 }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.16
+                viewer.animator().alphaValue = opening ? 1 : 0
+            }, completionHandler: completion)
+            return
+        }
+        let target = viewer.convert(source, from: nil)
+        let scale = max(target.width / media.width, target.height / media.height)
+        let bounds = viewer.bounds
+        let crop = CGRect(x: media.midX - target.width / (2 * scale), y: media.midY - target.height / (2 * scale),
+                          width: target.width / scale, height: target.height / scale)
+        let anchor = CGPoint(x: bounds.minX + bounds.width * layer.anchorPoint.x,
+                             y: bounds.minY + bounds.height * layer.anchorPoint.y)
+        let zoom = CATransform3DScale(CATransform3DMakeTranslation(
+            target.midX - anchor.x - (media.midX - anchor.x) * scale,
+            target.midY - anchor.y - (media.midY - anchor.y) * scale, 0), scale, scale, 1)
+        let transform = CABasicAnimation(keyPath: "transform")
+        transform.fromValue = opening ? zoom : (layer.presentation()?.transform ?? CATransform3DIdentity)
+        transform.toValue = opening ? CATransform3DIdentity : zoom
+        let fullPath = CGPath(rect: bounds, transform: nil)
+        let cropPath = CGPath(rect: crop, transform: nil)
+        let clip = CABasicAnimation(keyPath: "path")
+        clip.fromValue = opening ? cropPath : (layer.mask?.presentation() as? CAShapeLayer)?.path ?? fullPath
+        clip.toValue = opening ? fullPath : cropPath
+        let fade = CAKeyframeAnimation(keyPath: "opacity")
+        fade.values = opening ? [0, 1, 1] : [1, 1, 0]
+        fade.keyTimes = opening ? [0, 0.45, 1] : [0, 0.55, 1]
+        let mask = CAShapeLayer()
+        mask.frame = bounds
+        mask.path = opening ? fullPath : cropPath
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock {
+            if layer.mask === mask { layer.mask = nil }
+            completion()
+        }
+        layer.mask = mask
+        if !opening { layer.opacity = 0 }
+        for animation in [transform, clip, fade] {
+            animation.duration = 0.32
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        }
+        layer.add(transform, forKey: "viewerZoom")
+        layer.add(fade, forKey: "viewerFade")
+        mask.add(clip, forKey: "viewerClip")
+        CATransaction.commit()
     }
 
     var isShowingViewer: Bool { viewer != nil }

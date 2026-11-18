@@ -23,7 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// A card follows the page it shows, frame by frame, on a narrow and on a wide window, with the
 /// core and a synthetic post of pictures of different shapes.
-///   flutter test integration_test/card_pages_test.dart -d macos
+///   flutter test integration_test/card_pages_test.dart -d (an iPad or a tablet)
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 

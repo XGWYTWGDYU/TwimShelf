@@ -123,7 +123,7 @@ public static class DataHome
     /// (a file is always written before the database refers to it).
     public static async Task MoveTo(string target, Func<string, Task> snapshot, string databaseFile, IProgress<(int Done, int Total)>? progress = null)
     {
-        var from = Path ?? throw new InvalidOperationException("dataHome.none");
+        var from = (Path ?? throw new InvalidOperationException("dataHome.none")).TrimEnd(System.IO.Path.DirectorySeparatorChar);
         if (MoveProblem(target) is { } problem) throw new IOException(Strings.L(problem));
         var sep = System.IO.Path.DirectorySeparatorChar;
         if (string.Equals(target, from, StringComparison.OrdinalIgnoreCase) || target.StartsWith(from + sep, StringComparison.OrdinalIgnoreCase))
@@ -138,7 +138,8 @@ public static class DataHome
             var done = 0;
             foreach (var f in files)
             {
-                if (f == databaseFile || f == databaseFile + "-wal" || f == databaseFile + "-shm") { done++; continue; }
+                // the snapshot is the database: the running one's files never go over it
+                if (new[] { "", "-wal", "-shm" }.Any(end => string.Equals(f, databaseFile + end, StringComparison.OrdinalIgnoreCase))) { done++; continue; }
                 var rel = f[(from.Length + 1)..];
                 var dst = System.IO.Path.Combine(target, rel);
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(dst)!);

@@ -67,7 +67,7 @@ export function DropImport() {
         for (const [i, f] of media.entries()) {
           const path = await uploadFile(f);
           if (!dir) dir = dirOf(path);
-          else await move(path, `${dir}/${i}-${f.name}`);
+          else await move(path, `${dir}/drop${i}-${f.name}`);
           setBusy((b) => b && { ...b, done: b.done + 1 });
         }
         const r = await core.readJson<ImportReport>('tl_import_loose_dir', { dir, folder: folder || null, consume: true, keep_to: null, album: false });

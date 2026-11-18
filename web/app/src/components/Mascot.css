@@ -1,0 +1,24 @@
+/* The little Clawd sits over the pages, under the viewer, dialogs and menus. */
+.pet-layer { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 40; pointer-events: none; }
+
+/* A press: the icon ducks away, Clawd pops up in its place with a little tilt, and goes back. */
+.mascot-swap { position: relative; display: inline-grid; place-items: center; }
+.mascot-swap > * { display: grid; place-items: center; }
+/* over the icon, not beside it: Clawd is wider, and the row's label must not move */
+.mascot-swap > .mascot-swap-clawd { position: absolute; inset: -8px; }
+.mascot-swap.in > .mascot-swap-normal { animation: mascot-leave 110ms ease-in both; }
+.mascot-swap.in > .mascot-swap-clawd { animation: mascot-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.mascot-swap.out > .mascot-swap-clawd { animation: mascot-leave 130ms ease-in both; }
+.mascot-swap.out > .mascot-swap-normal { animation: mascot-return 220ms cubic-bezier(0.34, 1.56, 0.64, 1) 90ms both; }
+
+@keyframes mascot-pop {
+  from { opacity: 0; transform: scale(0.4) rotate(-16deg); }
+  45% { opacity: 1; }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+@keyframes mascot-leave { to { opacity: 0; transform: scale(0.55); } }
+@keyframes mascot-return { from { opacity: 0; transform: scale(0.55); } to { opacity: 1; transform: scale(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot-swap > * { animation-duration: 1ms !important; animation-delay: 0ms !important; }
+}

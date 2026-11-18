@@ -56,7 +56,7 @@ enum L10n {
             if s[i] == "%" { i += 1; continue }
             // an explicit position: digits followed by $
             var j = i, digits = 0
-            while j < s.count, CharacterSet.decimalDigits.contains(s[j]) { digits = digits * 10 + Int(s[j].value - 48); j += 1 }
+            while j < s.count, s[j].isASCII, CharacterSet.decimalDigits.contains(s[j]), digits < 100 { digits = digits * 10 + Int(s[j].value - 48); j += 1 }
             var pos = next
             if j < s.count, s[j] == "$", j > i { pos = digits; i = j + 1 } else { next += 1 }
             // flags, width, precision and length modifiers, then the conversion
@@ -73,7 +73,7 @@ enum L10n {
             }
             i += 1
         }
-        guard let top = byPosition.keys.max() else { return [] }
+        guard let top = byPosition.keys.max(), top >= 1 else { return [] }
         return (1...top).map { byPosition[$0] ?? .object }
     }
 

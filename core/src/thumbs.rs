@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
+/// The largest picture decoded for a thumbnail.
+const MAX_DECODED_PIXELS: u64 = 200_000_000;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum ThumbResult {
@@ -150,6 +153,9 @@ fn square(path: &Path, side: u32) -> anyhow::Result<RgbImage> {
         .with_guessed_format()
         .map_err(not_decodable)?;
     let mut decoder = reader.into_decoder().map_err(not_decodable)?;
+    // a few bytes can claim a huge picture: refused before the memory for it is asked for
+    let (width, height) = decoder.dimensions();
+    if u64::from(width) * u64::from(height) > MAX_DECODED_PIXELS { return Err(not_decodable(()).into()); }
     let icc = decoder.icc_profile().ok().flatten();
     let exif = decoder.exif_metadata().ok().flatten();
     let orientation = exif

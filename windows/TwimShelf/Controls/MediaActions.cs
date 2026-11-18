@@ -42,7 +42,8 @@ public static class MediaActions
 
     public static void ShowInExplorer(string path)
     {
-        try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\""); } catch { }
+        // (Explorer finds nothing with the `/` the core's relative paths bring)
+        try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{Path.GetFullPath(path)}\""); } catch { }
     }
 
     /// Runs an action and leaves a message with 撤销.
@@ -121,7 +122,15 @@ public static class MediaActions
         list.SelectionChanged += (_, _) => { if (list.SelectedItem != null) box.Text = ""; Update(); };
         list.IsItemClickEnabled = true;
         var picked = false; // a folder clicked in the list (it closes the dialog itself)
-        list.ItemClick += (_, e) => { chosen = (e.ClickedItem as ListViewItem)?.Tag as string; picked = true; d.Hide(); };
+        list.ItemClick += (_, e) =>
+        {
+            // the event names the row's content, not the ListViewItem around it
+            var item = e.ClickedItem as ListViewItem ?? list.Items.OfType<ListViewItem>().FirstOrDefault(i => ReferenceEquals(i.Content, e.ClickedItem));
+            if (item?.Tag is not string name) return;
+            chosen = name;
+            picked = true;
+            d.Hide();
+        };
         var r = await Dialogs.ShowAsync(W, d);
         // 取消 and Esc are a cancel, whatever was typed or selected
         if (r != ContentDialogResult.Primary && !picked) return null;

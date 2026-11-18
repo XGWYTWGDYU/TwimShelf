@@ -40,6 +40,7 @@ final class ShareSheetModel: ObservableObject {
     var large = false
     var onFinish: (() -> Void)?
     private var collector = ShareCollector()
+    private var publishing = false
     private var batch: ShareCollector.Batch?
 
     func start(_ providers: [NSItemProvider]) {
@@ -94,7 +95,9 @@ final class ShareSheetModel: ObservableObject {
         stage = .working
         progress = L("share.handingOver")
         let folder = chosenFolder
+        publishing = true
         Task {
+            defer { publishing = false }
             do {
                 try await collector.publish(batch, folder: folder, dropped: dropped)
                 onFinish?()
@@ -107,6 +110,8 @@ final class ShareSheetModel: ObservableObject {
 
     /// Closed without choosing: nothing was added anywhere.
     func close() {
+        // (being handed over: what is packed now is not taken away under it)
+        guard !publishing else { return }
         collector.discard()
     }
 }

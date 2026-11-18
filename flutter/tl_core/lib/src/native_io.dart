@@ -24,13 +24,9 @@ String readNStr(NStr p) => p.toDartString();
 /// Runs [work] (calls into the core) away from the UI isolate.
 Future<R> runAsync<R>(R Function() work) => Isolate.run(work);
 
-/// The web build serves the core over HTTP: never here.
-const bool coreIsRemote = false;
-
 DynamicLibrary openCoreLibrary() {
-  if (Platform.isAndroid || Platform.isLinux) return DynamicLibrary.open('libtl_core.so');
-  if (Platform.isWindows) return DynamicLibrary.open('tl_core.dll');
-  if (Platform.isIOS || Platform.isMacOS) return DynamicLibrary.process();
+  if (Platform.isAndroid) return DynamicLibrary.open('libtl_core.so');
+  if (Platform.isIOS) return DynamicLibrary.process();
   throw UnsupportedError('core.unsupportedPlatform');
 }
 

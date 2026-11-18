@@ -23,7 +23,7 @@ async function send(device, url, tweet) {
   const key = taskKey(device.id, url);
   const now = Date.now();
   await updateTasks((tasks) => {
-    tasks[key] = { key, url, tweet: tweet || "", deviceId: device.id, deviceName: device.name, state: "sending", error: "", created: tasks[key]?.created ?? now, updated: now, lastSeen: now };
+    tasks[key] = { key, url, tweet: tweet || "", deviceId: device.id, deviceName: device.name, state: "sending", error: "", created: now, updated: now, lastSeen: now };
   });
   const r = await call(device, "POST", "/ext/download", { url });
   const tasks = await updateTasks((tasks) => {
@@ -83,7 +83,13 @@ async function pump() {
         else if (sent.status === 0 && Date.now() - x.created > GIVE_UP_MS) await updateTasks((all) => { const cur = all[x.key]; if (cur) { cur.unsent = false; cur.state = "failed"; cur.updated = Date.now(); } });
         else if (sent.status !== 0) await updateTasks((all) => { const cur = all[x.key]; if (cur) { cur.unsent = false; cur.state = "failed"; cur.error = sent.json.message || sent.json.error || `HTTP ${sent.status}`; cur.updated = Date.now(); } });
       }
-      const r = await call(device, "POST", "/ext/status", { urls: mine.filter((x) => !x.unsent).map((x) => x.url) });
+      // (a device answers about 200 links at a time)
+      const asked = mine.filter((x) => !x.unsent).map((x) => x.url);
+      let r = { status: 200, json: { tasks: [] } };
+      for (let i = 0; i < asked.length && r.status === 200; i += 200) {
+        const part = await call(device, "POST", "/ext/status", { urls: asked.slice(i, i + 200) });
+        r = part.status === 200 ? { status: 200, json: { tasks: [...r.json.tasks, ...(part.json.tasks || [])] } } : part;
+      }
       await updateTasks((all) => {
         const now = Date.now();
         for (const x of mine) {
@@ -134,6 +140,9 @@ function schedule(ms) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  // the page's button may only ask for a download; everything else is the extension's own pages
+  const ownPage = sender.id === chrome.runtime.id && (sender.url || "").startsWith(chrome.runtime.getURL(""));
+  if (sender.id !== chrome.runtime.id || (!ownPage && !["devices", "download", "openSetup"].includes(msg?.type))) { reply({ error: "unknown" }); return false; }
   (async () => {
     const { devices, defaultDevice } = await load();
     const usable = devices.filter((d) => !d.unbound);

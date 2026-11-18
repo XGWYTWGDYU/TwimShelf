@@ -104,6 +104,8 @@ mod ffi {
         anyhow::ensure!(pixels > 0 && pixels <= MAX_PIXELS, "heif: {pixels} pixels");
         let icc = match heif_image_handle_get_raw_color_profile_size(handle.0) {
             0 => None,
+            // (a colour profile is small; a file claiming more is not trusted with the memory)
+            size if size > 16 << 20 => None,
             size => {
                 let mut data = vec![0u8; size];
                 check(heif_image_handle_get_raw_color_profile(handle.0, data.as_mut_ptr().cast())).ok().map(|_| data)
@@ -114,6 +116,8 @@ mod ffi {
         let image = Owned(image, free_image);
         let width = usize::try_from(heif_image_get_width(image.0, CHANNEL_INTERLEAVED))?;
         let height = usize::try_from(heif_image_get_height(image.0, CHANNEL_INTERLEAVED))?;
+        // the decoded picture, not only what the file's header said
+        anyhow::ensure!(width > 0 && height > 0 && width as u64 * height as u64 <= MAX_PIXELS, "heif: {width} × {height} pixels");
         let mut stride = 0usize;
         let plane = heif_image_get_plane_readonly2(image.0, CHANNEL_INTERLEAVED, &mut stride);
         anyhow::ensure!(!plane.is_null() && stride >= width * 4, "heif: no pixels");

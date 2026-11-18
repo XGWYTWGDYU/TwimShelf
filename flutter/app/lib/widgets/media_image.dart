@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:tl_core/tl_core.dart';
 import '../platform/files.dart';
-import '../platform/os.dart';
 
 /// Flutter's own decoder leaves HEIC and AVIF to the device, if it has one: these go through the
 /// core's, on every platform.
@@ -38,7 +37,7 @@ class HeifFileImage extends ImageProvider<HeifFileImage> {
       MultiFrameImageStreamCompleter(codec: _load(decode), scale: 1, debugLabel: path);
 
   Future<ui.Codec> _load(ImageDecoderCallback decode) async {
-    final jpeg = await Core.displayImageAsync(path, maxSide, cacheDir ?? (OS.isWeb ? serverInfo.cache : Directory.systemTemp.path));
+    final jpeg = await Core.displayImageAsync(path, maxSide, cacheDir ?? Directory.systemTemp.path);
     return decode(await ui.ImmutableBuffer.fromUint8List(await readFileBytes(jpeg)));
   }
 

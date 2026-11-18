@@ -488,16 +488,18 @@ final class ExternalModelViewController: FormViewController, UITextFieldDelegate
 
     private func runTest() {
         view.endEditing(true)
-        let m = read()
+        // the test uses what is typed, under an id of its own: the saved key changes only with 保存
+        var m = read()
+        m.id = "ext:test-" + UUID().uuidString
         let key = (keyField.text ?? "").trimmingCharacters(in: .whitespaces)
-        m.apiKey = key.isEmpty ? nil : key   // the test uses what is typed (saved with 保存)
+        m.apiKey = key.isEmpty ? nil : key
         testing = true; testResult = nil; build()
         Task { @MainActor in
             do {
                 let tags = try await ExternalAI.test(m)
                 testResult = L("models.external.successColon") + (tags.isEmpty ? L("models.external.noTags") : tags.joined(separator: L("list.separator")))
             } catch { testResult = L("models.external.failureColon") + error.localizedDescription }
-            if isNew { m.apiKey = nil }
+            m.apiKey = nil
             testing = false
             build()
         }

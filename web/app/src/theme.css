@@ -1,19 +1,19 @@
-/* TwimShelf's look on the web and Electron: quiet neutral surfaces, ink text, one blue accent,
-   violet for AI tags, teal for approved ones; light and dark from the system. Components use only
-   these tokens (spacing on a 4px grid, one type scale, a few radii and shadows). */
+/* TwimShelf's look on the web and Electron, the same in both: the Antigravity concept's quiet
+   neutral surfaces, ink text and one blue accent (15c2013), with the native apps' sizes and layouts
+   (the numbers in the Swift sources); light and dark from the system.
+   Components use only these tokens. The app must not feel like a web page: the arrow cursor
+   everywhere, no text selection outside text that is meant to be selected, no hover lifts. */
 :root {
-  /* type: the system font (no web font download; works offline) */
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans", "Noto Sans CJK SC", sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans", "Noto Sans CJK SC", sans-serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  --text-xs: 11px;
+  --text-xs: 11px;      /* NSFont.smallSystemFontSize (11) */
   --text-sm: 12px;
-  --text-base: 13px;
+  --text-base: 13px;    /* NSFont.systemFontSize */
   --text-md: 14px;
   --text-lg: 16px;
   --text-xl: 20px;
   --text-2xl: 24px;
 
-  /* spacing */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -22,51 +22,65 @@
   --sp-6: 24px;
   --sp-8: 32px;
 
-  /* radii */
   --r-sm: 6px;
   --r-md: 10px;
   --r-lg: 14px;
   --r-xl: 18px;
   --r-pill: 999px;
 
-  /* layout */
+  /* layout (MacRootViewController: sidebar 190–320, toolbar 52) */
   --sidebar-w: 242px;
+  --toolbar-h: 52px;
   --viewer-panel-w: 328px;
 
-  /* light: neutral greys */
+  /* light: neutral greys (the Antigravity concept, 15c2013) */
   --bg: #fbfbfc;
+  --window: var(--bg);
+  --bg-feed: var(--bg);
+  --card: #ffffff;
+  --card-media: #f1f2f4;
+  --card-edge: transparent;
   --bg-sidebar: #f3f4f6;
   --bg-elevated: #ffffff;
   --bg-subtle: #f1f2f4;
   --bg-hover: rgba(18, 20, 24, 0.045);
   --bg-active: rgba(18, 20, 24, 0.08);
   --bg-selected: rgba(10, 102, 255, 0.09);
+  --control: #ffffff;
+  --control-edge: rgba(18, 20, 24, 0.14);
+  --placeholder-tile: #f1f2f4;
 
   --fg: #141416;
   --fg-2: #5c5d63;
   --fg-3: #8d8e95;
-
   --line: rgba(18, 20, 24, 0.08);
   --line-strong: rgba(18, 20, 24, 0.14);
 
   --accent: #0a66ff;
   --accent-soft: rgba(10, 102, 255, 0.10);
   --accent-fg: #ffffff;
+  --link: #0a66ff;
   --ai: #7c3aed;
   --ai-soft: rgba(124, 58, 237, 0.09);
   --ai-border: rgba(124, 58, 237, 0.24);
   --approved: #0d9488;
   --approved-soft: rgba(13, 148, 136, 0.10);
+  --tag: #0a66ff;
+  --tag-soft: rgba(10, 102, 255, 0.10);
+  --indigo: #4f46e5;
+  --orange: #d97706;
   --danger: #e11d48;
   --danger-soft: rgba(225, 29, 72, 0.10);
   --warning: #d97706;
   --success: #0d9488;
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px var(--line);
-  --shadow-card-hover: 0 10px 28px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--line-strong);
+  --shadow-card-hover: var(--shadow-card);
   --shadow-float: 0 16px 40px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line);
   --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line-strong);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-edge: rgba(18, 20, 24, 0.08);
 
   /* older names some pages use */
   --bg-group: var(--bg-subtle);
@@ -79,12 +93,20 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #111113;
+    --window: var(--bg);
+    --bg-feed: var(--bg);
+    --card: #1c1c20;
+    --card-media: #232328;
+    --card-edge: transparent;
     --bg-sidebar: #18181b;
     --bg-elevated: #1c1c20;
     --bg-subtle: #232328;
     --bg-hover: rgba(255, 255, 255, 0.055);
     --bg-active: rgba(255, 255, 255, 0.10);
     --bg-selected: rgba(59, 130, 246, 0.16);
+    --control: #1c1c20;
+    --control-edge: rgba(255, 255, 255, 0.15);
+    --placeholder-tile: #232328;
     --fg: #f4f4f5;
     --fg-2: #a1a1aa;
     --fg-3: #71717a;
@@ -92,29 +114,55 @@
     --line-strong: rgba(255, 255, 255, 0.15);
     --accent: #3b82f6;
     --accent-soft: rgba(59, 130, 246, 0.16);
+    --link: #3b82f6;
     --ai: #a78bfa;
     --ai-soft: rgba(167, 139, 250, 0.14);
     --ai-border: rgba(167, 139, 250, 0.30);
     --approved: #2dd4bf;
     --approved-soft: rgba(45, 212, 191, 0.14);
+    --tag: #3b82f6;
+    --tag-soft: rgba(59, 130, 246, 0.16);
+    --indigo: #818cf8;
+    --orange: #f59e0b;
     --danger: #fb7185;
     --danger-soft: rgba(251, 113, 133, 0.14);
+    --warning: #f59e0b;
     --success: #2dd4bf;
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--line);
-    --shadow-card-hover: 0 14px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--line-strong);
     --shadow-float: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-strong);
     --shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line-strong);
+    --glass: rgba(28, 28, 32, 0.78);
+    --glass-edge: rgba(255, 255, 255, 0.1);
     color-scheme: dark;
   }
 }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { font: var(--text-base)/1.45 var(--font); color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased; overflow: hidden; }
+body {
+  font: var(--text-base)/1.3 var(--font); color: var(--fg); background: var(--window);
+  -webkit-font-smoothing: antialiased; overflow: hidden; overscroll-behavior: none;
+  /* an app, not a page: nothing is selected or dragged by accident */
+  user-select: none; -webkit-user-select: none;
+}
+/* the arrow everywhere, as in a native app (no hand over buttons, no I-beam over labels, no
+   magnifier over pictures); only text you can type in shows the I-beam */
+*, *::before, *::after { cursor: default !important; }
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="file"]),
+textarea, [contenteditable="true"] { cursor: text !important; user-select: text; -webkit-user-select: text; }
+/* text that is meant to be selected and copied (a post's text, logs) */
+.selectable, .selectable * { user-select: text; -webkit-user-select: text; }
+img, a, video { -webkit-user-drag: none; user-drag: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
-a { color: var(--accent); text-decoration: none; }
-::selection { background: var(--bg-selected); }
-::-webkit-scrollbar { width: 7px; height: 7px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: var(--r-pill); }
-::-webkit-scrollbar-thumb:hover { background: var(--fg-3); }
+button { -webkit-tap-highlight-color: transparent; }
+a { color: inherit; text-decoration: none; }
+/* focus rings only for the keyboard, in the system's style */
+:focus { outline: none; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* Scroll bars: the system's own on the Mac (overlay, as in every Mac app); slim ones elsewhere */
+html:not(.platform-mac) ::-webkit-scrollbar { width: 10px; height: 10px; }
+html:not(.platform-mac) ::-webkit-scrollbar-track { background: transparent; }
+html:not(.platform-mac) ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; border: 3px solid transparent; background-clip: padding-box; }
+html:not(.platform-mac) ::-webkit-scrollbar-thumb:hover { background-color: var(--fg-3); }

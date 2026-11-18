@@ -160,10 +160,8 @@ class _SyncPageState extends State<SyncPage> {
   /// as a catalog key (the Local Network permission, no usable network).
   Widget? _networkProblem(DiscoveryStatus? d) {
     if (d == null || !d.running || (d.network_ok && d.error == null)) return null;
-    // the system's permission: a button to where it is switched on (iOS, macOS)
-    final settings = d.error == 'sync.err.noLocalNetwork' && (OS.isIOS || OS.isMacOS)
-        ? Uri.parse(OS.isIOS ? 'app-settings:' : 'x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork')
-        : null;
+    // the system's permission: a button to where it is switched on (iOS)
+    final settings = d.error == 'sync.err.noLocalNetwork' && OS.isIOS ? Uri.parse('app-settings:') : null;
     return ListTile(
       key: const ValueKey('sync-no-network'),
       leading: Icon(Icons.wifi_off, color: Theme.of(context).colorScheme.error),

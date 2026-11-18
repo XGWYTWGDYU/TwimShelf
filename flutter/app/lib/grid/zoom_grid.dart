@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -7,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:tl_core/tl_core.dart';
 
 import 'thumb_store.dart';
-import '../widgets/wheel_pager.dart';
 
 /// The zoomable photo grid: the shared engine (core/src/grid.rs) decides where every tile is in
 /// every frame — resting rows, the pinch's layers, the settle — and this draws them.
@@ -30,6 +30,7 @@ class ZoomGrid extends StatefulWidget {
     this.padding = EdgeInsets.zero,
     this.selected,
     this.onZoomLimits,
+    this.hiddenMediaId,
   });
 
   final List<FeedItem> items;
@@ -43,6 +44,8 @@ class ZoomGrid extends StatefulWidget {
   final Set<int>? selected;
   /// Whether another step in and out is possible, whenever that changes (the page's buttons).
   final void Function(bool canZoomIn, bool canZoomOut)? onZoomLimits;
+  /// Media currently flying in the viewer: its tile draws as a placeholder slot.
+  final ValueListenable<String?>? hiddenMediaId;
 
   @override
   State<ZoomGrid> createState() => ZoomGridState();
@@ -76,26 +79,45 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
   @visibleForTesting
   int? indexAt(Offset p) => _indexAt(p);
 
+  /// Global screen rect of the tile for [mediaId] if it is currently visible on screen.
+  Rect? tileGlobalRect(String mediaId) {
+    final e = _engine;
+    final box = context.findRenderObject() as RenderBox?;
+    if (e == null || box == null || !box.attached || !box.hasSize) return null;
+    Rect? found;
+    e.tiles((t) {
+      if (found != null || t.index >= widget.items.length) return;
+      if (widget.items[t.index].media_id == mediaId) {
+        final topLeft = box.localToGlobal(Offset(t.x, t.y));
+        found = Rect.fromLTWH(topLeft.dx, topLeft.dy, t.side, t.side);
+      }
+    });
+    return found;
+  }
+
   double get _now => SchedulerBinding.instance.currentSystemFrameTimeStamp.inMicroseconds / 1e6;
 
   @override
   void initState() {
     super.initState();
-    widget.store.onLoaded = _requestFrame;
+    widget.store.addLoadedListener(_requestFrame);
     _scroll.addListener(_scrolled);
   }
 
   @override
   void didUpdateWidget(ZoomGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    widget.store.onLoaded = _requestFrame;
+    if (oldWidget.store != widget.store) {
+      oldWidget.store.removeLoadedListener(_requestFrame);
+      widget.store.addLoadedListener(_requestFrame);
+    }
     if (oldWidget.items.length != widget.items.length) _configure();
     _requestFrame();
   }
 
   @override
   void dispose() {
-    if (widget.store.onLoaded == _requestFrame) widget.store.onLoaded = null;
+    widget.store.removeLoadedListener(_requestFrame);
     _repaint.dispose();
     _ticker.dispose();
     _scroll.dispose();
@@ -276,21 +298,18 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
     }
   }
 
-  // trackpad pinch (macOS, Linux)
+  // trackpad pinch (an iPad's trackpad)
   void _panZoomStart(PointerPanZoomStartEvent ev) {
-    if (wheelPages) return; // a trackpad only scrolls there
     _endStepNow();
     _interruptSettle();
   }
 
   void _panZoomUpdate(PointerPanZoomUpdateEvent ev) {
-    if (wheelPages) return; // a trackpad only scrolls there
     if (!_zooming && (ev.scale - 1).abs() > 0.02) _beginPinch(ev.localPosition);
     if (_zooming) _pinch(ev.scale, ev.localPosition);
   }
 
   void _panZoomEnd(PointerPanZoomEndEvent ev) {
-    if (wheelPages) return; // a trackpad only scrolls there
     if (_zooming && _pinchStartDistance == 0) _endPinch();
   }
 
@@ -348,8 +367,7 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
   void _signal(PointerSignalEvent ev) {
     if (ev is! PointerScrollEvent) return;
     final keys = HardwareKeyboard.instance;
-    // Linux: the wheel only scrolls; the size changes by Ctrl + − = and the buttons
-    if (wheelPages || !(keys.isControlPressed || keys.isMetaPressed)) {
+    if (!(keys.isControlPressed || keys.isMetaPressed)) {
       _interruptSettle();
       return;
     }
@@ -437,7 +455,12 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
 }
 
 class _GridPainter extends CustomPainter {
-  _GridPainter(this.state, this.placeholder, this.badge, this.dpr, this.accent) : super(repaint: state._repaint);
+  _GridPainter(this.state, this.placeholder, this.badge, this.dpr, this.accent)
+      : super(
+          repaint: state.widget.hiddenMediaId == null
+              ? state._repaint
+              : Listenable.merge([state._repaint, state.widget.hiddenMediaId!]),
+        );
   final Color accent;
   static final _check = TextPainter(
     text: TextSpan(text: String.fromCharCode(Icons.check.codePoint),
@@ -476,6 +499,11 @@ class _GridPainter extends CustomPainter {
           topLeft: Radius.circular(t.r0), topRight: Radius.circular(t.r1),
           bottomRight: Radius.circular(t.r2), bottomLeft: Radius.circular(t.r3));
       final img = store.image(item.media_id, t.side * dpr, item: item);
+      if (item.media_id == state.widget.hiddenMediaId?.value) {
+        empty.color = placeholder.withValues(alpha: placeholder.a * t.alpha);
+        canvas.drawRRect(rrect, empty);
+        return;
+      }
       if (img == null) {
         empty.color = placeholder.withValues(alpha: placeholder.a * t.alpha);
         canvas.drawRRect(rrect, empty);

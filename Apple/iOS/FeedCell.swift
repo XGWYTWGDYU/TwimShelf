@@ -4,6 +4,7 @@ import AVFoundation
 /// One media page: poster/photo plus an optional inline video layer.
 final class MediaPageView: UIView {
     let imageView = UIImageView()
+    private let inlineStill = UIImageView()
     let playBadge = UIImageView(image: UIImage(systemName: "play.fill"))
     let playerLayer = AVPlayerLayer()
     private let badBadge = PaddedLabel()
@@ -28,6 +29,8 @@ final class MediaPageView: UIView {
         playBadge.layer.cornerRadius = 22
         playBadge.preferredSymbolConfiguration = .init(pointSize: 18, weight: .bold)
         addSubview(imageView)
+        inlineStill.contentMode = .scaleAspectFit
+        addSubview(inlineStill)
         layer.addSublayer(playerLayer)
         addSubview(playBadge)
         badBadge.text = L("bad.damaged")
@@ -46,6 +49,7 @@ final class MediaPageView: UIView {
         super.layoutSubviews()
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 22).cgPath
         imageView.frame = bounds
+        inlineStill.frame = bounds
         CATransaction.begin(); CATransaction.setDisableActions(true)
         playerLayer.frame = bounds
         CATransaction.commit()
@@ -61,6 +65,13 @@ final class MediaPageView: UIView {
     }
 
     static func prefetch(_ item: FeedItem) { MediaLoader.shared.prefetch([item], maxPixel: pixelSize) }
+
+    var transitionImage: UIImage? { inlineStill.image ?? imageView.image }
+
+    func showInlineStill(_ image: CGImage?) {
+        inlineStill.image = image.map { UIImage(cgImage: $0) }
+        if playerLayer.player == nil { playBadge.isHidden = item?.kind != .video || image != nil }
+    }
 
     /// New data for the same media (tags, damage state): badges only.
     func update(_ item: FeedItem) {
@@ -80,6 +91,7 @@ final class MediaPageView: UIView {
         accessibilityIdentifier = item.kind == .video ? "media-video" : "media-photo"
         accessibilityTraits = .button
         playerLayer.player = nil
+        showInlineStill(nil)
         let px = Self.pixelSize
         if let img = MediaLoader.shared.cached(item, maxPixel: px) { imageView.image = img; return }
         imageView.image = nil
@@ -356,7 +368,7 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
     @objc private func addTagTapped() { UISelectionFeedbackGenerator().selectionChanged(); delegate?.feedCellDidTapAddTag(self) }
     @objc private func tapped() { delegate?.feedCell(self, didTapPage: page) }
     @objc private func openLink() {
-        if let s = currentItem?.url, let u = URL(string: s) { UIApplication.shared.open(u) }
+        if let s = currentItem?.url, let u = URL(string: s), ["http", "https"].contains(u.scheme?.lowercased()) { UIApplication.shared.open(u) }
     }
 
     /// Turns to a page without animation (a media shown from elsewhere).

@@ -4,7 +4,7 @@
 # named (./build.sh --check flutter-ios lists them; with --yes it installs them).
 # Xcode does not show a pre-action's output: it goes to <build.dir>/cache/logs/xcode-prepare.log, and a
 # failure also shows as a notification.
-#   xcode_prepare.sh ios|macos
+#   xcode_prepare.sh [ios]
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # build.dir of config.yaml: caches, logs and downloaded SDKs under <dir>/cache
@@ -12,7 +12,7 @@ CACHE="$(python3 "$ROOT/scripts/apply.py" where cache 2>/dev/null || echo "$ROOT
 mkdir -p "$CACHE/logs"
 LOG="$CACHE/logs/xcode-prepare.log"
 exec >"$LOG" 2>&1
-platform=${1:-ios}
+platform=ios
 fail() {
   echo "FAILED: $*"
   osascript -e "display notification \"$* — see $LOG\" with title \"TwimShelf build\"" >/dev/null 2>&1 || true
@@ -25,7 +25,7 @@ export LANG="${LANG:-en_US.UTF-8}" LC_ALL="${LC_ALL:-en_US.UTF-8}"
 command -v cargo >/dev/null || fail "Rust is missing: run ./build.sh --check"
 
 # Flutter: the one this checkout was prepared with, one on PATH, or the one build.sh put in <build.dir>/cache/sdk
-gen="$ROOT/flutter/app/$platform/Flutter/$( [[ $platform == ios ]] && echo Generated.xcconfig || echo ephemeral/Flutter-Generated.xcconfig )"
+gen="$ROOT/flutter/app/ios/Flutter/Generated.xcconfig"
 FLUTTER_ROOT=$(sed -nE 's/^FLUTTER_ROOT=(.*)/\1/p' "$gen" 2>/dev/null)
 if [[ ! -x "${FLUTTER_ROOT:-/nonexistent}/bin/flutter" ]]; then
   if command -v flutter >/dev/null; then FLUTTER_ROOT="$(cd "$(dirname "$(readlink -f "$(command -v flutter)")")/.." && pwd)"

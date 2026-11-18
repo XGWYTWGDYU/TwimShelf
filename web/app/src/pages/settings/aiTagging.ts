@@ -157,6 +157,7 @@ export function setAuto(enabled: boolean) {
 }
 
 let abort: AbortController | undefined;
+let finished: Promise<void> = Promise.resolve();
 let interval: number | undefined;
 let retryAfter = 0;
 const leaseId = crypto.getRandomValues(new Uint32Array(4)).join('-');
@@ -194,8 +195,12 @@ async function imageFor(item: MediaRef, signal: AbortSignal): Promise<string> {
 }
 
 export async function runTagging({ retag = false, replace = false, automatic = false } = {}): Promise<void> {
+  // asked for by hand while the automatic run is going: that run ends first
+  if (abort && !automatic) { abort.abort(); await finished; }
   const selected = activeTagger.get();
   if (abort || !selected) return;
+  let ended = () => {};
+  finished = new Promise<void>((resolve) => { ended = resolve; });
   const controller = abort = new AbortController();
   const { signal } = controller;
   let heartbeat: number | undefined;
@@ -261,5 +266,6 @@ export async function runTagging({ retag = false, replace = false, automatic = f
     abort = undefined;
     tagging.set({ ...tagging.get(), running: false });
     if (done) libraryChanged();
+    ended();
   }
 }

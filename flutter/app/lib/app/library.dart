@@ -8,10 +8,7 @@ import 'package:tl_core/tl_core.dart';
 import '../dev/seed.dart';
 import '../grid/thumb_store.dart';
 import '../platform/secrets.dart';
-import '../platform/lease.dart';
-import '../services/extension_receiver.dart';
 import 'prefs.dart';
-import '../platform/quick_action.dart';
 import '../platform/share_inbox.dart';
 import '../l10n/l10n.dart';
 import '../ai/auto_tagger.dart';
@@ -30,7 +27,11 @@ class LibraryModel extends ChangeNotifier {
 
   final String directory;
   /// Grid thumbnails, shared by every grid.
-  late final ThumbStore thumbs;
+  ThumbStore? _thumbs;
+  ThumbStore get thumbs => _thumbs!;
+  set thumbs(ThumbStore value) => _thumbs = value;
+  /// The thumbnails, once the library has made its store (a test library has none).
+  ThumbStore? get thumbsIfReady => _thumbs;
   LibraryStats? stats;
   FolderOverview? folders;
 
@@ -60,21 +61,15 @@ class LibraryModel extends ChangeNotifier {
   Timer? _poll;
 
   /// Opens the library in the app's support folder, or `TL_LIBRARY_DIR` (test builds and the
-  /// desktop tests point it at a synthetic library; the user's real one is never used there).
+  /// integration tests point it at a synthetic library; the user's real one is never used there).
   /// For a test that opened its own synthetic library with the core.
   @visibleForTesting
   static LibraryModel forTest(String dir) => LibraryModel._(dir);
 
   static Future<LibraryModel> open() async {
-    final String dir;
-    if (OS.isWeb) {
-      // the web build: the library is the server's (it opened it already)
-      dir = (await loadServerInfo()).library;
-    } else {
-      final override = OS.environment['TL_LIBRARY_DIR'];
-      dir = override ?? '${(await getApplicationSupportDirectory()).path}${OS.pathSeparator}Library';
-      await Directory(dir).create(recursive: true);
-    }
+    final override = OS.environment['TL_LIBRARY_DIR'];
+    final dir = override ?? '${(await getApplicationSupportDirectory()).path}${OS.pathSeparator}Library';
+    await Directory(dir).create(recursive: true);
     final language = L10n.languageTag;
     final ok = await openLibrary(language, dir);
     if (!ok) throw CoreError(L('app.openFailed'));
@@ -89,9 +84,8 @@ class LibraryModel extends ChangeNotifier {
     m.thumbs.onFailed = (id) => unawaited(coreRunAsync(() => Core.reportThumbnailFailed(id)).catchError((Object _) {}));
     // shares from other apps (Android today): files are imported, links wait in the queue for
     // the download flow (they are acknowledged there, so none is lost)
-    m.shares = ShareInbox(asks: !OS.isIOS && !OS.isMacOS);
+    m.shares = ShareInbox(asks: !OS.isIOS);
     m._shareEvents = m.shares.events.listen((e) {
-      if (e is ShareQuickDownload) QuickAction.request();
       if (e is ShareFilesImported) m.refresh();
     });
     m.aiModels = await ExternalModels.create();
@@ -109,9 +103,7 @@ class LibraryModel extends ChangeNotifier {
     } catch (_) {}
     // the first counts (opening is no change to announce)
     await m.refresh(local: false);
-    m.downloads = await DownloadService.create(libraryDirectory: OS.isWeb ? null : Directory(dir), libraryPath: dir, onFinished: (_) => m.refresh());
-    // the browser extension sends links here (the desktop apps; the server listens on its own)
-    ExtensionReceiver.instance.start(m.downloads);
+    m.downloads = await DownloadService.create(libraryDirectory: Directory(dir), libraryPath: dir, onFinished: (_) => m.refresh());
     // shared links go into the download queue durably before the share is acknowledged
     await m.downloads.attachShareInbox(m.shares);
     unawaited(m.shares.start());
@@ -119,11 +111,6 @@ class LibraryModel extends ChangeNotifier {
     m._poll = Timer.periodic(const Duration(seconds: 1), (_) => m._checkEpoch());
     // another device's changes: reload, without announcing them as this device's
     m.sync.remoteChanges.addListener(() => m.refresh(local: false));
-    // the web app open in several windows: one runs the background work, the next takes over
-    BackgroundLease.instance.addListener(() {
-      if (BackgroundLease.instance.holder) unawaited(m.tagger.startIfEnabled().catchError((Object _) {}));
-    });
-    unawaited(BackgroundLease.instance.start());
         // LAN sync with the account's other devices (off in test runs that ask for it)
     if (OS.environment['TL_SYNC_OFF'] == null) unawaited(m.sync.start());
     return m;
@@ -191,7 +178,7 @@ class LibraryModel extends ChangeNotifier {
     _poll?.cancel();
     sync.dispose();
     downloads.dispose();
-    thumbs.dispose();
+    _thumbs?.dispose();
     unawaited(tagger.close());
     ai.close();
     _shareEvents?.cancel();

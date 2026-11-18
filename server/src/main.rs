@@ -73,7 +73,8 @@ fn c(s: &Path) -> CString { CString::new(s.to_string_lossy().as_bytes()).unwrap_
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let data = PathBuf::from(env("TL_DATA", "/data"));
+    // absolute: paths handed to the web app come back in requests (`/f/<path>`)
+    let data = std::path::absolute(env("TL_DATA", "/data"))?;
     let args: Vec<String> = std::env::args().skip(1).collect();
     // `twimshelf passwd`: in the container, sets the web password
     if args.first().map(String::as_str) == Some("passwd") {
@@ -119,9 +120,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/scaled", get(scaled))
         .route("/gfonts/{*path}", get(gfont))
         .route("/api/lease", post(gate::lease))
-        .route("/login", get(gate::login_page).post(gate::login))
+        .route("/login", get(gate::login_page).post(gate::login).layer(DefaultBodyLimit::max(64 << 10)))
         .route("/logout", get(gate::logout))
-        .route("/ext/{*rest}", axum::routing::any(gate::ext))
+        .route("/ext/{*rest}", axum::routing::any(gate::ext).layer(DefaultBodyLimit::max(1 << 20)))
         .layer(DefaultBodyLimit::max(64 << 20));
     let web = ServeDir::new(&config.web).fallback(ServeFile::new(config.web.join("index.html")));
     let app = api
@@ -197,16 +198,14 @@ async fn call(State(cfg): State<Shared>, UrlPath(name): UrlPath<String>, body: a
     let args: Vec<Value> = if body.is_empty() { vec![] } else {
         match serde_json::from_slice(&body) { Ok(Value::Array(a)) => a, _ => return (StatusCode::BAD_REQUEST, "arguments: a JSON array").into_response() }
     };
-    let library = cfg.dir("library").to_string_lossy().into_owned();
+    // the library was opened at start-up: opening it again would replace it under running work
+    if name == "tl_open" { return Json(json!({ "r": true })).into_response(); }
+    if !paths_allowed(&cfg, &name, &args) { return (StatusCode::FORBIDDEN, "outside the data folder").into_response(); }
     let models = cfg.dir("models").to_string_lossy().into_owned();
     let r = tokio::task::spawn_blocking(move || {
         let mut args = args;
         // the data folders are the server's: a client cannot point the core elsewhere
-        match name.as_str() {
-            "tl_open" => args = vec![Value::String(library)],
-            "tl_set_models_dir" => args = vec![Value::String(models)],
-            _ => {}
-        }
+        if name == "tl_set_models_dir" { args = vec![Value::String(models)]; }
         dispatch::call(&name, &wire::Args(args))
     }).await;
     match r {
@@ -216,12 +215,67 @@ async fn call(State(cfg): State<Shared>, UrlPath(name): UrlPath<String>, body: a
     }
 }
 
-/// `path` resolved inside the data folder, or None (outside it, or missing).
+/// Where the server's files are: the data folder, and the library and models where the desktop
+/// app keeps them apart from it after an upgrade (`Config::dir`).
+fn roots(cfg: &Config) -> Vec<PathBuf> {
+    [cfg.data.clone(), cfg.dir("library"), cfg.dir("models")].iter().filter_map(|p| std::fs::canonicalize(p).ok()).collect()
+}
+
+/// An absolute path as it really is, links resolved, also when its last parts do not exist yet.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) { return None; }
+    let mut rest = Vec::new();
+    let mut at = path;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(at) { return Some(rest.iter().rev().fold(real, |p, part| p.join(part))); }
+        rest.push(at.file_name()?);
+        at = at.parent()?;
+    }
+}
+
+/// A path a call of the core may use: inside the server's folders, and never the sign-in and
+/// secret files in `app` (only the web app's own `/f` requests reach those).
+fn core_path_allowed(cfg: &Config, path: &str) -> bool {
+    let Some(real) = resolved(Path::new(path)) else { return false };
+    let app = std::fs::canonicalize(cfg.dir("app")).unwrap_or_else(|_| cfg.dir("app"));
+    roots(cfg).iter().any(|r| real.starts_with(r)) && !real.starts_with(app)
+}
+
+/// Whether every file path among a call's arguments stays inside the server's folders.
+fn paths_allowed(cfg: &Config, name: &str, args: &[Value]) -> bool {
+    let text = |i: usize| args.get(i).and_then(Value::as_str).unwrap_or("");
+    let json = |i: usize| serde_json::from_str::<Value>(text(i)).unwrap_or(Value::Null);
+    let at = |list: &[usize]| list.iter().all(|&i| core_path_allowed(cfg, text(i)));
+    let optional = |v: &Value| v.as_str().filter(|p| !p.is_empty()).is_none_or(|p| core_path_allowed(cfg, p));
+    let every = |v: &Value| v.as_array().is_none_or(|a| a.iter().all(|p| p.as_str().is_some_and(|p| core_path_allowed(cfg, p))));
+    match name {
+        "tl_import_legacy_dir" | "tl_import_legacy_zip" | "tl_import_loose_zip" | "tl_import_pack" | "tl_parse_bookmarks"
+        | "tl_share_stage" | "tl_db_snapshot" | "tl_model_import" | "tl_import_report" | "tl_export_backup" | "tl_export_diagnostics" => at(&[0]),
+        "tl_update_download" | "tl_model_export_zip" => at(&[1]),
+        "tl_share_pack" => at(&[0, 1]),
+        "tl_thumbnail" | "tl_thumbnails_warm" => at(&[2]),
+        "tl_display_image" => at(&[0, 2]),
+        // a report names the folder its problem files are copied from
+        "tl_import_export_issues" => at(&[0, 1]) && std::fs::read(text(0)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .is_none_or(|r| r["source"].as_str().is_none_or(|s| core_path_allowed(cfg, s))),
+        "tl_export_media" => core_path_allowed(cfg, json(0)["out"].as_str().unwrap_or("")),
+        "tl_import_loose_dir" => { let a = json(0); core_path_allowed(cfg, a["dir"].as_str().unwrap_or("")) && optional(&a["keep_to"]) }
+        "tl_storage_usage" => json(0).as_array().is_none_or(|a| a.iter().all(|e| optional(&e["path"]))),
+        "tl_delete_import_reports" => { let a = json(0); every(&a["reports"]) && every(&a["owned"]) }
+        _ => true,
+    }
+}
+
+/// `path` resolved inside the server's folders, or None (outside them, or missing).
 fn inside_data(cfg: &Config, path: &str) -> Option<PathBuf> {
     let p = PathBuf::from(if path.starts_with('/') { path.to_string() } else { format!("/{path}") });
     let real = std::fs::canonicalize(&p).ok()?;
-    let root = std::fs::canonicalize(&cfg.data).ok()?;
-    (real.starts_with(&root) && !private(cfg, &real)).then_some(real)
+    (roots(cfg).iter().any(|r| real.starts_with(r)) && !private(cfg, &real)).then_some(real)
+}
+
+/// The folders everything else lives in: never deleted or moved as a whole through `/f`.
+fn is_top_folder(cfg: &Config, p: &Path) -> bool {
+    roots(cfg).iter().any(|r| r == p) || std::fs::canonicalize(cfg.dir("app")).is_ok_and(|a| a == p)
 }
 
 /// The sign-in files are the server's alone: never read, written or moved through `/f`.
@@ -238,6 +292,9 @@ async fn file(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>, req: Re
         Ok(r) => r.into_response(),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
+    // whatever was uploaded is shown as a file, never run as a page of this site
+    res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox"));
+    res.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     // media files are named by their hash: they never change under the same name
     if p.starts_with(cfg.dir("library").join("blobs")) || p.starts_with(cfg.dir("cache")) {
         res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=31536000, immutable"));
@@ -245,15 +302,16 @@ async fn file(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>, req: Re
     res
 }
 
-/// `path` for writing: inside the data folder (its folder made when missing), never a link out.
+/// `path` for writing: inside the server's folders (its folder made when missing), never a link out.
 fn writable(cfg: &Config, path: &str) -> Option<PathBuf> {
     let p = PathBuf::from(if path.starts_with('/') { path.to_string() } else { format!("/{path}") });
-    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) { return None; }
     let parent = p.parent()?;
+    let roots = roots(cfg);
+    // checked before anything is made: a refused request leaves nothing behind
+    if !roots.iter().any(|r| resolved(parent).is_some_and(|real| real.starts_with(r))) { return None; }
     std::fs::create_dir_all(parent).ok()?;
     let real_parent = std::fs::canonicalize(parent).ok()?;
-    let root = std::fs::canonicalize(&cfg.data).ok()?;
-    if !real_parent.starts_with(&root) { return None; }
+    if !roots.iter().any(|r| real_parent.starts_with(r)) { return None; }
     if p.is_symlink() { return None; }
     let target = real_parent.join(p.file_name()?);
     if private(cfg, &target) { return None; }
@@ -270,6 +328,7 @@ async fn put_file(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>, bod
 
 async fn delete_file(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>) -> Response {
     let Some(p) = inside_data(&cfg, &path) else { return StatusCode::NO_CONTENT.into_response() };
+    if is_top_folder(&cfg, &p) { return StatusCode::FORBIDDEN.into_response(); }
     let r = if p.is_dir() { tokio::fs::remove_dir_all(&p).await } else { tokio::fs::remove_file(&p).await };
     match r { Ok(()) => StatusCode::NO_CONTENT.into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
@@ -279,11 +338,18 @@ struct MoveRequest { from: String, to: String }
 
 async fn move_file(State(cfg): State<Shared>, Json(m): Json<MoveRequest>) -> Response {
     let (Some(from), Some(to)) = (inside_data(&cfg, &m.from), writable(&cfg, &m.to)) else { return StatusCode::FORBIDDEN.into_response() };
+    if is_top_folder(&cfg, &from) { return StatusCode::FORBIDDEN.into_response(); }
     match tokio::fs::rename(&from, &to).await { Ok(()) => StatusCode::NO_CONTENT.into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
 }
 
 #[derive(Deserialize)]
 struct ScaledQuery { path: String, side: u32 }
+
+/// Pictures scaled at the same time, and video frames taken at the same time.
+static PICTURES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(6);
+static POSTERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+/// The largest picture decoded here (the core's own limit for HEIF).
+const MAX_PIXELS: u64 = 200_000_000;
 
 /// A picture of the data folder upright (its EXIF orientation applied) and no longer than
 /// `side` on its long edge, as a JPEG: what AI tagging sends, made here so the page decodes a
@@ -291,9 +357,13 @@ struct ScaledQuery { path: String, side: u32 }
 async fn scaled(State(cfg): State<Shared>, Query(q): Query<ScaledQuery>) -> Response {
     let Some(src) = inside_data(&cfg, &q.path) else { return StatusCode::NOT_FOUND.into_response() };
     let side = q.side.clamp(32, 4096);
+    // a page of cards asks for many at once: each one decodes a whole picture
+    let Ok(_turn) = PICTURES.acquire().await else { return StatusCode::SERVICE_UNAVAILABLE.into_response() };
     let made = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
         use image::ImageDecoder;
         let mut decoder = image::ImageReader::open(&src)?.with_guessed_format()?.into_decoder()?;
+        let (w, h) = decoder.dimensions();
+        anyhow::ensure!(u64::from(w) * u64::from(h) <= MAX_PIXELS, "picture too large");
         let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
         let mut picture = image::DynamicImage::from_decoder(decoder)?;
         picture.apply_orientation(orientation);
@@ -318,10 +388,13 @@ struct PosterQuery { path: String, side: u32, #[serde(default)] whole: u8 }
 async fn poster(State(cfg): State<Shared>, Query(q): Query<PosterQuery>) -> Response {
     let Some(src) = inside_data(&cfg, &q.path) else { return StatusCode::NOT_FOUND.into_response() };
     let side = q.side.clamp(32, 4096);
-    let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    // named after the whole path: posts keep their files under the same names (video.mp4)
+    let name = { use sha2::Digest; hex::encode(sha2::Sha256::digest(src.to_string_lossy().as_bytes())) };
     let kind = if q.whole == 1 { format!("whole{side}") } else { side.to_string() };
-    let out = cfg.dir("cache").join("posters").join(kind).join(format!("{stem}.jpg"));
-    if !out.exists() {
+    let out = cfg.dir("cache").join("posters").join(kind).join(format!("{name}.jpg"));
+    let turn = if out.exists() { None } else { POSTERS.acquire().await.ok() };
+    // (made by another request while this one waited)
+    if turn.is_some() && !out.exists() {
         let _ = tokio::fs::create_dir_all(out.parent().unwrap()).await;
         let filter = if q.whole == 1 {
             format!("scale='if(gt(iw,ih),{side},-2)':'if(gt(iw,ih),-2,{side})'")
@@ -355,6 +428,10 @@ async fn upload(State(cfg): State<Shared>, Query(q): Query<UploadQuery>, body: B
     let name: String = Path::new(&q.name).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     if name.is_empty() || name.starts_with('.') { return (StatusCode::BAD_REQUEST, "file name").into_response(); }
     let dir = cfg.dir("uploads").join(format!("{:016x}", rand::random::<u64>()));
+    // a browser that goes away mid-upload ends this request here: nothing half-written stays
+    struct Unfinished(Option<PathBuf>);
+    impl Drop for Unfinished { fn drop(&mut self) { if let Some(d) = self.0.take() { let _ = std::fs::remove_dir_all(d); } } }
+    let mut unfinished = Unfinished(Some(dir.clone()));
     let r: anyhow::Result<PathBuf> = async {
         tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join(&name);
@@ -365,8 +442,8 @@ async fn upload(State(cfg): State<Shared>, Query(q): Query<UploadQuery>, body: B
         Ok(path)
     }.await;
     match r {
-        Ok(p) => Json(json!({ "path": p.to_string_lossy() })).into_response(),
-        Err(e) => { let _ = tokio::fs::remove_dir_all(&dir).await; (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response() }
+        Ok(p) => { unfinished.0 = None; Json(json!({ "path": p.to_string_lossy() })).into_response() }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
     }
 }
 
@@ -379,6 +456,16 @@ struct ProxyRequest {
     #[serde(default)] body: Option<String>,
 }
 fn get_method() -> String { "GET".into() }
+
+/// A response's body, refused when it grows past `max` bytes (it is held in memory).
+async fn read_capped(mut resp: reqwest::Response, max: usize) -> anyhow::Result<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        anyhow::ensure!(body.len() + chunk.len() <= max, "the answer is too large");
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
 
 /// A fallback font for the web app (see the top): from `cache/fonts`, or fetched from Google
 /// Fonts the first time and kept there.
@@ -395,13 +482,13 @@ async fn gfont(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>) -> Res
             let fetched: anyhow::Result<Vec<u8>> = async {
                 let resp = reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).build()?
                     .get(format!("https://fonts.gstatic.com/s/{path}")).send().await?.error_for_status()?;
-                Ok(resp.bytes().await?.to_vec())
+                read_capped(resp, 32 << 20).await
             }.await;
             match fetched {
                 Ok(b) => {
                     // written aside and moved in: a half-written font is never served
                     if let Some(dir) = file.parent() { let _ = tokio::fs::create_dir_all(dir).await; }
-                    let tmp = file.with_extension(format!("part{}", std::process::id()));
+                    let tmp = file.with_extension(format!("part{:08x}", rand::random::<u32>()));
                     if tokio::fs::write(&tmp, &b).await.is_ok() { let _ = tokio::fs::rename(&tmp, &file).await; }
                     b
                 }
@@ -427,7 +514,7 @@ async fn proxy(Json(r): Json<ProxyRequest>) -> Response {
         let resp = req.send().await?;
         let status = resp.status().as_u16();
         let headers: Vec<(String, String)> = resp.headers().iter().filter_map(|(k, v)| Some((k.to_string(), v.to_str().ok()?.to_string()))).collect();
-        let body = resp.bytes().await?;
+        let body = read_capped(resp, 128 << 20).await?;
         Ok(json!({ "status": status, "headers": headers, "body": base64::engine::general_purpose::STANDARD.encode(&body) }))
     }.await;
     match res {
@@ -436,3 +523,37 @@ async fn proxy(Json(r): Json<ProxyRequest>) -> Response {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(data: &Path) -> Config {
+        Config { auth: auth::Auth::new(data), data: data.to_path_buf(), web: PathBuf::new(), public: false, lease: std::sync::Mutex::new(None), desktop: None }
+    }
+
+    #[test]
+    fn calls_of_the_core_stay_inside_the_data_folder() {
+        let dir = std::env::temp_dir().join(format!("tl-paths-{:08x}", rand::random::<u32>()));
+        for d in ["library", "models", "cache", "uploads", "exports", "app"] { std::fs::create_dir_all(dir.join(d)).unwrap(); }
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let cfg = config(&dir);
+        let p = |s: &str| dir.join(s).to_string_lossy().into_owned();
+        assert!(paths_allowed(&cfg, "tl_export_backup", &[json!(p("exports/new/a.tlpack"))]));
+        assert!(paths_allowed(&cfg, "tl_import_pack", &[json!(p("uploads/1/a.tlpack")), json!("")]));
+        assert!(paths_allowed(&cfg, "tl_stats", &[]));
+        assert!(!paths_allowed(&cfg, "tl_export_backup", &[json!("/etc/x.tlpack")]));
+        assert!(!paths_allowed(&cfg, "tl_export_backup", &[json!(p("exports/../../x"))]));
+        assert!(!paths_allowed(&cfg, "tl_db_snapshot", &[json!(p("app/auth.json"))]));
+        assert!(!paths_allowed(&cfg, "tl_update_download", &[json!("{}"), json!("/root/.ssh")]));
+        assert!(!paths_allowed(&cfg, "tl_import_loose_dir", &[json!(json!({ "dir": p("app") }).to_string())]));
+        assert!(!paths_allowed(&cfg, "tl_export_media", &[json!(json!({ "media_ids": [], "out": "/tmp/x" }).to_string())]));
+        std::fs::write(dir.join("exports/r.json"), json!({ "source": p("app") }).to_string()).unwrap();
+        assert!(!paths_allowed(&cfg, "tl_import_export_issues", &[json!(p("exports/r.json")), json!(p("exports/o.zip"))]));
+        // refused writes make nothing, and the top folders cannot be deleted
+        let outside = std::env::temp_dir().join(format!("tl-outside-{:08x}", rand::random::<u32>()));
+        assert!(writable(&cfg, &outside.join("a/b").to_string_lossy()).is_none());
+        assert!(!outside.exists());
+        assert!(is_top_folder(&cfg, &dir) && is_top_folder(&cfg, &dir.join("library")) && !is_top_folder(&cfg, &dir.join("cache")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

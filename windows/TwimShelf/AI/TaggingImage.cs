@@ -38,7 +38,7 @@ public static class TaggingImage
     {
         var decoder = await BitmapDecoder.CreateAsync(input);
         // upright first (EXIF orientation applied), then the sizes
-        var upright = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, new BitmapTransform(), ExifOrientationMode.RespectExifOrientation, ColorManagementMode.ColorManageToSRgb);
+        using var upright = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, new BitmapTransform(), ExifOrientationMode.RespectExifOrientation, ColorManagementMode.ColorManageToSRgb);
         double w = upright.PixelWidth, h = upright.PixelHeight;
         if (w <= 0 || h <= 0) return null;
         var fit = Math.Min(1.0, 896 / Math.Max(w, h));
@@ -51,16 +51,24 @@ public static class TaggingImage
         var scaled = await Resize(upright, sw, sh);
         uint cw = Math.Max(sw, (uint)Math.Ceiling(sh / 4.0)), ch = Math.Max(sh, (uint)Math.Ceiling(sw / 4.0));
         var canvas = cw == sw && ch == sh ? scaled : Pad(scaled, cw, ch);
-
-        using var output = new InMemoryRandomAccessStream();
-        var props = new BitmapPropertySet { ["ImageQuality"] = new BitmapTypedValue(0.8, Windows.Foundation.PropertyType.Single) };
-        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, output, props);
-        encoder.SetSoftwareBitmap(canvas);
-        await encoder.FlushAsync();
-        var bytes = new byte[output.Size];
-        output.Seek(0);
-        await output.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
-        return bytes;
+        try
+        {
+            using var output = new InMemoryRandomAccessStream();
+            var props = new BitmapPropertySet { ["ImageQuality"] = new BitmapTypedValue(0.8, Windows.Foundation.PropertyType.Single) };
+            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, output, props);
+            encoder.SetSoftwareBitmap(canvas);
+            await encoder.FlushAsync();
+            var bytes = new byte[output.Size];
+            output.Seek(0);
+            await output.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
+            return bytes;
+        }
+        finally
+        {
+            // the pictures' memory is outside what the collector sees: a long run of tagging adds up
+            if (!ReferenceEquals(canvas, scaled)) canvas.Dispose();
+            if (!ReferenceEquals(scaled, upright)) scaled.Dispose();
+        }
     }
 
     static async Task<SoftwareBitmap> Resize(SoftwareBitmap source, uint w, uint h)

@@ -6,7 +6,7 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
-/// llama.cpp for the Flutter app on Android, Windows and Linux (the Apple builds run MLX).
+/// llama.cpp for the Flutter app on Android (the iPhone build runs MLX).
 ///
 /// One job at a time, off the UI isolate; a model stays loaded between the pictures of a batch
 /// and goes 30 s after the last job, as the MLX engine does.
@@ -14,7 +14,7 @@ class LlamaEngine {
   LlamaEngine._();
   static final instance = LlamaEngine._();
 
-  static bool get isSupported => Platform.isAndroid || Platform.isWindows || Platform.isLinux;
+  static bool get isSupported => Platform.isAndroid;
 
   String? _backendsDir;
   String? devices;
@@ -23,7 +23,7 @@ class LlamaEngine {
   Timer? _idle;
 
   /// Loads the backends (CPU, and Vulkan where a driver exists) from [backendsDir]: Android's
-  /// native library folder; null on desktops (next to the program). Returns the devices found.
+  /// native library folder. Returns the devices found.
   Future<String> init(String? backendsDir) async {
     _backendsDir = backendsDir;
     final known = devices;
@@ -87,9 +87,7 @@ class _Loaded {
 
 /// The C interface (src/tl_llama.h), used inside worker isolates; handles cross as addresses.
 class _Native {
-  static final DynamicLibrary _lib = Platform.isWindows
-      ? DynamicLibrary.open('tl_llama.dll')
-      : DynamicLibrary.open('libtl_llama.so');
+  static final DynamicLibrary _lib = DynamicLibrary.open('libtl_llama.so');
 
   static final _init = _lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>('tl_llama_init');
   static final _load = _lib.lookupFunction<

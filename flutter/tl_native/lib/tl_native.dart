@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Native helpers (iOS, iPadOS, macOS, Android). Every call returns null/false where the
+/// Native helpers (iOS, iPadOS, Android). Every call returns null/false where the
 /// platform has none, so callers keep their portable fallback.
 class TlNative {
   TlNative._();
@@ -18,7 +18,8 @@ class TlNative {
           });
   }
 
-  static bool get hasPosters => !kIsWeb && (Platform.isIOS || Platform.isMacOS || Platform.isAndroid);
+  /// (The Mac too: the unit tests run there, on its AVFoundation.)
+  static bool get hasPosters => Platform.isIOS || Platform.isAndroid || Platform.isMacOS;
 
   /// Square JPEG posters of the video at [at], one per side in [sides], written to [out] with
   /// `{side}` replaced by the side. The frame is decoded once, by the system's decoder.
@@ -33,7 +34,7 @@ class TlNative {
     }
   }
 
-  /// Where the app itself is installed (iOS, macOS: the bundle; Android: the APKs); empty where
+  /// Where the app itself is installed (iOS: the bundle; Android: the APKs); empty where
   /// the platform has no such call (the caller uses the executable's folder).
   static Future<List<String>> appPaths() async {
     if (!hasPosters) return const [];
@@ -46,15 +47,14 @@ class TlNative {
     }
   }
 
-  /// iOS, macOS: the shares folder in the app group, shared with the share extension.
+  /// iOS: the shares folder in the app group, shared with the share extension.
   static Future<String?> sharesRoot() async {
-    if (kIsWeb) return null;
     return _channel.invokeMethod<String>('sharesRoot');
   }
 
   /// Android: the folder an update's APK must be downloaded into (the installer reads it there).
   static Future<String?> updatesDir() async {
-    if (kIsWeb || !Platform.isAndroid) return null;
+    if (!Platform.isAndroid) return null;
     try {
       return await _channel.invokeMethod<String>('updatesDir');
     } on PlatformException {
@@ -65,7 +65,7 @@ class TlNative {
   /// Android: hands the APK to the system's installer. False when the app may not install
   /// packages yet (the system's page for allowing it was opened instead).
   static Future<bool> installApk(String path) async {
-    if (kIsWeb || !Platform.isAndroid) return false;
+    if (!Platform.isAndroid) return false;
     try {
       return await _channel.invokeMethod<bool>('installApk', {'path': path}) ?? false;
     } on PlatformException {

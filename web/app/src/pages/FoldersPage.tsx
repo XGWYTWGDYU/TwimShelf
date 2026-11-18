@@ -1,58 +1,78 @@
-import { useState } from 'react';
-import { L, type FolderOverview } from '@twimshelf/core';
-import { Folder, FolderPlus, Images, Video } from 'lucide-react';
-import { Button, Empty, Page, Row, Section } from '../components/ui';
-import { CardGrid, change, Confirm, LoadState, MediaCard, NameDialog } from '../components/libraryControls';
+// 文件夹: all folders as cover tiles, like the albums in Photos (MacFoldersOverview): as many columns
+// as the width allows (tiles of at least 170), each a square cover with the name and the count
+// beneath. A click opens the folder; its menu opens, renames or deletes it; the toolbar's button
+// makes a new one.
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { FolderPlus } from 'lucide-react';
+import { L, type FeedItem, type Folder, type FolderOverview } from '@twimshelf/core';
+import { Toolbar, ToolButton } from '../components/Toolbar';
+import { openMenu } from '../components/Menu';
 import { core } from '../lib/core';
+import { createFolder, deleteFolder, renameFolder } from '../lib/folderActions';
 import { useAsync, useStore } from '../lib/hooks';
 import { libraryVersion } from '../lib/library';
-import { go } from '../lib/router';
+import { folderRoute, go } from '../lib/router';
+import { thumb } from '../lib/thumbs';
+import './FoldersPage.css';
 
-type Edit = { kind: 'create' } | { kind: 'rename' | 'delete'; name: string } | { kind: 'merge'; name: string; to: string };
+const MARGIN = 20, GAP = 16, MIN_TILE = 170;
 
 export default function FoldersPage() {
   const version = useStore(libraryVersion);
-  const { data, error, reload } = useAsync(() => core.read<FolderOverview>(core.b.tl_folder_overview()), [version]);
-  const [edit, setEdit] = useState<Edit>();
-  const close = () => setEdit(undefined);
-  const rename = (from: string, to: string) => change(core.readJson('tl_rename_folder', { old: from, new: to }));
-  const makeFolder = () => setEdit({ kind: 'create' });
+  const { data } = useAsync(() => core.read<FolderOverview>(core.b.tl_folder_overview()), [version]);
+  const list = data?.folders ?? [];
+  const box = useRef<HTMLDivElement>(null);
+  const [side, setSide] = useState(MIN_TILE);
+  // tiles as wide as the columns that fit, so rows always fill the width
+  useLayoutEffect(() => {
+    const el = box.current!;
+    const fit = () => {
+      const w = Math.max(el.clientWidth - 2 * MARGIN, MIN_TILE);
+      const cols = Math.max(1, Math.floor((w + GAP) / (MIN_TILE + GAP)));
+      setSide(Math.floor((w - GAP * (cols - 1)) / cols));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div className="folders-page">
+      <Toolbar title={L('place.folders')} subtitle={list.length ? L('folders.count', list.length) : undefined}>
+        <ToolButton label={L('common.newFolder')} onClick={() => void createFolder().then((n) => n && go(folderRoute(n)))}><FolderPlus size={17} strokeWidth={1.8} /></ToolButton>
+      </Toolbar>
+      <div className="folders-scroll" ref={box}>
+        {data && !list.length && <div className="folders-empty">{L('folders.empty.mac')}</div>}
+        <div className="folders-tiles" style={{ gridTemplateColumns: `repeat(auto-fill, ${side}px)` }}>
+          {list.map((f) => <FolderTile key={f.name} f={f} side={side} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  return <Page title={L('place.folders')} actions={<Button kind="primary" onClick={makeFolder}>
-    {L('common.newFolder')}
-  </Button>}>
-    {!data || error ? <LoadState error={error} reload={reload} /> : <>
-      <Section title={L('sidebar.mediaTypes')}>
-        <Row icon={<Images size={17} />} title={L('search.kw.photo.word')} trailing={data.photos.toLocaleString()}
-          onClick={() => go({ page: 'browse', kind: 'photo' })} />
-        <Row icon={<Video size={17} />} title={L('place.videos')} trailing={data.videos.toLocaleString()}
-          onClick={() => go({ page: 'browse', kind: 'video' })} />
-      </Section>
-      {!data.folders.length ? <Empty icon={<FolderPlus />} title={L('search.noFolders')}>{L('folders.empty.hint')}</Empty>
-        : <CardGrid>{data.folders.map((folder) => <MediaCard key={folder.name} icon={<Folder size={36} />}
-          path={folder.cover_path} video={folder.cover_video} title={folder.name}
-          subtitle={L('grid.countSuffix', folder.count).trim()}
-          onOpen={() => go({ page: 'browse', folder: folder.name })} actions={<>
-            <Button kind="plain" onClick={() => setEdit({ kind: 'rename', name: folder.name })}>{L('common.rename')}</Button>
-            <Button onClick={() => setEdit({ kind: 'delete', name: folder.name })}>{L('common.delete')}</Button>
-          </>} />)}</CardGrid>}
-    </>}
-    {edit?.kind === 'create' && <NameDialog title={L('common.newFolder')} action={L('common.create')} onClose={close}
-      onSave={(name) => change(core.read(core.b.tl_create_folder(name)))} />}
-    {edit?.kind === 'rename' && <NameDialog title={L('folder.rename.title')} action={L('common.rename')} initial={edit.name} onClose={close}
-      onSave={async (name) => {
-        if (name === edit.name) return;
-        if (data?.folders.some((folder) => folder.name === name)) {
-          setEdit({ kind: 'merge', name: edit.name, to: name });
-          return false;
-        }
-        await rename(edit.name, name);
-      }} />}
-    {edit?.kind === 'merge' && <Confirm title={L('folder.merge.title', edit.to)} action={L('folder.merge')} onClose={close}
-      onConfirm={() => rename(edit.name, edit.to)}>{L('folder.merge.message', edit.to, edit.name, edit.name)}</Confirm>}
-    {edit?.kind === 'delete' && <Confirm title={L('folder.delete.title', edit.name)} action={L('folder.delete.confirm')}
-      danger onClose={close} onConfirm={() => change(core.read(core.b.tl_delete_folder(edit.name)))}>
-      {L('folder.delete.message')}
-    </Confirm>}
-  </Page>;
+function FolderTile({ f, side }: { f: Folder; side: number }) {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    setUrl(undefined);
+    if (!f.cover_path || !f.cover_id) return;
+    let live = true;
+    const item = { media_id: f.cover_id, path: f.cover_path, kind: f.cover_video ? 'video' : 'photo' } as FeedItem;
+    thumb(item, 512).then((u) => live && setUrl(u), () => {});
+    return () => { live = false; };
+  }, [f.cover_id, f.cover_path, f.cover_video]);
+  return (
+    <div className="folder-tile" role="button" aria-label={f.name} style={{ width: side }}
+      onClick={() => go(folderRoute(f.name))}
+      onContextMenu={(e) => openMenu(e, [
+        { label: L('common.open'), run: () => go(folderRoute(f.name)) },
+        'separator',
+        { label: L('folder.renameShort'), run: () => void renameFolder(f.name) },
+        { label: L('folder.deleteEllipsis'), run: () => void deleteFolder(f.name) },
+      ])}>
+      <div className="folder-cover" style={{ height: side }}>{url && <img src={url} alt="" draggable={false} />}</div>
+      <div className="folder-name">{f.name}</div>
+      <div className="folder-detail">{L('search.row.mediaCount', f.count) + (f.videos > 0 ? L('folders.videosSuffix', f.videos) : '')}</div>
+    </div>
+  );
 }

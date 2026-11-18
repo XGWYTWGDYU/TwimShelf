@@ -1,20 +1,36 @@
 import { useEffect } from 'react';
-import { L } from '@twimshelf/core';
-import { Archive, Download, HardDrive, Info, LogOut, Puzzle, RefreshCw, Sparkles, Tags, Trash2 } from 'lucide-react';
-import { Page, Row, Section } from '../../components/ui';
-import { useStore } from '../../lib/hooks';
-import { stats } from '../../lib/library';
+import {
+  KEYWORDS, keywordWord, L,
+  type DiscoveryStatus, type DownloadStatus, type ImportProgress,
+  type ModelDownloadStatus, type SyncStatus, type VerifyStatus,
+} from '@twimshelf/core';
+import {
+  Download, HardDrive, Info, LogOut, Package, Puzzle, Scale,
+  RefreshCw, Search, Sparkles, Tags, Trash2,
+} from 'lucide-react';
+import { Button, Page } from '../../components/ui';
+import { ClawdIcon, mascotEnabled, setMascotEnabled } from '../../components/Mascot';
+import { clawdLicense } from '../../components/clawdIcons.generated';
+import { alertMessage } from '../../components/pickers';
+import { useTask } from '../../components/libraryControls';
+import { core } from '../../lib/core';
+import { useAsync, useInterval, useStore } from '../../lib/hooks';
+import { libraryVersion, stats } from '../../lib/library';
 import TagsPage from '../TagsPage';
-import DownloadsPage from './DownloadsPage';
-import TransferPage from './TransferPage';
-import ImportRecordsPage from './ImportRecordsPage';
-import SyncPage from './SyncPage';
-import ExtensionPage from './ExtensionPage';
 import AIPage from './AIPage';
-import { enableAutoTagging } from './aiTagging';
+import { activeTagger, enableAutoTagging, externalModels, modelTitle, tagging } from './aiTagging';
+import DownloadsPage from './DownloadsPage';
+import ExtensionPage from './ExtensionPage';
+import ImportRecordsPage from './ImportRecordsPage';
+import { AboutPage, ProblemsPage, StoragePage, WipePage } from './MaintenancePages';
 import ModelHubPage from './ModelHubPage';
-import { AboutPage, StoragePage, WipePage } from './MaintenancePages';
-import { settings } from './settingsControls';
+import { size } from './serverFiles';
+import {
+  ActivityRow, Card, CardRow, NavRow, NavTile, Pill, RowDivider,
+  runWipeFlow, SectionGroup, settings, StatsStrip, ToggleRow,
+} from './settingsControls';
+import SyncPage from './SyncPage';
+import TransferPage from './TransferPage';
 
 const pages = {
   downloads: DownloadsPage,
@@ -25,51 +41,327 @@ const pages = {
   extension: ExtensionPage,
   storage: StoragePage,
   about: AboutPage,
+  problems: ProblemsPage,
   'import-records': ImportRecordsPage,
   'model-hub': ModelHubPage,
   'clear-all-data': WipePage,
 };
 
-const groups = [
-  { title: 'settings.section.content', pages: [
-    { sub: 'downloads', label: 'common.downloadPosts', icon: Download },
-    { sub: 'import-backup', label: 'common.importAndBackup', icon: Archive },
-    { sub: 'tags', label: 'common.tags', icon: Tags },
-  ] },
-  { title: 'settings.section.smart', pages: [
-    { sub: 'ai', label: 'models.tagging', icon: Sparkles },
-    { sub: 'sync', label: 'common.lanSync', icon: RefreshCw },
-    { sub: 'extension', label: 'ext.title', icon: Puzzle },
-  ] },
-  { title: 'sidebar.other', pages: [
-    { sub: 'storage', label: 'storage.title', icon: HardDrive },
-    { sub: 'about', label: 'settings.about', icon: Info },
-  ] },
-];
-
 export default function SettingsPage({ sub }: { sub?: string }) {
   const counts = useStore(stats);
+  const version = useStore(libraryVersion);
+  const selectedTagger = useStore(activeTagger);
+  const tagActivity = useStore(tagging);
+  const mascot = useStore(mascotEnabled);
+  const task = useTask();
+
   useEffect(enableAutoTagging, []);
+
+  const live = useAsync(async () => {
+    const [dl, aiCounts, extModels, sync, discovery, ext, modelDl, verify, imp] = await Promise.all([
+      core.read<DownloadStatus>(core.b.tl_download_status()).catch(() => null),
+      core.read<[number, number]>(core.b.tl_ai_counts()).catch(() => [0, 0] as [number, number]),
+      externalModels().catch(() => []),
+      core.read<SyncStatus>(core.b.tl_sync_status()).catch(() => null),
+      core.read<DiscoveryStatus>(core.b.tl_discovery_status()).catch(() => null),
+      core.read<{ clients: { id: string }[] }>(core.b.tl_ext_clients()).catch(() => null),
+      core.read<ModelDownloadStatus | null>(core.b.tl_model_status()).catch(() => null),
+      core.read<VerifyStatus | null>(core.b.tl_verify_status()).catch(() => null),
+      core.read<ImportProgress | null>(core.b.tl_import_status()).catch(() => null),
+    ]);
+    return { dl, aiCounts, extModels, sync, discovery, ext, modelDl, verify, imp };
+  }, [version]);
+
+  useInterval(live.reload, sub ? null : 2000);
+
   if (sub && Object.hasOwn(pages, sub)) {
     const Screen = pages[sub as keyof typeof pages];
     return <Screen />;
   }
-  return <Page title={L('place.settings')}>
-    {counts && <Section title={L('common.library')}><div className="control-stats">
-      {([
-        ['common.posts', counts.posts], ['search.kw.photo.word', counts.photos],
-        ['place.videos', counts.videos], ['common.tags', counts.tags],
-      ] as const).map(([key, number]) => <div key={key}><strong>{number.toLocaleString()}</strong><small>{L(key)}</small></div>)}
-    </div></Section>}
-    {groups.map((group) => <Section key={group.title} title={L(group.title)}>
-      {group.pages.map(({ sub, label, icon: Icon }) => <Row key={sub} icon={<Icon size={18} />}
-        title={L(label)} onClick={() => settings(sub)} />)}
-    </Section>)}
-    {!window.twimshelf && <Section footer={L('settings.signOut.footer')}>
-      <Row icon={<LogOut size={18} />} title={L('settings.signOut')} onClick={() => { location.href = '/logout'; }} />
-    </Section>}
-    <Section footer={L('settings.wipe.footer')}>
-      <Row icon={<Trash2 size={18} />} danger title={L('settings.wipe.button')} onClick={() => settings('clear-all-data')} />
-    </Section>
-  </Page>;
+
+  const d = live.data;
+  const dl = d?.dl;
+  const [aiDone = 0, aiTotal = 0] = d?.aiCounts ?? [0, 0];
+  const activeModel = d?.extModels.find((m) => m.id === selectedTagger);
+  const sync = d?.sync;
+  const hasAccount = !!sync?.account_id;
+  const onlinePeers = hasAccount
+    ? (d?.discovery?.peers ?? []).filter((p) => p.account === sync?.account_id && p.host && p.port).length
+    : 0;
+  const syncing = (sync?.syncing ?? 0) > 0;
+  const extCount = d?.ext?.clients.length ?? 0;
+
+  const dlFinish = (dl?.done ?? 0) + (dl?.skipped ?? 0) + (dl?.failed ?? 0);
+  const dlDetail = dl?.running
+    ? `${L('activity.downloadingPosts')} · ${dlFinish} / ${dl.total}`
+    : dl?.paused
+      ? L('mac.download.paused', dl.paused)
+      : undefined;
+  const dlProgress = dl?.running && dl.total > 0 ? dlFinish / dl.total : undefined;
+
+  const aiDetail = (activeModel ? modelTitle(activeModel) : L('mac.models.none'))
+    + (aiTotal > 0 ? L('mac.models.analysed', aiDone, aiTotal) : '');
+  const aiProgress = aiTotal > 0 ? aiDone / aiTotal : undefined;
+
+  const syncDetail = hasAccount
+    ? (onlinePeers > 0 ? L('mac.sync.online', onlinePeers) : L('mac.sync.noneOnline'))
+    : L('mac.sync.noAccount');
+
+  const syncPillText = !hasAccount
+    ? L('sync.state.notJoined')
+    : syncing
+      ? L('mac.sync.syncing')
+      : onlinePeers > 0
+        ? L('mac.sync.online', onlinePeers)
+        : L('sync.state.on');
+
+  const receiving = sync?.receiving;
+  const otherActivities: {
+    key: string;
+    kind: 'download' | 'model' | 'tagging' | 'verify' | 'importing';
+    title: string;
+    detail?: string;
+    progress?: number;
+    previewPath?: string | null;
+    previewIsVideo?: boolean;
+  }[] = [];
+
+  if (dl?.running) {
+    const recent = dl.recent.at(-1);
+    otherActivities.push({
+      key: 'download',
+      kind: 'download',
+      title: L('activity.downloadingPosts'),
+      detail: `${dlFinish} / ${dl.total}${dl.failed > 0 ? L('settings.failedSuffix', dl.failed) : ''}${dl.active.length ? L('activity.activeSuffix', dl.active.length) : ''}`,
+      progress: dl.total > 0 ? dlFinish / dl.total : undefined,
+      previewPath: recent,
+      previewIsVideo: recent ? /\.(mp4|mov|m4v|webm)$/i.test(recent) : false,
+    });
+  }
+  if (d?.modelDl?.running) {
+    const m = d.modelDl;
+    otherActivities.push({
+      key: 'model',
+      kind: 'model',
+      title: L('activity.downloadingModel', m.repo),
+      detail: m.verifying ? L('models.verifying') : m.total_bytes > 0 ? `${size(m.done_bytes)} / ${size(m.total_bytes)}` : L('models.connecting'),
+      progress: m.total_bytes > 0 ? m.done_bytes / m.total_bytes : undefined,
+    });
+  }
+  if (tagActivity.running) {
+    otherActivities.push({
+      key: 'tagging',
+      kind: 'tagging',
+      title: L('ai.activity.new', activeModel ? modelTitle(activeModel) : L('models.tagging')),
+      detail: L('web.ai.processed', tagActivity.done),
+      progress: aiTotal > 0 ? aiDone / aiTotal : undefined,
+    });
+  }
+  if (d?.imp?.running) {
+    const imp = d.imp;
+    otherActivities.push({
+      key: 'importing',
+      kind: 'importing',
+      title: imp.waiting ? L('activity.importWaiting') : L('activity.importing'),
+      detail: L('activity.importProgress', imp.folders_done, imp.folders_total, imp.files_done)
+        + (imp.issues > 0 ? L('activity.importIssues', imp.issues) : ''),
+      progress: imp.folders_total > 0 ? imp.folders_done / imp.folders_total : undefined,
+      previewPath: imp.current,
+    });
+  }
+  if (d?.verify?.running) {
+    const v = d.verify;
+    otherActivities.push({
+      key: 'verify',
+      kind: 'verify',
+      title: L('activity.verifying'),
+      detail: `${v.checked} / ${v.total} · ${size(v.bytes)}${v.bad > 0 ? L('activity.foundBad', v.bad) : ''}`,
+      progress: v.total > 0 ? v.checked / v.total : undefined,
+      previewPath: v.current,
+    });
+  }
+
+  return (
+    <Page title={L('place.settings')}>
+      <div className="settings-canvas">
+        {syncing && (
+          <Card tint="accent" spacing={16}>
+            <ActivityRow
+              kind="sync"
+              title={receiving && receiving.total > 0 ? L('activity.receiving') : L('activity.syncing')}
+              detail={
+                receiving && receiving.total > 0
+                  ? L('activity.filesLeft', Math.max(0, receiving.total - receiving.received))
+                    + (receiving.total_bytes > 0
+                      ? L('activity.received', receiving.received, receiving.total, size(receiving.bytes), size(receiving.total_bytes))
+                      : L('activity.receivedShort', receiving.received, receiving.total, size(receiving.bytes)))
+                  : L('activity.syncDetail')
+              }
+              progress={receiving && receiving.total_bytes > 0 ? receiving.bytes / receiving.total_bytes : undefined}
+              previewPath={receiving?.last_path}
+            />
+          </Card>
+        )}
+
+        <div className="s-hero">
+          <div className="s-hero-top">
+            <h2 className="s-hero-title">{L('common.library')}</h2>
+            <Pill
+              text={syncPillText}
+              color={syncing ? 'blue' : hasAccount ? 'green' : 'secondary'}
+              icon={<RefreshCw size={10} strokeWidth={2.5} />}
+            />
+          </div>
+          <StatsStrip stats={counts} />
+        </div>
+
+        {otherActivities.length > 0 && (
+          <Card tint="accent" spacing={16}>
+            {otherActivities.map((act) => (
+              <ActivityRow
+                key={act.key}
+                kind={act.kind}
+                title={act.title}
+                detail={act.detail}
+                progress={act.progress}
+                previewPath={act.previewPath}
+                previewIsVideo={act.previewIsVideo}
+              />
+            ))}
+          </Card>
+        )}
+
+        <SectionGroup title={L('mac.manage')}>
+          <div className="nav-tiles-grid">
+            <NavTile
+              id="nav-download"
+              title={L('common.downloadPosts')}
+              detail={dlDetail}
+              icon={mascot && dl?.running ? <ClawdIcon name="bag" size={24} /> : <Download size={19} strokeWidth={2} />}
+              color="blue"
+              progress={dlProgress}
+              onClick={() => settings('downloads')}
+            />
+            <NavTile
+              id="nav-transfer"
+              title={L('common.importAndBackup')}
+              icon={<Package size={19} strokeWidth={2} />}
+              color="brown"
+              onClick={() => settings('import-backup')}
+            />
+            <NavTile
+              id="nav-tags"
+              title={L('common.tags')}
+              icon={<Tags size={19} strokeWidth={2} />}
+              color="indigo"
+              onClick={() => settings('tags')}
+            />
+            <NavTile
+              id="nav-models"
+              title={L('common.aiModels')}
+              detail={aiDetail}
+              icon={mascot && tagActivity.running ? <ClawdIcon name="camera" size={24} /> : <Sparkles size={19} strokeWidth={2} />}
+              color="purple"
+              progress={aiProgress}
+              onClick={() => settings('ai')}
+            />
+            <NavTile
+              id="nav-sync"
+              title={L('mac.sync')}
+              detail={syncDetail}
+              icon={<RefreshCw size={19} strokeWidth={2} />}
+              color="green"
+              badge={syncing ? L('mac.sync.syncing') : undefined}
+              badgeColor="blue"
+              onClick={() => settings('sync')}
+            />
+            <NavTile
+              id="nav-extension"
+              title={L('ext.title')}
+              detail={extCount === 0 ? L('ext.state.none') : L('ext.state.count', String(extCount))}
+              icon={<Puzzle size={19} strokeWidth={2} />}
+              color="indigo"
+              onClick={() => settings('extension')}
+            />
+          </div>
+        </SectionGroup>
+
+        <SectionGroup title={L('mac.prefs')}>
+          <Card spacing={14}>
+            <div className="card-group-label">{L('common.search')}</div>
+            <ToggleRow
+              icon={<Search size={15} strokeWidth={2} />}
+              color="purple"
+              title={L('settings.fuzzy')}
+              checked={false}
+              disabled
+              onChange={() => {}}
+            />
+            <div style={{ padding: 12, borderRadius: 12, background: 'var(--bg-subtle)' }}>
+              <div className="chips-row" style={{ gap: 6 }}>
+                {KEYWORDS.map((kw) => (
+                  <Pill key={kw.id} text={keywordWord(kw)} color="blue" />
+                ))}
+              </div>
+            </div>
+          </Card>
+        </SectionGroup>
+
+        <SectionGroup title={L('mascot.title')} footer={L('mascot.footer')}>
+          <Card spacing={12}>
+            <ToggleRow icon={<ClawdIcon name="settings" size={22} />} color="orange"
+              title={L('mascot.toggle')} checked={mascot} onChange={setMascotEnabled} />
+            <RowDivider inset={42} />
+            <NavRow icon={<Scale size={15} />} color="gray" title={L('mascot.licenses')}
+              onClick={() => void alertMessage(L('mascot.licenses'), clawdLicense)} />
+          </Card>
+        </SectionGroup>
+
+        <Card spacing={12}>
+          <NavRow
+            id="nav-storage"
+            icon={<HardDrive size={15} strokeWidth={2} />}
+            color="gray"
+            title={L('storage.title')}
+            onClick={() => settings('storage')}
+          />
+          <RowDivider inset={42} />
+          <NavRow
+            id="settingsAbout"
+            icon={<Info size={15} strokeWidth={2} />}
+            color="gray"
+            title={L('settings.about')}
+            onClick={() => settings('about')}
+          />
+        </Card>
+
+        {!window.twimshelf && (
+          <SectionGroup footer={L('settings.signOut.footer')}>
+            <Card spacing={12}>
+              <NavRow
+                icon={<LogOut size={15} strokeWidth={2} />}
+                color="gray"
+                title={L('settings.signOut')}
+                onClick={() => { location.href = '/logout'; }}
+              />
+            </Card>
+          </SectionGroup>
+        )}
+
+        <Card tint="red" spacing={12}>
+          <CardRow
+            icon={<Trash2 size={15} strokeWidth={2} />}
+            color="red"
+            title={L('mac.wipe.title')}
+            detail={L('settings.wipe.footer')}
+            trailing={
+              <Button kind="danger" disabled={task.busy} onClick={() => void task.run(() => runWipeFlow())}>
+                {L('mac.eraseEllipsis')}
+              </Button>
+            }
+          />
+        </Card>
+      </div>
+    </Page>
+  );
 }

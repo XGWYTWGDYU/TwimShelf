@@ -2,11 +2,25 @@
 import { Core, httpTransport, setStrings, pickLanguage, type Strings } from '@twimshelf/core';
 import en from '@twimshelf/core/src/generated/strings/en.json';
 
+/** An item of a system menu (Electron): what the page sends to the desktop app. */
+export type NativeMenuItem = 'separator' | { id?: string; label: string; enabled?: boolean; checked?: boolean; accel?: string; role?: string; children?: NativeMenuItem[] };
+
 declare global {
   interface Window {
     /** Set by the Electron app's preload. Its window is served by its own local server (signed
      *  in by a cookie the app sets), so the page talks to it exactly like the web page does. */
-    twimshelf?: { desktop: true; platform: string };
+    twimshelf?: {
+      desktop: true;
+      platform: string;
+      popupMenu?: (items: NativeMenuItem[], x: number, y: number) => Promise<string | null>;
+      setAppMenu?: (menus: { label: string; role?: string; items: (NativeMenuItem | 'separator')[] }[]) => void;
+      onAppMenu?: (f: (id: string) => void) => () => void;
+      setViewerMode?: (on: boolean) => void;
+      toggleFullScreen?: () => void;
+      showItemInFolder?: (path: string) => void;
+      getMascotEnabled?: () => Promise<boolean>;
+      setMascotEnabled?: (enabled: boolean) => Promise<void>;
+    };
   }
 }
 

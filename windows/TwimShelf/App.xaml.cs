@@ -20,7 +20,8 @@ public partial class App : Application
     {
         // light or dark is the system's (nothing to choose on Windows)
         InitializeComponent();
-        UnhandledException += (_, e) => Diagnostics.Log("unhandled: " + e.Message + "\n" + e.Exception);
+        // a failed button (no network for a check, say) is logged; it does not end the app
+        UnhandledException += (_, e) => { Diagnostics.Log("unhandled: " + e.Message + "\n" + e.Exception); e.Handled = true; };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Diagnostics.Log("unhandled (domain): " + e.ExceptionObject);
         TaskScheduler.UnobservedTaskException += (_, e) => Diagnostics.Log("unobserved: " + e.Exception);
     }

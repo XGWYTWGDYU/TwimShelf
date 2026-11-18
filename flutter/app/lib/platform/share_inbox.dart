@@ -8,8 +8,6 @@ import 'package:tl_core/tl_core.dart';
 import 'package:tl_native/tl_native.dart';
 
 import '../app/jobs.dart';
-import 'desktop_inbox.dart';
-import 'desktop_entry.dart';
 import 'shared_links.dart';
 import 'os.dart';
 export 'shared_links.dart';
@@ -29,7 +27,7 @@ final class ShareLinksReady extends ShareInboxEvent {
   String? folder;
 }
 
-/// Shared here with no page of its own (Android, Linux), or dropped on a window: files copied and links noted, not
+/// Shared here with no page of its own (Android), or dropped on the window: files copied and links noted, not
 /// imported. The app shows the share page, which ends in `confirm` or `discard`.
 final class ShareNeedsChoice extends ShareInboxEvent {
   const ShareNeedsChoice(this.id, this.directory, this.files, this.links);
@@ -37,11 +35,6 @@ final class ShareNeedsChoice extends ShareInboxEvent {
   final String directory;
   final List<String> files;
   final List<String> links;
-}
-
-/// 下载帖子 from the program's icon on Linux.
-final class ShareQuickDownload extends ShareInboxEvent {
-  const ShareQuickDownload();
 }
 
 final class ShareFilesImported extends ShareInboxEvent {
@@ -85,8 +78,6 @@ class ShareInbox with WidgetsBindingObserver {
   bool _started = false;
   bool _disposed = false;
   bool _again = false;
-  final List<StreamSubscription<FileSystemEvent>> _watchers = [];
-  Timer? _debounce;
 
   static Future<ImportReport> _import(String source, String kept, {String? folder, bool album = true}) =>
       Core.importLooseDirAsync(source, folder: folder, consume: true, keepTo: kept, album: album);
@@ -95,32 +86,6 @@ class ShareInbox with WidgetsBindingObserver {
     if (_started || _disposed) return;
     _started = true;
     WidgetsBinding.instance.addObserver(this);
-    final shares = await _shares();
-    if (shares != null && OS.isLinux) {
-      for (final name in ['Requests', 'Inbox']) {
-        final directory = await Directory('${shares.path}/$name')
-            .create(recursive: true);
-        _watchers.add(
-          directory.watch().listen((event) {
-            if (!isDesktopPublication(event, request: name == 'Requests')) {
-              return;
-            }
-            _debounce?.cancel();
-            _debounce = Timer(
-              const Duration(milliseconds: 100),
-              () => unawaited(drain()),
-            );
-          }),
-        );
-      }
-      try {
-        // Registration labels come from the same initialized catalog as the UI.
-        if (root == null && OS.isLinux) await installDesktopEntry();
-      } catch (_) {
-        // Registration is recoverable and must not prevent a pending import.
-        _emit(const ShareInboxFailure(0));
-      }
-    }
     await drain();
   }
 
@@ -149,7 +114,7 @@ class ShareInbox with WidgetsBindingObserver {
   Future<Directory?> _shares() async {
     if (root != null) return root;
     if (_root != null) return _root;
-    final path = OS.isIOS || OS.isMacOS
+    final path = OS.isIOS
         ? await TlNative.sharesRoot()
         : await _channel.invokeMethod<String>('getSharesRoot');
     if (path != null) _root = Directory(path);
@@ -186,9 +151,6 @@ class ShareInbox with WidgetsBindingObserver {
     try {
       final root = await _shares();
       if (root == null) return;
-      final desktop = DesktopInbox(root, quickDownload: () => _emit(const ShareQuickDownload()));
-      final failures = await desktop.publishRequests();
-      if (failures > 0) _emit(ShareInboxFailure(failures));
       final inbox = Directory('${root.path}/Inbox');
       final links = Directory('${root.path}/Links');
       final announced = <String>{};
@@ -296,19 +258,6 @@ class ShareInbox with WidgetsBindingObserver {
     } catch (_) {
       _emit(ShareInboxFailure(pending));
     }
-  }
-
-  /// Alternate embedders can forward startup arguments here. Standard desktop
-  /// runners already persist them before starting Flutter; do not forward twice.
-  Future<void> importArguments(
-    List<String> arguments, {
-    String? workingDirectory,
-  }) async {
-    final shares = await _shares();
-    if (shares == null) return;
-    await DesktopInbox(shares)
-        .enqueue(arguments, workingDirectory: workingDirectory);
-    await drain();
   }
 
   /// Media dragged onto the window: copied into the inbox and offered on the share page, as what
@@ -466,7 +415,7 @@ class ShareInbox with WidgetsBindingObserver {
 
   /// The library's folders for the share pages that do not open the library.
   Future<void> publishFolders(List<String> names) async {
-    if (!OS.isIOS && !OS.isMacOS && !OS.isAndroid) return;
+    if (!OS.isIOS && !OS.isAndroid) return;
     final root = await _shares();
     if (root == null) return;
     await root.create(recursive: true);
@@ -476,10 +425,6 @@ class ShareInbox with WidgetsBindingObserver {
   Future<void> dispose() async {
     _disposed = true;
     if (_started) WidgetsBinding.instance.removeObserver(this);
-    _debounce?.cancel();
-    for (final watcher in _watchers) {
-      await watcher.cancel();
-    }
     await _running;
     await _events.close();
   }

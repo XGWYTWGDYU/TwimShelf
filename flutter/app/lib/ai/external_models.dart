@@ -13,7 +13,6 @@ import 'package:tl_core/tl_core.dart';
 import 'local_models.dart';
 import '../l10n/l10n.dart';
 import '../platform/secrets.dart';
-import '../platform/proxy_client.dart';
 import '../platform/system_random.dart';
 
 enum ExternalFailureKind {
@@ -462,7 +461,7 @@ class ExternalAI {
     this.models, {
     http.Client? client,
     this.timeout = const Duration(seconds: 120),
-  }) : _client = client ?? externalClient(),
+  }) : _client = client ?? http.Client(),
        _ownsClient = client == null;
   final ExternalModels models;
   final http.Client _client;

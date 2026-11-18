@@ -41,6 +41,7 @@ public sealed partial class FoldersPage : UserControl, IShellPage
         _grid.ItemClick += (_, e) => _open(((Folder)e.ClickedItem).Name);
         _grid.ContainerContentChanging += OnContainer;
         _grid.SizeChanged += (_, _) => Layout();
+        _grid.Loaded += (_, _) => Layout();
         _grid.RightTapped += (s, e) =>
         {
             if ((e.OriginalSource as FrameworkElement)?.DataContext is not Folder f) return;
@@ -98,8 +99,15 @@ public sealed partial class FoldersPage : UserControl, IShellPage
             wrap.ItemWidth = side + Gap;
             wrap.ItemHeight = side + Caption + Gap;
         }
-        _grid.ItemsSource = null;
-        _grid.ItemsSource = _folders;
+        foreach (var f in _folders)
+            if (CoverOf(_grid.ContainerFromItem(f)) is { } cover) cover.Width = cover.Height = _side;
+    }
+
+    static Grid? CoverOf(DependencyObject? container)
+    {
+        if (container == null) return null;
+        try { return (WinRT.CastExtensions.As<Microsoft.UI.Xaml.Controls.Primitives.SelectorItem>(container).ContentTemplateRoot as StackPanel)?.Children[0] as Grid; }
+        catch { return null; }
     }
 
     void OnContainer(ListViewBase sender, ContainerContentChangingEventArgs args)

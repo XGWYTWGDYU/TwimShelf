@@ -49,4 +49,4 @@ Alternatively supply `--dart-define=TL_IMPORT_DIR=/data/user/0/<applicationId>/f
 
 ## Release exclusion
 
-Build the isolated host with `flutter build linux --release --target lib/dev/seed_smoke.dart` and inspect lib/libapp.so for `dev.seed.missingManifest`, `.synthetic-seed-v1` and `synthetic-seed`. The debug-only helper's body and fixture strings must be absent. Do not use --no-tree-shake-icons as evidence about Dart tree shaking: the relevant guard is kDebugMode. No debug seed assets are declared in pubspec.yaml.
+Build the isolated host with `flutter build apk --release --target lib/dev/seed_smoke.dart` and inspect `lib/arm64-v8a/libapp.so` inside the APK for `dev.seed.missingManifest`, `.synthetic-seed-v1` and `synthetic-seed`. The debug-only helper's body and fixture strings must be absent. Do not use --no-tree-shake-icons as evidence about Dart tree shaking: the relevant guard is kDebugMode. No debug seed assets are declared in pubspec.yaml.

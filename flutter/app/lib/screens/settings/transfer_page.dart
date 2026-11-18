@@ -65,7 +65,6 @@ class TransferPage extends StatelessWidget {
       }
     }
     if (!context.mounted) return;
-    // the web build: the file goes to the server first, the core imports it there
     final String source;
     try {
       source = await pickedPath(file);
@@ -98,7 +97,7 @@ class TransferPage extends StatelessWidget {
     final name = '${L('settings.backup.fileName', [stamp])}.tlpack';
     // iOS has no folder picker here: a temporary file, handed on with the share sheet afterwards
     final String out;
-    if (OS.isIOS || OS.isWeb) {
+    if (OS.isIOS) {
       out = '${(await getTemporaryDirectory()).path}${OS.pathSeparator}$name';
     } else {
       final dir = await getDirectoryPath();
@@ -111,7 +110,7 @@ class TransferPage extends StatelessWidget {
       return p == null || p.total == 0 ? null : p.done / p.total;
     }, cancel: Core.cancelExportAsync);
     if (!context.mounted || report == null) return;
-    if (OS.isIOS || OS.isWeb) await deliver(out);
+    if (OS.isIOS) await deliver(out);
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,

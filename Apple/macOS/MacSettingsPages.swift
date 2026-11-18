@@ -127,11 +127,6 @@ struct SettingsRootView: View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(L("mac.prefs"))
             Card(spacing: 14) {
-                groupLabel(L("settings.section.browse"))
-                ToggleRow(symbol: "hand.raised.slash.fill", color: .indigo, title: L("settings.noGestures"),
-                          isOn: Binding(get: { LibraryPrefs.playerGesturesOff }, set: { LibraryPrefs.playerGesturesOff = $0 }))
-
-                Divider().padding(.vertical, 2)
                 groupLabel(L("common.search"))
                 ToggleRow(symbol: "sparkle.magnifyingglass", color: .purple, title: L("settings.fuzzy"),
                           isOn: Binding(get: { LibraryPrefs.fuzzySearch }, set: { LibraryPrefs.fuzzySearch = $0; NotificationCenter.default.post(name: .libraryChanged, object: nil) }),

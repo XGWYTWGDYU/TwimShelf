@@ -5,6 +5,7 @@ for the Flutter and the native apps (Apple and Windows): no SVG library, no rend
   python3 scripts/gen_icons.py
 """
 import math
+import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -250,6 +251,13 @@ def main():
     target.write_text('\n'.join(dart) + '\n', encoding='utf-8')
     (ROOT / 'Apple/Shared/ClawdIconData.swift').write_text('\n'.join(swift) + '\n', encoding='utf-8')
     (ROOT / 'windows/TwimShelf/Controls/ClawdIconData.g.cs').write_text('\n'.join(cs) + '\n', encoding='utf-8')
+    web = [f'// {head}', 'export const clawdIcons = {']
+    for name, ops in icons.items():
+        web.append(f'  {json.dumps(name)}: [')
+        web.extend(f'    {json.dumps(op)},' for op in ops)
+        web.append('  ],')
+    web += ['} as const;', f'export const clawdLicense = {json.dumps((SOURCE / "LICENSE").read_text(encoding="utf-8"))};']
+    (ROOT / 'web/app/src/components/clawdIcons.generated.ts').write_text('\n'.join(web) + '\n', encoding='utf-8')
     print(f'{len(icons)} icons')
 
 

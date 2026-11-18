@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../app/prefs.dart';
@@ -89,11 +91,68 @@ class MascotIcon extends StatelessWidget {
   final Widget fallback;
   final double? size;
 
+  // Clawd pops up with a little overshoot and tilt; what it replaces shrinks away.
+  static Widget _pop(Widget child, Animation<double> animation) => FadeTransition(
+        opacity: animation.drive(CurveTween(curve: const Interval(0, 0.4))),
+        child: RotationTransition(
+          turns: animation.drive(Tween<double>(begin: -0.04, end: 0).chain(CurveTween(curve: Curves.easeOutCubic))),
+          child: ScaleTransition(
+            scale: animation.drive(Tween<double>(begin: 0.45, end: 1).chain(CurveTween(curve: Curves.easeOutBack))),
+            child: child,
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: Prefs.instance,
-        builder: (_, _) => name != null && Prefs.instance.mascot ? ClawdIcon(name!, size: size) : fallback,
+        builder: (_, _) {
+          final mascot = Prefs.instance.mascot ? name : null;
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 280),
+            reverseDuration: const Duration(milliseconds: 140),
+            transitionBuilder: _pop,
+            child: KeyedSubtree(
+              key: ValueKey<String?>(mascot),
+              child: mascot != null ? ClawdIcon(mascot, size: size) : fallback,
+            ),
+          );
+        },
       );
+}
+
+/// Shows the mascot during an activation without delaying navigation.
+class MascotPress extends StatefulWidget {
+  const MascotPress(this.name, {super.key, required this.onPressed, required this.builder});
+  final String? name;
+  final VoidCallback onPressed;
+  final Widget Function(BuildContext context, String? activeMascot, VoidCallback press) builder;
+
+  @override
+  State<MascotPress> createState() => _MascotPressState();
+}
+
+class _MascotPressState extends State<MascotPress> {
+  Timer? _reset;
+
+  void _press() {
+    if (widget.name != null && Prefs.instance.mascot) {
+      _reset?.cancel();
+      setState(() {
+        _reset = Timer(const Duration(milliseconds: 700), () => setState(() => _reset = null));
+      });
+    }
+    widget.onPressed();
+  }
+
+  @override
+  void dispose() {
+    _reset?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _reset == null ? null : widget.name, _press);
 }
 
 /// The switch's notice and the license texts it refers to.

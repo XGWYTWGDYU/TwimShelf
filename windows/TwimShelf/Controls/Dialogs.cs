@@ -105,6 +105,8 @@ public static class Dialogs
         timer.Start();
         var task = Task.Run(work);
         _ = task.ContinueWith(_ => w.DispatcherQueue.TryEnqueue(() => d.Hide()), TaskScheduler.Default);
+        // work that ended before the dialog opened: hiding it then did nothing, and it has no button
+        d.Opened += (_, _) => { if (task.IsCompleted) d.Hide(); };
         _ = ShowAsync(w, d);
         try { return await task; }
         finally { timer.Stop(); }

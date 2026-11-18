@@ -81,6 +81,70 @@ public static class Clawd
     public static IconElement Icon(string name, double size = 20) =>
         new ImageIcon { Source = Source(name, size, 2), Width = size, Height = size };
 
+    static readonly HashSet<Microsoft.UI.Dispatching.DispatcherQueueTimer> Pulsing = [];
+
+    static double Overshoot(double x)
+    {
+        const double c = 1.70158;
+        return 1 + (c + 1) * Math.Pow(x - 1, 3) + c * Math.Pow(x - 1, 2);
+    }
+
+    /// A press: Clawd pops up in the item's icon's place, stays a moment, shrinks away, and the
+    /// icon grows back (the other apps' timing). Another press takes the item over and ends this one.
+    public static void Pulse(NavigationViewItem item, string name, Func<IconElement> normal)
+    {
+        const double popIn = 0.24, hold = 0.7, shrink = 0.12, regrow = 0.2;
+        var scale = new ScaleTransform();
+        IconElement shown = Icon(name);
+        void Pose(double size, double opacity)
+        {
+            scale.ScaleX = scale.ScaleY = size;
+            shown.Opacity = opacity;
+        }
+        void Dress()
+        {
+            shown.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
+            shown.RenderTransform = scale;
+        }
+        Dress();
+        Pose(0.45, 0);
+        item.Icon = shown;
+        var back = false;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var timer = item.DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(16);
+        timer.IsRepeating = true;
+        timer.Tick += (t, _) =>
+        {
+            if (!ReferenceEquals(item.Icon, shown)) { t.Stop(); Pulsing.Remove(t); return; }
+            var s = clock.Elapsed.TotalSeconds;
+            if (s < popIn) { var x = s / popIn; Pose(0.45 + 0.55 * Overshoot(x), Math.Min(1, x * 2.5)); }
+            else if (s < hold) Pose(1, 1);
+            else if (s < hold + shrink) { var x = (s - hold) / shrink; Pose(1 - 0.45 * x, 1 - x); }
+            else if (s < hold + shrink + regrow)
+            {
+                if (!back)
+                {
+                    back = true;
+                    shown = normal();
+                    Dress();
+                    Pose(0.55, 0);
+                    item.Icon = shown;
+                }
+                var x = (s - hold - shrink) / regrow;
+                Pose(0.55 + 0.45 * Overshoot(x), Math.Min(1, x * 2.5));
+            }
+            else
+            {
+                t.Stop();
+                Pulsing.Remove(t);
+                item.Icon = normal();
+            }
+        };
+        Pulsing.Add(timer);
+        timer.Start();
+    }
+
     /// For a card's header or a page: a picture.
     public static Image Picture(string name, double size) =>
         new() { Source = Source(name, size, 2), Width = size, Height = size, Stretch = Stretch.Uniform };

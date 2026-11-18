@@ -534,6 +534,19 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
         return iv
     }
 
+    /// The Metal grid has no UIKit view for an individual tile.
+    func placeViewerSource(_ imageView: UIImageView, for mediaId: String) -> Bool {
+        guard let scene, let index = scene.tiles.firstIndex(where: { $0.item.mediaId == mediaId }) else { return false }
+        let frame = scene.engine.restFrame(index, scene.engine.rest)
+        guard frame.intersects(bounds.inset(by: scrollView.adjustedContentInset)) else { return false }
+        let item = scene.tiles[index].item
+        imageView.image = renderer?.thumbnails.image(for: item).map { UIImage(cgImage: $0) }
+            ?? MediaLoader.shared.anyCached(item, near: frame.width * traitCollection.displayScale)
+        imageView.frame = convert(frame, to: scrollView)
+        if imageView.superview == nil { scrollView.addSubview(imageView) }
+        return true
+    }
+
     // MARK: Accessibility
 
     /// The tiles on screen, as buttons (selected ones marked), in reading order.

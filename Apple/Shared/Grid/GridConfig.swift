@@ -50,7 +50,8 @@ struct GridConfig {
 
     func side(_ level: Int) -> CGFloat {
         let n = CGFloat(columns[level])
-        return floor((width - gap * (n - 1)) / n * scale) / scale
+        // (at least a point: a view not laid out yet has no width, and zooming divides by this)
+        return max(floor((width - gap * (n - 1)) / n * scale) / scale, 1)
     }
 
     func pitch(_ level: Int) -> CGFloat { side(level) + gap }

@@ -21,7 +21,7 @@ class L10n {
     final language = locale.languageCode.toLowerCase();
     if (language == 'zh') {
       // The script is the language; the region only says where the person is (zh-Hans-TW is
-      // Simplified). Only a system that names no script (zh-TW on Windows, Linux) needs the region.
+      // Simplified). Only a system that names no script (zh-TW) needs the region.
       final script = locale.scriptCode?.toLowerCase();
       if (script != null) return script == 'hant' ? 'zh-Hant' : 'zh-Hans';
       return const ['TW', 'HK', 'MO'].contains(locale.countryCode?.toUpperCase()) ? 'zh-Hant' : 'zh-Hans';

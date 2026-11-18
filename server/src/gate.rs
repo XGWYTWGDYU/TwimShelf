@@ -33,10 +33,18 @@ fn origins(peer: IpAddr, headers: &HeaderMap) -> Vec<IpAddr> {
     v
 }
 
-/// The address a sign-in is counted against: the first one proxies name, or the connection's.
+/// The address a sign-in is counted against. A connection from the internet is that address,
+/// whatever it claims; behind a local proxy, the last outside address in `X-Forwarded-For` (the
+/// one the proxy itself added: what a client sends comes before it), then the other headers.
 fn client_ip(peer: IpAddr, headers: &HeaderMap) -> IpAddr {
-    origins(peer, headers).into_iter().rev().find(|ip| !extension::is_local(*ip)).unwrap_or(peer)
+    if !extension::is_local(peer) { return peer; }
+    let forwarded = headers.get_all("x-forwarded-for").iter().filter_map(|h| h.to_str().ok())
+        .flat_map(|h| h.split(',')).filter_map(|s| s.trim().parse::<IpAddr>().ok()).filter(|ip| !extension::is_local(*ip)).last();
+    forwarded.or_else(|| origins(peer, headers).into_iter().rev().find(|ip| !extension::is_local(*ip))).unwrap_or(peer)
 }
+
+/// Password checks running at once: each takes about 19 MB for a moment.
+static CHECKS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     headers.get_all(header::COOKIE).iter().filter_map(|h| h.to_str().ok())
@@ -55,6 +63,10 @@ pub async fn gate(State(cfg): State<Shared>, ConnectInfo(peer): ConnectInfo<Sock
         return (StatusCode::FORBIDDEN, Html(page(lang, lang.t(T::LanOnlyTitle), &format!("<p>{}</p>", lang.t(T::LanOnly))))).into_response();
     }
     let path = req.uri().path().to_string();
+    // another site's page cannot make a signed-in browser change anything here
+    let changes = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) || path == "/logout";
+    let cross_site = req.headers().get("sec-fetch-site").is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"cross-site"));
+    if changes && cross_site && !path.starts_with("/ext/") { return StatusCode::FORBIDDEN.into_response(); }
     if open_path(&path) { return next.run(req).await; }
     if cookie(req.headers(), crate::auth::COOKIE).is_some_and(|c| cfg.auth.valid(&c)) { return next.run(req).await; }
     if let Some(token) = &cfg.desktop {
@@ -105,7 +117,9 @@ pub async fn login(State(cfg): State<Shared>, ConnectInfo(peer): ConnectInfo<Soc
     }
     let auth = cfg.clone();
     let password = f.password.clone();
+    let Ok(turn) = CHECKS.acquire().await else { return StatusCode::SERVICE_UNAVAILABLE.into_response() };
     let ok = tokio::task::spawn_blocking(move || auth.auth.check(&password)).await.unwrap_or(false);
+    drop(turn);
     if !ok {
         cfg.auth.failed(ip);
         // a wrong password always costs a moment (guessing is slow even before the lock)
@@ -275,6 +289,13 @@ mod tests {
         h.insert("x-forwarded-for", "203.0.113.9, 10.0.0.2".parse().unwrap());
         assert!(!origins(lan, &h).iter().all(|ip| extension::is_local(*ip)));
         assert_eq!(client_ip(lan, &h), "203.0.113.9".parse::<IpAddr>().unwrap());
+        // what a client claims counts for nothing on a direct connection, or before the proxy's own entry
+        let outside: IpAddr = "198.51.100.4".parse().unwrap();
+        assert_eq!(client_ip(outside, &h), outside);
+        let mut spoofed = HeaderMap::new();
+        spoofed.insert("x-forwarded-for", "8.8.8.8, 203.0.113.9".parse().unwrap());
+        spoofed.insert("forwarded", "for=8.8.4.4".parse().unwrap());
+        assert_eq!(client_ip(lan, &spoofed), "203.0.113.9".parse::<IpAddr>().unwrap());
         let mut f = HeaderMap::new();
         f.insert("forwarded", "for=\"[2001:db8::7]:4711\";proto=https".parse().unwrap());
         assert!(!origins(lan, &f).iter().all(|ip| extension::is_local(*ip)));

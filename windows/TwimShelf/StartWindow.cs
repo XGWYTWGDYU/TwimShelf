@@ -22,7 +22,7 @@ public sealed partial class StartWindow : Window
         Content = _root;
         _root.RequestedTheme = ElementTheme.Default;
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
-        var scale = 1.0;
+        var scale = WindowScale.Of(AppWindow);
         AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(640 * scale), (int)(460 * scale)));
         // the start window's size is its own: made here (AppWindow.Presenter comes back in the AOT build
         // as the base presenter, and a cast to OverlappedPresenter fails)

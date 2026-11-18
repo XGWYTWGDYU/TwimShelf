@@ -12,7 +12,7 @@ import 'settings_page.dart' show SettingsIcon, SettingsSection;
 import '../widgets/text_menu.dart';
 import '../platform/os.dart';
 
-/// The share page where the system has no share page of its own for an app (Android, Linux), and
+/// The share page where the system has no share page of its own for an app (Android), and
 /// for what is dropped on a window: a sheet as tall as what it shows, with what was shared on a
 /// card and the folder it goes into, or none. Links are downloaded here into a staging folder.
 /// Nothing reaches the library until 导入; closing the sheet in any way deletes what was brought here.

@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import QuartzCore
 #if canImport(UIKit)
 import UIKit
 typealias MascotImage = UIImage
@@ -8,11 +9,66 @@ import AppKit
 typealias MascotImage = NSImage
 #endif
 
+/// A press in the mascot mode: Clawd pops up in the icon's place with a little overshoot, stays a
+/// moment, shrinks away, and the icon grows back. Tab bars and list cells only take whole images,
+/// so it is played as frames everywhere.
+final class MascotPulse {
+    private static let popIn = 0.24, shrink = 0.12, regrow = 0.2
+    private let clawd: MascotImage, normal: MascotImage
+    private let show: (MascotImage) -> Void
+    private let finished: () -> Void
+    private let start = CACurrentMediaTime()
+    private var timer: Timer?
+    private var holding = false
+
+    init(_ name: String, side: CGFloat, normal: MascotImage, show: @escaping (MascotImage) -> Void, finished: @escaping () -> Void = {}) {
+        clawd = Mascot.icon(name, side: side)
+        self.normal = normal
+        self.show = show
+        self.finished = finished
+        step()
+        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.step() }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    /// Stops where it is; whoever cancels sets the icon that comes next.
+    func cancel() { timer?.invalidate(); timer = nil }
+
+    private static func overshoot(_ x: CGFloat) -> CGFloat {
+        let c: CGFloat = 1.70158
+        return 1 + (c + 1) * pow(x - 1, 3) + c * pow(x - 1, 2)
+    }
+
+    private func step() {
+        let t = CACurrentMediaTime() - start
+        let hold = Mascot.pulseDuration
+        if t < Self.popIn {
+            let x = CGFloat(t / Self.popIn)
+            show(Mascot.frame(clawd, scale: 0.45 + 0.55 * Self.overshoot(x), alpha: min(1, x * 2.5)))
+        } else if t < hold {
+            if !holding { holding = true; show(clawd) }
+        } else if t < hold + Self.shrink {
+            let x = CGFloat((t - hold) / Self.shrink)
+            show(Mascot.frame(clawd, scale: 1 - 0.45 * x, alpha: 1 - x))
+        } else if t < hold + Self.shrink + Self.regrow {
+            let x = CGFloat((t - hold - Self.shrink) / Self.regrow)
+            show(Mascot.frame(normal, scale: 0.55 + 0.45 * Self.overshoot(x), alpha: min(1, x * 2.5)))
+        } else {
+            cancel()
+            show(normal)
+            finished()
+        }
+    }
+}
+
 /// 使用 Claude Code 吉祥物: the mode's switch, its icons (drawn from `ClawdIconData`, see
 /// scripts/gen_icons.py) and the little Clawd's engine (core/src/pet.rs).
 enum Mascot {
     static let changed = Notification.Name("mascotChanged")
     static let key = "mascot.enabled"
+    /// How long Clawd stays after a press.
+    static let pulseDuration = 0.7
 
     static var isOn: Bool {
         get { UserDefaults.standard.bool(forKey: key) }
@@ -112,6 +168,26 @@ enum Mascot {
         }
         image.isTemplate = false
         return image
+        #endif
+    }
+
+    /// `image` at a size and opacity, on a canvas of its own size. A template stays a template, so
+    /// the place's icon keeps its tint on the way back.
+    fileprivate static func frame(_ image: MascotImage, scale: CGFloat, alpha: CGFloat) -> MascotImage {
+        let size = image.size
+        let rect = CGRect(x: (size.width - size.width * scale) / 2, y: (size.height - size.height * scale) / 2,
+                          width: size.width * scale, height: size.height * scale)
+        #if canImport(UIKit)
+        let source = image.imageAsset?.image(with: .current) ?? image
+        let drawn = UIGraphicsImageRenderer(size: size).image { _ in source.draw(in: rect, blendMode: .normal, alpha: alpha) }
+        return drawn.withRenderingMode(image.renderingMode == .alwaysOriginal ? .alwaysOriginal : .alwaysTemplate)
+        #else
+        let drawn = NSImage(size: size, flipped: false) { _ in
+            image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: alpha)
+            return true
+        }
+        drawn.isTemplate = image.isTemplate
+        return drawn
         #endif
     }
 

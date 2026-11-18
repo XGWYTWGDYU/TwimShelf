@@ -9,9 +9,8 @@ import 'package:screen_brightness/screen_brightness.dart';
 import '../app/prefs.dart';
 import '../l10n/l10n.dart';
 import '../platform/video.dart';
-import '../platform/os.dart';
 
-/// One video of the viewer, as the native player:
+/// One video of the viewer, backed by the same [VideoSession] as its feed card:
 ///  * double tap: play / pause · single tap: the controls (they hide after 3 s of playing)
 ///  * long press: 2.5× while held
 ///  * drags (unless 视频禁用手势): sideways seeks (a full width covers up to two minutes), up and
@@ -21,7 +20,6 @@ import '../platform/os.dart';
 ///    unlocked), rotate (phones and tablets), share, close
 ///  * the caption sits above the controls, under one shade from the caption to the bottom edge,
 ///    and comes and goes with them
-/// It plays while it is the page on screen, starts muted (headphones only asks first) and loops.
 class VideoPage extends StatefulWidget {
   const VideoPage({
     super.key,
@@ -36,6 +34,9 @@ class VideoPage extends StatefulWidget {
     required this.canNext,
     this.onControlsChanged,
     this.onTurn,
+    this.fallbackPreview,
+    this.routeAnimation,
+    this.dismissProgress,
   });
   /// The video was turned on its own, or back (the viewer stops paging while it is). Only the
   /// video turns: the app's orientation is never changed, so nothing behind it ever turns.
@@ -51,6 +52,11 @@ class VideoPage extends StatefulWidget {
   final ValueChanged<Rect?> onShare;
   final bool canPrevious, canNext;
   final ValueChanged<bool>? onControlsChanged;
+  /// Optional fallback image (e.g. the grid's decoded thumbnail) shown while opening.
+  final Widget? fallbackPreview;
+  final Animation<double>? routeAnimation;
+  /// Interactive dismiss drag progress (0..1) so player overlays fade out as the video shrinks.
+  final ValueListenable<double>? dismissProgress;
 
   @override
   State<VideoPage> createState() => VideoPageState();
@@ -59,12 +65,12 @@ class VideoPage extends StatefulWidget {
 enum _Pan { none, seek, brightness, volume }
 
 class VideoPageState extends State<VideoPage> {
-  VideoPlayback? _video;
+  late final VideoSession _session = VideoSession.of(widget.path);
+  VideoPlayback? _boundPlayback;
   bool _playing = false;
   bool _controls = true;
   bool _locked = false;
   bool _lockFlash = false;
-  Object? _error;
   Timer? _hide;
   double _volume = 100;
   final _subs = <StreamSubscription<dynamic>>[];
@@ -86,6 +92,8 @@ class VideoPageState extends State<VideoPage> {
   Duration? _scrubPosition;
   Duration? _pendingSeek;
   Future<void>? _seekWork;
+
+  VideoPlayback? get _video => _session.playback;
 
   // Keep one decoder seek in flight; newer pointer positions replace stale work.
   Future<void> _seek(Duration target) {
@@ -116,13 +124,26 @@ class VideoPageState extends State<VideoPage> {
     _scheduleHide();
   }
 
-  static bool get _mobile => !kIsWeb && (OS.isIOS || OS.isAndroid);
   bool get gestures => !Prefs.instance.playerGesturesOff;
+
+  /// Locked (the lock button): the viewer's dismiss swipes wait too.
+  bool get locked => _locked;
 
   @override
   void initState() {
     super.initState();
-    if (widget.active) _open();
+    _session.addListener(_onSessionChanged);
+    if (widget.active) _activate();
+  }
+
+  void _onSessionChanged() {
+    final v = _session.playback;
+    if (v != null && v != _boundPlayback) {
+      _bindPlayback(v);
+    } else if (v == null && _boundPlayback != null) {
+      _clearPlaybackSubs();
+    }
+    if (mounted) setState(() {});
   }
 
   @override
@@ -144,48 +165,56 @@ class VideoPageState extends State<VideoPage> {
     super.didUpdateWidget(oldWidget);
     final old = oldWidget;
     if (widget.active && !old.active) {
-      _video == null ? _open() : _setPlaying(true);
+      _activate();
     } else if (!widget.active && old.active) {
-      _setPlaying(false);
+      _deactivate();
       // a page left behind comes back upright (the viewer has already resumed paging)
       _turns = 0;
     }
   }
 
-  Future<void> _open() async {
-    final v = VideoPlayback();
-    setState(() => _video = v);
-    // the card's frame of this moment shows until this player is past it
-    _bridge = VideoResume.takeFrame(widget.path);
-    _subs.add(v.position.listen((p) {
-      if (_bridge != null && _bridgeFrom != null && p > _bridgeFrom! + const Duration(milliseconds: 40)) _bridge = null;
-      if (mounted && !_scrubbing) setState(() {});
-      // while this is the video on screen, its moment is where the feed card goes on from
-      if (mounted && widget.active && (ModalRoute.of(context)?.isCurrent ?? false)) VideoResume.leave(widget.path, p, quiet: true);
-    }));
-    try {
-      await v.setLoop(true);
-      await v.open(widget.path, autoplay: false);
-      if (!mounted) return;
-      // the opened video goes on from where its card was
-      final from = VideoResume.take(widget.path, 'viewer');
-      _bridgeFrom = from ?? Duration.zero;
-      if (from != null) await v.seek(from);
-      if (!mounted) return;
-      _subs.add(v.surfaceController.player.stream.playing.listen((playing) {
-        if (mounted) setState(() => _playing = playing);
-      }));
-      await _setPlaying(widget.active);
-      _scheduleHide();
-      _autoLandscape();
-    } catch (e) {
-      if (mounted) setState(() => _error = e);
+  Future<void> _activate() async {
+    final existing = _session.playback;
+    if (existing != null) {
+      _bindPlayback(existing);
     }
+    final v = await _session.attachViewer(this);
+    if (!mounted || v == null || !widget.active) return;
+    if (v != _boundPlayback) _bindPlayback(v);
+    await _setPlaying(true);
+    _scheduleHide();
+    _autoLandscape();
+  }
+
+  void _deactivate() {
+    _clearPlaybackSubs();
+    _session.detachViewer(this);
+    if (mounted) setState(() => _playing = false);
+  }
+
+  void _bindPlayback(VideoPlayback v) {
+    _clearPlaybackSubs();
+    _boundPlayback = v;
+    _playing = v.surfaceController.player.state.playing;
+    _subs.add(v.position.listen((p) {
+      if (mounted && !_scrubbing) setState(() {});
+    }));
+    _subs.add(v.surfaceController.player.stream.playing.listen((playing) {
+      if (mounted) setState(() => _playing = playing);
+    }));
+  }
+
+  void _clearPlaybackSubs() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _subs.clear();
+    _boundPlayback = null;
   }
 
   /// 横屏视频自动横屏: a video wider than tall, opened on a portrait screen, is turned.
   void _autoLandscape() {
-    if (!_mobile || !Prefs.instance.autoLandscape || _turns != 0 || !widget.active) return;
+    if (!Prefs.instance.autoLandscape || _turns != 0 || !widget.active) return;
     final size = MediaQuery.sizeOf(context);
     if (size.width >= size.height) return;
     // the video's own size is known once its first frame is decoded
@@ -226,7 +255,7 @@ class VideoPageState extends State<VideoPage> {
 
   Future<void> togglePlay() => _setPlaying(!_playing);
 
-  /// ↑ ↓ on a desktop: the player's volume in tenths.
+  /// ↑ ↓ on a keyboard: the player's volume in tenths.
   void stepVolume(int delta) {
     _volume = (_volume + delta * 10).clamp(0, 100);
     _video?.setMuted(_volume == 0);
@@ -283,14 +312,11 @@ class VideoPageState extends State<VideoPage> {
 
   void _tap() => _locked ? _flashLock() : _showControls(!_controls);
 
-  /// The speed chosen in the menu (desktops); a long press boosts from it and returns to it.
-  double _rate = 1;
-  static String _speed(double r) => '${r == r.roundToDouble() ? r.toInt() : r}×'; // i18n-exempt: a speed
-
+  /// A long press boosts to 2.5× and returns to normal speed.
   double _boostFrom = 1;
   void _longPressStart() {
     if (_locked) return;
-    _boostFrom = _rate;
+    _boostFrom = 1;
     _video?.setRate(2.5);
     _showHud(Icons.fast_forward, text: '2.5×', sticky: true); // i18n-exempt: a speed, not words
   }
@@ -301,16 +327,13 @@ class VideoPageState extends State<VideoPage> {
   }
 
   /// The drags belong to a touch screen (a finger or a pen): with a mouse or a trackpad they do
-  /// nothing, on any platform — so a touch-screen laptop or tablet has them, a desktop
-  /// without one does not (it has the speed menu and the keys instead).
+  /// nothing, on any platform.
   bool _touch = false;
 
   /// Whether this device lets an app set the screen's brightness for the whole system: iOS and
-  /// iPadOS do; Android once the person allowed changing system settings. Never macOS (and Linux
-  /// has no such API here).
+  /// iPadOS do; Android once the person allowed changing system settings.
   static bool? _canSetBrightness;
   static Future<bool> _systemBrightness() async {
-    if (kIsWeb || OS.isMacOS || OS.isLinux) return false;
     try {
       return _canSetBrightness ??= await ScreenBrightness.instance.canChangeSystemBrightness;
     } catch (_) {
@@ -337,8 +360,6 @@ class VideoPageState extends State<VideoPage> {
         _panStart = v.currentPosition.inMilliseconds / 1000;
         _scrubbing = true;
       } else if (_panOrigin.dx < size.width / 2) {
-        // the system's brightness, where the system lets an app set it (not the app's own
-        // window brightness); where it cannot, this half does nothing
         if (!await _systemBrightness()) return;
         _pan = _Pan.brightness;
         try {
@@ -347,7 +368,6 @@ class VideoPageState extends State<VideoPage> {
           _panStart = 0.5;
         }
       } else {
-        // the system's volume (what the volume buttons change), not the player's own
         _pan = _Pan.volume;
         try {
           await FlutterVolumeController.updateShowSystemUI(false);
@@ -385,36 +405,28 @@ class VideoPageState extends State<VideoPage> {
   }
 
   void _panEnd() {
-    if (_pan == _Pan.seek) {
+    if (_pan == _Pan.seek && _video != null) {
       unawaited(_finishSeek(_scrubPosition ?? _video!.currentPosition));
     }
     _pan = _Pan.none;
     _hideHud(after: const Duration(milliseconds: 400));
   }
 
-  Uint8List? _bridge;
-  Duration? _bridgeFrom;
-
-  /// Before the viewer closes: this video's moment and its frame, for the feed card to go on from.
-  Future<void> leaveForCard() async {
-    final v = _video;
-    if (v == null) return;
-    // held at this moment: the frame and the position are the same one (the picture takes a while)
-    await v.pause();
-    VideoResume.leave(widget.path, v.currentPosition);
-    VideoResume.leaveFrame(widget.path, await VideoResume.frameOf(v));
+  /// Called as the viewer begins its close animation: mutes and hides controls while the shared
+  /// [VideoSession] keeps playing inside the shrinking zoom rectangle.
+  void leaveForCard() {
+    _hide?.cancel();
+    if (mounted && _controls) setState(() => _controls = false);
+    _session.prepareLeaveViewer();
   }
 
   @override
   void dispose() {
-    for (final s in _subs) {
-      s.cancel();
-    }
+    _session.removeListener(_onSessionChanged);
+    _clearPlaybackSubs();
     _hide?.cancel();
     _hudTimer?.cancel();
-    final v = _video;
-    if (v != null) debugPrint('TwimShelf video: viewer closes ${widget.path.split('/').last} at ${(v.currentPosition.inMilliseconds / 1000).toStringAsFixed(2)} s');
-    unawaited(_video?.dispose());
+    _session.detachViewer(this);
     super.dispose();
   }
 
@@ -425,16 +437,34 @@ class VideoPageState extends State<VideoPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_session.error != null) return const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 56));
     final v = _video;
-    if (_error != null) return const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 56));
-    if (v == null) return const Center(child: Icon(Icons.play_circle_outline, size: 72, color: Colors.white70));
-    final total = v.currentDuration;
-    final at = _scrubPosition ?? v.currentPosition;
-    final showBar = _controls && !_locked;
+    final total = v?.currentDuration ?? Duration.zero;
+    final at = _scrubPosition ?? (v?.currentPosition ?? _session.position);
+    final showBar = _controls && !_locked && v != null;
     final page = LayoutBuilder(builder: (context, box) {
       // below the turn: the turned screen's safe area
       final pad = MediaQuery.paddingOf(context);
       final size = box.biggest;
+      Widget fadeWithRoute(Widget overlay) {
+        final anim = widget.routeAnimation;
+        final dismiss = widget.dismissProgress;
+        if (anim == null && dismiss == null) return overlay;
+        return AnimatedBuilder(
+          animation: Listenable.merge([?anim, ?dismiss]),
+          child: overlay,
+          builder: (context, child) {
+            final routeOp = anim == null
+                ? 1.0
+                : Curves.easeIn.transform(((anim.value - 0.30) / 0.70).clamp(0.0, 1.0));
+            final dismissOp = dismiss == null
+                ? 1.0
+                : (1 - dismiss.value * 4).clamp(0.0, 1.0);
+            return Opacity(opacity: routeOp * dismissOp, child: child);
+          },
+        );
+      }
+
       return Stack(children: [
         Positioned.fill(
           // the long press (2.5×) answers after a quarter second, as native
@@ -455,133 +485,120 @@ class VideoPageState extends State<VideoPage> {
               onPanStart: gestures ? (d) => _panStartAt(d, size) : null,
               onPanUpdate: gestures ? (d) => _panUpdate(d, size) : null,
               onPanEnd: gestures ? (_) => _panEnd() : null,
-              child: Stack(fit: StackFit.expand, children: [
-                VideoSurface(controller: v.surfaceController, controls: NoVideoControls, resumeUponEnteringForegroundMode: true, fill: Colors.black),
-                if (_bridge != null) IgnorePointer(child: Image.memory(_bridge!, fit: BoxFit.contain, gaplessPlayback: true)),
-              ]),
-            ),
-          ),
-        ),
-        // 没有连接耳机，已静音 · 开启声音
-        ValueListenableBuilder<bool>(
-          valueListenable: v.needsSpeakerConsent,
-          builder: (context, ask, _) => !ask
-              ? const SizedBox.shrink()
-              : Align(
-                  alignment: Alignment.topCenter,
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
-                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Text(L('audio.prompt')),
-                            TextButton(key: const ValueKey('soundOn'), onPressed: () => v.allowSpeakerForCurrentVideo(), child: Text(L('audio.turnOn'))),
-                          ]),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-        ),
-        if (_hudIcon != null) Center(child: _Hud(icon: _hudIcon!, text: _hudText, level: _hudLevel)),
-        // the arrows, while the drags hold the sideways swipe
-        if (gestures && showBar && widget.canPrevious)
-          Positioned(left: 8 + pad.left, top: 0, bottom: 0, child: Center(child: _RoundButton(key: const ValueKey('videoPrevious'), icon: Icons.chevron_left, tooltip: L('viewer.previous'), onPressed: () => widget.onStep(-1)))),
-        if (gestures && showBar && widget.canNext)
-          Positioned(right: 8 + pad.right, top: 0, bottom: 0, child: Center(child: _RoundButton(key: const ValueKey('videoNext'), icon: Icons.chevron_right, tooltip: L('viewer.next'), onPressed: () => widget.onStep(1)))),
-        // caption and controls under one shade from the caption to the bottom edge
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: IgnorePointer(
-            ignoring: !showBar,
-            child: AnimatedOpacity(
-              opacity: showBar ? 1 : 0,
-              duration: const Duration(milliseconds: 200),
-              child: DecoratedBox(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0x00000000), Color(0x8C000000), Color(0xB3000000)],
-                    stops: [0, 0.35, 1],
-                  ),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(16 + pad.left, 40, 16 + pad.right, 8 + pad.bottom),
-                  child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    ?widget.caption,
-                    Row(children: [
-                      _BarButton(key: const ValueKey('videoPlay'), icon: _playing ? Icons.pause : Icons.play_arrow, tooltip: _playing ? L('viewer.pause') : L('viewer.play'), onPressed: togglePlay),
-                      Text(_time(at), style: const TextStyle(color: Colors.white, fontFeatures: [FontFeature.tabularFigures()])),
-                      Expanded(
-                        child: Slider(
-                          value: total.inMilliseconds == 0 ? 0 : (at.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0),
-                          onChangeStart: (_) {
-                            _hide?.cancel();
-                            setState(() {
-                              _scrubbing = true;
-                              _scrubPosition = v.currentPosition;
-                            });
-                          },
-                          onChanged: total == Duration.zero ? null : (f) => _previewSeek(total * f),
-                          onChangeEnd: (f) => _finishSeek(total * f),
-                        ),
-                      ),
-                      Text(_time(total), style: const TextStyle(color: Colors.white, fontFeatures: [FontFeature.tabularFigures()])),
-                      // the speed, on a desktop (a phone or tablet holds a finger for 2.5×)
-                      if (!_mobile)
-                        PopupMenuButton<double>(
-                          key: const ValueKey('videoSpeed'),
-                          tooltip: L('player.speed'),
-                          initialValue: _rate,
-                          color: const Color(0xEE202020),
-                          onSelected: (r) {
-                            setState(() => _rate = r);
-                            v.setRate(r);
-                            _scheduleHide();
-                          },
-                          itemBuilder: (_) => [
-                            for (final r in const [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0])
-                              PopupMenuItem(value: r, child: Text(_speed(r), style: TextStyle(color: Colors.white, fontWeight: r == _rate ? FontWeight.w700 : null))),
-                          ],
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: Text(_speed(_rate), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),
-                          ),
-                        ),
-                      ValueListenableBuilder<bool>(
-                        valueListenable: v.muted,
-                        builder: (context, muted, _) => _BarButton(
-                          key: const ValueKey('videoMute'),
-                          icon: muted ? Icons.volume_off : Icons.volume_up,
-                          tooltip: muted ? L('audio.turnOn') : null,
-                          onPressed: () => v.setMuted(!muted),
-                        ),
-                      ),
-                    ]),
-                    Row(children: [
-                      Text(widget.counter, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                      const Spacer(),
-                      if (_mobile) _BarButton(key: const ValueKey('videoLock'), icon: Icons.lock_open, tooltip: L('viewer.lock'), onPressed: _toggleLock),
-                      if (_mobile) _BarButton(key: const ValueKey('videoRotate'), icon: Icons.screen_rotation, tooltip: L('viewer.rotate'), onPressed: _rotate),
-                      Builder(
-                        builder: (button) => _BarButton(key: const ValueKey('videoShare'), icon: Icons.ios_share, tooltip: L('viewer.share'), onPressed: () {
-                          final box = button.findRenderObject() as RenderBox?;
-                          widget.onShare(box == null ? null : box.localToGlobal(Offset.zero) & box.size);
-                        }),
-                      ),
-                      _BarButton(key: const ValueKey('videoClose'), icon: Icons.close, tooltip: L('viewer.close'), onPressed: widget.onClose),
-                    ]),
-                  ]),
-                ),
+              child: VideoSessionView(
+                session: _session,
+                fill: Colors.transparent,
+                showPlayBadgeWhenStopped: widget.fallbackPreview == null,
+                fallback: widget.fallbackPreview,
               ),
             ),
           ),
         ),
+        // 没有连接耳机，已静音 · 开启声音
+        if (v != null)
+          ValueListenableBuilder<bool>(
+            valueListenable: v.needsSpeakerConsent,
+            builder: (context, ask, _) => !ask
+                ? const SizedBox.shrink()
+                : Align(
+                    alignment: Alignment.topCenter,
+                    child: fadeWithRoute(
+                      SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Card(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Text(L('audio.prompt')),
+                                TextButton(key: const ValueKey('soundOn'), onPressed: () => v.allowSpeakerForCurrentVideo(), child: Text(L('audio.turnOn'))),
+                              ]),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+        if (_hudIcon != null) Center(child: fadeWithRoute(_Hud(icon: _hudIcon!, text: _hudText, level: _hudLevel))),
+        // the arrows, while the drags hold the sideways swipe
+        if (gestures && showBar && widget.canPrevious)
+          Positioned(left: 8 + pad.left, top: 0, bottom: 0, child: Center(child: fadeWithRoute(_RoundButton(key: const ValueKey('videoPrevious'), icon: Icons.chevron_left, tooltip: L('viewer.previous'), onPressed: () => widget.onStep(-1))))),
+        if (gestures && showBar && widget.canNext)
+          Positioned(right: 8 + pad.right, top: 0, bottom: 0, child: Center(child: fadeWithRoute(_RoundButton(key: const ValueKey('videoNext'), icon: Icons.chevron_right, tooltip: L('viewer.next'), onPressed: () => widget.onStep(1))))),
+        // caption and controls under one shade from the caption to the bottom edge
+        if (v != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: IgnorePointer(
+              ignoring: !showBar,
+              child: fadeWithRoute(
+                AnimatedOpacity(
+                  opacity: showBar ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x00000000), Color(0x8C000000), Color(0xB3000000)],
+                        stops: [0, 0.35, 1],
+                      ),
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(16 + pad.left, 40, 16 + pad.right, 8 + pad.bottom),
+                      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        ?widget.caption,
+                        Row(children: [
+                          _BarButton(key: const ValueKey('videoPlay'), icon: _playing ? Icons.pause : Icons.play_arrow, tooltip: _playing ? L('viewer.pause') : L('viewer.play'), onPressed: togglePlay),
+                          Text(_time(at), style: const TextStyle(color: Colors.white, fontFeatures: [FontFeature.tabularFigures()])),
+                          Expanded(
+                            child: Slider(
+                              value: total.inMilliseconds == 0 ? 0 : (at.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0),
+                              onChangeStart: (_) {
+                                _hide?.cancel();
+                                setState(() {
+                                  _scrubbing = true;
+                                  _scrubPosition = v.currentPosition;
+                                });
+                              },
+                              onChanged: total == Duration.zero ? null : (f) => _previewSeek(total * f),
+                              onChangeEnd: (f) => _finishSeek(total * f),
+                            ),
+                          ),
+                          Text(_time(total), style: const TextStyle(color: Colors.white, fontFeatures: [FontFeature.tabularFigures()])),
+                          ValueListenableBuilder<bool>(
+                            valueListenable: v.muted,
+                            builder: (context, muted, _) => _BarButton(
+                              key: const ValueKey('videoMute'),
+                              icon: muted ? Icons.volume_off : Icons.volume_up,
+                              tooltip: muted ? L('audio.turnOn') : null,
+                              onPressed: () => v.setMuted(!muted),
+                            ),
+                          ),
+                        ]),
+                        Row(children: [
+                          Text(widget.counter, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                          const Spacer(),
+                          _BarButton(key: const ValueKey('videoLock'), icon: Icons.lock_open, tooltip: L('viewer.lock'), onPressed: _toggleLock),
+                          _BarButton(key: const ValueKey('videoRotate'), icon: Icons.screen_rotation, tooltip: L('viewer.rotate'), onPressed: _rotate),
+                          Builder(
+                            builder: (button) => _BarButton(key: const ValueKey('videoShare'), icon: Icons.ios_share, tooltip: L('viewer.share'), onPressed: () {
+                              final box = button.findRenderObject() as RenderBox?;
+                              widget.onShare(box == null ? null : box.localToGlobal(Offset.zero) & box.size);
+                            }),
+                          ),
+                          _BarButton(key: const ValueKey('videoClose'), icon: Icons.close, tooltip: L('viewer.close'), onPressed: widget.onClose),
+                        ]),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         // locked: only the lock, in the middle of the width at the bar's height
         if (_locked && (_lockFlash || _controls))
           Positioned(

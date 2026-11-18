@@ -11,11 +11,10 @@ import '../widgets/drop_import.dart';
 import '../mascot/mascot.dart';
 import '../mascot/pet_layer.dart';
 import '../platform/apple_platform.dart';
-import '../platform/desktop_window.dart';
+import '../platform/window_chrome.dart';
 import '../screens/folders_page.dart';
 import '../screens/grid_page.dart';
 import '../screens/settings_page.dart';
-import '../screens/data_home_page.dart';
 import '../services/updates.dart';
 import '../screens/browse_page.dart';
 import '../widgets/activity_panel.dart';
@@ -25,7 +24,7 @@ import 'places.dart';
 import 'prefs.dart';
 
 /// How much room the window gives, decided from its size only — never from the device (a
-/// phone, a foldable folded or open, a tablet in split view, a desktop window of any size).
+/// phone, a foldable folded or open, a tablet in split view or in a window of any size).
 enum ShellLayout {
   /// A bottom navigation bar (a phone's width).
   bar,
@@ -85,9 +84,7 @@ class _ShellState extends State<Shell> {
     ApplePlatform.instance.windowControls.addListener(_changed);
     // GitHub builds: a newer release, at most once a day
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // what opening repaired or found missing first, then a newer release
-      await StartupChecks.run(context);
-      if (mounted) await Updates.checkOnLaunch(context);
+      await Updates.checkOnLaunch(context);
     });
   }
 
@@ -205,20 +202,16 @@ class _ShellState extends State<Shell> {
     );
   }
 
-  /// The bar touches the window's top-leading corner: everything moves below the window's
-  /// controls (a windowed iPad's, macOS's traffic lights, the caption buttons on Linux), and on
-  /// a desktop the strip there moves the window.
+  /// The bar touches the window's top-leading corner: everything moves below a windowed iPad's
+  /// window controls.
   Widget _withChrome(Widget child) {
     final top = WindowChrome.top(context);
     if (top == 0) return child;
     final mq = MediaQuery.of(context);
-    return Stack(children: [
-      MediaQuery(
-        data: mq.copyWith(padding: mq.padding.copyWith(top: mq.padding.top > top ? mq.padding.top : top)),
-        child: child,
-      ),
-      const Positioned(left: 0, right: 0, top: 0, child: WindowStrip()),
-    ]);
+    return MediaQuery(
+      data: mq.copyWith(padding: mq.padding.copyWith(top: mq.padding.top > top ? mq.padding.top : top)),
+      child: child,
+    );
   }
 
   Widget _primaryStacks(Place current, ShellLayout layout) {
@@ -247,18 +240,23 @@ class _ShellState extends State<Shell> {
       final selected = _place == p;
       final row = Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
-        child: ListTile(
-          key: ValueKey('side-${p.id}'),
-          dense: true,
-          visualDensity: VisualDensity.compact,
-          shape: const StadiumBorder(),
-          selected: selected,
-          selectedColor: scheme.onSecondaryContainer,
-          selectedTileColor: scheme.secondaryContainer,
-          leading: MascotIcon(p.mascotIcon, fallback: Icon(selected ? p.selectedIcon : p.icon)),
-          title: Text(p.title, overflow: TextOverflow.ellipsis),
-          trailing: count == null ? null : Text(count, style: Theme.of(context).textTheme.labelMedium),
-          onTap: () => _select(p),
+        child: MascotPress(
+          p.mascotIcon,
+          key: ValueKey(p.id),
+          onPressed: () => _select(p),
+          builder: (context, mascot, press) => ListTile(
+            key: ValueKey('side-${p.id}'),
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            shape: const StadiumBorder(),
+            selected: selected,
+            selectedColor: scheme.onSecondaryContainer,
+            selectedTileColor: scheme.secondaryContainer,
+            leading: MascotIcon(mascot, fallback: Icon(selected ? p.selectedIcon : p.icon)),
+            title: Text(p.title, overflow: TextOverflow.ellipsis),
+            trailing: count == null ? null : Text(count, style: Theme.of(context).textTheme.labelMedium),
+            onTap: press,
+          ),
         ),
       );
       final folder = p.folder;
@@ -275,7 +273,6 @@ class _ShellState extends State<Shell> {
 
     final stats = library.stats;
     final leading = WindowChrome.leading(context);
-    final trailingTop = WindowChrome.trailing(context).bottom;
     final mq = MediaQuery.of(context);
     return Scaffold(
       // the page area below gets `mq`, keyboard included, and each page's own Scaffold makes room
@@ -290,9 +287,9 @@ class _ShellState extends State<Shell> {
               child: SafeArea(
                 right: false,
                 child: Column(children: [
-                  // in line with the window's controls (a windowed iPad, macOS): the app, at the
+                  // in line with the window's controls (a windowed iPad): the app, at the
                   // sidebar's end so the controls keep the start; the places start below them
-                  // room for the window's controls (a windowed iPad, macOS): the places start below
+                  // room for the window's controls (a windowed iPad): the places start below
                   if (leading.height > 0) SizedBox(height: (leading.bottom - mq.padding.top).clamp(28, 200)),
                   Expanded(
                     child: ListenableBuilder(listenable: prefs, builder: (context, _) => ListView(
@@ -330,15 +327,8 @@ class _ShellState extends State<Shell> {
                 child: const SizedBox(width: 9, child: Center(child: VerticalDivider(width: 1))),
               ),
             ),
-          Expanded(
-            // the caption buttons on Linux sit over the content's top end
-            child: MediaQuery(
-              data: mq.copyWith(padding: mq.padding.copyWith(top: mq.padding.top > trailingTop ? mq.padding.top : trailingTop)),
-              child: _primaryStacks(_place, ShellLayout.sidebar),
-            ),
-          ),
+          Expanded(child: _primaryStacks(_place, ShellLayout.sidebar)),
         ]),
-        const Positioned(left: 0, right: 0, top: 0, child: WindowStrip()),
       ]),
     );
   }
@@ -410,35 +400,39 @@ class _FloatingNavItem extends StatelessWidget {
     final color = selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
     const spring = Curves.easeOutCubic;
     const time = Duration(milliseconds: 260);
-    return Tooltip(
-      message: selected ? '' : place.title,
-      child: Semantics(
-        selected: selected,
-        button: true,
-        label: place.title,
-        child: AnimatedContainer(
-          duration: time,
-          curve: spring,
-          decoration: ShapeDecoration(color: selected ? scheme.secondaryContainer : Colors.transparent, shape: const StadiumBorder()),
-          child: InkWell(
-            key: ValueKey('bar-${place.id}'),
-            customBorder: const StadiumBorder(),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              child: AnimatedSize(
-                duration: time,
-                curve: spring,
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  IconTheme.merge(
-                    data: IconThemeData(color: color),
-                    child: MascotIcon(place.mascotIcon, fallback: Icon(selected ? place.selectedIcon : place.icon)),
-                  ),
-                  if (selected) ...[
-                    const SizedBox(width: 8),
-                    Text(place.title, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color, fontWeight: FontWeight.w600)),
-                  ],
-                ]),
+    return MascotPress(
+      place.mascotIcon,
+      onPressed: onTap,
+      builder: (context, mascot, press) => Tooltip(
+        message: selected ? '' : place.title,
+        child: Semantics(
+          selected: selected,
+          button: true,
+          label: place.title,
+          child: AnimatedContainer(
+            duration: time,
+            curve: spring,
+            decoration: ShapeDecoration(color: selected ? scheme.secondaryContainer : Colors.transparent, shape: const StadiumBorder()),
+            child: InkWell(
+              key: ValueKey('bar-${place.id}'),
+              customBorder: const StadiumBorder(),
+              onTap: press,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                child: AnimatedSize(
+                  duration: time,
+                  curve: spring,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    IconTheme.merge(
+                      data: IconThemeData(color: color),
+                      child: MascotIcon(mascot, fallback: Icon(selected ? place.selectedIcon : place.icon)),
+                    ),
+                    if (selected) ...[
+                      const SizedBox(width: 8),
+                      Text(place.title, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color, fontWeight: FontWeight.w600)),
+                    ],
+                  ]),
+                ),
               ),
             ),
           ),

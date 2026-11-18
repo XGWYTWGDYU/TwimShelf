@@ -1099,8 +1099,9 @@ pub extern "C" fn tl_pet_tick(p: *mut crate::pet::Pet, dt: f64, buffer: *mut f64
         let mut rects = Vec::with_capacity(64);
         e.draw(&mut rects);
         if !buffer.is_null() {
-            let out = unsafe { std::slice::from_raw_parts_mut(buffer, capacity as usize * 5) };
-            for (i, r) in rects.iter().take(capacity as usize).enumerate() {
+            let n = rects.len().min(usize::try_from(capacity).unwrap_or(usize::MAX));
+            let out = unsafe { std::slice::from_raw_parts_mut(buffer, n * 5) };
+            for (i, r) in rects.iter().take(n).enumerate() {
                 out[i * 5..i * 5 + 5].copy_from_slice(&[r.x, r.y, r.w, r.h, r.color as f64]);
             }
         }

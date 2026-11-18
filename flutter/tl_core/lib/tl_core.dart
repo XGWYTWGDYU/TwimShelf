@@ -4,13 +4,10 @@ import 'dart:convert';
 import 'src/native.dart';
 import 'src/models.dart';
 export 'src/models.dart';
-export 'src/grid.dart' if (dart.library.js_interop) 'src/grid_web.dart';
-export 'src/pet.dart' if (dart.library.js_interop) 'src/pet_web.dart';
-export 'src/remote.dart';
-export 'src/native.dart' show coreIsRemote;
+export 'src/grid.dart';
+export 'src/pet.dart';
 
-/// Runs [work] — calls into the core — off the UI: another isolate in the apps, asynchronous
-/// requests in the web build (where there are no isolates).
+/// Runs [work] — calls into the core — off the UI, in another isolate.
 Future<R> coreRunAsync<R>(R Function() work) => runAsync(work);
 
 class CoreError implements Exception {
@@ -253,20 +250,6 @@ class Core {
   static void discoveryRediscover() => _bindings.tl_discovery_rediscover();
   static void discoveryStop() => _bindings.tl_discovery_stop();
 
-  /// The browser extension's receiver: this device's name, platform (macos, windows, linux,
-  /// server) and download settings; with `listen` the listener starts (once). Its port, or null.
-  static int? extensionServe(Map<String, Object?> options) => _call((arena) =>
-      (_read(_bindings.tl_ext_serve(_string(jsonEncode(options), arena))) as num?)?.toInt());
-  /// A new binding code: `{code, link, addresses, expires_in}`; [addresses] ("host:port") as the
-  /// browser reaches this device, or null for its own LAN addresses.
-  static Map<String, dynamic> extensionPairBegin([List<String>? addresses]) => _call((arena) =>
-      _read(_bindings.tl_ext_pair_begin(_string(jsonEncode(addresses), arena))) as Map<String, dynamic>);
-  static void extensionPairCancel() => _bindings.tl_ext_pair_cancel();
-  /// `{clients: [{id, name, added, seen}], pairing: {code, link, expires_in}?, port}`
-  static Map<String, dynamic> extensionClients() => _call((arena) =>
-      _read(_bindings.tl_ext_clients()) as Map<String, dynamic>);
-  static bool extensionRemove(String id) => _call((arena) =>
-      _read(_bindings.tl_ext_remove(_string(id, arena))) as bool);
   static int syncStart(String accountKeyHex, String deviceName) =>
       _call((arena) {
         final value = _read(_bindings.tl_sync_start(
@@ -300,12 +283,6 @@ class Core {
   static void setModelsDirectory(String dir) => _call((arena) {
         _read(_bindings.tl_set_models_dir(_string(dir, arena)));
       });
-  /// Windows / Linux secrets: a new key, and values sealed / opened with it.
-  static String secretKey() => _call((arena) => _read(_bindings.tl_secret_key()) as String);
-  static String secretSeal(String key, String text) =>
-      _call((arena) => _read(_bindings.tl_secret_seal(_string(key, arena), _string(text, arena))) as String);
-  static String secretOpen(String key, String blob) =>
-      _call((arena) => _read(_bindings.tl_secret_open(_string(key, arena), _string(blob, arena))) as String);
   /// The models offered for download in [format] (`mlx` or `gguf`).
   static List<CatalogEntry> modelCatalog(String format) => _call((arena) {
         final value = _read(_bindings.tl_model_catalog(_string(format, arena)));
