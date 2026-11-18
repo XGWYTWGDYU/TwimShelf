@@ -48,7 +48,7 @@ struct SettingsRootView: View {
                     NavTile(title: L("common.importAndBackup"), detail: nil, symbol: "shippingbox.fill", color: .brown, id: "nav-transfer") { env.open(L("common.importAndBackup"), MacSettingsPages.transfer()) }
                     NavTile(title: L("common.tags"), detail: nil, symbol: "tag.fill", color: .indigo, id: "nav-tags") { env.open(L("common.tags"), MacTagsPage()) }
                     NavTile(title: L("common.aiModels"), detail: (ModelStore.shared.activeTaggerId.map { ModelStore.shared.displayName($0) } ?? L("mac.models.none")) + (counts.total > 0 ? L("mac.models.analysed", counts.done, counts.total) : ""),
-                            symbol: "sparkles", color: .purple, mascot: AutoTagger.shared.running ? "camera" : nil, progress: counts.total > 0 ? Double(counts.done) / Double(counts.total) : nil, id: "nav-models") { env.open(L("common.aiModels"), MacSettingsPages.models()) }
+                            symbol: "sparkles", color: .purple, progress: counts.total > 0 ? Double(counts.done) / Double(counts.total) : nil, id: "nav-models") { env.open(L("common.aiModels"), MacSettingsPages.models()) }
                     NavTile(title: L("mac.sync"), detail: svc.hasAccount ? (online > 0 ? L("mac.sync.online", online) : L("mac.sync.noneOnline")) : L("mac.sync.noAccount"), symbol: "arrow.triangle.2.circlepath", color: .green,
                             badge: (svc.status?.syncing ?? 0) > 0 ? L("mac.sync.syncing") : nil, badgeColor: .blue, id: "nav-sync") { env.open(L("mac.sync"), MacSettingsPages.sync()) }
                     NavTile(title: L("ext.title"), detail: ExtensionReceiver.summary, symbol: "puzzlepiece.extension.fill", color: .indigo, id: "nav-extension") { env.open(L("ext.title"), MacSettingsPages.browserExtension()) }
@@ -66,21 +66,12 @@ struct SettingsRootView: View {
                     }
                 }
             }
-            // how many cards a row of 浏览 holds (the window's shape picks the level)
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeading(L("cards.section"))
-                Card(spacing: 14) {
-                CardRow(symbol: "rectangle.portrait.split.2x1", color: .teal, title: L("cards.portrait")) {
-                    Picker("", selection: Binding(get: { LibraryPrefs.cardDensityPortrait }, set: { LibraryPrefs.cardDensityPortrait = $0 })) {
-                        ForEach(0..<3, id: \.self) { Text(LibraryPrefs.densityNames[$0]).tag($0) }
-                    }.labelsHidden().pickerStyle(.menu).fixedSize()
-                }
-                RowDivider(inset: 42)
-                CardRow(symbol: "rectangle.split.3x1", color: .teal, title: L("cards.landscape")) {
+            // how many cards a row of 浏览 holds
+            Card(spacing: 14) {
+                CardRow(symbol: "rectangle.split.3x1", color: .teal, title: L("cards.section")) {
                     Picker("", selection: Binding(get: { LibraryPrefs.cardDensityLandscape }, set: { LibraryPrefs.cardDensityLandscape = $0 })) {
                         ForEach(0..<3, id: \.self) { Text(LibraryPrefs.densityNames[$0]).tag($0) }
                     }.labelsHidden().pickerStyle(.menu).fixedSize()
-                }
                 }
             }
             // last: starting with the Mac, what the app takes on this Mac, the app itself, and clearing everything

@@ -1681,7 +1681,6 @@ final class ToastView: UIView {
         label.textColor = .white
         label.numberOfLines = 2
         button.titleLabel?.font = .systemFont(ofSize: 15, weight: .bold)
-        button.tintColor = .systemYellow
         button.addAction(UIAction { [weak self] _ in self?.action?(); self?.hide() }, for: .touchUpInside)
         button.accessibilityIdentifier = "toastAction"
         let st = UIStackView(arrangedSubviews: [label, button])

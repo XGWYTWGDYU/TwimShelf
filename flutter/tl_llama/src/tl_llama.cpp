@@ -122,6 +122,12 @@ static char *describe_picture(tl_llama *m, const char *image, const char *system
   if (n > (int32_t)buf.size()) { buf.resize(n + 1); n = llama_chat_apply_template(tmpl, msgs, 2, true, buf.data(), (int32_t)buf.size()); }
   if (n < 0) { fail(error, "chat template"); return nullptr; }
   std::string prompt(buf.data(), n);
+  // a model that reasons in <think>: its reasoning is already over when it starts to answer
+  if (tmpl && std::strstr(tmpl, "<think>")) {
+    const std::string open = "<think>\n";
+    if (prompt.size() >= open.size() && prompt.compare(prompt.size() - open.size(), open.size(), open) == 0) prompt += "\n</think>\n\n";
+    else prompt += "<think>\n\n</think>\n\n";
+  }
 
   mtmd_helper_bitmap_wrapper loaded = mtmd_helper_bitmap_init_from_file(m->vision, image, false, mtmd_helper_init_opt_default());
   mtmd_bitmap *bitmap = loaded.bitmap;

@@ -21,6 +21,7 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
     private var entries: [[FeedItem]] = []
     private var items: [FeedItem] = []
     let grid = MacMediaGridView()
+    private let topBar = MacGridTopBar()
     private let emptyLabel = NSTextField(labelWithString: L("grid.empty"))
     private let toast = MacToast()
     private let reloadWork = LatestWork()
@@ -42,11 +43,13 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.font = .systemFont(ofSize: NSFont.systemFontSize + 2)
         emptyLabel.isHidden = true
-        for v in [grid, emptyLabel, toast] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        for v in [grid, topBar, emptyLabel, toast] as [NSView] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
         NSLayoutConstraint.activate([
             // the grid runs under the toolbar (it keeps its first row below it)
             grid.topAnchor.constraint(equalTo: topAnchor), grid.leadingAnchor.constraint(equalTo: leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: trailingAnchor), grid.bottomAnchor.constraint(equalTo: bottomAnchor),
+            topBar.topAnchor.constraint(equalTo: topAnchor), topBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            topBar.trailingAnchor.constraint(equalTo: trailingAnchor), topBar.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
             emptyLabel.centerXAnchor.constraint(equalTo: grid.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: grid.centerYAnchor),
             toast.centerXAnchor.constraint(equalTo: centerXAnchor), toast.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
         ])
@@ -383,12 +386,24 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
     }
 }
 
-/// A page's title and subtitle on a capsule of glass, for the toolbar of a grid page: the photos
-/// scroll under the toolbar, and the glass keeps the text legible over any of them.
+/// The strip of blur across the top of a grid page, behind the toolbar: the photos scroll under
+/// it, with a straight edge. Clicks go through it.
+private final class MacGridTopBar: NSVisualEffectView {
+    init() {
+        super.init(frame: .zero)
+        material = .headerView
+        blendingMode = .withinWindow
+        state = .active
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A page's title and subtitle, for the toolbar of a grid page (over the page's blur bar).
 final class MacGlassTitle: NSView {
     private let title = NSTextField(labelWithString: "")
     private let subtitle = NSTextField(labelWithString: "")
-    /// As wide as the longer line plus the capsule's padding (at most 320).
+    /// As wide as the longer line plus its margins (at most 320).
     private lazy var width = widthAnchor.constraint(equalToConstant: 60)
 
     init() {
@@ -403,36 +418,11 @@ final class MacGlassTitle: NSView {
         text.alignment = .leading
         text.spacing = 0
         text.translatesAutoresizingMaskIntoConstraints = false
-        // centred in the pill, whatever the glass does with its content view
-        let box = NSView()
-        box.addSubview(text)
-        NSLayoutConstraint.activate([text.centerYAnchor.constraint(equalTo: box.centerYAnchor), text.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
-                                     text.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14)])
-        let glass: NSView
-        if #available(macOS 26.0, *) {
-            let g = NSGlassEffectView()
-            g.cornerRadius = 18
-            g.contentView = box
-            glass = g
-        } else {
-            let v = NSVisualEffectView()
-            v.material = .popover
-            v.blendingMode = .withinWindow
-            v.state = .active
-            v.wantsLayer = true
-            v.layer?.cornerRadius = 18
-            box.translatesAutoresizingMaskIntoConstraints = false
-            v.addSubview(box)
-            NSLayoutConstraint.activate([box.topAnchor.constraint(equalTo: v.topAnchor), box.bottomAnchor.constraint(equalTo: v.bottomAnchor),
-                                         box.leadingAnchor.constraint(equalTo: v.leadingAnchor), box.trailingAnchor.constraint(equalTo: v.trailingAnchor)])
-            glass = v
-        }
-        glass.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(glass)
+        addSubview(text)
         width.priority = .required
         NSLayoutConstraint.activate([
-            glass.topAnchor.constraint(equalTo: topAnchor), glass.bottomAnchor.constraint(equalTo: bottomAnchor),
-            glass.leadingAnchor.constraint(equalTo: leadingAnchor), glass.trailingAnchor.constraint(equalTo: trailingAnchor),
+            text.centerYAnchor.constraint(equalTo: centerYAnchor), text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             heightAnchor.constraint(equalToConstant: 36),
             width,
         ])
@@ -441,7 +431,7 @@ final class MacGlassTitle: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Appears or goes at once, without any animation (nothing of the glass lingers on a page that has none).
+    /// Appears or goes at once, without any animation.
     func setShown(_ on: Bool) {
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0

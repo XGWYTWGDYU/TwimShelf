@@ -1203,7 +1203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         static let back = NSToolbarItem.Identifier("back")
         static let title = NSToolbarItem.Identifier("titlePill")
     }
-    /// The title and subtitle of a grid page, on glass (the photos scroll under the toolbar).
+    /// The title and subtitle of a grid page.
     private let titlePill = MacGlassTitle()
 
     private var page: MacMediaGridPage? { root.content.page }
@@ -1295,9 +1295,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
         toolbarMode = mode
         let shown = Set(visibleItems(mode))
-        // a grid page shows its title on glass (as an item); the window's own title only elsewhere
-        // The title item is never hidden or shown (the toolbar animates that, and its glass lingered on
-        // the other pages): it stays in place and the pill inside it appears or goes at once.
+        // a grid page shows its title as an item; the window's own title only elsewhere
+        // The title item is never hidden or shown (the toolbar animates that): it stays in place
+        // and the text inside it appears or goes at once.
         let pill = c.page != nil
         titlePill.setShown(pill)
         if window.titleVisibility != (pill ? .hidden : .visible) { window.titleVisibility = pill ? .hidden : .visible }
@@ -1410,7 +1410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             item.view = titlePill
             item.label = L("mac.toolbar.title")
             item.visibilityPriority = .high
-            if #available(macOS 26.0, *) { item.isBordered = false }   // the pill is its own glass
+            if #available(macOS 26.0, *) { item.isBordered = false }   // plain text, no capsule around it
             return item
         case ID.search:
             let item = NSToolbarItem(itemIdentifier: id)

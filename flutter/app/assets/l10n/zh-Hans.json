@@ -1179,7 +1179,7 @@
   "tags.deleteAIEllipsis": "删除全部 AI 标签…",
   "tags.deleteEllipsis": "删除标签…",
   "tags.filter": "筛选标签",
-  "tags.hint.mac": " · 点一下卡片，在浏览里只看这个标签；右键有更多操作",
+  "tags.hint.mac": " · 点卡片右上角的箭头，在浏览里只看这个标签；右键有更多操作",
   "tags.itemsUnit": "个媒体",
   "tags.menu.title": "%@（%@ 个媒体）",
   "tags.noAI": "没有 AI 标签",

@@ -1,4 +1,5 @@
 import AppKit
+import IOSurface
 import MetalKit
 
 protocol MacMediaGridDelegate: AnyObject {
@@ -21,6 +22,11 @@ protocol MacMediaGridDelegate: AnyObject {
 final class MacMediaGridView: NSView {
     weak var delegate: MacMediaGridDelegate?
     private let metalView = MTKView()
+    /// While the width moves: the frame for this very layout, shown in the same transaction as the
+    /// sidebar's own movement (a drawable reaches the screen a frame or more after it).
+    private let movingPicture = NSView()
+    private var surfaces: [(surface: IOSurface, texture: MTLTexture)] = []
+    private var shownSurface: IOSurface?
     private let scrollView = GridScrollView()
     private let document = GridDocumentView()
     private let footerLabel = NSTextField(labelWithString: "")
@@ -55,8 +61,20 @@ final class MacMediaGridView: NSView {
         metalView.isPaused = true
         metalView.enableSetNeedsDisplay = false
         metalView.delegate = self
-        metalView.autoresizingMask = [.width, .height]
         addSubview(metalView)
+        // The picture is as wide as the window and stays against the grid's right edge, the part
+        // past the left edge cut off. A sidebar moving only slides it: there is no drawable to
+        // make again on each frame, and the window's edge never shows a cut column or empty strip.
+        clipsToBounds = true
+        metalView.wantsLayer = true
+        metalView.layer?.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull(), "transform": NSNull()]
+        movingPicture.wantsLayer = true
+        movingPicture.layerContentsRedrawPolicy = .never
+        movingPicture.layer?.isOpaque = true
+        movingPicture.layer?.contentsGravity = .resize
+        movingPicture.layer?.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull(), "hidden": NSNull()]
+        movingPicture.isHidden = true
+        addSubview(movingPicture)
         renderer = GridRenderer(view: metalView, budgetMB: 400)
         renderer?.thumbnails.onLoaded = { [weak self] in self?.needsDraw = true }
         renderer?.thumbnails.onFailed = { MacMediaLoader.shared.reportIfBroken($0) }
@@ -89,7 +107,9 @@ final class MacMediaGridView: NSView {
         } else if window == nil {
             link?.invalidate()
             link = nil
+            surfaces = []
         }
+        needsLayout = true
         needsDraw = true
     }
 
@@ -100,18 +120,92 @@ final class MacMediaGridView: NSView {
 
     private var scale: CGFloat { window?.backingScaleFactor ?? 2 }
 
+    /// The width is moving: each frame is shown with the view's own new size.
+    private var widthMoving = false
+    private var widthSettled: DispatchWorkItem?
+    private func widthChanged() {
+        widthMoving = true
+        movingPicture.isHidden = false
+        widthSettled?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.widthMoving = false
+            self.updateThumbnailSizes()
+            // the view's own picture takes over once it is on the screen
+            self.metalView.draw()
+            self.needsDraw = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self, !self.widthMoving else { return }
+                self.movingPicture.isHidden = true
+                self.movingPicture.layer?.contents = nil
+                self.shownSurface = nil
+                self.surfaces = Array(self.surfaces.prefix(3))
+            }
+        }
+        widthSettled = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    /// A surface nothing is showing: the window server still holds the last frames for a while,
+    /// and drawing into one of those would put a wrong picture on the screen.
+    private func nextSurface() -> (surface: IOSurface, texture: MTLTexture)? {
+        guard let device = metalView.device else { return nil }
+        let w = Int((metalView.bounds.width * scale).rounded()), h = Int((metalView.bounds.height * scale).rounded())
+        guard w > 0, h > 0 else { return nil }
+        if surfaces.first.map({ $0.surface.width != w || $0.surface.height != h }) ?? false { surfaces = [] }
+        if let free = surfaces.first(where: { !$0.surface.isInUse && $0.surface !== shownSurface }) { return free }
+        // the colours of the view's own picture: nothing may shift when one takes over from the other
+        let color = (metalView.colorspace ?? CGColorSpace(name: CGColorSpace.sRGB))?.copyPropertyList()
+        guard let surface = IOSurface(properties: [.width: w, .height: h, .bytesPerElement: 4, .pixelFormat: kCVPixelFormatType_32BGRA]) else { return nil }
+        if let color { IOSurfaceSetValue(surface as IOSurfaceRef, kIOSurfaceColorSpace, color) }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]
+        d.storageMode = device.hasUnifiedMemory ? .shared : .managed
+        guard let texture = device.makeTexture(descriptor: d, iosurface: surface as IOSurfaceRef, plane: 0) else { return nil }
+        surfaces.append((surface, texture))
+        return surfaces.last
+    }
+
+    private func drawMovingPicture() {
+        guard let renderer, let next = nextSurface() else { return }
+        renderer.target = next.texture
+        metalView.draw()
+        renderer.target = nil
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        movingPicture.layer?.contents = next.surface
+        shownSurface = next.surface
+        CATransaction.commit()
+        needsDraw = false
+    }
+
     private func config() -> GridConfig {
         var cfg = GridConfig(width: bounds.width, height: bounds.height, scale: scale,
                              insetTop: safeAreaInsets.top, insetBottom: Self.footerHeight + bottomInset, count: 0)
-        cfg.columns = GridConfig.columns(forWidth: bounds.width)
+        cfg.columns = GridConfig.columns(forWidth: bounds.width, windowWidth: window?.frame.width)
+        // always the width's exact share: where a sidebar's movement ends is where the tiles stay
+        cfg.exactness = 1
         return cfg
     }
 
     override func layout() {
         super.layout()
-        metalView.frame = bounds
-        scrollView.frame = bounds
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let pictureWidth = max(bounds.width, window?.contentView?.bounds.width ?? 0)
+        metalView.frame = NSRect(x: bounds.width - pictureWidth, y: 0, width: pictureWidth, height: bounds.height)
+        movingPicture.frame = metalView.frame
+        renderer?.contentWidth = bounds.width
+        CATransaction.commit()
+        // the scrolling starts below the toolbar: the system puts no soft fade over a scroll view
+        // that does not reach under it (the page has a blur bar of its own there)
+        let top = min(safeAreaInsets.top, bounds.height)
+        scrollView.frame = NSRect(x: 0, y: top, width: bounds.width, height: bounds.height - top)
         guard bounds.width > 0, bounds.height > 0 else { return }
+        // (dragging the window's edge has no sidebar to keep up with)
+        // (a sidebar's movement counts as a live resize of this view, but not of the window)
+        let windowDragged = window?.inLiveResize == true
+        if let s = scene, s.engine.cfg.width != bounds.width, !windowDragged { widthChanged() }
         let cfg = config()
         if scene == nil {
             let s = GridScene(cfg: cfg, level: initialLevel)
@@ -125,9 +219,10 @@ final class MacMediaGridView: NSView {
             updateThumbnailSizes()
         } else if let s = scene {
             let c = s.engine.cfg
-            if c.width != cfg.width || c.height != cfg.height || c.insetTop != cfg.insetTop || c.insetBottom != cfg.insetBottom || c.scale != cfg.scale {
+            if c.width != cfg.width || c.height != cfg.height || c.insetTop != cfg.insetTop || c.insetBottom != cfg.insetBottom || c.scale != cfg.scale || c.exactness != cfg.exactness {
                 s.setConfig(cfg)
-                if c.width != cfg.width || c.scale != cfg.scale { updateThumbnailSizes() }
+                if c.scale != cfg.scale { updateThumbnailSizes() }
+                if widthMoving { drawMovingPicture() } else if windowDragged { metalView.draw(); needsDraw = false }
             }
         }
     }
@@ -153,16 +248,16 @@ final class MacMediaGridView: NSView {
     // MARK: Scroll view ↔ resting layout
 
     /// The scroll offset in the engine's terms: the content y at the top inset line.
-    private var offset: CGFloat { scrollView.contentView.bounds.origin.y + (scene?.engine.cfg.insetTop ?? 0) }
+    private var offset: CGFloat { scrollView.contentView.bounds.origin.y }
 
     private func applyRestToScroll() {
         guard let scene else { return }
         let cfg = scene.engine.cfg, r = scene.engine.rest
         syncingScroll = true
-        scrollView.contentInsets = NSEdgeInsets(top: cfg.insetTop, left: 0, bottom: cfg.insetBottom, right: 0)
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: cfg.insetBottom, right: 0)
         let h = cfg.contentHeight(level: r.level, phase: r.phase)
         document.frame = NSRect(x: 0, y: 0, width: cfg.width, height: max(h, 1))
-        scrollView.contentView.scroll(to: NSPoint(x: 0, y: r.offset - cfg.insetTop))
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: r.offset))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         syncingScroll = false
         placeFooter(h)
@@ -182,7 +277,7 @@ final class MacMediaGridView: NSView {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.3
                 ctx.timingFunction = .springy
-                scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: maxOffset - cfg.insetTop))
+                scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: maxOffset))
             }
         }
         needsDraw = true
@@ -378,8 +473,8 @@ final class MacMediaGridView: NSView {
     fileprivate func debugScroll(by dy: CGFloat) {
         guard let scene else { return }
         let cfg = scene.engine.cfg, r = scene.engine.rest
-        let maxY = cfg.maxOffset(level: r.level, phase: r.phase) - cfg.insetTop
-        let y = min(max(scrollView.contentView.bounds.origin.y + dy, -cfg.insetTop), maxY)
+        let maxY = cfg.maxOffset(level: r.level, phase: r.phase)
+        let y = min(max(scrollView.contentView.bounds.origin.y + dy, 0), maxY)
         scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: y))
     }
     fileprivate func debugPinchBegin(at p: CGPoint) {
@@ -477,7 +572,10 @@ extension MacMediaGridView: MTKViewDelegate {
     /// Thumbnail sizes follow the levels; a whole new set is put on disk in the background.
     fileprivate func updateThumbnailSizes() {
         guard let scene, let renderer else { return }
-        renderer.setThumbnailSizes(scene.engine.cfg)
+        // by the window's width: a sidebar opening beside the grid keeps the pictures it has
+        var cfg = scene.engine.cfg
+        cfg.width = window?.frame.width ?? cfg.width
+        guard renderer.setThumbnailSizes(cfg) else { return }
         renderer.thumbnails.warm(scene.tiles.map(\.item))
         lastPrefetch = .nan
     }

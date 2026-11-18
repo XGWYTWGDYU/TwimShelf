@@ -191,8 +191,8 @@ enum ExternalAI {
     }
 
     /// The request body: a system message and a user message with the text and the image.
-    static func body(model: String, system: String, question: String, jpeg: Data) -> Data {
-        let json: [String: Any] = [
+    static func body(model: String, system: String, question: String, jpeg: Data, thinkingOff: [String: Any] = [:]) -> Data {
+        let json: [String: Any] = thinkingOff.merging([
             "model": model,
             "temperature": 0.1,
             "max_tokens": 300,
@@ -204,8 +204,30 @@ enum ExternalAI {
                     ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + jpeg.base64EncodedString()]],
                 ]],
             ],
-        ]
+        ]) { _, own in own }
         return (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
+    }
+
+    /// What turns a model's reasoning off, as this service spells it. Services that answer with
+    /// the result alone get nothing; the rest of the world (local servers) gets the usual words.
+    static func thinkingOff(host: String) -> [String: Any] {
+        let h = host.lowercased()
+        func at(_ d: String) -> Bool { h == d || h.hasSuffix("." + d) }
+        if at("openai.com") || at("openai.azure.com") || at("x.ai") || at("anthropic.com") { return [:] }
+        if at("deepseek.com") || at("bigmodel.cn") || at("z.ai") { return ["thinking": ["type": "disabled"]] }
+        if at("aliyuncs.com") || at("siliconflow.cn") || at("siliconflow.com") { return ["enable_thinking": false] }
+        if at("openrouter.ai") { return ["reasoning": ["enabled": false]] }
+        if at("googleapis.com") { return ["reasoning_effort": "none"] }
+        return ["think": false, "enable_thinking": false, "chat_template_kwargs": ["enable_thinking": false]]
+    }
+
+    /// Servers that refused the switch above: asked plainly from then on.
+    private static let refusedLock = NSLock()
+    nonisolated(unsafe) private static var refusedThinkingOff = Set<String>()
+    private static func refusesThinkingOff(_ url: String, add: Bool = false) -> Bool {
+        refusedLock.lock(); defer { refusedLock.unlock() }
+        if add { refusedThinkingOff.insert(url) }
+        return refusedThinkingOff.contains(url)
     }
 
     /// The answer text of a Chat Completions response.
@@ -215,7 +237,9 @@ enum ExternalAI {
         if let s = msg?["content"] as? String, !s.isEmpty { return s }
         // some servers return content as parts
         if let parts = msg?["content"] as? [[String: Any]] {
-            let s = parts.compactMap { $0["text"] as? String }.joined()
+            // (never the parts that hold the model's reasoning)
+            let s = parts.filter { p in !((p["type"] as? String)?.lowercased().contains("think") == true || (p["type"] as? String)?.lowercased().contains("reason") == true) }
+                .compactMap { $0["text"] as? String }.joined()
             if !s.isEmpty { return s }
         }
         throw Failure.empty
@@ -237,7 +261,14 @@ enum ExternalAI {
         guard let jpg = jpeg(image) else { throw Failure.empty }
         let p = ModelPrompts.prompt(forModel: m.id)
         let name = try await modelName(m)
-        let data = try await send(request(url, key: m.apiKey, body: body(model: name, system: p.system, question: p.question(existing: existing, vocabulary: vocabulary, postText: postText), jpeg: jpg)))
+        let question = p.question(existing: existing, vocabulary: vocabulary, postText: postText)
+        let off = refusesThinkingOff(m.url) ? [:] : thinkingOff(host: url.host ?? "")
+        let data: Data
+        do { data = try await send(request(url, key: m.apiKey, body: body(model: name, system: p.system, question: question, jpeg: jpg, thinkingOff: off))) }
+        catch Failure.http(let code, _) where (code == 400 || code == 422) && !off.isEmpty {
+            _ = refusesThinkingOff(m.url, add: true)
+            data = try await send(request(url, key: m.apiKey, body: body(model: name, system: p.system, question: question, jpeg: jpg)))
+        }
         return try AIEngine.parseTags(try answer(data))
     }
 

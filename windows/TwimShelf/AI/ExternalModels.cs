@@ -304,7 +304,7 @@ public sealed partial class ExternalAI(ExternalModels models)
     }
 
     /// The request, byte for byte the other apps' (keys sorted as Swift's encoder gives them).
-    public static string Body(string model, string system, string question, byte[] jpeg)
+    public static string Body(string model, string system, string question, byte[] jpeg, JsonObject? thinkingOff = null)
     {
         var o = new JsonObject
         {
@@ -322,9 +322,27 @@ public sealed partial class ExternalAI(ExternalModels models)
             ["stream"] = false,
             ["temperature"] = 0.1,
         };
+        if (thinkingOff != null) foreach (var (k, v) in thinkingOff) o[k] = v?.DeepClone();
         return o.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
-            .Replace("\"temperature\":0.1}", "\"temperature\":0.10000000000000001}");
+            .Replace("\"temperature\":0.1", "\"temperature\":0.10000000000000001");
     }
+
+    /// What turns a model's reasoning off, as this service spells it. Services that answer with the
+    /// result alone get nothing; the rest of the world (local servers) gets the usual words.
+    public static JsonObject? ThinkingOff(string host)
+    {
+        var h = host.ToLowerInvariant();
+        bool At(string d) => h == d || h.EndsWith("." + d, StringComparison.Ordinal);
+        if (At("openai.com") || At("openai.azure.com") || At("x.ai") || At("anthropic.com")) return null;
+        if (At("deepseek.com") || At("bigmodel.cn") || At("z.ai")) return new JsonObject { ["thinking"] = new JsonObject { ["type"] = "disabled" } };
+        if (At("aliyuncs.com") || At("siliconflow.cn") || At("siliconflow.com")) return new JsonObject { ["enable_thinking"] = false };
+        if (At("openrouter.ai")) return new JsonObject { ["reasoning"] = new JsonObject { ["enabled"] = false } };
+        if (At("googleapis.com")) return new JsonObject { ["reasoning_effort"] = "none" };
+        return new JsonObject { ["think"] = false, ["enable_thinking"] = false, ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false } };
+    }
+
+    /// Servers that refused the switch above: asked plainly from then on.
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> RefusedThinkingOff = new();
 
     async Task<byte[]> Send(ExternalModel model, string path, string? body, CancellationToken cancel)
     {
@@ -402,7 +420,8 @@ public sealed partial class ExternalAI(ExternalModels models)
         if (content is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0) return s;
         if (content is JsonArray parts)
         {
-            var joined = string.Concat(parts.OfType<JsonObject>().Select(p => p["text"] is JsonValue t && t.TryGetValue<string>(out var x) ? x : ""));
+            // (never the parts that hold the model's reasoning)
+            var joined = string.Concat(parts.OfType<JsonObject>().Where(p => !(p["type"] is JsonValue k && k.TryGetValue<string>(out var type) && (type.Contains("think", StringComparison.OrdinalIgnoreCase) || type.Contains("reason", StringComparison.OrdinalIgnoreCase)))).Select(p => p["text"] is JsonValue t && t.TryGetValue<string>(out var x) ? x : ""));
             if (joined.Length > 0) return joined;
         }
         throw new ExternalFailure(ExternalFailureKind.Empty);
@@ -417,7 +436,15 @@ public sealed partial class ExternalAI(ExternalModels models)
     {
         var prompt = models.PromptFor(model.Id);
         var name = await ModelName(model, cancel);
-        var data = await Send(model, "chat/completions", Body(name, prompt.System, prompt.Question(existing, vocabulary, postText), jpeg), cancel);
+        var question = prompt.Question(existing, vocabulary, postText);
+        var off = RefusedThinkingOff.ContainsKey(model.Url) ? null : ThinkingOff(Endpoint(model.Url, "chat/completions").Host);
+        byte[] data;
+        try { data = await Send(model, "chat/completions", Body(name, prompt.System, question, jpeg, off), cancel); }
+        catch (ExternalFailure e) when (off != null && e.Kind == ExternalFailureKind.Http && e.Status is 400 or 422)
+        {
+            RefusedThinkingOff[model.Url] = true;
+            data = await Send(model, "chat/completions", Body(name, prompt.System, question, jpeg), cancel);
+        }
         return ParseTags(Answer(data));
     }
 

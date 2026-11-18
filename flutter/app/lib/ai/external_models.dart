@@ -498,6 +498,7 @@ class ExternalAI {
     required String system,
     required String question,
     required List<int> jpeg,
+    Map<String, Object> thinkingOff = const {},
   }) {
     final encoded = jsonEncode({
       'max_tokens': 300,
@@ -519,11 +520,12 @@ class ExternalAI {
       'model': model,
       'stream': false,
       'temperature': 0.1,
+      ...thinkingOff,
     });
     // Foundation NSNumber encodes this Double with 17 significant digits.
     return encoded.replaceFirst(
-      '"temperature":0.1}',
-      '"temperature":0.10000000000000001}',
+      '"temperature":0.1',
+      '"temperature":0.10000000000000001',
     );
   }
 
@@ -671,6 +673,8 @@ class ExternalAI {
     if (content is List) {
       final value = content
           .whereType<Map>()
+          // (never the parts that hold the model's reasoning)
+          .where((p) => !'${p['type']}'.toLowerCase().contains(RegExp('think|reason')))
           .map((p) => p['text'])
           .whereType<String>()
           .join();
@@ -680,17 +684,14 @@ class ExternalAI {
   }
 
   /// A model's reply as tags, by the rules every app shares (scripts/checks/ai_tags/cases.json):
-  /// a JSON array of strings (after a reasoning block or inside a code fence), or, from a reply
-  /// with no JSON in it at all, a list split at commas and the like. Anything else, or a tag that
-  /// is a piece of the reply's syntax (`}`, `harley }`), refuses the whole reply ([badTags]): a
-  /// model saying that is not working, and its other words are no better. An empty list is
+  /// a list in brackets (after a reasoning block, inside a code fence or a `{"tags": …}`, cut off
+  /// by the length limit, with single quotes), or, from a reply with no brackets at all, a list
+  /// split at commas and the like. What is no tag in a good list (`}`, a number) is left out. A
+  /// reply that is no list, or holds nothing but such pieces, is [badTags]; an empty list is
   /// [noTags]. Either way the analysis failed, and nothing is written.
   static List<String> parseTags(String raw) {
     const bad = ExternalFailure(ExternalFailureKind.badTags);
-    var text = raw;
-    final think = text.lastIndexOf('</think>');
-    if (think >= 0) text = text.substring(think + 8);
-    text = text.trim();
+    var text = _withoutThinking(raw).trim();
     if (text.startsWith('```')) {
       final nl = text.indexOf('\n');
       text = nl < 0 ? '' : text.substring(nl + 1);
@@ -700,18 +701,16 @@ class ExternalAI {
     List<String> items;
     final a = text.indexOf('['), b = text.lastIndexOf(']');
     if (a >= 0 || b >= 0) {
-      if (a < 0 || b < a) throw bad;
-      final outside = text.substring(0, a) + text.substring(b + 1);
-      if (outside.contains(RegExp(r'[\[\]{}]'))) throw bad;
-      Object? list;
-      try {
-        list = jsonDecode(text.substring(a, b + 1));
-      } catch (_) {
-        throw bad;
-      }
-      if (list is! List || list.any((e) => e is! String)) throw bad;
-      items = list.cast<String>();
+      if (a < 0 || (b >= 0 && b < a)) throw bad;
+      final brackets = RegExp(r'[\[\]{}]');
+      final before = text.substring(0, a).trim();
+      final after = b < 0 ? '' : text.substring(b + 1).trim();
+      final wrapped = before.startsWith('{') && !before.substring(1).contains(brackets) && (after == '}' || b < 0);
+      if (!wrapped && (before + after).contains(brackets)) throw bad;
+      items = _listItems(text.substring(a + 1, b < 0 ? text.length : b), cutOff: b < 0);
     } else {
+      if (text.contains(_thinkingAloud)) throw bad;
+      text = text.replaceFirst(RegExp('^[^,\uFF0C\u3001;\uFF1B\n:\uFF1A{}"]{1,24}[:\uFF1A]\\s*'), '');
       if (text.contains(RegExp(r'[{}:"]'))) throw bad;
       items = text.split(RegExp('[,\uFF0C\u3001;\uFF1B\n#]'));
     }
@@ -722,15 +721,120 @@ class ExternalAI {
     final punctuation = RegExp(r'^[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E\s]+$');
     final seen = <String>{};
     final result = <String>[];
+    var pieces = false;
     for (final item in items) {
       final clean = item.replaceAll(edge, '').toLowerCase();
       if (clean.isEmpty) continue;
-      if (fragment.hasMatch(clean) || punctuation.hasMatch(clean)) throw bad;
+      if (fragment.hasMatch(clean) || punctuation.hasMatch(clean)) {
+        pieces = true;
+        continue;
+      }
       if (clean.characters.length <= 12 && seen.add(clean)) result.add(clean);
       if (result.length == 12) break;
     }
-    if (result.isEmpty) throw const ExternalFailure(ExternalFailureKind.noTags);
+    if (result.isEmpty) throw ExternalFailure(pieces ? ExternalFailureKind.badTags : ExternalFailureKind.noTags);
     return result;
+  }
+
+  // How models mark their reasoning, and a plain reply that is reasoning without any mark.
+  static const _thinkingEnds = ['</think>', '</thinking>', '</reasoning>', '</reason>', '[/think]', '◁/think▷', '</seed:think>', '<channel|>', '<|end_of_thought|>', '<|channel|>final<|message|>'];
+  static const _thinkingStarts = ['<think>', '<thinking>', '<reasoning>', '<reason>', '[think]', '◁think▷', '<seed:think>', '<|channel>thought', '<|channel|>analysis', '<|begin_of_thought|>'];
+  static final _thinkingAloud = RegExp(
+    r"^((thinking process|thinking|thoughts?|reasoning|analysis)\s*[:：]|let me|let's|okay,|ok,|hmm|the user|the image|this image|思考|嗯|好的|首先|用户)",
+    caseSensitive: false,
+  );
+
+  /// What follows the model's reasoning. Reasoning that never ended (the length limit) is no answer.
+  static String _withoutThinking(String raw) {
+    var text = raw;
+    for (final end in _thinkingEnds) {
+      final at = text.toLowerCase().lastIndexOf(end);
+      if (at >= 0) text = text.substring(at + end.length);
+    }
+    final lower = text.toLowerCase();
+    if (_thinkingStarts.any(lower.contains)) throw const ExternalFailure(ExternalFailureKind.badTags);
+    return text;
+  }
+
+  /// What turns a model's reasoning off, as this service spells it. Services that answer with the
+  /// result alone get nothing; the rest of the world (local servers) gets the usual words.
+  static Map<String, Object> thinkingOff(String host) {
+    final h = host.toLowerCase();
+    bool at(String d) => h == d || h.endsWith('.$d');
+    if (at('openai.com') || at('openai.azure.com') || at('x.ai') || at('anthropic.com')) return const {};
+    if (at('deepseek.com') || at('bigmodel.cn') || at('z.ai')) return const {'thinking': {'type': 'disabled'}};
+    if (at('aliyuncs.com') || at('siliconflow.cn') || at('siliconflow.com')) return const {'enable_thinking': false};
+    if (at('openrouter.ai')) return const {'reasoning': {'enabled': false}};
+    if (at('googleapis.com')) return const {'reasoning_effort': 'none'};
+    return const {'think': false, 'enable_thinking': false, 'chat_template_kwargs': {'enable_thinking': false}};
+  }
+
+  /// Servers that refused the switch above: asked plainly from then on.
+  static final _refusedThinkingOff = <String>{};
+
+  /// The entries between a list's brackets. [cutOff]: the reply stopped inside the list, and what
+  /// it was still writing is left out.
+  static List<String> _listItems(String c, {required bool cutOff}) {
+    const bad = ExternalFailure(ExternalFailureKind.badTags);
+    const closers = {'"': '"', "'": "'", '\u201C': '\u201D', '\u2018': '\u2019'};
+    final space = RegExp(r'\s');
+    final items = <String>[];
+    var i = 0;
+    while (i < c.length) {
+      if (c[i] == ',' || space.hasMatch(c[i])) {
+        i++;
+        continue;
+      }
+      final close = closers[c[i]];
+      if (close != null) {
+        final word = StringBuffer();
+        var j = i + 1;
+        var closed = false;
+        while (j < c.length) {
+          if (c[j] == r'\' && j + 1 < c.length) {
+            final e = c[j + 1];
+            if (e == 'n' || e == 't' || e == 'r') {
+              word.write(' ');
+              j += 2;
+            } else if (e == 'u') {
+              final v = j + 5 < c.length ? int.tryParse(c.substring(j + 2, j + 6), radix: 16) : null;
+              if (v == null) throw bad;
+              word.writeCharCode(v);
+              j += 6;
+            } else {
+              word.write(e);
+              j += 2;
+            }
+            continue;
+          }
+          if (c[j] == close) {
+            // an apostrophe inside a word in single quotes (dog's) is not the end
+            var k = j + 1;
+            while (k < c.length && space.hasMatch(c[k])) {
+              k++;
+            }
+            if (close != "'" || k >= c.length || c[k] == ',') {
+              closed = true;
+              j++;
+              break;
+            }
+          }
+          word.write(c[j]);
+          j++;
+        }
+        if (!closed) break;
+        items.add(word.toString());
+        i = j;
+      } else {
+        var j = c.indexOf(',', i);
+        if (j < 0) j = c.length;
+        final word = c.substring(i, j).trim();
+        if (word.contains(RegExp(r'[\[\]{}]'))) throw bad;
+        if (!(cutOff && j == c.length) && double.tryParse(word) == null && !const {'null', 'true', 'false'}.contains(word)) items.add(word);
+        i = j;
+      }
+    }
+    return items;
   }
 
   Future<List<String>> tags({
@@ -743,21 +847,22 @@ class ExternalAI {
   }) async {
     final prompt = models.promptFor(model.id);
     final name = await modelName(model, cancellation: cancellation);
-    final data = await _send(
-      model,
-      'chat/completions',
-      body: body(
-        model: name,
-        system: prompt.system,
-        question: prompt.question(
-          existing: existing,
-          vocabulary: vocabulary,
-          postText: postText,
-        ),
-        jpeg: jpeg,
-      ),
-      cancellation: cancellation,
-    );
+    final question = prompt.question(existing: existing, vocabulary: vocabulary, postText: postText);
+    final off = _refusedThinkingOff.contains(model.url) ? const <String, Object>{} : thinkingOff(endpoint(model.url, 'chat/completions').host);
+    Future<Uint8List> ask(Map<String, Object> extra) => _send(
+          model,
+          'chat/completions',
+          body: body(model: name, system: prompt.system, question: question, jpeg: jpeg, thinkingOff: extra),
+          cancellation: cancellation,
+        );
+    Uint8List data;
+    try {
+      data = await ask(off);
+    } on ExternalFailure catch (e) {
+      if (off.isEmpty || e.kind != ExternalFailureKind.http || (e.status != 400 && e.status != 422)) rethrow;
+      _refusedThinkingOff.add(model.url);
+      data = await ask(const {});
+    }
     return parseTags(answer(data));
   }
 

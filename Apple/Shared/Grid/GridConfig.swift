@@ -17,6 +17,18 @@ struct GridConfig {
 
     /// The three levels for a width: 5 / 3 / 1 up to a large phone, then as many columns as keep
     /// the tiles about as big as the phone's (80 / 134 / 402 pt).
+    /// The columns of a grid in a window: chosen once for a window's width, so a sidebar opening or
+    /// closing beside the grid makes its tiles larger or smaller and moves none of them to another
+    /// row or column, as in Photos. Only the window itself changing size chooses again.
+    static func columns(forWidth w: CGFloat, windowWidth: CGFloat?) -> [Int] {
+        guard let windowWidth else { return columns(forWidth: w) }
+        if let chosen = windowColumns, chosen.width == windowWidth { return chosen.columns }
+        let columns = columns(forWidth: w)
+        windowColumns = (windowWidth, columns)
+        return columns
+    }
+    nonisolated(unsafe) private static var windowColumns: (width: CGFloat, columns: [Int])?
+
     static func columns(forWidth w: CGFloat) -> [Int] {
         guard w > 500 else { return [5, 3, 1] }
         let one = max(1, Int((w / 402).rounded()))
@@ -48,10 +60,17 @@ struct GridConfig {
     var gap: CGFloat { max(1, (Self.gapPixelsAt3x * scale / 3).rounded()) / scale }
     var levels: Int { columns.count }
 
+    /// Tiles of exactly the width's share (1) or of whole pixels (0). On the Mac, whose sidebar
+    /// resizes the grid continuously, always exact: whole pixels grow in steps, and going back to
+    /// them when the sidebar stops moves every tile once more.
+    var exactness: CGFloat = 0
+
     func side(_ level: Int) -> CGFloat {
         let n = CGFloat(columns[level])
+        let exact = (width - gap * (n - 1)) / n
+        let whole = floor(exact * scale) / scale
         // (at least a point: a view not laid out yet has no width, and zooming divides by this)
-        return max(floor((width - gap * (n - 1)) / n * scale) / scale, 1)
+        return max(whole + (exact - whole) * exactness, 1)
     }
 
     func pitch(_ level: Int) -> CGFloat { side(level) + gap }

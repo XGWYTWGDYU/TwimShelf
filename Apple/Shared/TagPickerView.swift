@@ -172,49 +172,69 @@ struct TagPickerView: View {
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.07)))
     }
 
+    /// On the Mac a plain stack: a system list paints every new row and heading white for a moment
+    /// over the popover's glass. On iOS the list stays, and a new row simply appears.
     private var list: some View {
-        List {
-            if model.canCreate {
-                Section {
-                    Button { model.add(model.query) } label: {
-                        row(icon: "plus.circle.fill", tint: .accentColor, title: L("tagPicker.create", model.trimmed), titleColor: .accentColor)
+        #if os(iOS)
+        List { listContent }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+        #else
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) { listContent }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 12)
+        }
+        .animation(.snappy(duration: 0.25), value: model.added)
+        #endif
+    }
+
+    @ViewBuilder private var listContent: some View {
+        if model.canCreate {
+            group(nil) {
+                Button { model.add(model.query) } label: {
+                    row(icon: "plus.circle.fill", tint: .accentColor, title: L("tagPicker.create", model.trimmed), titleColor: .accentColor)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("tagPickerCreate")
+            }
+        }
+        if !model.added.isEmpty {
+            group(L("tagPicker.justAdded")) {
+                ForEach(model.added, id: \.self) { a in
+                    Button { model.undoAddition(a) } label: {
+                        row(icon: "checkmark.circle.fill", tint: .green, title: a, detail: L("common.undo"))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("tagPickerCreate")
-                }
-            }
-            if !model.added.isEmpty {
-                Section(L("tagPicker.justAdded")) {
-                    ForEach(model.added, id: \.self) { a in
-                        Button { model.undoAddition(a) } label: {
-                            row(icon: "checkmark.circle.fill", tint: .green, title: a, detail: L("common.undo"))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("tagPickerUndo-" + a)
-                    }
-                }
-            }
-            if !model.suggestions.isEmpty {
-                Section(model.trimmed.isEmpty ? L("tagPicker.frequent") : L("tagPicker.matching")) {
-                    ForEach(model.suggestions, id: \.label) { t in
-                        Button { model.add(t.label) } label: {
-                            row(icon: t.ai > 0 && t.user == 0 ? "sparkles" : "tag", tint: .accentColor, title: t.label, detail: model.taggedText(t))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("tagPickerRow-" + t.label)
-                    }
+                    .accessibilityIdentifier("tagPickerUndo-" + a)
                 }
             }
         }
+        if !model.suggestions.isEmpty {
+            group(model.trimmed.isEmpty ? L("tagPicker.frequent") : L("tagPicker.matching")) {
+                ForEach(model.suggestions, id: \.label) { t in
+                    Button { model.add(t.label) } label: {
+                        row(icon: t.ai > 0 && t.user == 0 ? "sparkles" : "tag", tint: .accentColor, title: t.label, detail: model.taggedText(t))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("tagPickerRow-" + t.label)
+                }
+            }
+        }
+    }
+
+    /// A section of the list, under its heading.
+    @ViewBuilder private func group<Rows: View>(_ title: String?, @ViewBuilder rows: () -> Rows) -> some View {
         #if os(iOS)
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .scrollDismissesKeyboard(.interactively)
+        if let title { Section(title) { rows() } } else { Section { rows() } }
         #else
-        .listStyle(.inset)
-        .scrollContentBackground(.hidden)
+        VStack(alignment: .leading, spacing: 2) {
+            if let title { Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 2) }
+            rows()
+        }
         #endif
-        .animation(.snappy(duration: 0.25), value: model.added)
     }
 
     /// One list row: symbol, label, and the "n/m 已添加" count on the trailing side.
@@ -226,6 +246,10 @@ struct TagPickerView: View {
             if let detail { Text(detail).font(.callout).foregroundStyle(.secondary).monospacedDigit() }
         }
         .contentShape(Rectangle())
+        #if os(iOS)
         .padding(.vertical, 2)
+        #else
+        .padding(.vertical, 5)
+        #endif
     }
 }

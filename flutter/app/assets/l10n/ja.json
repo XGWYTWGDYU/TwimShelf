@@ -1179,7 +1179,7 @@
   "tags.deleteAIEllipsis": "AI タグをすべて削除…",
   "tags.deleteEllipsis": "タグを削除…",
   "tags.filter": "タグを絞り込む",
-  "tags.hint.mac": " · カードをクリックするとブラウズでそのタグだけ表示、右クリックでほかの操作",
+  "tags.hint.mac": " · カードの矢印をクリックするとブラウズでそのタグだけ表示、右クリックでほかの操作",
   "tags.itemsUnit": "件",
   "tags.menu.title": "%@（%@ 件）",
   "tags.noAI": "AI タグはありません",

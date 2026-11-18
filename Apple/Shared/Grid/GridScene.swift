@@ -121,6 +121,20 @@ final class GridScene {
         guard !isBusy else { return }
         var cfg = cfg
         cfg.count = engine.items.count
+        // wider or narrower with the same columns (the sidebar opening): every tile grows with the
+        // width and stays in its row and column; the row in the middle of the view stays where it
+        // is on screen, as in Photos
+        if cfg.scale == engine.cfg.scale, cfg.columns == engine.cfg.columns, cfg.pitch(engine.rest.level) != engine.cfg.pitch(engine.rest.level) {
+            let old = engine.cfg, r = engine.rest
+            let middle = (old.insetTop + old.height) / 2
+            let row = floor((middle - old.insetTop + r.offset) / old.pitch(r.level))
+            let onScreen = old.insetTop + (row + 0.5) * old.pitch(r.level) - r.offset
+            engine.cfg = cfg
+            engine.rest.offset = clampf(cfg.insetTop + (row + 0.5) * cfg.pitch(r.level) - onScreen, 0, cfg.maxOffset(level: r.level, phase: r.phase))
+            reflow = nil
+            onRestChanged?()
+            return
+        }
         // same width (a toolbar, a taller window): the layout stays, the offset stays in range
         if cfg.width == engine.cfg.width, cfg.scale == engine.cfg.scale, cfg.columns == engine.cfg.columns {
             engine.cfg = cfg

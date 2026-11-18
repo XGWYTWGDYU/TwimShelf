@@ -34709,25 +34709,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : " · Click a card to see only that tag in Browse; right-click for more"
+            "value" : " · Click a card's arrow to see only that tag in Browse; right-click for more"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : " · カードをクリックするとブラウズでそのタグだけ表示、右クリックでほかの操作"
+            "value" : " · カードの矢印をクリックするとブラウズでそのタグだけ表示、右クリックでほかの操作"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : " · 点一下卡片，在浏览里只看这个标签；右键有更多操作"
+            "value" : " · 点卡片右上角的箭头，在浏览里只看这个标签；右键有更多操作"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : " · 點一下卡片，在瀏覽裡只看這個標籤；按右鍵有更多操作"
+            "value" : " · 點卡片右上角的箭頭，在瀏覽裡只看這個標籤；按右鍵有更多操作"
           }
         }
       }

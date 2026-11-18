@@ -76,14 +76,31 @@ final class GridRenderer {
         thumbnails.setSizes(small: GridThumbnails.smallPoints * cfg.scale, large: cfg.side(cfg.levels - 1) * cfg.scale * GridConfig.maxSideFactor)
     }
 
+    /// The width the tiles are laid out for, when the view is wider: they are drawn against the
+    /// view's right edge. Nil is the view's own width.
+    var contentWidth: CGFloat?
+    /// Draw the next frames here instead of on the view's drawable.
+    var target: MTLTexture?
+
     /// One frame. `info` gives a tile's media, its post's count and whether it is selected.
     func draw(_ tiles: [Tile], in view: MTKView, scale: CGFloat, background: MTLClearColor,
               info: (Int) -> (item: FeedItem, count: Int, selected: Bool)?) {
         // a bounded wait: the main thread drives scrolling, never stall it for long
-        guard inflight.wait(timeout: .now() + .milliseconds(4)) == .success else { return }
-        guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable else {
-            inflight.signal(); return
+        guard inflight.wait(timeout: .now() + .milliseconds(target == nil ? 4 : 33)) == .success else { return }
+        let pass: MTLRenderPassDescriptor
+        var drawable: CAMetalDrawable?
+        if let target {
+            pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = target
+            pass.colorAttachments[0].storeAction = .store
+        } else {
+            guard let p = view.currentRenderPassDescriptor, let d = view.currentDrawable else {
+                inflight.signal(); return
+            }
+            pass = p
+            drawable = d
         }
+        let pixels = target ?? drawable?.texture
         ensureCapacity(tiles.count)
         let buffer = buffers[frameIndex]
         frameIndex = (frameIndex + 1) % buffers.count
@@ -125,7 +142,12 @@ final class GridRenderer {
         guard let cmd = queue.makeCommandBuffer(), let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else {
             inflight.signal(); return
         }
-        var u = GridUniforms(viewSize: SIMD2(Float(view.bounds.width), Float(view.bounds.height)), scale: Float(scale))
+        let width = contentWidth ?? view.bounds.width
+        var u = GridUniforms(viewSize: SIMD2(Float(width), Float(view.bounds.height)), scale: Float(scale))
+        if contentWidth != nil {
+            let w = Double(width * scale), full = Double(pixels?.width ?? 0)
+            enc.setViewport(MTLViewport(originX: full - w, originY: 0, width: w, height: Double(pixels?.height ?? 0), znear: 0, zfar: 1))
+        }
         if !tiles.isEmpty {
             enc.setRenderPipelineState(pipeline)
             enc.setVertexBuffer(buffer, offset: 0, index: 0)
@@ -144,10 +166,16 @@ final class GridRenderer {
             }
         }
         enc.endEncoding()
-        cmd.present(drawable)
         let sem = inflight
         cmd.addCompletedHandler { _ in sem.signal() }
-        cmd.commit()
+        if let drawable {
+            cmd.present(drawable)
+            cmd.commit()
+        } else {
+            // the caller shows the finished picture itself
+            cmd.commit()
+            cmd.waitUntilCompleted()
+        }
     }
 
     #if DEBUG

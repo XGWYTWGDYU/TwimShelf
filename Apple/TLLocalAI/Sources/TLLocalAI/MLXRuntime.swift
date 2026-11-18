@@ -144,7 +144,9 @@ public actor MLXRuntime {
             let session = ChatSession(
                 container, instructions: system,
                 generateParameters: GenerateParameters(maxTokens: maxTokens, temperature: 0.1),
-                processing: .init(resize: CGSize(width: 448, height: 448)))
+                processing: .init(resize: CGSize(width: 448, height: 448)),
+                // tags are all that is asked for: no reasoning first, in the models that can skip it
+                additionalContext: ["enable_thinking": false])
             return try await session.respond(to: question, image: .ciImage(image), video: nil)
         }
     }

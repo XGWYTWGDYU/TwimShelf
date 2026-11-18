@@ -180,8 +180,8 @@ final class MacSettingsPanel: NSViewController {
 }
 
 /// Every tag as a card (SwiftUI, hosted here): its name, how many media carry it, and a bar that
-/// splits those media into yours, the AI's and both. Click a card to see only that tag on the
-/// home screen; right-click for the rest (put its media into a folder, rename or merge, delete).
+/// splits those media into yours, the AI's and both. The arrow in a card's corner shows only that
+/// tag on the home screen; right-click for the rest (put its media into a folder, rename or merge, delete).
 final class MacTagsPage: NSViewController {
     weak var panel: MacSettingsPanel?
     private let model = TagsModel()
@@ -376,42 +376,41 @@ struct TagCardsView: View {
 struct TagCard: View {
     let tag: TagCount
     @ObservedObject var model: TagsModel
-    @State private var hovering = false
 
     private var common: Int { TagsModel.common(tag) }
     private var onlyMine: Int { tag.user - common }
     private var onlyAI: Int { tag.ai - common }
 
     var body: some View {
-        Button { model.showOnHome(tag.label) } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(tag.label).font(.system(size: 16, weight: .semibold)).lineLimit(2, reservesSpace: true).multilineTextAlignment(.leading)
-                    Spacer(minLength: 4)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(tag.label).font(.system(size: 16, weight: .semibold)).lineLimit(2, reservesSpace: true).multilineTextAlignment(.leading)
+                Spacer(minLength: 4)
+                // the only way from here to 浏览: a click on the card itself does nothing
+                Button { model.showOnHome(tag.label) } label: {
                     Image(systemName: "arrow.up.right").font(.caption.weight(.bold)).foregroundStyle(.tint)
-                        .opacity(hovering ? 1 : 0)
+                        .frame(width: 26, height: 26).contentShape(Rectangle())
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(tag.count)").font(.system(size: 30, weight: .bold, design: .rounded)).monospacedDigit()
-                    Text(L("tags.itemsUnit")).font(.callout).foregroundStyle(.secondary)
-                }
-                bar
-                HStack(spacing: 10) {
-                    if tag.user > 0 { stat(L("search.kw.mine.word"), tag.user, .tagMine) }
-                    if tag.ai > 0 { stat("AI", tag.ai, .tagAI) }
-                    if common > 0 { stat(L("search.kw.common.word"), common, .tagBoth) }
-                }
-                .font(.caption)
+                .buttonStyle(.plain)
+                .help(L("tags.onlyInBrowse", tag.label))
+                .padding(.trailing, -6)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("\(tag.count)").font(.system(size: 30, weight: .bold, design: .rounded)).monospacedDigit()
+                Text(L("tags.itemsUnit")).font(.callout).foregroundStyle(.secondary)
+            }
+            bar
+            HStack(spacing: 10) {
+                if tag.user > 0 { stat(L("search.kw.mine.word"), tag.user, .tagMine) }
+                if tag.ai > 0 { stat("AI", tag.ai, .tagAI) }
+                if common > 0 { stat(L("search.kw.common.word"), common, .tagBoth) }
+            }
+            .font(.caption)
         }
-        .buttonStyle(.plain)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .background { cardBackground }
-        .scaleEffect(hovering ? 1.015 : 1)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: hovering)
-        .onHover { hovering = $0 }
         .contextMenu {
             Button(L("tags.onlyInBrowse", tag.label)) { model.showOnHome(tag.label) }
             Button(L("tags.allToFolder", tag.count)) { model.toFolder(tag) }
@@ -421,7 +420,7 @@ struct TagCard: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L("tags.cell.spoken", tag.label, tag.count, tag.user, tag.ai))
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: L("tags.onlyInBrowse", tag.label)) { model.showOnHome(tag.label) }
     }
 
     @ViewBuilder private var cardBackground: some View {

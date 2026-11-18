@@ -86,9 +86,14 @@ enum LibraryPrefs {
     static let densityNames = [L("cards.fewer"), L("cards.medium"), L("cards.more")]
 
     /// The columns of 浏览 for a width: one card per `base` points at 适中, wider cards at 少,
-    /// narrower at 多 (the window's shape picks the portrait or the landscape level).
+    /// narrower at 多 (the window's shape picks the portrait or the landscape level; a Mac has the
+    /// one level, whatever the shape of its window).
     static func feedColumns(width: CGFloat, height: CGFloat, base: CGFloat, maxColumns: Int) -> Int {
+        #if os(macOS)
+        let level = cardDensityLandscape
+        #else
         let level = width > height ? cardDensityLandscape : cardDensityPortrait
+        #endif
         let per = base * [1.35, 1.0, 0.72][min(max(level, 0), 2)]
         return max(1, min(maxColumns + (level == 2 ? 2 : 0), Int(width / per)))
     }

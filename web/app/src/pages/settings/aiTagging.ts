@@ -2,6 +2,7 @@ import { L, store, type MediaRef, type TagCount } from '@twimshelf/core';
 import { core } from '../../lib/core';
 import { libraryChanged } from '../../lib/library';
 import { readSecret, serverFetch, updateSecrets } from './serverFiles';
+import { parseTags, thinkingOff } from './tagReply';
 
 export interface ExternalModel { id: string; name: string; url: string; model: string }
 export const promptFields = ['system', 'prompt', 'existing', 'vocabulary', 'context'] as const;
@@ -102,7 +103,7 @@ async function proxy<T>(url: URL, key: string | null, body?: unknown, signal?: A
   }
   if (!response.ok) throw new Error('common.notDone');
   const reply = await response.json() as { status: number; body: string };
-  if (reply.status < 200 || reply.status >= 300) throw new Error(L('models.external.err.status', reply.status));
+  if (reply.status < 200 || reply.status >= 300) throw Object.assign(new Error(L('models.external.err.status', reply.status)), { status: reply.status });
   if (reply.body.length > 3_000_000) throw new Error('models.external.err.empty');
   try {
     return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(reply.body), (c) => c.charCodeAt(0)))) as T;
@@ -111,24 +112,34 @@ async function proxy<T>(url: URL, key: string | null, body?: unknown, signal?: A
   }
 }
 
+/** Servers that refused the switch for reasoning: asked plainly from then on. */
+const refusedThinkingOff = new Set<string>();
+
 async function completion(model: ExternalModel, key: string | null, prompt: Prompt, question: string, image: string, signal?: AbortSignal) {
   const name = model.model || (await proxy<{ data?: Array<{ id: string }> }>(endpoint(model.url, 'models'), key, undefined, signal)).data?.[0]?.id;
   if (!name) throw new Error('models.external.err.noModel');
-  const result = await proxy<{ choices?: Array<{ message?: { content?: string } }> }>(endpoint(model.url, 'chat/completions'), key, {
-    model: name, max_tokens: 300, stream: false, temperature: 0.1,
+  type Reply = { choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }> };
+  const url = endpoint(model.url, 'chat/completions');
+  const ask = (extra: Record<string, unknown>) => proxy<Reply>(url, key, {
+    ...extra, model: name, max_tokens: 300, stream: false, temperature: 0.1,
     messages: [
       { role: 'system', content: prompt.system },
       { role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: image } }] },
     ],
   }, signal);
-  const answer = result.choices?.[0]?.message?.content;
+  const off = refusedThinkingOff.has(model.url) ? {} : thinkingOff(url.hostname);
+  let result: Reply;
   try {
-    const labels: unknown = JSON.parse(answer?.trim().replace(/^```(?:json)?\s*|\s*```$/gi, '') ?? '');
-    if (!Array.isArray(labels) || !labels.every((label) => typeof label === 'string')) throw new Error();
-    return [...new Set(labels.map((label: string) => label.trim().toLowerCase()).filter(Boolean))];
-  } catch {
-    throw new Error('ai.err.badReply');
+    result = await ask(off);
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    if (!Object.keys(off).length || (status !== 400 && status !== 422)) throw error;
+    refusedThinkingOff.add(model.url);
+    result = await ask({});
   }
+  const content = result.choices?.[0]?.message?.content ?? '';
+  // (never the parts that hold the model's reasoning)
+  return parseTags(typeof content === 'string' ? content : content.filter((p) => !/think|reason/i.test(p.type ?? '')).map((p) => p.text ?? '').join(''));
 }
 
 export async function testModel(model: ExternalModel, key: string, clear: boolean) {

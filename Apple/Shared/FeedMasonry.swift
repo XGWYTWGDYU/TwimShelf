@@ -13,7 +13,16 @@ struct FeedMasonry {
         var rowGap: CGFloat
         var top: CGFloat = 0
         var footer: CGFloat
-        var columnWidth: CGFloat { columns > 0 ? floor((width - side * 2 - CGFloat(columns - 1) * columnGap) / CGFloat(columns)) : 0 }
+        /// The size of one screen pixel where cards follow a moving width (the Mac's sidebar): each
+        /// card keeps its exact share and only its edges meet the pixels, so nothing adds up down a
+        /// column or steps from frame to frame. 0: whole points.
+        var pixel: CGFloat = 0
+        var columnWidth: CGFloat {
+            guard columns > 0 else { return 0 }
+            let w = (width - side * 2 - CGFloat(columns - 1) * columnGap) / CGFloat(columns)
+            return pixel > 0 ? w : floor(w)
+        }
+        func snapped(_ v: CGFloat) -> CGFloat { pixel > 0 ? (v / pixel).rounded() * pixel : v }
     }
 
     let metrics: Metrics
@@ -28,8 +37,9 @@ struct FeedMasonry {
     /// One pass: its cards, then the footer under the tallest column.
     private(set) var passHeight: CGFloat = 0
 
-    /// `height(i, columnWidth)`: how tall card `i` is at that width.
-    init(count: Int, metrics m: Metrics, height: (Int, CGFloat) -> CGFloat) {
+    /// `height(i, columnWidth)`: how tall card `i` is at that width. With `keeping`, every card
+    /// stays in the column it has there: a width on the move changes no card's place.
+    init(count: Int, metrics m: Metrics, keeping previous: FeedMasonry? = nil, height: (Int, CGFloat) -> CGFloat) {
         metrics = m
         guard count > 0, m.columns > 0 else { return }
         let w = m.columnWidth
@@ -39,16 +49,22 @@ struct FeedMasonry {
         for i in 0..<count {
             // the shortest column (the leftmost of equals)
             var c = 0
-            for k in 1..<m.columns where bottoms[k] < bottoms[c] - 0.5 { c = k }
-            let h = max(1, height(i, w).rounded(.up))
+            if let previous, previous.metrics.columns == m.columns, previous.columnOf.count == count {
+                c = previous.columnOf[i]
+            } else {
+                for k in 1..<m.columns where bottoms[k] < bottoms[c] - 0.5 { c = k }
+            }
+            let h = m.pixel > 0 ? max(1, height(i, w)) : max(1, height(i, w).rounded(.up))
             let y = bottoms[c] == 0 ? 0 : bottoms[c] + m.rowGap
-            frames.append(CGRect(x: m.side + CGFloat(c) * (w + m.columnGap), y: y, width: w, height: h))
+            let x = m.side + CGFloat(c) * (w + m.columnGap)
+            let left = m.snapped(x), top = m.snapped(y)
+            frames.append(CGRect(x: left, y: top, width: m.snapped(x + w) - left, height: m.snapped(y + h) - top))
             columnOf.append(c)
             bottoms[c] = y + h
             tallest = max(tallest, h)
         }
         byTop = frames.indices.sorted { frames[$0].minY < frames[$1].minY }
-        passHeight = (bottoms.max() ?? 0) + m.footer
+        passHeight = m.snapped((bottoms.max() ?? 0) + m.footer)
     }
 
     /// A card grows or shrinks while its pages are turned: everything stays in its column and the
@@ -57,7 +73,7 @@ struct FeedMasonry {
     @discardableResult
     mutating func resize(item i: Int, height: CGFloat) -> CGFloat {
         guard frames.indices.contains(i) else { return 0 }
-        let d = max(1, height) - frames[i].height
+        let d = metrics.snapped(max(1, height)) - frames[i].height
         guard abs(d) > 0.01 else { return 0 }
         frames[i].size.height += d
         let c = columnOf[i]
@@ -72,7 +88,7 @@ struct FeedMasonry {
             byTop[b] = v
         }
         let before = passHeight
-        passHeight = (bottoms.max() ?? 0) + metrics.footer
+        passHeight = metrics.snapped((bottoms.max() ?? 0) + metrics.footer)
         return passHeight - before
     }
 
@@ -161,12 +177,13 @@ struct CardPages {
 }
 
 /// A card's media height at a place between two pages (`position` 1.5: halfway from the second
-/// page to the third).
-func cardMediaHeight(_ items: [FeedItem], width: CGFloat, position: CGFloat) -> CGFloat {
+/// page to the third). `exact`: the media's own shape to the fraction, for cards placed by pixels.
+func cardMediaHeight(_ items: [FeedItem], width: CGFloat, position: CGFloat, exact: Bool = false) -> CGFloat {
     guard !items.isEmpty else { return width * 1.25 }
     let p = min(max(position, 0), CGFloat(items.count - 1))
     let a = Int(p.rounded(.down)), b = min(a + 1, items.count - 1)
-    let ha = ceil(width * items[a].cardMediaRatio), hb = ceil(width * items[b].cardMediaRatio)
+    let ea = width * items[a].cardMediaRatio, eb = width * items[b].cardMediaRatio
+    let ha = exact ? ea : ceil(ea), hb = exact ? eb : ceil(eb)
     return ha + (hb - ha) * (p - CGFloat(a))
 }
 

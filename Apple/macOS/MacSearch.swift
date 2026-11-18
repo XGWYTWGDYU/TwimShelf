@@ -315,7 +315,8 @@ final class MacTokenSearch: NSView {
         field.onTextChange = { [weak self] in self?.changed(); self?.showSuggestions() }
         field.onBeginEditing = { [weak self] in self?.tagsLoaded = false; self?.showSuggestions() }
         field.onEndEditing = { [weak self] in self?.endedEditing() }
-        field.onCommit = { [weak self] in self?.changed() }
+        // Return searches: the list has done its work
+        field.onCommit = { [weak self] in self?.changed(); self?.closeList() }
         exit.bezelStyle = .circular
         exit.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: L("search.exit"))
         exit.toolTip = L("search.exit")

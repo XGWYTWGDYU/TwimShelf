@@ -126,7 +126,7 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
     private func config() -> GridConfig {
         var cfg = GridConfig(width: bounds.width, height: bounds.height, scale: scale,
                              insetTop: safeAreaInsets.top, insetBottom: safeAreaInsets.bottom + Self.footerHeight, count: 0)
-        cfg.columns = GridConfig.columns(forWidth: bounds.width)
+        cfg.columns = GridConfig.columns(forWidth: bounds.width, windowWidth: window?.bounds.width)
         return cfg
     }
 
@@ -402,7 +402,10 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
     /// Thumbnail sizes follow the levels; a whole new set is put on disk in the background.
     private func updateThumbnailSizes() {
         guard let scene, let renderer else { return }
-        renderer.setThumbnailSizes(scene.engine.cfg)
+        // by the window's width: a sidebar opening beside the grid keeps the pictures it has
+        var cfg = scene.engine.cfg
+        cfg.width = window?.bounds.width ?? cfg.width
+        guard renderer.setThumbnailSizes(cfg) else { return }
         renderer.thumbnails.warm(scene.tiles.map(\.item))
         lastPrefetch = .nan
     }

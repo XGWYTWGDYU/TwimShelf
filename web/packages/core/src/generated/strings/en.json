@@ -1299,7 +1299,7 @@
   "tags.deleteAIEllipsis": "Delete All AI Tags…",
   "tags.deleteEllipsis": "Delete Tag…",
   "tags.filter": "Filter Tags",
-  "tags.hint.mac": " · Click a card to see only that tag in Browse; right-click for more",
+  "tags.hint.mac": " · Click a card's arrow to see only that tag in Browse; right-click for more",
   "tags.itemsUnit": "items",
   "tags.menu.title": "%@ (%@ items)",
   "tags.noAI": "No AI Tags",

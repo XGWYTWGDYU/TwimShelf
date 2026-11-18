@@ -178,13 +178,19 @@ final class InlineVideos<Host: AnyObject> {
         Task { [weak self, weak slot] in
             guard (try? await asset.load(.isPlayable)) == true, let self, let slot,
                   self.slots[id] === slot else { return }
-            slot.player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+            let playerItem = AVPlayerItem(asset: asset)
+            slot.player.replaceCurrentItem(with: playerItem)
             let time = self.position(for: slot.mediaId)
             if time > .zero {
+                // an item not ready yet refuses the seek, and the card would never play
+                while playerItem.status == .unknown {
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                    guard self.slots[id] === slot else { return }
+                }
                 // Attach the layer only after the seek completes so the first decoded frame
                 // from the new item can never cover the card's still frame.
-                guard await slot.player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero),
-                      self.slots[id] === slot else { return }
+                _ = await slot.player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                guard self.slots[id] === slot else { return }
             }
             guard let host = slot.host else { return }
             slot.ready = true

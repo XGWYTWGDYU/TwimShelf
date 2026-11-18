@@ -21,6 +21,7 @@ final class FeedCard: NSCollectionViewItem {
     let mediaImage = ImageLayerView()
     let playerLayer = AVPlayerLayer()
     private var inlineReadiness: NSKeyValueObservation?
+    private var videoShape: NSKeyValueObservation?
     private var resumeImage: NSImage?
     private let playBadge = NSImageView()
     private let badBadge = NSTextField(labelWithString: L("card.badge.damaged"))
@@ -82,6 +83,9 @@ final class FeedCard: NSCollectionViewItem {
         badBadge.isHidden = true
         badBadge.setAccessibilityIdentifier("badBadge")
         [mediaImage, playBadge, counter, prevButton, nextButton, badBadge].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; mediaView.addSubview($0) }
+        // back to front: the still picture, the playing video over it, the card's controls on top
+        playerLayer.zPosition = 1
+        for v in [playBadge, counter, prevButton, nextButton, badBadge] as [NSView] { v.wantsLayer = true; v.layer?.zPosition = 2 }
 
         author.font = .systemFont(ofSize: 13, weight: .semibold)
         author.lineBreakMode = .byTruncatingTail
@@ -157,6 +161,7 @@ final class FeedCard: NSCollectionViewItem {
         tagScroll.frame = NSRect(x: 0, y: MacCardLayout.bottom, width: b.width, height: MacCardLayout.tagsHeight)
         CATransaction.begin(); CATransaction.setDisableActions(true)
         playerLayer.frame = mediaView.bounds
+        fitVideo()
         view.effectiveAppearance.performAsCurrentDrawingAppearance { mediaView.layer?.backgroundColor = MacCardView.mediaFill.cgColor }
         CATransaction.commit()
     }
@@ -217,11 +222,30 @@ final class FeedCard: NSCollectionViewItem {
         playBadge.isHidden = true
     }
 
+    /// A video of the card's own shape covers its media area exactly. Fitted inside it, the part
+    /// of a pixel the two differ by would show the still around the video, differently on each
+    /// frame of a sidebar's movement. One of another shape (very long or wide) stays fitted.
+    private func fitVideo() {
+        let box = mediaView.bounds.size
+        let size = playerLayer.player?.currentItem?.presentationSize ?? .zero
+        let same = size.width > 0 && size.height > 0 && box.width > 0 && box.height > 0
+            && abs((size.height / size.width) / (box.height / box.width) - 1) < 0.02
+        let gravity: AVLayerVideoGravity = same ? .resizeAspectFill : .resizeAspect
+        guard playerLayer.videoGravity != gravity else { return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        playerLayer.videoGravity = gravity
+        CATransaction.commit()
+    }
+
     func setInlinePlayer(_ player: AVPlayer?) {
         if let player {
             if let observation = attachInlineVideo(player, to: playerLayer) { inlineReadiness = observation }
+            videoShape = player.currentItem?.observe(\.presentationSize, options: [.initial, .new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.fitVideo() }
+            }
         } else {
             inlineReadiness = nil
+            videoShape = nil
             playerLayer.player = nil
         }
         playBadge.isHidden = current?.kind != .video || player != nil || resumeImage != nil
@@ -478,7 +502,12 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             self.cardHeights.prepare(width: w, sizeKey: "")
             let key = self.entryKey(e)
             let caption = self.cardHeights.height(key + "#\(e.first?.cardContentKey ?? 0)") { MacCardLayout(item: e.first, width: w).captionHeight }
-            return caption + cardMediaHeight(e, width: w, position: CGFloat(self.cardPages.page(of: key, count: e.count)))
+            return caption + cardMediaHeight(e, width: w, position: CGFloat(self.cardPages.page(of: key, count: e.count)), exact: true)
+        }
+        layout.mediaHeight = { [weak self] i, w in
+            guard let self, i < self.entries.count else { return w * FeedCard.mediaRatio }
+            let e = self.entries[i]
+            return cardMediaHeight(e, width: w, position: CGFloat(self.cardPages.page(of: self.entryKey(e), count: e.count)), exact: true)
         }
         collection.collectionViewLayout = layout
         collection.dataSource = self
@@ -636,7 +665,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         let width = card.view.bounds.width
         guard width > 0 else { return }
         resizing.removeAll { $0.card === card }
-        let to = card.captionHeight + cardMediaHeight(card.items, width: width, position: CGFloat(card.page))
+        let to = card.captionHeight + cardMediaHeight(card.items, width: width, position: CGFloat(card.page), exact: true)
         resizing.append((card, card.view.bounds.height, to, CACurrentMediaTime()))
         guard resizeTimer == nil else { return }
         let t = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.resizeStep() } }
@@ -1529,7 +1558,7 @@ final class MacToast: NSVisualEffectView {
     func show(_ text: String, action title: String? = nil, _ action: (() -> Void)? = nil) {
         label.stringValue = text
         button.isHidden = title == nil
-        button.attributedTitle = NSAttributedString(string: title ?? "", attributes: [.foregroundColor: NSColor.systemYellow, .font: NSFont.systemFont(ofSize: 13, weight: .bold)])
+        button.attributedTitle = NSAttributedString(string: title ?? "", attributes: [.foregroundColor: NSColor.controlAccentColor, .font: NSFont.systemFont(ofSize: 13, weight: .bold)])
         self.action = action
         hideWork?.cancel()
         isHidden = false
@@ -1873,19 +1902,39 @@ final class ImageLayerView: NSView {
 private final class ResizingFeedCollectionView: NSCollectionView {
     override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
-        (collectionViewLayout as? MacFeedMasonryLayout)?.invalidateHeights()
+        (collectionViewLayout as? MacFeedMasonryLayout)?.widthSettled()
     }
 }
 
 final class MacFeedMasonryLayout: NSCollectionViewLayout {
     /// The height of entry `i` at a column width.
     var height: ((Int, CGFloat) -> CGFloat)?
+    /// How much of that is the media: it follows the width exactly on every frame of a resize.
+    var mediaHeight: ((Int, CGFloat) -> CGFloat)?
+    /// What each card has besides its media, from the last full measure. Its text is not measured
+    /// again while the width is moving (too slow for every card on every frame).
+    private var captions: [CGFloat] = []
     private var plan: FeedMasonry?
     private var dirty = true
     private var passes = 0
 
     /// The entries changed (new order, other text, grouping): heights are read again.
     func invalidateHeights() { dirty = true; invalidateLayout() }
+
+    /// The width stopped moving: its text is measured again, and every card stays where it is.
+    func widthSettled() { keepColumns = true; dirty = true; invalidateLayout() }
+    private var keepColumns = false
+
+    /// The columns are chosen once for a window's width: a sidebar opening or closing makes the
+    /// cards wider or narrower and moves none of them to another column.
+    private var chosenColumns: (windowWidth: CGFloat, density: Int, columns: Int)?
+    private func columns(_ cv: NSCollectionView, width: CGFloat) -> Int {
+        let density = LibraryPrefs.cardDensityLandscape
+        if let c = chosenColumns, c.windowWidth == cv.window?.frame.width, c.density == density { return c.columns }
+        let n = LibraryPrefs.feedColumns(width: width - 40, height: cv.enclosingScrollView?.contentSize.height ?? cv.bounds.height, base: 300, maxColumns: 6)
+        if let w = cv.window?.frame.width { chosenColumns = (w, density, n) }
+        return n
+    }
 
     /// One card is this tall now. Returns how much a pass of the grid grew.
     func resize(item: Int, height: CGFloat) -> CGFloat {
@@ -1896,8 +1945,8 @@ final class MacFeedMasonryLayout: NSCollectionViewLayout {
 
     private func metrics(_ cv: NSCollectionView) -> FeedMasonry.Metrics {
         let width = cv.enclosingScrollView?.contentSize.width ?? cv.bounds.width
-        let columns = LibraryPrefs.feedColumns(width: width - 40, height: cv.enclosingScrollView?.contentSize.height ?? cv.bounds.height, base: 300, maxColumns: 6)
-        return FeedMasonry.Metrics(width: width, columns: columns, side: 20, columnGap: 16, rowGap: 18, top: 12, footer: 56)
+        return FeedMasonry.Metrics(width: width, columns: columns(cv, width: width), side: 20, columnGap: 16, rowGap: 18, top: 12, footer: 56,
+                                   pixel: 1 / (cv.window?.backingScaleFactor ?? 2))
     }
 
     override func prepare() {
@@ -1907,14 +1956,18 @@ final class MacFeedMasonryLayout: NSCollectionViewLayout {
         let count = passes > 0 ? cv.numberOfItems(inSection: 0) : 0
         let m = metrics(cv)
         if dirty || plan?.metrics != m || plan?.frames.count != count {
-            let previous = plan
-            let approximate = cv.inLiveResize && previous?.frames.count == count
-            plan = FeedMasonry(count: count, metrics: m) { [weak self] i, w in
-                if approximate, let previous, previous.metrics.columnWidth > 0 {
-                    return previous.frames[i].height * w / previous.metrics.columnWidth
-                }
-                return self?.height?(i, w) ?? w * FeedCard.mediaRatio
+            let approximate = cv.inLiveResize && captions.count == count && mediaHeight != nil
+            var measured = [CGFloat](repeating: 0, count: approximate ? 0 : count)
+            plan = FeedMasonry(count: count, metrics: m, keeping: approximate || keepColumns ? plan : nil) { [weak self] i, w in
+                guard let self else { return w * FeedCard.mediaRatio }
+                let media = self.mediaHeight?(i, w)
+                if approximate, let media { return self.captions[i] + media }
+                let h = self.height?(i, w) ?? w * FeedCard.mediaRatio
+                measured[i] = h - (media ?? h)
+                return h
             }
+            if !approximate { captions = measured }
+            keepColumns = false
             dirty = false
         }
     }
