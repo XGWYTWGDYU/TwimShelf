@@ -40,7 +40,7 @@ fn post_with_awaited_media() -> Store {
 fn whole_post_folder_actions_include_media_still_awaited() {
     let s = post_with_awaited_media();
     s.add_posts_to_folder("f", &["p".into()]).unwrap();
-    s.blob_arrived(B).unwrap();
+    s.blob_arrived(B, &blob_path(B)).unwrap();
     assert_eq!(s.folders_of(B).unwrap(), vec!["f".to_string()]);
 }
 

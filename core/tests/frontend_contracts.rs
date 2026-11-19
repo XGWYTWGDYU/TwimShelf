@@ -70,7 +70,7 @@ fn wait(mut done: impl FnMut() -> bool) { let until = Instant::now() + Duration:
     for id in &scope.ids { assert!(f.lib.db().media_tags(id).unwrap().iter().any(|(l,o)| l == "label" && o & 1 != 0)); }
     f.lib.apply_action(&action(K::FolderAdd, vec![], vec!["p".into()])).unwrap();
     assert_eq!(f.lib.apply_action(&action(K::FolderRemove, vec![], vec!["p".into()])).unwrap().changes.len(), 4);
-    f.lib.db().blob_arrived(&pending).unwrap(); assert!(f.lib.db().folders_of(&pending).unwrap().is_empty());
+    f.lib.db().blob_arrived(&pending, &tl_core::oplog::blob_rel(&pending, "jpg")).unwrap(); assert!(f.lib.db().folders_of(&pending).unwrap().is_empty());
 }
 #[test] fn bulk_action_rolls_back_on_database_failure() {
     let f = Fixture::new(2);

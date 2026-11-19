@@ -148,6 +148,15 @@ pub fn end() { set_progress(|p| { p.running = false; p.waiting = false; p.outcom
 pub(crate) fn finish<T>(result: &anyhow::Result<T>) {
     set_progress(|p| { p.running = false; p.waiting = false; p.outcome = if cancelled() { "cancelled" } else if result.is_err() { "failed" } else if p.issues > 0 { "partial" } else { "succeeded" }.into(); });
 }
+
+fn finish_files(result: anyhow::Result<ImportReport>) -> anyhow::Result<ImportReport> {
+    finish(&result);
+    let report = result?;
+    // The saved report describes what came in. Legacy and loose imports also signal
+    // cancellation to callers that treat any successful response as a finished import.
+    if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
+    Ok(report)
+}
 pub fn progress() -> ImportProgress { PROGRESS.lock().unwrap().clone().unwrap_or_default() }
 pub(crate) fn set_progress(f: impl FnOnce(&mut ImportProgress)) { f(PROGRESS.lock().unwrap().get_or_insert_with(Default::default)) }
 
@@ -312,6 +321,36 @@ mod consume_tests {
     use crate::rules::TrashAction;
 
     #[test]
+    fn cancelling_the_last_zip_entry_saves_an_incomplete_report() {
+        struct CancelledEntry;
+        impl Source for CancelledEntry {
+            fn kind(&self) -> &'static str { "loose_zip" }
+            fn path(&self) -> String { "test.zip".into() }
+            fn entries(&mut self) -> anyhow::Result<Vec<(String, bool, usize)>> {
+                Ok(vec![("last.jpg".into(), false, 0)])
+            }
+            fn read_bytes(&mut self, _: usize, _: u64) -> anyhow::Result<Vec<u8>> { unreachable!() }
+            fn store(&mut self, _: usize, lib: &Library, _: &MediaKind, _: &str) -> anyhow::Result<(String, String)> {
+                let mode: i32 = lib.db().conn().query_row("PRAGMA synchronous", [], |row| row.get(0))?;
+                assert_eq!(mode, 2, "bulk import must leave SQLite in FULL mode");
+                cancel();
+                anyhow::bail!("stopped while streaming")
+            }
+        }
+        let root = std::env::temp_dir().join(format!("tl-import-cancel-{:016x}", rand::random::<u64>()));
+        let lib = Library::open(&root).unwrap();
+        let _guard = begin_in(&lib, "loose_zip").unwrap();
+        let report = run_loose(&lib, &mut CancelledEntry, None).unwrap();
+        assert!(report.incomplete.is_some());
+        assert!(report.issues.is_empty());
+        let saved = load_report(Path::new(report.report_file.as_deref().unwrap())).unwrap();
+        assert_eq!(saved.incomplete, report.incomplete);
+        assert!(finish_files(Ok(report)).is_err());
+        assert_eq!(progress().outcome, "cancelled");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn consume_preserves_media_that_was_purged_before_reimport() {
         let root = std::env::temp_dir().join(format!("tl-consume-purged-{}", std::process::id()));
         let lib = Library::open(root.join("library")).unwrap();
@@ -370,6 +409,8 @@ mod consume_tests {
         let _import = begin_in(&lib, "loose_share").unwrap();
         let mut src = DirSource { root: share, files: vec![], consumed: Some(vec![]) };
         assert_eq!(run_loose(&lib, &mut src, None).unwrap().new_media, 2);
+        assert_eq!(progress().files_done, 2);
+        assert_eq!(progress().folders_done, 2);
         let after = crate::testutil::jpg(b"after");
         fs::write(&changed, &after).unwrap();
         fs::write(&added, &after).unwrap();
@@ -405,9 +446,7 @@ pub fn import_loose_zip(lib: &Library, path: &Path, folder: Option<&str>) -> any
     let mut src = ZipSource { path: path.to_path_buf(), z };
     let _g = begin_in(lib, "loose_zip")?;
     lib.diag_import_start("loose_zip");
-    let r = run_loose(lib, &mut src, folder);
-    finish(&r);
-    r
+    finish_files(run_loose(lib, &mut src, folder))
 }
 
 /// Imports a folder of loose media (the share extensions' inbox: one folder per share). With
@@ -419,21 +458,39 @@ pub fn import_loose_dir(lib: &Library, dir: &Path, folder: Option<&str>, consume
     import_loose_dir_keep(lib, dir, folder, consume, None, true)
 }
 
+fn resolve_destination(path: &Path) -> anyhow::Result<PathBuf> {
+    let absolute = std::path::absolute(path)?;
+    anyhow::ensure!(!absolute.components().any(|part| part == std::path::Component::ParentDir), "unsafe import path");
+    match fs::canonicalize(&absolute) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !absolute.is_symlink() => {
+            let parent = absolute.parent().ok_or(error)?;
+            Ok(resolve_destination(parent)?.join(absolute.file_name().unwrap_or_default()))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub fn import_loose_dir_keep(lib: &Library, dir: &Path, folder: Option<&str>, consume: bool, keep_to: Option<&Path>, album: bool) -> anyhow::Result<ImportReport> {
     if consume || keep_to.is_some() {
         let source = fs::canonicalize(dir)?;
         let library = fs::canonicalize(&lib.dir)?;
-        let blobs = fs::canonicalize(library.join("blobs"))?;
-        anyhow::ensure!(!source.starts_with(&blobs) && !library.starts_with(&source), "import source overlaps managed library data");
+        let mut protected = vec![library.join("blobs"), library.join("logs"), library.join("tmp"), lib.models_dir()];
+        for path in &mut protected { *path = resolve_destination(path)?; }
+        let safe = |path: &Path| !library.starts_with(path)
+            && !protected.iter().any(|managed| path.starts_with(managed) || managed.starts_with(path));
+        anyhow::ensure!(safe(&source), "import source overlaps managed library data");
+        if let Some(destination) = keep_to {
+            anyhow::ensure!(safe(&resolve_destination(destination)?), "import destination overlaps managed library data");
+        }
     }
     let mut src = DirSource { root: dir.to_path_buf(), files: vec![], consumed: consume.then(Vec::new) };
     let _g = begin_in(lib, "loose_share")?;
     lib.diag_import_start("loose_share");
-    let r = run_loose(lib, &mut src, folder);
-    finish(&r);
-    let rep = r?;
+    let rep = finish_files(run_loose(lib, &mut src, folder))?;
     // what was shared from another app is 从相册导入; what was dropped on a window is only loose
     if album { lib.mark_album(&rep)?; }
+    if rep.incomplete.is_some() { return Ok(rep); }
     if consume { src.consume_stored(lib)?; }
     let mut rep = rep;
     if let Some(to) = keep_to.filter(|_| dir.exists()) {
@@ -516,21 +573,17 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
     for v in posts.values_mut() { v.sort(); }
     rep.folders = posts.len();
     set_progress(|p| p.folders_total = files.len() + posts.len());
-    let flush = lib.group_flush();
-    let mut done = 0;
     for (dir, list) in &posts {
-        if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
+        if cancelled() { break; }
         // a sidecar at the archive's root: the post is named after the archive
         let name = dir.rsplit('/').next().filter(|n| !n.is_empty()).map(str::to_string)
             .unwrap_or_else(|| Path::new(&rep.source).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
         let folder_path = if dir.is_empty() { ".".to_string() } else { dir.clone() };
         import_post_folder(lib, src, &mut rep, &name, &folder_path, list)?;
         set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
-        done += 1;
-        flush.after(done)?;
     }
     for (path, key) in files {
-        if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
+        if cancelled() { break; }
         let fname = path.rsplit('/').next().unwrap_or(&path).to_string();
         let Some((kind, ext)) = kind_for(Path::new(&fname)) else {
             let e = fname.rsplit_once('.').map(|x| x.1.to_lowercase()).unwrap_or_default();
@@ -544,6 +597,7 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
                 let meta = crate::model::PostMeta { id: format!("{LOOSE_PREFIX}{sha}"), ..Default::default() };
                 lib.record_import(&meta, &[Stored { sha, rel, kind, src: path.clone() }], &path, &mut rep)?;
             }
+            Err(_) if cancelled() => break,
             Err(e) => {
                 let msg = format!("{e:#}");
                 let cat = if crate::library::is_not_media(&e) { "not_media" } else { "unreadable" };
@@ -551,12 +605,10 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
             }
         }
         set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
-        done += 1;
-        flush.after(done)?;
     }
+    if cancelled() { rep.incomplete = Some(tr!("import.cancelled")); }
     lib.import_into_folder(&mut rep, folder)?;
     lib.finish_report(&mut rep)?;
-    flush.flush()?;
     Ok(rep)
 }
 
@@ -570,9 +622,7 @@ pub struct Stored { pub sha: String, pub rel: String, pub kind: MediaKind, pub s
 fn run(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyhow::Result<ImportReport> {
     let _g = begin_in(lib, src.kind())?;
     lib.diag_import_start(src.kind());
-    let r = run_inner(lib, src, folder);
-    finish(&r);
-    r
+    finish_files(run_inner(lib, src, folder))
 }
 
 fn run_inner(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyhow::Result<ImportReport> {
@@ -585,17 +635,15 @@ fn run_inner(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
     for (p, why) in &plan.ignored { rep.issue("ignored_location", p, why.clone(), None); }
     rep.folders = plan.posts.len();
     set_progress(|p| p.folders_total = plan.posts.len());
-    let flush = lib.group_flush();
-    for (i, (name, files)) in plan.posts.iter().enumerate() {
-        if cancelled() { anyhow::bail!(tr!("import.cancelled")); }
+    for (name, files) in &plan.posts {
+        if cancelled() { break; }
         let folder_path = format!("{}{}", if plan.root.is_empty() { String::new() } else { plan.root.join("/") + "/" }, name);
         import_post_folder(lib, src, &mut rep, name, &folder_path, files)?;
         set_progress(|p| { p.folders_done += 1; p.issues = rep.issues.len(); });
-        flush.after(i + 1)?;
     }
+    if cancelled() { rep.incomplete = Some(tr!("import.cancelled")); }
     lib.import_into_folder(&mut rep, folder)?;
     lib.finish_report(&mut rep)?;
-    flush.flush()?;
     Ok(rep)
 }
 
@@ -616,6 +664,7 @@ fn import_post_folder(lib: &Library, src: &mut dyn Source, rep: &mut ImportRepor
     let meta = legacy_post_meta(name, sidecar);
     let mut stored = vec![];
     for (fname, key, path) in files {
+        if cancelled() { break; }
         if fname == SIDECAR_NAME {
             if Some(*key) != chosen { rep.issue("ignored_location", path, tr!("import.manySidecars"), None); }
             continue;
@@ -630,6 +679,7 @@ fn import_post_folder(lib: &Library, src: &mut dyn Source, rep: &mut ImportRepor
                 set_progress(|p| { p.files_done += 1; p.current = Some(lib.dir.join(&rel).to_string_lossy().into_owned()); });
                 stored.push(Stored { sha, rel, kind, src: path.clone() });
             }
+            Err(_) if cancelled() => break,
             Err(e) => {
                 let msg = format!("{e:#}");
                 let cat = if crate::library::is_not_media(&e) { "not_media" } else { "unreadable" };
@@ -638,6 +688,7 @@ fn import_post_folder(lib: &Library, src: &mut dyn Source, rep: &mut ImportRepor
         }
     }
     if stored.is_empty() {
+        if cancelled() { return Ok(()); }
         rep.issue("post_not_imported", folder_path, tr!("import.noMediaInFolder"), None);
     } else {
         lib.record_import(&meta, &stored, folder_path, rep)?;
@@ -686,7 +737,7 @@ impl Library {
                     if db.trash_reg(&f.sha)?.state == crate::rules::PURGED {
                         drop_files.push((f.sha.clone(), f.rel.clone()));
                     } else {
-                        db.blob_arrived(&f.sha)?;
+                        self.imported_blob_arrived(&db, &f.sha, &f.rel)?;
                     }
                 }
                 rep.first_by_sha.entry(f.sha.clone()).or_insert_with(|| f.src.clone());

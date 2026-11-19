@@ -52,6 +52,14 @@ fn packed_ffi_and_plain_ffi_match() {
     let data: PackedFeed = serde_json::from_value(envelope["ok"].clone()).unwrap();
     let other: serde_json::Value = serde_json::from_str(&plain).unwrap();
     assert_eq!(serde_json::to_value(data.unpack()).unwrap(), other["ok"]);
+    let mut malformed = data.clone();
+    let mut bad_post = data.media[0].clone();
+    bad_post.1 = u32::MAX;
+    let mut bad_tags = data.media[0].clone();
+    bad_tags.5 = u32::MAX;
+    malformed.media.extend([bad_post, bad_tags]);
+    assert_eq!(serde_json::to_value(malformed.unpack()).unwrap(), other["ok"]);
+
     fixtures(&root, &packed, &plain);
 }
 

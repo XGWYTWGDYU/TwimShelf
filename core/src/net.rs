@@ -19,15 +19,30 @@ pub fn parse_status_url(url: &str) -> Option<(String, String)> {
     Some((user.to_string(), id.to_string()))
 }
 
-pub fn client() -> reqwest::Client {
-    static C: OnceLock<reqwest::Client> = OnceLock::new();
-    C.get_or_init(|| reqwest::Client::builder()
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15")
         .connect_timeout(std::time::Duration::from_secs(15))
-        // a stalled server cannot hold a download forever (large videos still stream for as long as data flows)
         .read_timeout(std::time::Duration::from_secs(60))
         .https_only(true)
-        .build().expect("http client")).clone()
+}
+
+pub fn client() -> reqwest::Client {
+    static C: OnceLock<reqwest::Client> = OnceLock::new();
+    C.get_or_init(|| client_builder().build().expect("http client")).clone()
+}
+
+pub(crate) fn media_client() -> &'static reqwest::Client {
+    static C: OnceLock<reqwest::Client> = OnceLock::new();
+    C.get_or_init(|| client_builder()
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 || !crate::rules::media_url_ok(attempt.url().as_str()) {
+                attempt.error("invalid media redirect")
+            } else {
+                attempt.follow()
+            }
+        }))
+        .build().expect("media http client"))
 }
 
 /// Reads a response body up to `max` bytes (an answer larger than that is refused, not buffered).

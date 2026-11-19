@@ -107,11 +107,11 @@ proptest! {
     /// (the proof covers components of up to 3 bytes).
     #[test]
     fn path_sanitizer_on_any_path(parts in proptest::collection::vec(prop_oneof![Just("".to_string()), Just(".".to_string()), Just("..".to_string()), Just("...".to_string()),
-                                    "[a-z猫😀 ]{1,8}", Just("a\\\\b".to_string()), Just("a\0b".to_string()), Just("..a".to_string())], 0..10), absolute in any::<bool>()) {
+                                    "[a-z猫😀 ]{1,8}", Just("a\\\\b".to_string()), Just("a\0b".to_string()), Just("..a".to_string()), Just("part:name".to_string())], 0..10), absolute in any::<bool>()) {
         let p = format!("{}{}", if absolute { "/" } else { "" }, parts.join("/"));
         let got = safe_relative_bytes(p.as_bytes());
-        let bad = p.starts_with('/') || parts.iter().any(|c| c == ".." || c.contains('\0') || c.contains('\\'));
         let kept: Vec<&String> = parts.iter().filter(|c| !c.is_empty() && *c != ".").collect();
+        let bad = p.starts_with('/') || kept.iter().any(|c| c.contains(['\0', '\\', ':']) || c.ends_with(['.', ' ']));
         if bad || kept.is_empty() { prop_assert_eq!(got, None, "{:?}", p); }
         else {
             let want = kept.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("/");

@@ -507,9 +507,13 @@ impl SyncNode {
     /// Copies one model folder from a peer, validates it, then installs it. Progress is reported
     /// through the model-download status.
     pub async fn pull_model(&self, host: &str, port: u16, id: &str, label: &str, total: u64) -> anyhow::Result<()> {
-        crate::models::begin_external(label, total)?;
+        let operation = crate::models::begin_external(label, total)?;
+        self.pull_model_claimed(host, port, id, operation).await
+    }
+
+    pub(crate) async fn pull_model_claimed(&self, host: &str, port: u16, id: &str, operation: crate::models::ModelOperation) -> anyhow::Result<()> {
         let r = self.pull_model_inner(host, port, id).await;
-        crate::models::end_external(&r);
+        operation.finish(&r);
         r
     }
 
@@ -683,6 +687,7 @@ impl SyncNode {
             if missing > 0 { self.lib.diag("files_missing_refetch", serde_json::json!({ "files": missing })); self.changes.fetch_add(1, Ordering::SeqCst); }
             db.version_vector()?
         };
+        self.lib.settle()?;
         let me = self.device_id();
         let name = self.device_name.lock().unwrap().clone();
         ch.send(&Msg::Hello { device: me.clone(), name, vv: my_vv, now_ms: now_ms() }).await?;
@@ -890,7 +895,7 @@ impl SyncNode {
                         let expected = db.wanted_extension(&id)?;
                         let Some(expected) = expected else { continue };
                         stored_path = self.lib.commit_tmp_locked(&db, &tmp, &id, &expected)?;
-                        db.blob_arrived(&id)?;
+                        db.blob_arrived(&id, &stored_path)?;
                     }
                     *got = true;
                     if let Some(t) = self.transfer.lock().unwrap().as_mut() {

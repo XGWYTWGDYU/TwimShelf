@@ -18,29 +18,6 @@ impl TempFile {
 }
 impl Drop for TempFile { fn drop(&mut self) { let _ = fs::remove_file(&self.0); } }
 
-// ---------- bulk imports: making them durable in groups ----------
-//
-// Each stored media file used to be flushed to disk on its own, and each post committed with
-// its own flush (`synchronous=FULL`): three or four flushes a post, about a tenth of a second on
-// a hard disk, so a large import crawled. Inside an import (`GroupFlush`) neither happens: the
-// files are written and noted, the commits stay atomic but unflushed (WAL, `synchronous=NORMAL`)
-// and nothing checkpoints on its own. Every group of posts, and at the end, the noted files are
-// flushed (several at once), and only then is the database checkpointed, which is when the
-// group's records become durable. So a record is never durable before its file, and a power
-// loss costs at most the last unfinished group (the files it left behind are unreferenced and
-// cleaned up; the source can be imported again). A share that deletes its source does so only
-// after the import, and so after the last flush.
-
-thread_local! {
-    /// On an import's thread: the library files stored since the last group flush, not yet on disk.
-    static UNFLUSHED: std::cell::RefCell<Option<Vec<PathBuf>>> = const { std::cell::RefCell::new(None) };
-}
-
-/// Whether this thread is in a bulk import whose files are flushed in groups.
-pub(crate) fn flushing_in_groups() -> bool { UNFLUSHED.with(|u| u.borrow().is_some()) }
-
-fn note_unflushed(p: &Path) { UNFLUSHED.with(|u| if let Some(v) = u.borrow_mut().as_mut() { v.push(p.to_path_buf()); }) }
-
 /// An analysis's labels as the core accepts them (`apply_ai_tags_at`): at least one, and none
 /// that is a fragment of a reply's syntax (`}`, `harley }`, `:`): a JSON or quoting character,
 /// a control character, or nothing but ASCII punctuation. The apps' parsers refuse these
@@ -50,82 +27,13 @@ pub fn check_ai_labels(labels: &[String]) -> anyhow::Result<()> {
     if labels.is_empty() { anyhow::bail!(tr!("ai.noTags")); }
     let fragment = |l: &str| l.chars().any(|c| c.is_control() || "{}[]<>:\"\\`".contains(c))
         || l.chars().all(|c| c.is_ascii_punctuation() || c.is_whitespace());
-    if labels.iter().any(|l| fragment(l)) { anyhow::bail!(tr!("ai.badTags")); }
+    if labels.iter().any(|l| l.to_lowercase().chars().count() > 24 || fragment(l)) { anyhow::bail!(tr!("ai.badTags")); }
     Ok(())
-}
-
-/// Posts between two group flushes of an import.
-pub(crate) const FLUSH_EVERY: usize = 200;
-
-/// A bulk import on this thread (see above); dropping it flushes what is left and puts the
-/// database back to flushing every commit.
-pub(crate) struct GroupFlush<'a> { lib: &'a Library }
-
-impl Library {
-    pub(crate) fn group_flush(&self) -> GroupFlush<'_> {
-        UNFLUSHED.with(|u| *u.borrow_mut() = Some(vec![]));
-        let _ = self.db().conn().execute_batch("PRAGMA synchronous=NORMAL; PRAGMA wal_autocheckpoint=0;");
-        GroupFlush { lib: self }
-    }
-}
-
-impl GroupFlush<'_> {
-    /// Makes everything stored so far durable: the files, then the records (checkpoint).
-    pub(crate) fn flush(&self) -> anyhow::Result<()> {
-        UNFLUSHED.with(|u| {
-            let mut unflushed = u.borrow_mut();
-            let Some(files) = unflushed.as_mut() else { return Ok(()); };
-            sync_files(files)?;
-            checkpoint_wal(&self.lib.db())?;
-            files.clear();
-            Ok(())
-        })
-    }
-
-    /// `flush` after every `FLUSH_EVERY` posts (`done`: posts handled so far).
-    pub(crate) fn after(&self, done: usize) -> anyhow::Result<()> {
-        if done > 0 && done % FLUSH_EVERY == 0 { self.flush()?; }
-        Ok(())
-    }
 }
 
 fn checkpoint_wal(db: &Store) -> anyhow::Result<()> {
     let busy: i32 = db.conn().query_row("PRAGMA wal_checkpoint(FULL)", [], |row| row.get(0))?;
     anyhow::ensure!(busy == 0, "library WAL checkpoint could not complete");
-    Ok(())
-}
-
-impl Drop for GroupFlush<'_> {
-    fn drop(&mut self) {
-        let _ = self.flush();
-        UNFLUSHED.with(|u| *u.borrow_mut() = None);
-        let _ = self.lib.db().conn().execute_batch("PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000;");
-    }
-}
-
-/// Flushes files to disk, several at a time (a hard disk takes them faster together), then the
-/// folders that received them (where a rename is durable only with its folder). A file gone
-/// meanwhile (deleted again) needs nothing.
-fn sync_files(files: &[PathBuf]) -> std::io::Result<()> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    if files.is_empty() { return Ok(()); }
-    let next = AtomicUsize::new(0);
-    let failed: Mutex<Option<std::io::Error>> = Mutex::new(None);
-    std::thread::scope(|s| {
-        for _ in 0..files.len().min(8) {
-            s.spawn(|| while let Some(p) = files.get(next.fetch_add(1, Ordering::Relaxed)) {
-                // writing access: Windows flushes only a file opened for writing
-                let r = fs::OpenOptions::new().write(true).open(p).and_then(|f| f.sync_all());
-                if let Err(e) = r { if e.kind() != std::io::ErrorKind::NotFound { *failed.lock().unwrap() = Some(e); } }
-            });
-        }
-    });
-    if let Some(e) = failed.into_inner().unwrap() { return Err(e); }
-    #[cfg(unix)]
-    {
-        let folders: std::collections::BTreeSet<&Path> = files.iter().filter_map(|p| p.parent()).collect();
-        for d in folders { if let Ok(f) = fs::File::open(d) { f.sync_all()?; } }
-    }
     Ok(())
 }
 
@@ -211,7 +119,7 @@ impl FeedFilter {
     }
     /// Only the filters on the media themselves (type, place, state), not the search.
     fn media_filters(&self) -> FeedFilter {
-        FeedFilter { author: None, labels: vec![], review: crate::rules::Review::Any, exclude_terms: vec![], origins: None, ..self.clone() }
+        FeedFilter { author: None, labels: vec![], review: crate::rules::Review::Any, origins: None, ..self.clone() }
     }
 }
 
@@ -299,18 +207,19 @@ impl PackedFeed {
     }
 
     pub fn unpack(&self) -> Vec<FeedItem> {
-        self.media.iter().map(|(id, p, ordinal, kind, path, t, bad, w, h)| {
-            let post = &self.posts[*p as usize];
-            FeedItem {
+        self.media.iter().filter_map(|(id, p, ordinal, kind, path, t, bad, w, h)| {
+            let post = self.posts.get(*p as usize)?;
+            let tags = self.tag_lists.get(*t as usize)?;
+            Some(FeedItem {
                 media_id: id.clone(), post_id: post.id.clone(), ordinal: *ordinal,
                 kind: if kind == "v" { MediaKind::Video } else { MediaKind::Photo },
                 path: if path.starts_with('/') || path.contains(':') { path.clone() } else { format!("{}{path}", self.root) },
                 text: post.text.clone(), author_name: post.author_name.clone(), screen_name: post.screen_name.clone(),
                 url: post.url.clone(), created_at: post.created_at.clone(),
-                tags: self.tag_lists[*t as usize].iter().map(|(label, origin, models)| TagView { label: label.clone(), origin: *origin, models: models.clone() }).collect(),
+                tags: tags.iter().map(|(label, origin, models)| TagView { label: label.clone(), origin: *origin, models: models.clone() }).collect(),
                 bad: (!bad.is_empty()).then(|| bad.clone()), recent: post.recent, album: post.album,
                 size: (*w > 0 && *h > 0).then_some((*w, *h)),
-            }
+            })
         }).collect()
     }
 }
@@ -387,6 +296,11 @@ impl Library {
         let _ = fs::remove_dir_all(dir.join("tmp"));
         let models = dir.join("models");
         let lib = Library { dir, store: Mutex::new(store), vec_cache: Mutex::new(None), models: Mutex::new(models), epoch: Default::default() };
+        // Replay ready records before settling deletes or sweeping files they may still reference.
+        let applied = lib.db().retry_pending_ops(|id, ext| lib.dir.join(crate::oplog::blob_rel(id, ext)).exists());
+        if let Ok(n) = applied {
+            if n > 0 { lib.diag("pending_ops_applied", serde_json::json!({ "applied": n })); }
+        }
         // Housekeeping below writes to the database; on a full disk it fails, and the library must
         // still open (so media can be deleted to make room). Each step is retried at the next start.
         if let Err(e) = lib.settle() { lib.diag("maintenance_skipped", serde_json::json!({ "step": "settle", "error": crate::diagnostics::scrub(&format!("{e:#}")) })); } // finish file removals interrupted by a quit
@@ -396,11 +310,6 @@ impl Library {
         lib.keep_reserve();
         let _ = lib.db().prune_recent(crate::store::now_ms());
         let _ = lib.db().gc_dead_tags();
-        // records a newer app version sent before this device was updated
-        let dir2 = lib.dir.clone();
-        if let Ok(n) = lib.db().retry_pending_ops(|id, ext| dir2.join(crate::oplog::blob_rel(id, ext)).exists()) {
-            if n > 0 { lib.diag("pending_ops_applied", serde_json::json!({ "applied": n })); }
-        }
         Ok(lib)
     }
 
@@ -445,8 +354,7 @@ impl Library {
         let db = self.db();
         let pending = db.gc_pending()?;
         if pending.is_empty() { return Ok(0); }
-        // Pending deletes may have been recorded in synchronous=NORMAL during a bulk import.
-        // Even after the connection switches back to FULL, they need to be durable before unlinking.
+        // Checkpoint the delete records before unlinking any of their files.
         checkpoint_wal(&db)?;
         let tx = db.conn().unchecked_transaction()?;
         let mut removed = 0;
@@ -639,6 +547,16 @@ impl Library {
         Ok(removed)
     }
 
+    /// Keep an intact registered copy if this import used a different extension.
+    pub(crate) fn imported_blob_arrived(&self, db: &Store, id: &str, path: &str) -> anyhow::Result<()> {
+        if let Some((_, _, _, previous)) = db.media_row(id)? {
+            if previous != path && self.check_file(id, &previous).is_none() {
+                return Ok(db.blob_arrived(id, &previous)?);
+            }
+        }
+        Ok(db.blob_arrived(id, path)?)
+    }
+
     /// Copies bytes into blobs/ab/<sha>.<ext> atomically; returns (sha, relative path). How tests
     /// put a file in place: the app stores through a temporary file and the media checks instead.
     pub fn put_blob(&self, bytes: &[u8], ext: &str) -> anyhow::Result<(String, String)> {
@@ -686,13 +604,21 @@ impl Library {
             let checked = db.conn().prepare_cached("SELECT 1 FROM verified_media WHERE media_id=?1").and_then(|mut s| s.exists([sha])).unwrap_or(false);
             checked || self.check_file(sha, &rel).is_none()
         };
-        if dst.exists() && !damaged() && intact() { fs::remove_file(tmp)?; } else {
+        if dst.exists() && !damaged() && intact() {
+            fs::OpenOptions::new().write(true).open(&dst)?.sync_all()?;
+            fs::remove_file(tmp)?;
+        } else {
             fs::create_dir_all(dst.parent().unwrap())?;
             db.conn().execute("DELETE FROM verified_media WHERE media_id=?1", [sha])?;
             fs::rename(tmp, &dst)?;
-            if flushing_in_groups() { note_unflushed(&dst); }
-            // the rename itself is durable only once its folder is synced
-            else if let Ok(d) = fs::File::open(dst.parent().unwrap()) { let _ = d.sync_all(); }
+        }
+        // The file and its directory entries must be durable before the caller records the media.
+        #[cfg(unix)]
+        {
+            let shard = dst.parent().unwrap();
+            fs::File::open(shard)?.sync_all()?;
+            fs::File::open(self.dir.join("blobs"))?.sync_all()?;
+            fs::File::open(&self.dir)?.sync_all()?;
         }
         Ok(rel)
     }
@@ -702,7 +628,8 @@ impl Library {
 
     /// Media matching every term (substring on tag labels within scope), shuffled by seed.
     pub fn feed(&self, req: &FeedRequest) -> anyhow::Result<Vec<FeedItem>> {
-        let terms: Vec<String> = req.terms.iter().map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty()).collect();
+        let (term_indices, terms): (Vec<_>, Vec<_>) = req.terms.iter().enumerate()
+            .map(|(i, t)| (i, t.trim().to_lowercase())).filter(|(_, t)| !t.is_empty()).unzip();
         let sets: Vec<Vec<String>> = if terms.is_empty() || (!req.fields.tags && !req.fields.text && req.fields.author) {
             vec![]
         } else if !req.fuzzy {
@@ -713,7 +640,7 @@ impl Library {
         } else {
             let labels = self.db().all_labels()?;
             let vectors = match &req.embed_model { Some(m) => self.vectors(m)?, None => Default::default() };
-            terms.iter().enumerate().map(|(i, t)| {
+            terms.iter().zip(term_indices).map(|(t, i)| {
                 let qv = req.term_vectors.get(i).and_then(|v| v.as_deref());
                 crate::semantic::expand(t, &labels, qv, &vectors, req.threshold)
             }).collect()
@@ -804,6 +731,7 @@ impl Library {
     /// is written. The partial file is always removed again.
     pub fn put_reader_limited(&self, input: &mut dyn std::io::Read, kind: &MediaKind, ext: &str, max_bytes: u64, cancelled: &dyn Fn() -> bool) -> anyhow::Result<(String, String)> {
         let tmp = self.tmp_path();
+        let _cleanup = TempFile(tmp.clone());
         let r = (|| -> anyhow::Result<String> {
             let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(&tmp)?);
             let mut h = Sha256::new();
@@ -830,15 +758,13 @@ impl Library {
                 out.write_all(&buf[..n])?;
             }
             let file = out.into_inner()?;
-            // in a bulk import the file is flushed with its group (GroupFlush)
-            if !flushing_in_groups() { file.sync_all()?; }
+            file.sync_all()?;
             if !checked { check(&head)?; }
             Ok(hex::encode(h.finalize()))
         })();
-        match r {
-            Ok(sha) => Ok((sha.clone(), self.commit_tmp(&tmp, &sha, ext)?)),
-            Err(e) => { let _ = fs::remove_file(&tmp); Err(e) }
-        }
+        let sha = r?;
+        let rel = self.commit_tmp(&tmp, &sha, ext)?;
+        Ok((sha, rel))
     }
 
     /// Applies one model's labels to a media (see `rules::retag_plan`) and marks it analysed,
@@ -944,7 +870,34 @@ impl Library {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn purge_waits_when_import_mode_cannot_checkpoint_the_delete() {
+    fn whole_posts_keep_exclusions_and_fuzzy_vectors_keep_their_term_index() {
+        let dir = std::env::temp_dir().join(format!("tl-feed-filters-{:016x}", rand::random::<u64>()));
+        let lib = Library::open(&dir).unwrap();
+        let a = "a".repeat(64);
+        let b = "b".repeat(64);
+        {
+            let db = lib.db();
+            db.upsert_post(&crate::model::PostMeta { id: "post".into(), ..Default::default() }).unwrap();
+            for (ordinal, id, label) in [(0, &a, "cat"), (1, &b, "dog")] {
+                db.add_media(id, "post", ordinal, &MediaKind::Photo, &crate::oplog::blob_rel(id, "jpg"), false).unwrap();
+                db.tag_media(id, label, Origin::USER).unwrap();
+            }
+        }
+        let exclude: FeedRequest = serde_json::from_value(serde_json::json!({
+            "scope": "both", "whole_posts": true, "filter": {"exclude_terms": ["cat"]},
+        })).unwrap();
+        assert_eq!(lib.feed(&exclude).unwrap().iter().map(|item| &item.media_id).collect::<Vec<_>>(), [&b]);
+        lib.set_vectors("m", &[("cat".into(), vec![1.0, 0.0]), ("dog".into(), vec![0.0, 1.0])]).unwrap();
+        let fuzzy: FeedRequest = serde_json::from_value(serde_json::json!({
+            "scope": "both", "terms": ["  ", "puppy"], "fuzzy": true, "embed_model": "m",
+            "term_vectors": [[1.0, 0.0], [0.0, 1.0]],
+        })).unwrap();
+        assert_eq!(lib.feed(&fuzzy).unwrap().iter().map(|item| &item.media_id).collect::<Vec<_>>(), [&b]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn purge_leaves_file_when_checkpoint_is_blocked() {
         let dir = std::env::temp_dir().join(format!("tl-purge-checkpoint-{}", rand::random::<u64>()));
         let lib = Library::open(&dir).unwrap();
         let (id, rel) = lib.put_blob(&crate::testutil::jpg(b"keep until checkpoint"), "jpg").unwrap();
@@ -957,16 +910,12 @@ mod tests {
         let ids = std::slice::from_ref(&id);
         lib.trash_apply(ids, crate::rules::TrashAction::Trash).unwrap();
 
-        let group = lib.group_flush();
         let reader = rusqlite::Connection::open(dir.join("library.sqlite")).unwrap();
         reader.execute_batch("BEGIN").unwrap();
         reader.query_row("SELECT count(*) FROM trash", [], |row| row.get::<_, i64>(0)).unwrap();
         assert!(lib.trash_apply(ids, crate::rules::TrashAction::Purge).is_err());
         assert!(dir.join(&rel).exists());
         assert_eq!(lib.db().gc_pending().unwrap().len(), 1);
-        drop(group);
-        assert!(lib.settle().is_err());
-        assert!(dir.join(&rel).exists());
 
         drop(reader);
         assert_eq!(lib.settle().unwrap(), 1);
@@ -982,6 +931,8 @@ mod tests {
         let ok = |v: &[&str]| check_ai_labels(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>()).is_ok();
         assert!(ok(&["猫", "室内"]) && ok(&["c++", "3d", "初音 miku", "😺", "mac外国语"]));
         assert!(!ok(&[]) && !ok(&["  "]));
+        assert!(check_ai_labels(&["猫".repeat(24)]).is_ok());
+        assert!(check_ai_labels(&["猫".repeat(25)]).is_err());
         for bad in ["\u{7d}", ":", "harley \u{7d}", "mactw \u{7d}", "[猫]", "a\u{7}b", "..."] { assert!(!ok(&["猫", bad]), "{bad}"); }
         let d = std::env::temp_dir().join(format!("tl-badtags-{}", rand::random::<u64>()));
         let lib = Library::open(&d).unwrap();
@@ -989,37 +940,6 @@ mod tests {
         assert_eq!(e.to_string(), tr!("ai.badTags").to_string());
         let e = lib.apply_ai_tags_at(lib.epoch(), "missing", "m", &[], false).unwrap_err();
         assert_eq!(e.to_string(), tr!("ai.noTags").to_string());
-        std::fs::remove_dir_all(&d).unwrap();
-    }
-
-    /// Inside a bulk import files wait for their group's flush, commits are not flushed one by
-    /// one, and afterwards every commit is flushed again; the records are there either way.
-    #[test]
-    fn an_import_flushes_in_groups_and_then_as_before() {
-        let d = std::env::temp_dir().join(format!("tl-group-{}", rand::random::<u64>()));
-        let lib = Library::open(&d).unwrap();
-        let sync = |lib: &Library| lib.db().conn().query_row("PRAGMA synchronous", [], |r| r.get::<_, i64>(0)).unwrap();
-        assert_eq!(sync(&lib), 2);
-        let src = d.join("src.png");
-        {
-            let group = lib.group_flush();
-            assert!(flushing_in_groups());
-            assert_eq!(sync(&lib), 1);
-            for i in 0..3 {
-                std::fs::write(&src, [&b"\x89PNG\r\n\x1a\n"[..], format!("group {i}").as_bytes()].concat()).unwrap();
-                lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
-            }
-            UNFLUSHED.with(|u| assert_eq!(u.borrow().as_ref().unwrap().len(), 3));
-            group.flush().unwrap();
-            UNFLUSHED.with(|u| assert!(u.borrow().as_ref().unwrap().is_empty()));
-            std::fs::write(&src, b"\x89PNG\r\n\x1a\nleft for the end").unwrap();
-            lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
-        }
-        assert!(!flushing_in_groups());
-        assert_eq!(sync(&lib), 2);
-        // the same content again (already stored) notes nothing
-        lib.put_file(&src, &MediaKind::Photo, "png").unwrap();
-        assert_eq!(std::fs::read_dir(d.join("blobs")).unwrap().flatten().map(|e| std::fs::read_dir(e.path()).unwrap().count()).sum::<usize>(), 4);
         std::fs::remove_dir_all(&d).unwrap();
     }
 

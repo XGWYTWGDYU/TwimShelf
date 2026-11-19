@@ -4,7 +4,8 @@ use crate::model::MediaKind;
 use crate::net::{self, RemotePost};
 use crate::protected::Credentials;
 use anyhow::{anyhow, bail};
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
+use std::panic::AssertUnwindSafe;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
@@ -61,10 +62,10 @@ pub fn runtime() -> &'static tokio::runtime::Runtime {
 }
 
 pub fn set_cookies(c: Option<Credentials>) { *COOKIES.lock().unwrap() = c; }
-pub fn status() -> DownloadStatus { STATUS.lock().unwrap().clone().unwrap_or_default() }
+pub fn status() -> DownloadStatus { STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default() }
 pub fn cancel() { CANCEL.store(true, Ordering::SeqCst); update(|s| s.outcome = "cancelled".into()); }
 pub fn stop(lib: &Library, pause: bool) -> anyhow::Result<usize> {
-    let _guard = RUN_GUARD.lock().unwrap();
+    let _guard = RUN_GUARD.lock().unwrap_or_else(|e| e.into_inner());
     let n = lib.db().stop_jobs(pause)?;
     CANCEL.store(true, Ordering::SeqCst);
     update(|s| s.outcome = if pause { "paused" } else { "cancelled" }.into());
@@ -75,7 +76,7 @@ async fn stopped() {
 }
 
 fn update(f: impl FnOnce(&mut DownloadStatus)) {
-    let mut g = STATUS.lock().unwrap();
+    let mut g = STATUS.lock().unwrap_or_else(|e| e.into_inner());
     f(g.get_or_insert_with(Default::default));
 }
 
@@ -87,6 +88,21 @@ struct LinkOpts { #[serde(default)] route: Route, #[serde(default)] revive: bool
 /// worker finishes is never left waiting.
 static RUN_GUARD: Mutex<bool> = Mutex::new(false);
 
+struct Running(bool);
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        if !self.0 { return; }
+        let mut running = RUN_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        update(|status| {
+            status.running = false;
+            status.active.clear();
+            if status.outcome == "running" { status.outcome = "failed".into(); }
+        });
+        *running = false;
+    }
+}
+
 /// Queues the URLs (plus any unfinished jobs from earlier runs) and works through them in the
 /// background. A request made while a batch is running joins it (its links are appended).
 /// Returns how many links are waiting now.
@@ -95,7 +111,7 @@ pub fn resume(lib: Arc<Library>, req: DownloadRequest) -> anyhow::Result<usize> 
 fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> anyhow::Result<usize> {
     let opts = LinkOpts { route: req.route, revive: req.revive, folder: req.folder.clone().filter(|f| !f.trim().is_empty()), recent: req.mark_recent, staged: false };
     let opts_json = serde_json::to_string(&opts)?;
-    let mut running = RUN_GUARD.lock().unwrap();
+    let mut running = RUN_GUARD.lock().unwrap_or_else(|e| e.into_inner());
     if *running && CANCEL.load(Ordering::SeqCst) { bail!(tr!("download.stopping")); }
     let pending = {
         let db = lib.db();
@@ -114,14 +130,16 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
     *running = true;
     let gen = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     CANCEL.store(false, Ordering::SeqCst);
-    *STATUS.lock().unwrap() = Some(DownloadStatus { running: true, outcome: "running".into(), total: n, generation: gen, ..Default::default() });
+    *STATUS.lock().unwrap_or_else(|e| e.into_inner()) = Some(DownloadStatus { running: true, outcome: "running".into(), total: n, generation: gen, ..Default::default() });
     // only now: a stop or a joining download in between would be overwritten by the lines above
     drop(running);
     let concurrency = req.concurrency.clamp(1, 16);
     let interval = std::time::Duration::from_millis(req.interval_ms.min(600_000));
+    let guard = Running(true);
     runtime().spawn(async move {
+        let mut guard = guard;
         let sem = Arc::new(tokio::sync::Semaphore::new(concurrency));
-        let mut tasks = vec![];
+        let mut tasks = tokio::task::JoinSet::new();
         // (link, request epoch) already started in this run: a link asked for again runs again
         let mut seen: std::collections::HashSet<(String, i64)> = std::collections::HashSet::new();
         let mut first = true;
@@ -129,12 +147,13 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
             // an unreadable queue is not an empty one: said in the diagnostics, tried again on the next start
             let fresh: Vec<(String, i64, Option<String>)> = lib.db().pending_jobs_epoch().inspect_err(|e| lib.diag("download_queue_unreadable", serde_json::json!({ "error": crate::diagnostics::scrub(&e.to_string()) }))).unwrap_or_default().into_iter().filter(|(u, e, _)| !seen.contains(&(u.clone(), *e))).collect();
             if fresh.is_empty() || CANCEL.load(Ordering::SeqCst) {
-                for t in tasks.drain(..) { let _ = t.await; }
+                while tasks.join_next().await.is_some() {}
                 // finish only if nothing new arrived meanwhile (checked under the guard)
-                let mut g = RUN_GUARD.lock().unwrap();
+                let mut g = RUN_GUARD.lock().unwrap_or_else(|e| e.into_inner());
                 let more = !CANCEL.load(Ordering::SeqCst) && lib.db().pending_jobs_epoch().unwrap_or_default().iter().any(|(u, e, _)| !seen.contains(&(u.clone(), *e)));
                 if more { drop(g); continue; }
                 *g = false;
+                guard.0 = false;
                 update(|s| {
                     s.running = false;
                     if s.outcome == "running" { s.outcome = if s.failed == 0 { "succeeded" } else if s.done + s.skipped > 0 { "partial" } else { "failed" }.into(); }
@@ -142,6 +161,7 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
                 break;
             }
             for (url, epoch, opts) in fresh {
+                while tasks.try_join_next().is_some() {}
                 if CANCEL.load(Ordering::SeqCst) { break; }
                 seen.insert((url.clone(), epoch));
                 if !first && !interval.is_zero() { tokio::select! { _ = tokio::time::sleep(interval) => {}, _ = stopped() => { break; } } }
@@ -150,9 +170,13 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
                 if CANCEL.load(Ordering::SeqCst) { break; }
                 let lib = lib.clone();
                 let o: LinkOpts = opts.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
-                tasks.push(tokio::spawn(async move {
+                tasks.spawn(async move {
                     update(|s| s.active.push(url.clone()));
-                    let r = tokio::select! { r = process(&lib, &url, &o) => r, _ = stopped() => Err(anyhow!(tr!("download.stopped"))) };
+                    let work = AssertUnwindSafe(process(&lib, &url, &o)).catch_unwind();
+                    let r = tokio::select! {
+                        r = work => r.unwrap_or_else(|_| Err(anyhow!("download worker interrupted"))),
+                        _ = stopped() => Err(anyhow!(tr!("download.stopped"))),
+                    };
                     // the cause only (the link itself is the user's content)
                     if let Err(e) = &r { if !CANCEL.load(Ordering::SeqCst) { lib.diag("download_error", serde_json::json!({ "route": format!("{:?}", o.route), "error": crate::diagnostics::scrub(&format!("{e:#}")) })); } }
                     let counts = lib.db().finish_job_epoch(&url, epoch, r.as_ref().err().map(|e| e.to_string())).unwrap_or(true);
@@ -166,7 +190,7 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
                         }
                     });
                     drop(permit);
-                }));
+                });
             }
         }
     });
@@ -341,7 +365,7 @@ async fn fetch_tmp(lib: &Library, url: &str, kind: &MediaKind, headers: &[(Strin
     // media come from X's media servers only: a wrong or tampered answer cannot make this
     // device fetch from the local network or anywhere else
     if !crate::rules::media_url_ok(url) { bail!(tr!("download.notXMedia")); }
-    let mut rq = net::client().get(url);
+    let mut rq = net::media_client().get(url);
     for (k, v) in headers { rq = rq.header(k.as_str(), v.as_str()); }
     let resp = rq.send().await?.error_for_status()?;
     let ext = match kind {

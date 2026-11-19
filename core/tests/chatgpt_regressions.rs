@@ -35,7 +35,7 @@ fn regression_purged_inflight_blob_recreates_media_row() {
  let s=base();
  s.trash_action(ID,TrashAction::Trash).unwrap();s.trash_action(ID,TrashAction::Purge).unwrap();s.gc_done(ID).unwrap();
  assert!(s.media_row(ID).unwrap().is_none());
- s.blob_arrived(ID).unwrap();
+ s.blob_arrived(ID, &tl_core::oplog::blob_rel(ID, "jpg")).unwrap();
  assert!(s.media_row(ID).unwrap().is_none(),"late blob must not recreate purged media");
  assert!(s.gc_pending().unwrap().is_empty(),"no remaining removal scheduled");
 }

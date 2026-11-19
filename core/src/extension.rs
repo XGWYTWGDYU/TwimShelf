@@ -344,7 +344,8 @@ pub fn handle_open(r: &Request) -> Reply { handle(crate::ffi::current_library(),
 /// named; a web page's never is): CORS and Chrome's private-network preflight.
 pub fn cors_headers(origin: Option<&str>) -> Vec<(&'static str, String)> {
     match origin {
-        Some(o) if o.starts_with("chrome-extension://") || o.starts_with("moz-extension://") || o.starts_with("safari-web-extension://") => vec![
+        Some(o) if !o.chars().any(char::is_control) && (o.starts_with("chrome-extension://")
+            || o.starts_with("moz-extension://") || o.starts_with("safari-web-extension://")) => vec![
             ("Access-Control-Allow-Origin", o.to_string()),
             ("Access-Control-Allow-Methods", "GET, POST, OPTIONS".into()),
             ("Access-Control-Allow-Headers", "authorization, content-type".into()),

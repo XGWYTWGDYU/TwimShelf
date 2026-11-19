@@ -68,8 +68,10 @@ fn import_summary(lib: &Library) -> serde_json::Value {
 /// Writes the diagnostics ZIP; returns how many files it holds.
 pub fn export(lib: &Library, out: &Path, app_info: &str) -> anyhow::Result<usize> {
     let logs = lib.dir.join("logs");
-    let tmp = out.with_extension("zip.partial");
-    let mut z = zip::ZipWriter::new(std::io::BufWriter::new(File::create(&tmp)?));
+    let tmp = out.with_extension(format!("{:016x}.zip.partial", rand::random::<u64>()));
+    let file = File::create_new(&tmp)?;
+    let _cleanup = crate::library::TempFile(tmp.clone());
+    let mut z = zip::ZipWriter::new(std::io::BufWriter::new(file));
     let o = zip::write::SimpleFileOptions::default();
     let mut n = 0;
     let mut add = |z: &mut zip::ZipWriter<std::io::BufWriter<File>>, name: &str, bytes: &[u8]| -> anyhow::Result<()> {

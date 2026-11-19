@@ -318,22 +318,36 @@ impl Store {
         self.conn().execute("DELETE FROM want_blob WHERE media_id=?1", [id]).map(|_| ())
     }
 
-    /// Called once a wanted blob has been stored: materializes its media row.
-    pub fn blob_arrived(&self, id: &str) -> rusqlite::Result<()> {
+    /// Materializes a wanted blob from the actual path of its verified copy.
+    pub fn blob_arrived(&self, id: &str, path: &str) -> rusqlite::Result<()> {
         use rusqlite::OptionalExtension;
-        if self.trash_reg(id)?.state == crate::rules::PURGED { return Ok(()); }
-        let row: Option<(String, String)> = self.conn().query_row("SELECT kind, ext FROM want_blob WHERE media_id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-        // shown under its owner once one of its posts is known (else it appears with the post)
-        if let (Some((kind, ext)), Some((post_id, ordinal))) = (row, self.known_owner(id)?) {
-            let kind = if kind == "video" { MediaKind::Video } else { MediaKind::Photo };
-            self.apply_media(id, &post_id, ordinal, &kind, &blob_rel(id, &ext))?;
-            // whatever apply_media found (an existing row keeps its path), nothing is awaited any more
-            self.conn().execute("DELETE FROM want_blob WHERE media_id=?1", [id])?;
+        let ext = path.rsplit('.').next().unwrap_or_default();
+        if !crate::rules::is_blob_path(path.as_bytes()) || blob_rel(id, ext) != path {
+            return Err(rusqlite::Error::InvalidParameterName("blob path".into()));
         }
-        // A verified copy replaced a damaged local file.
-        self.set_bad(id, None)?;
-        Ok(())
+        self.atomic(|| {
+            if self.trash_reg(id)?.state == crate::rules::PURGED { return Ok(()); }
+            if let Some((_, _, _, previous)) = self.media_row(id)? {
+                if previous != path {
+                    self.conn().execute("UPDATE media SET path=?2 WHERE id=?1", params![id, path])?;
+                    self.conn().execute("DELETE FROM verified_media WHERE media_id=?1", [id])?;
+                }
+                self.conn().execute("DELETE FROM want_blob WHERE media_id=?1", [id])?;
+            } else {
+                let kind: Option<String> = self.conn().query_row("SELECT kind FROM want_blob WHERE media_id=?1", [id], |r| r.get(0)).optional()?;
+                if let Some(kind) = kind {
+                    if let Some((post_id, ordinal)) = self.known_owner(id)? {
+                        let kind = if kind == "video" { MediaKind::Video } else { MediaKind::Photo };
+                        self.apply_media(id, &post_id, ordinal, &kind, path)?;
+                    } else {
+                        self.conn().execute("UPDATE want_blob SET ext=?2 WHERE media_id=?1", params![id, ext])?;
+                    }
+                }
+            }
+            self.set_bad(id, None)
+        })
     }
+
 }
 
 /// Relative path of a stored file. Callers pass ids and extensions checked by
@@ -381,7 +395,7 @@ mod tests {
         assert_eq!(b.apply_remote(&ops, |_, _| false).unwrap(), 6);
         assert_eq!(b.apply_remote(&ops, |_, _| false).unwrap(), 0, "idempotent");
         assert_eq!(b.wanted_blobs(10).unwrap(), vec![(ID.to_string(), "jpg".to_string())]);
-        b.blob_arrived(ID).unwrap();
+        b.blob_arrived(ID, &blob_rel(ID, "jpg")).unwrap();
         assert!(b.wanted_blobs(10).unwrap().is_empty());
         let mut tags: Vec<(String, u8)> = b.conn().prepare("SELECT t.label, tm.origin FROM tag_media tm JOIN tag t ON t.id=tm.tag_id ORDER BY t.label").unwrap()
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect();

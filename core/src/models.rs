@@ -59,30 +59,56 @@ const MAX_ZIP_ENTRIES: usize = 10_000;
 const MAX_MODEL_BYTES: u64 = 64 << 30;
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
-pub fn status() -> Option<ModelDownloadStatus> { STATUS.lock().unwrap().clone() }
+pub fn status() -> Option<ModelDownloadStatus> { STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone() }
 
 /// Progress reporting shared with LAN model pulls (same UI as downloads).
-pub(crate) fn begin_external(label: &str, total: u64) -> anyhow::Result<()> {
+pub(crate) fn begin_external(label: &str, total: u64) -> anyhow::Result<ModelOperation> {
     claim(ModelDownloadStatus { repo: label.into(), running: true, total_bytes: total, ..Default::default() })
 }
 
 /// Starts a model operation unless one is running: the check and the claim happen under one
 /// lock, so two taps (or a download and a pull from another device) can never both start.
-fn claim(s: ModelDownloadStatus) -> anyhow::Result<()> {
+fn claim(s: ModelDownloadStatus) -> anyhow::Result<ModelOperation> {
     let mut g = STATUS.lock().unwrap_or_else(|e| e.into_inner());
     if g.as_ref().map_or(false, |s| s.running) { bail!(tr!("models.busy")); }
     CANCEL.store(false, Ordering::SeqCst);
     *g = Some(s);
-    Ok(())
+    Ok(ModelOperation { running: true })
 }
 
 /// A private staging folder name (two operations never share or delete each other's).
 pub(crate) fn staging_name(prefix: &str) -> String { format!(".{prefix}-{}", hex::encode(rand::random::<[u8; 6]>())) }
 pub(crate) fn external_progress(done: u64, file: &str) { update(|s| { s.done_bytes = done; s.file = file.into(); }) }
 pub(crate) fn external_cancelled() -> bool { CANCEL.load(Ordering::SeqCst) }
-pub(crate) fn end_external(r: &anyhow::Result<()>) {
-    update(|s| { s.running = false; s.finished = r.is_ok(); s.error = r.as_ref().err().map(|e| format!("{e:#}")); if r.is_ok() { s.done_bytes = s.total_bytes; } });
+pub(crate) struct ModelOperation { running: bool }
+
+impl ModelOperation {
+    pub(crate) fn finish<T>(mut self, result: &anyhow::Result<T>) {
+        let error = result.as_ref().err().map(|e| format!("{e:#}"));
+        update(|s| {
+            s.running = false;
+            s.finished = result.is_ok();
+            s.error = error;
+            s.verifying = false;
+            if s.finished { s.done_bytes = s.total_bytes; }
+        });
+        self.running = false;
+    }
 }
+
+impl Drop for ModelOperation {
+    fn drop(&mut self) {
+        if self.running {
+            update(|s| {
+                s.running = false;
+                s.verifying = false;
+                s.finished = false;
+                s.error = Some("model operation interrupted".into());
+            });
+        }
+    }
+}
+
 pub(crate) fn is_wanted_file(name: &str) -> bool { wanted(name) }
 pub(crate) fn checked_id(id: &str) -> anyhow::Result<&str> { safe_id(id) }
 pub fn cancel() { CANCEL.store(true, Ordering::SeqCst) }
@@ -92,7 +118,7 @@ async fn or_cancel<F: std::future::Future>(f: F) -> anyhow::Result<F::Output> {
     let cancelled = async { while !CANCEL.load(Ordering::SeqCst) { tokio::time::sleep(std::time::Duration::from_millis(200)).await; } };
     tokio::select! { r = f => Ok(r), _ = cancelled => bail!(tr!("common.cancelled")) }
 }
-fn update(f: impl FnOnce(&mut ModelDownloadStatus)) { if let Some(s) = STATUS.lock().unwrap().as_mut() { f(s) } }
+fn update(f: impl FnOnce(&mut ModelDownloadStatus)) { if let Some(s) = STATUS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { f(s) } }
 
 pub fn slug(repo: &str) -> String { repo.replace('/', "--") }
 
@@ -116,7 +142,7 @@ pub fn hf_client() -> reqwest::Client {
 
 /// Files needed to run an MLX model; docs, images and git metadata are skipped.
 fn wanted(name: &str) -> bool {
-    if name.contains(['/', '\\', ':']) || name.contains("..") || name.starts_with('.') { return false; }
+    if !crate::rules::portable_basename(name) || name.contains("..") { return false; }
     let l = name.to_ascii_lowercase();
     l.ends_with(".safetensors") || l.ends_with(".json") || l.ends_with(".jinja") || l.ends_with(".txt") || l.ends_with(".model") || l.ends_with(".tiktoken")
 }
@@ -128,10 +154,11 @@ struct Lfs { oid: String }
 
 /// `revision` pins the files (the store's models); None follows the repo's `main`.
 pub fn start_download(repo: String, revision: Option<String>, models_dir: PathBuf) -> anyhow::Result<()> {
-    claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
+    safe_id(&slug(&repo))?;
+    let operation = claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
     runtime().spawn(async move {
         let r = download(&repo, revision.as_deref().unwrap_or("main"), &models_dir).await;
-        update(|s| { s.running = false; s.finished = r.is_ok(); s.error = r.err().map(|e| format!("{e:#}")); });
+        operation.finish(&r);
     });
     Ok(())
 }
@@ -218,7 +245,7 @@ async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base:
             let p = part.clone();
             let got = tokio::task::spawn_blocking(move || sha256_file(&p)).await?;
             update(|s| s.verifying = false);
-            if &got? != want { let _ = fs::remove_file(&part); bail!(tr!("models.verifyFailed")); }
+            if !got?.eq_ignore_ascii_case(want) { let _ = fs::remove_file(&part); bail!(tr!("models.verifyFailed")); }
         }
         rename_when_free(&part, &dst).await?;
         return Ok(());
@@ -259,7 +286,7 @@ fn gguf_manifest(dir: &Path) -> Option<GgufManifest> {
     (m.format == "gguf" && safe_file(&m.weights) && m.projector.as_deref().map_or(true, safe_file)).then_some(m)
 }
 
-fn safe_file(n: &str) -> bool { !n.is_empty() && !n.contains(['/', '\\']) && !n.starts_with('.') && n.to_ascii_lowercase().ends_with(".gguf") }
+fn safe_file(n: &str) -> bool { crate::rules::portable_basename(n) && n.to_ascii_lowercase().ends_with(".gguf") }
 
 /// A GGUF file starts with "GGUF" and a version; a cut-off copy is caught by its size check
 /// when it is downloaded.
@@ -272,10 +299,11 @@ fn gguf_ok(p: &Path) -> bool {
 /// like every model file (size, SHA-256), into a folder that names them.
 pub fn start_download_gguf(repo: String, revision: Option<String>, weights: String, projector: Option<String>, models_dir: PathBuf) -> anyhow::Result<()> {
     if !safe_file(&weights) || !projector.as_deref().map_or(true, safe_file) { bail!(tr!("models.badName")); }
-    claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
+    safe_id(&slug(&repo))?;
+    let operation = claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
     runtime().spawn(async move {
         let r = download_gguf(&repo, revision.as_deref().unwrap_or("main"), &weights, projector.as_deref(), &models_dir).await;
-        update(|s| { s.running = false; s.finished = r.is_ok(); s.error = r.err().map(|e| format!("{e:#}")); });
+        operation.finish(&r);
     });
     Ok(())
 }
@@ -336,7 +364,7 @@ pub fn check_safetensors(p: &Path) -> anyhow::Result<()> {
     f.read_exact(&mut buf)?;
     let hdr: serde_json::Value = serde_json::from_slice(&buf).with_context(|| tr!("models.headerUnreadable", name = name))?;
     let mut end = 0u64;
-    for (k, v) in hdr.as_object().into_iter().flatten() {
+    for (k, v) in hdr.as_object().with_context(|| tr!("models.headerDamaged", name = name))? {
         if k == "__metadata__" { continue; }
         let off = v["data_offsets"].as_array().and_then(|a| a.get(1)).and_then(|x| x.as_u64()).with_context(|| tr!("models.tensorNoOffset", name = name, k = k))?;
         end = end.max(off);
@@ -392,7 +420,7 @@ pub fn installed(models_dir: &Path) -> Vec<ModelInfo> {
 }
 
 fn safe_id(id: &str) -> anyhow::Result<&str> {
-    if id.is_empty() || id.contains(['/', '\\', ':']) || id.contains("..") || id.starts_with('.') { bail!(tr!("models.badName")); }
+    if !crate::rules::portable_basename(id) || id.contains("..") { bail!(tr!("models.badName")); }
     Ok(id)
 }
 
@@ -407,9 +435,9 @@ pub fn delete(models_dir: &Path, id: &str) -> anyhow::Result<()> {
 /// Runs a change to the models folder as a model operation: not beside a download, a pull or
 /// another change (each would pull the folder from under the other).
 fn claimed<T>(label: &str, f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
-    claim(ModelDownloadStatus { repo: label.into(), running: true, ..Default::default() })?;
+    let operation = claim(ModelDownloadStatus { repo: label.into(), running: true, ..Default::default() })?;
     let r = f();
-    update(|s| { s.running = false; s.finished = r.is_ok(); s.error = r.as_ref().err().map(|e| format!("{e:#}")); });
+    operation.finish(&r);
     r
 }
 
@@ -434,8 +462,10 @@ pub(crate) fn replace_dir(new: &Path, dst: &Path) -> anyhow::Result<()> {
 pub fn export_zip(models_dir: &Path, id: &str, out: &Path) -> anyhow::Result<u64> {
     let dir = models_dir.join(safe_id(id)?);
     validate_dir(&dir)?;
-    let tmp = out.with_extension("partial");
-    let mut zw = zip::ZipWriter::new(BufWriter::new(File::create(&tmp)?));
+    let tmp = out.with_extension(format!("{:016x}.partial", rand::random::<u64>()));
+    let file = File::create_new(&tmp)?;
+    let _cleanup = crate::library::TempFile(tmp.clone());
+    let mut zw = zip::ZipWriter::new(BufWriter::new(file));
     let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored).large_file(true);
     let mut bytes = 0;
     let mut names: Vec<String> = fs::read_dir(&dir)?.filter_map(|e| e.ok()).filter(|e| e.path().is_file())
@@ -476,7 +506,9 @@ fn import_claimed(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
                 let mut e = z.by_index(i)?;
                 if e.is_dir() { continue; }
                 let Some(rel) = crate::archive::safe_relative(&String::from_utf8_lossy(e.name_raw())) else { continue };
-                if rel.starts_with("__MACOSX") { continue; }
+                if rel.starts_with("__MACOSX") || !rel.components().all(|part| {
+                    matches!(part, std::path::Component::Normal(name) if name.to_str().is_some_and(crate::rules::portable_basename))
+                }) { continue; }
                 // only the files a model needs, and never more than a model can be (a ZIP bomb stops here)
                 if !wanted(&rel.file_name().unwrap_or_default().to_string_lossy()) { continue; }
                 let dst = staging.join(&rel);
@@ -524,6 +556,16 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn tensor_header_must_be_an_object() {
+        let path = std::env::temp_dir().join(format!("tl-tensor-header-{:016x}.safetensors", rand::random::<u64>()));
+        let mut data = 2u64.to_le_bytes().to_vec();
+        data.extend_from_slice(b"[]");
+        fs::write(&path, data).unwrap();
+        assert!(check_safetensors(&path).is_err());
+        fs::remove_file(path).unwrap();
+    }
 
     fn fake_model(dir: &Path) {
         fs::create_dir_all(dir).unwrap();

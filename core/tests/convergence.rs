@@ -234,6 +234,29 @@ fn sync_all(reps: &[&Store]) {
     } }
 }
 
+#[test]
+fn ai_cleanup_cannot_erase_a_concurrent_user_endorsement() {
+    let id = format!("{:064}", 0);
+    for replace in [false, true] {
+        let (a, b) = (replica(), replica());
+        a.retag(&id, "m", &["cat".into()], false).unwrap();
+        sync_all(&[&a, &b]);
+        a.tag_media(&id, "cat", tl_core::model::Origin::USER).unwrap();
+        // Give the cleanup a later clock so a two-bit tombstone would win.
+        let local_clock = a.meta_get("hlc").unwrap().unwrap();
+        b.meta_set("hlc", &local_clock).unwrap();
+        if replace {
+            b.retag(&id, "m", &["other".into()], true).unwrap();
+        } else {
+            b.remove_ai_tags().unwrap();
+        }
+        sync_all(&[&a, &b]);
+        for replica in [&a, &b] {
+            assert!(eff(replica, 0).contains(&("cat".into(), 1)));
+        }
+    }
+}
+
 /// A rename on one device while an AI tagging run on another keeps writing the old name:
 /// after sync every device shows only the new name, on every media, and the rename can be undone.
 #[test]

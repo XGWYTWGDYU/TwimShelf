@@ -279,10 +279,56 @@ fn awaited_files_follow_the_same_rules_as_stored_ones() {
     lib.trash_post("gone").unwrap();
     std::fs::create_dir_all(dir.join("blobs/ff")).unwrap();
     std::fs::write(dir.join(format!("blobs/ff/{id}.jpg")), b"x").unwrap();
-    lib.db().blob_arrived(&id).unwrap();
+    lib.db().blob_arrived(&id, &tl_core::oplog::blob_rel(&id, "jpg")).unwrap();
     let live = lib.db().live_media_of_post("gone").unwrap();
     assert!(live.is_empty(), "the deleted post does not come back when its file arrives");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn binned_import_materializes_the_extension_that_was_actually_stored() {
+    use sha2::{Digest, Sha256};
+    let dir = tmp("bin-extension");
+    let source = dir.join("source");
+    std::fs::create_dir_all(&source).unwrap();
+    let lib = Library::open(dir.join("library")).unwrap();
+    let bytes = b"\x00\x00\x00\x18ftypmp42 video";
+    let id = hex::encode(Sha256::digest(bytes));
+    lib.db().apply_remote(&[
+        op("peer", 1, Op::Post { meta: PostMeta { id: "p".into(), ..Default::default() }, hlc: 1 }),
+        op("peer", 2, Op::Media { id: id.clone(), post_id: "p".into(), ordinal: 0, kind: MediaKind::Video, ext: "mov".into() }),
+    ], |_, _| false).unwrap();
+    lib.trash_post("p").unwrap();
+    std::fs::write(source.join("clip.mp4"), bytes).unwrap();
+    assert_eq!(tl_core::import::import_loose_dir(&lib, &source, None, false).unwrap().deleted, 1);
+    let row = lib.db().media_row(&id).unwrap().unwrap();
+    assert!(row.3.ends_with(".mp4"));
+    assert_eq!(lib.check_file(&id, &row.3), None);
+    assert!(lib.db().wanted_blobs(10).unwrap().is_empty());
+    lib.trash_apply(std::slice::from_ref(&id), tl_core::rules::TrashAction::Restore).unwrap();
+    assert_eq!(lib.db().live_media_of_post("p").unwrap(), [id]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn startup_settles_a_deletion_that_becomes_ready_during_replay() {
+    let dir = tmp("pending-purge");
+    let (id, rel) = {
+        let lib = Library::open(&dir).unwrap();
+        let (id, rel) = lib.put_blob(b"\xff\xd8\xff\xe0pending", "jpg").unwrap();
+        let db = lib.db();
+        db.upsert_post(&PostMeta { id: "p".into(), ..Default::default() }).unwrap();
+        db.add_media(&id, "p", 0, &MediaKind::Photo, &rel, false).unwrap();
+        let deletion = tl_core::oplog::op_value(&Op::Trash { media_id: id.clone(), inc: 0, state: tl_core::rules::PURGED, hlc: 1 }).to_string();
+        db.conn().execute("INSERT INTO op VALUES('peer', 1, ?1)", [deletion]).unwrap();
+        db.conn().execute("INSERT INTO op_pending VALUES('peer', 1)", []).unwrap();
+        (id, rel)
+    };
+    let lib = Library::open(&dir).unwrap();
+    assert!(lib.db().media_row(&id).unwrap().is_none());
+    assert!(!dir.join(rel).exists());
+    assert!(lib.db().gc_pending().unwrap().is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// Media are fetched from X's media servers only.

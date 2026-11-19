@@ -258,8 +258,14 @@ impl Store {
         let cur = existing.map_or(0, |r| r.origin);
         if cur == origin && (origin != 0 || existing.is_some()) { return Ok(()); }
         let mask = if origin == 0 || cur ^ origin == 0 { 3 } else { cur ^ origin };
+        self.write_raw_bits(media_id, label, origin, mask)
+    }
+
+    fn write_raw_bits(&self, media_id: &str, label: &str, origin: u8, mask: u8) -> rusqlite::Result<()> {
+        let existing = self.tag_reg(media_id, label)?.unwrap_or_default();
+        if (existing.origin ^ origin) & mask == 0 && mask != 3 { return Ok(()); }
         let hlc = self.next_hlc()?;
-        let reg = crate::crdt::merge_bits(existing.unwrap_or_default(), crate::crdt::TagBits::write(origin, mask, hlc));
+        let reg = crate::crdt::merge_bits(existing, crate::crdt::TagBits::write(origin, mask, hlc));
         self.put_tag_reg(media_id, label, reg)?;
         self.record(&crate::oplog::Op::Tag { media_id: media_id.into(), label: label.into(), origin, mask, hlc })
     }
@@ -329,7 +335,7 @@ impl Store {
             let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
             v
         };
-        for (m, raw, o) in &rows { self.write_raw(m, raw, o & 1)?; }
+        for (m, raw, o) in &rows { self.write_raw_bits(m, raw, o & 1, crate::rules::AI)?; }
         let sources: Vec<(String, String, String)> = {
             let mut st = self.conn.prepare("SELECT s.media_id, r.label, s.model FROM tag_src s JOIN tag r ON r.id=s.tag_id WHERE s.present=1")?;
             let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
@@ -542,10 +548,17 @@ impl Store {
         v
     }
 
-    /// Writes an origin chosen by a rule (not OR-merged), under the tag's current name.
-    fn set_origin(&self, media_id: &str, label: &str, origin: u8) -> rusqlite::Result<()> {
-        if self.eff_origin(media_id, label)? == origin { return Ok(()); }
-        self.set_effective(media_id, label, origin)
+    /// Changes only the AI register, including for raw labels shown under an alias.
+    fn set_ai_origin(&self, media_id: &str, label: &str, origin: u8) -> rusqlite::Result<()> {
+        if origin & crate::rules::AI != 0 {
+            return self.write_raw_bits(media_id, label, origin, crate::rules::AI);
+        }
+        for (raw, bits) in self.raws_of(media_id, label)? {
+            if bits & crate::rules::AI != 0 {
+                self.write_raw_bits(media_id, &raw, bits & crate::rules::USER, crate::rules::AI)?;
+            }
+        }
+        Ok(())
     }
 
     /// Re-tags one media with `model`'s labels following `rules::retag_plan`, atomically
@@ -556,10 +569,13 @@ impl Store {
             let c = self.canonical(&l)?;   // a model answering with an old name gets the new one
             if !names.contains(&c) { names.push(c); }
         }
+        if names.is_empty() && !labels.is_empty() {
+            return Err(rusqlite::Error::InvalidParameterName(tr!("ai.badTags").to_string()));
+        }
         let labels = names;
         let existing = self.media_tags(media_id)?;
         for c in crate::rules::retag_plan(&existing, &labels, replace_old) {
-            if let Some(o) = c.origin { self.set_origin(media_id, &c.label, o)?; }
+            if let Some(o) = c.origin { self.set_ai_origin(media_id, &c.label, o)?; }
             if c.model_source == Some(true) { self.set_tag_source(media_id, &c.label, model, true)?; }
             if c.clear_sources {
                 for m in self.tag_sources(media_id, &c.label)? { self.set_tag_source(media_id, &c.label, &m, false)?; }

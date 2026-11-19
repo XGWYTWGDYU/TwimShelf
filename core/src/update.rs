@@ -107,39 +107,66 @@ pub fn download(info: &UpdateInfo, dir: &Path) -> anyhow::Result<PathBuf> {
     let (Some(url), Some(name)) = (info.asset_url.as_deref(), info.asset_name.as_deref()) else { bail!(tr!("update.noInstaller")) };
     let u = reqwest::Url::parse(url).map_err(|_| anyhow::anyhow!(tr!("update.badUrl")))?;
     if u.scheme() != "https" || u.host_str() != Some("github.com") { bail!(tr!("update.badUrl")) }
-    if name.contains(['/', '\\']) || name.starts_with('.') { bail!(tr!("update.badUrl")) }
+    if !crate::rules::portable_basename(name) { bail!(tr!("update.badUrl")) }
+    const MAX_INSTALLER_BYTES: u64 = 16 << 30;
+    anyhow::ensure!(info.asset_size <= MAX_INSTALLER_BYTES, tr!("update.sizeMismatch"));
+    let limit = if info.asset_size > 0 { info.asset_size } else { MAX_INSTALLER_BYTES };
+    let digest = info.asset_digest.as_deref().map(|value| {
+        value.strip_prefix("sha256:").filter(|digest| digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or_else(|| anyhow::anyhow!(tr!("update.digestMismatch")))
+    }).transpose()?;
     std::fs::create_dir_all(dir)?;
     let out = dir.join(name);
-    let part = dir.join(format!("{name}.partial"));
+    let part = dir.join(format!(".update-{:016x}.partial", rand::random::<u64>()));
     runtime().block_on(async {
         let resp = client().get(url).send().await?;
         if !resp.status().is_success() { bail!(tr!("update.http", code = resp.status().as_u16())) }
-        let mut f = tokio::fs::File::create(&part).await?;
+        anyhow::ensure!(resp.content_length().is_none_or(|n| n <= limit), tr!("update.sizeMismatch"));
+        let mut file = tokio::fs::File::create_new(&part).await?;
+        let _cleanup = crate::library::TempFile(part.clone());
         let mut hash = Sha256::new();
-        let mut n: u64 = 0;
+        let mut n = 0u64;
         let mut body = resp.bytes_stream();
         while let Some(chunk) = body.next().await {
             let chunk = chunk?;
-            hash.update(&chunk);
             n += chunk.len() as u64;
-            f.write_all(&chunk).await?;
+            anyhow::ensure!(n <= limit, tr!("update.sizeMismatch"));
+            hash.update(&chunk);
+            file.write_all(&chunk).await?;
         }
-        f.flush().await?;
-        drop(f);
         if info.asset_size > 0 && n != info.asset_size { bail!(tr!("update.sizeMismatch")) }
-        if let Some(d) = info.asset_digest.as_deref().and_then(|d| d.strip_prefix("sha256:")) {
-            if !hex::encode(hash.finalize()).eq_ignore_ascii_case(d) { bail!(tr!("update.digestMismatch")) }
+        if digest.is_some_and(|want| !hex::encode(hash.finalize()).eq_ignore_ascii_case(want)) {
+            bail!(tr!("update.digestMismatch"));
         }
-        Ok(())
-    }).map_err(|e| { let _ = std::fs::remove_file(&part); e })?;
-    let _ = std::fs::remove_file(&out);
-    std::fs::rename(&part, &out)?;
+        file.sync_all().await?;
+        drop(file);
+        tokio::fs::rename(&part, &out).await?;
+        Ok::<_, anyhow::Error>(())
+    })?;
     Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unsafe_installer_metadata_is_rejected_before_staging() {
+        let dir = std::env::temp_dir().join(format!("tl-update-metadata-{:016x}", rand::random::<u64>()));
+        let mut info = UpdateInfo {
+            version: "1".into(), page_url: String::new(), notes: String::new(),
+            asset_name: Some("".into()), asset_url: Some("https://github.com/".into()),
+            asset_size: 1, asset_digest: None,
+        };
+        assert_eq!(download(&info, &dir).unwrap_err().to_string(), tr!("update.badUrl").to_string());
+        info.asset_name = Some("TwimShelf.AppImage".into());
+        info.asset_digest = Some("sha512:invalid".into());
+        assert_eq!(download(&info, &dir).unwrap_err().to_string(), tr!("update.digestMismatch").to_string());
+        info.asset_digest = None;
+        info.asset_size = u64::MAX;
+        assert_eq!(download(&info, &dir).unwrap_err().to_string(), tr!("update.sizeMismatch").to_string());
+        assert!(!dir.exists());
+    }
+
     #[test] fn versions() {
         assert!(newer("v1.10.0", "1.9.2"));
         assert!(newer("1.0.1", "1.0"));

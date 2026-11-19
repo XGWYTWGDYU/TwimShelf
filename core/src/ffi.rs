@@ -680,8 +680,9 @@ pub extern "C" fn tl_sync_pull_model(host: *const c_char, port: u16, id: *const 
     with(|_| {
         let n = node()?;
         let (host, id, label) = (s(host), s(id), s(label));
-        if crate::models::status().map_or(false, |st| st.running) { anyhow::bail!(tr!("models.busy")); }
-        download::runtime().spawn(async move { let _ = n.pull_model(&host, port, &id, &label, total).await; });
+        crate::models::checked_id(&id)?;
+        let operation = crate::models::begin_external(&label, total)?;
+        download::runtime().spawn(async move { let _ = n.pull_model_claimed(&host, port, &id, operation).await; });
         Ok(())
     })
 }

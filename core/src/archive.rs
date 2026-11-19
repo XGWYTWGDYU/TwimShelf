@@ -369,13 +369,12 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
     let mut rep = ImportReport::default();
     rep.source = path.to_string_lossy().into_owned();
     crate::import::set_progress(|pr| pr.folders_total = manifest.posts.len());
-    let flush = lib.group_flush();
-    for (i, p) in manifest.posts.iter().enumerate() {
-        flush.after(i)?;
+    for p in &manifest.posts {
         if crate::import::cancelled() { rep.incomplete = Some(tr!("import.cancelled")); break; }
         if p.meta.id.len() > MAX_POST_ID_BYTES { rep.issue("unreadable", &p.meta.id.chars().take(40).collect::<String>(), tr!("pack.badPostId"), None); continue; }
         let mut stored = vec![];
         for m in &p.media {
+            if crate::import::cancelled() { break; }
             rep.entries += 1;
             if safe_relative(&m.file).is_none() { rep.issue("unsafe_path", &m.file, tr!("pack.unsafePath"), None); continue; }
             let ext = Path::new(&m.file).extension().and_then(|e| e.to_str()).unwrap_or("bin").to_ascii_lowercase();
@@ -393,6 +392,7 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
                 let mut w = BufWriter::new(file);
                 let mut buf = vec![0u8; 1 << 20];
                 loop {
+                    if crate::import::cancelled() { bail!(tr!("import.cancelled")); }
                     let n = e.read(&mut buf)?;
                     if n == 0 { break; }
                     media_bytes += n as u64;
@@ -401,10 +401,10 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
                     if head.len() < 16 { head.extend_from_slice(&buf[..n.min(16 - head.len())]); }
                     h.update(&buf[..n]); w.write_all(&buf[..n]).inspect_err(|e| store_failed = Some(e.to_string()))?;
                 }
-                // in a bulk import the file is flushed with its group (library::GroupFlush)
-                w.flush().and_then(|_| if crate::library::flushing_in_groups() { Ok(()) } else { w.get_ref().sync_all() }).inspect_err(|e| store_failed = Some(e.to_string()))?;
+                w.flush().and_then(|_| w.get_ref().sync_all()).inspect_err(|e| store_failed = Some(e.to_string()))?;
                 Ok(())
             })();
+            if crate::import::cancelled() { break; }
             if let Some(why) = store_failed { rep.incomplete = Some(why); }
             if let Err(e) = read { let _ = fs::remove_file(&tmp); rep.issue("unreadable", &m.file, format!("{e:#}"), None); continue; }
             let sha = hex::encode(h.finalize());
@@ -439,7 +439,7 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
                 if !db.add_media(&m.sha256, &p.meta.id, m.ordinal, &m.kind, rel, false)? {
                     rep.deleted += 1;
                     if db.trash_reg(&m.sha256)?.state == crate::rules::PURGED { drop_files.push((m.sha256.clone(), rel.clone())); }
-                    else { db.blob_arrived(&m.sha256)?; }
+                    else { lib.imported_blob_arrived(&db, &m.sha256, rel)?; }
                     continue;
                 }
                 for t in &m.tags {
@@ -460,6 +460,12 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
         }
         rep.posts += 1;
         rep.ids.push(p.meta.id.clone());
+    }
+    if crate::import::cancelled() {
+        rep.incomplete = Some(tr!("import.cancelled"));
+        lib.import_into_folder(&mut rep, folder)?;
+        lib.finish_report(&mut rep)?;
+        return Ok(rep);
     }
     // the other posts a media belongs to, for media that came in
     for c in &manifest.also_claimed {
@@ -487,9 +493,9 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
         }
         tx.commit()?;
     }
+    if crate::import::cancelled() { rep.incomplete = Some(tr!("import.cancelled")); }
     lib.import_into_folder(&mut rep, folder)?;
     lib.finish_report(&mut rep)?;
-    flush.flush()?;
     Ok(rep)
 }
 

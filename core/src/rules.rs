@@ -444,25 +444,36 @@ pub fn observe_clock(last: u64, remote: u64, now_ms: u64) -> u64 {
 
 /// Path sanitizer for archive entries, over raw bytes: returns the normalized relative path
 /// (empty and "." components dropped) or None when the entry is absolute, contains a `..`
-/// component, a NUL or a backslash, or normalizes to nothing. Written as a plain index scan so
+/// component, a non-portable path component, or normalizes to nothing. Written as a plain index scan so
 /// the model checker can explore it exhaustively.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Component { Skip, Keep, Reject }
 
 /// Classifies one path component (the bytes between two '/'): empty and "." are skipped,
-/// ".." or anything containing NUL or a backslash rejects the whole path.
+/// Drive prefixes, alternate streams, and Windows-trimmed suffixes are rejected.
 pub fn classify_component(c: &[u8]) -> Component {
     let mut i = 0;
     while i < c.len() {
-        if c[i] == 0 || c[i] == b'\\' || c[i] == b'/' { return Component::Reject; }
+        if c[i] == 0 || c[i] == b'\\' || c[i] == b'/' || c[i] == b':' { return Component::Reject; }
         i += 1;
     }
     match c.len() {
         0 => Component::Skip,
         1 if c[0] == b'.' => Component::Skip,
-        2 if c[0] == b'.' && c[1] == b'.' => Component::Reject,
+        _ if matches!(c.last(), Some(b'.' | b' ')) => Component::Reject,
         _ => Component::Keep,
     }
+}
+
+pub fn portable_basename(name: &str) -> bool {
+    if classify_component(name.as_bytes()) != Component::Keep || name.starts_with('.')
+        || name.chars().any(|c| c.is_control() || "<>\"|?*".contains(c)) {
+        return false;
+    }
+    let stem = name.split('.').next().unwrap_or_default().trim_end().to_ascii_uppercase();
+    !matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        && !["COM", "LPT"].iter().any(|prefix| stem.strip_prefix(prefix).is_some_and(|suffix|
+            matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")))
 }
 
 pub fn safe_relative_bytes(p: &[u8]) -> Option<Vec<u8>> {
@@ -488,6 +499,16 @@ pub fn safe_relative_bytes(p: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_and_download_names_are_portable() {
+        assert_eq!(safe_relative_bytes(b"model/config.json").as_deref(), Some(b"model/config.json".as_slice()));
+        assert!(safe_relative_bytes(b"model:format/config.json").is_none());
+        assert!(safe_relative_bytes(b"model /config.json").is_none());
+        assert!(!portable_basename("NUL.gguf"));
+        assert!(!portable_basename(""));
+        assert!(portable_basename("TwimShelf-arm64.AppImage"));
+    }
 
     #[test]
     fn retag_keeps_user_and_endorsed() {
@@ -1001,11 +1022,12 @@ mod proofs {
                 assert!(n > 0);
                 assert!(!(n == 1 && seg[0] == b'.'));
                 assert!(!(n == 2 && seg[0] == b'.' && seg[1] == b'.'));
-                for b in seg { assert!(*b != 0 && *b != b'\\' && *b != b'/'); }
+                assert!(!matches!(seg.last(), Some(b'.' | b' ')));
+                for b in seg { assert!(*b != 0 && *b != b'\\' && *b != b'/' && *b != b':'); }
             }
             Component::Skip => assert!(n == 0 || (n == 1 && seg[0] == b'.')),
             Component::Reject => {
-                assert!((n == 2 && seg[0] == b'.' && seg[1] == b'.') || seg.iter().any(|b| *b == 0 || *b == b'\\' || *b == b'/'));
+                assert!(matches!(seg.last(), Some(b'.' | b' ')) || seg.iter().any(|b| *b == 0 || *b == b'\\' || *b == b'/' || *b == b':'));
             }
         }
     }

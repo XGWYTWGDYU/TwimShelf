@@ -239,7 +239,7 @@ impl Discovery {
     }
 
     fn schedule(self: Arc<Self>) {
-        let mut last_round = Instant::now() - Duration::from_secs(20);
+        let mut last_round: Option<Instant> = None;
         let mut last_retry = Instant::now();
         let mut last_browse = Instant::now();
         while !self.stop.load(Ordering::Relaxed) {
@@ -264,9 +264,9 @@ impl Discovery {
             let change = self.change_at.load(Ordering::Relaxed);
             let due_change = change != 0 && now_ms() >= change;
             let forced = self.force.swap(false, Ordering::Relaxed);
-            if forced || due_change || last_round.elapsed() >= Duration::from_secs(20) {
+            if forced || due_change || last_round.is_none_or(|last| last.elapsed() >= Duration::from_secs(20)) {
                 if due_change { self.change_at.store(0, Ordering::Relaxed); }
-                last_round = Instant::now();
+                last_round = Some(Instant::now());
                 self.sync_all(forced);
             }
         }
@@ -297,7 +297,7 @@ impl Discovery {
                 let host = if addrs.len() == 1 { addrs[0] } else {
                     match first_reachable(&addrs, port).await { Some(a) => a, None => addrs[0] }
                 };
-                if me.node.sync_with(&host.to_string(), port).await.is_ok() || addrs.len() > 1 {
+                if me.node.sync_with(&host.to_string(), port).await.is_ok() {
                     me.reached_at(&device, host);
                 }
             });
