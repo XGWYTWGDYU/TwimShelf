@@ -171,6 +171,10 @@ function Build-Llama-Windows {
   & $cmake --build $build --config Release --target tl_llama --parallel
   if ($LASTEXITCODE) { Fail 'Building llama.cpp failed' }
   Get-ChildItem $build -Recurse -Filter *.dll | Where-Object { $_.FullName -match '\\Release\\' } | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
+  if ($Arm -and (Test-Path "$build\lc\bin")) {
+    # The ARM64 Ninja sub-build writes its runtime dependencies directly under bin.
+    Get-ChildItem "$build\lc\bin" -Filter *.dll | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
+  }
 }
 
 function Build-Windows {

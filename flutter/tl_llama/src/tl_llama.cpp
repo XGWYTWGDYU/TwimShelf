@@ -6,9 +6,12 @@
 #include <cstring>
 #include <exception>
 #include <mutex>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "chat.h"
 #include "ggml-backend.h"
 #include "llama.h"
 #ifdef __ANDROID__
@@ -21,6 +24,7 @@ struct tl_llama {
   llama_model *model = nullptr;
   llama_context *ctx = nullptr;
   mtmd_context *vision = nullptr;
+  common_chat_templates_ptr vision_templates;
   bool embeddings = false;
 };
 
@@ -107,21 +111,49 @@ static tl_llama *load_model(const char *weights, const char *projector, int32_t 
   return m;
 }
 
+static std::string picture_prompt(tl_llama *m, const char *system, const char *question) {
+  const std::string marker = mtmd_default_marker();
+  const std::string user = marker + "\n" + question;
+  llama_chat_message msgs[2] = {{"system", system}, {"user", user.c_str()}};
+  const char *tmpl = llama_model_chat_template(m->model, nullptr);
+  std::vector<char> buf(user.size() * 2 + std::strlen(system) + 1024);
+  int32_t n = llama_chat_apply_template(tmpl, msgs, 2, true, buf.data(), (int32_t)buf.size());
+  if (n > (int32_t)buf.size()) { buf.resize(n + 1); n = llama_chat_apply_template(tmpl, msgs, 2, true, buf.data(), (int32_t)buf.size()); }
+  if (n >= 0) return std::string(buf.data(), n);
+
+  // The C API only recognizes a fixed set of templates. Use the bundled Jinja renderer otherwise.
+  if (!m->vision_templates) m->vision_templates = common_chat_templates_init(m->model, "");
+  common_chat_templates_inputs inputs;
+  inputs.enable_thinking = false;
+  inputs.force_pure_content = true;
+  common_chat_msg instruction;
+  instruction.role = "system";
+  instruction.content = system;
+  common_chat_msg picture;
+  picture.role = "user";
+  picture.content_parts = {{"media_marker", marker}, {"text", std::string("\n") + question}};
+  inputs.messages = {std::move(instruction), std::move(picture)};
+  auto prompt = common_chat_templates_apply(m->vision_templates.get(), inputs).prompt.str();
+  const auto image_at = prompt.find(marker);
+  if (image_at == std::string::npos || prompt.find(marker, image_at + marker.size()) != std::string::npos) {
+    throw std::runtime_error("chat template: expected one image marker");
+  }
+  return prompt;
+}
+
 static char *describe_picture(tl_llama *m, const char *image, const char *system, const char *question,
                                    int32_t max_tokens, char **error) {
   if (!m || !m->vision) { fail(error, "no vision model"); return nullptr; }
   const llama_vocab *vocab = llama_model_get_vocab(m->model);
   llama_memory_clear(llama_get_memory(m->ctx), true);
 
-  // the model's own chat template, the picture's place marked in the user's message
-  std::string user = std::string(mtmd_default_marker()) + "\n" + question;
-  llama_chat_message msgs[2] = {{"system", system}, {"user", user.c_str()}};
-  const char *tmpl = llama_model_chat_template(m->model, nullptr);
-  std::vector<char> buf(user.size() * 2 + std::strlen(system) + 1024);
-  int32_t n = llama_chat_apply_template(tmpl, msgs, 2, true, buf.data(), (int32_t)buf.size());
-  if (n > (int32_t)buf.size()) { buf.resize(n + 1); n = llama_chat_apply_template(tmpl, msgs, 2, true, buf.data(), (int32_t)buf.size()); }
-  if (n < 0) { fail(error, "chat template"); return nullptr; }
-  std::string prompt(buf.data(), n);
+  std::string prompt;
+  try {
+    prompt = picture_prompt(m, system, question);
+  } catch (const std::exception &e) {
+    fail(error, std::string("chat template: ") + e.what());
+    return nullptr;
+  }
 
   mtmd_helper_bitmap_wrapper loaded = mtmd_helper_bitmap_init_from_file(m->vision, image, false, mtmd_helper_init_opt_default());
   mtmd_bitmap *bitmap = loaded.bitmap;
