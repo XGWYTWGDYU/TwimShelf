@@ -72,11 +72,14 @@ impl Library {
 impl GroupFlush<'_> {
     /// Makes everything stored so far durable: the files, then the records (checkpoint).
     pub(crate) fn flush(&self) -> anyhow::Result<()> {
-        let files = UNFLUSHED.with(|u| u.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default());
-        sync_files(&files)?;
-        // with synchronous=NORMAL a checkpoint syncs the WAL first, then the database
-        self.lib.db().conn().query_row("PRAGMA wal_checkpoint(FULL)", [], |_| Ok(()))?;
-        Ok(())
+        UNFLUSHED.with(|u| {
+            let mut unflushed = u.borrow_mut();
+            let Some(files) = unflushed.as_mut() else { return Ok(()); };
+            sync_files(files)?;
+            checkpoint_wal(&self.lib.db())?;
+            files.clear();
+            Ok(())
+        })
     }
 
     /// `flush` after every `FLUSH_EVERY` posts (`done`: posts handled so far).
@@ -84,6 +87,12 @@ impl GroupFlush<'_> {
         if done > 0 && done % FLUSH_EVERY == 0 { self.flush()?; }
         Ok(())
     }
+}
+
+fn checkpoint_wal(db: &Store) -> anyhow::Result<()> {
+    let busy: i32 = db.conn().query_row("PRAGMA wal_checkpoint(FULL)", [], |row| row.get(0))?;
+    anyhow::ensure!(busy == 0, "library WAL checkpoint could not complete");
+    Ok(())
 }
 
 impl Drop for GroupFlush<'_> {
@@ -356,11 +365,24 @@ impl Library {
         fs::create_dir_all(dir.join("blobs"))?;
         let db = dir.join("library.sqlite");
         let had_media = fs::read_dir(dir.join("blobs")).map_or(false, |mut r| r.next().is_some());
+        let missing_db = match fs::metadata(&db) {
+            Ok(info) => info.len() == 0,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => return Err(e.into()),
+        };
         let (store, _) = Store::open_reporting(db.to_str().unwrap())?;
         // media files on disk but no media in the database (the database was deleted): the files
         // stay — they are not orphans. Sync brings the library's records back from the account's
         // other devices and finds the files already here.
-        let lost = had_media && store.conn().query_row("SELECT count(*) FROM media", [], |r| r.get::<_, i64>(0)).unwrap_or(0) == 0;
+        // Remember the decision before any writes can populate a replacement database. An
+        // older unmarked database with no rows might already be awaiting recovery.
+        let sweep_mode = store.meta_get("blob_sweep_mode")?;
+        let has_rows = sweep_mode.is_none() && store.conn().prepare("SELECT 1 FROM media LIMIT 1")?.exists([])?;
+        let recovering = crate::rules::preserve_unclaimed_blobs(sweep_mode.as_deref().map(|mode| mode != "normal"), had_media, missing_db, has_rows);
+        if sweep_mode.is_none() {
+            let saved = store.meta_set("blob_sweep_mode", if recovering { "preserve" } else { "normal" });
+            if recovering { saved?; }
+        }
         // Leftovers from interrupted downloads/syncs/imports: nothing is mid-write at startup.
         let _ = fs::remove_dir_all(dir.join("tmp"));
         let models = dir.join("models");
@@ -368,7 +390,7 @@ impl Library {
         // Housekeeping below writes to the database; on a full disk it fails, and the library must
         // still open (so media can be deleted to make room). Each step is retried at the next start.
         if let Err(e) = lib.settle() { lib.diag("maintenance_skipped", serde_json::json!({ "step": "settle", "error": crate::diagnostics::scrub(&format!("{e:#}")) })); } // finish file removals interrupted by a quit
-        if !lost {
+        if !recovering {
             if let Ok(n) = lib.sweep_orphan_blobs() { if n > 0 { lib.diag("orphan_files_removed", serde_json::json!({ "files": n })); } }
         }
         lib.keep_reserve();
@@ -423,6 +445,9 @@ impl Library {
         let db = self.db();
         let pending = db.gc_pending()?;
         if pending.is_empty() { return Ok(0); }
+        // Pending deletes may have been recorded in synchronous=NORMAL during a bulk import.
+        // Even after the connection switches back to FULL, they need to be durable before unlinking.
+        checkpoint_wal(&db)?;
         let tx = db.conn().unchecked_transaction()?;
         let mut removed = 0;
         for (id, path) in pending {
@@ -918,6 +943,39 @@ impl Library {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn purge_waits_when_import_mode_cannot_checkpoint_the_delete() {
+        let dir = std::env::temp_dir().join(format!("tl-purge-checkpoint-{}", rand::random::<u64>()));
+        let lib = Library::open(&dir).unwrap();
+        let (id, rel) = lib.put_blob(&crate::testutil::jpg(b"keep until checkpoint"), "jpg").unwrap();
+        {
+            let db = lib.db();
+            db.upsert_post(&crate::model::PostMeta { id: "p".into(), ..Default::default() }).unwrap();
+            db.add_media(&id, "p", 0, &MediaKind::Photo, &rel, false).unwrap();
+            db.conn().busy_timeout(std::time::Duration::ZERO).unwrap();
+        }
+        let ids = std::slice::from_ref(&id);
+        lib.trash_apply(ids, crate::rules::TrashAction::Trash).unwrap();
+
+        let group = lib.group_flush();
+        let reader = rusqlite::Connection::open(dir.join("library.sqlite")).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        reader.query_row("SELECT count(*) FROM trash", [], |row| row.get::<_, i64>(0)).unwrap();
+        assert!(lib.trash_apply(ids, crate::rules::TrashAction::Purge).is_err());
+        assert!(dir.join(&rel).exists());
+        assert_eq!(lib.db().gc_pending().unwrap().len(), 1);
+        drop(group);
+        assert!(lib.settle().is_err());
+        assert!(dir.join(&rel).exists());
+
+        drop(reader);
+        assert_eq!(lib.settle().unwrap(), 1);
+        assert!(!dir.join(rel).exists());
+        assert!(lib.db().gc_pending().unwrap().is_empty());
+        drop(lib);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     /// A model's nonsense is refused before anything is written: no tags, no source, no AiDone.
     #[test]
     fn an_analysis_without_real_tags_is_refused() {

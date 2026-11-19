@@ -13,15 +13,23 @@ ARG NODE_VERSION
 
 # ---- the server: the core with HEIC/AVIF, built from pinned sources ----
 FROM rust:${RUST_VERSION}-bookworm AS server
-RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build nasm meson pkg-config && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build nasm meson pkg-config g++ && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY config.yaml Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY core core
 COPY server server
+COPY flutter/tl_llama/src flutter/tl_llama/src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     export TL_VERSION="$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' config.yaml)" && \
     cargo build -p tl-server --release --locked && cp target/release/twimshelf-server /twimshelf-server
+RUN --mount=type=cache,target=/src/llama-build \
+    cmake -S flutter/tl_llama/src -B /src/llama-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTL_LLAMA_VULKAN=OFF && \
+    cmake --build /src/llama-build --target tl_llama && \
+    mkdir -p /llama && \
+    find /src/llama-build -maxdepth 4 \( -type f -o -type l \) \
+      \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
+      -exec cp -P {} /llama/ \;
 
 # ---- the web app: the React front end (web/) ----
 FROM node:${NODE_VERSION}-bookworm-slim AS web
@@ -45,8 +53,9 @@ LABEL org.opencontainers.image.title="TwimShelf" \
       org.opencontainers.image.source="https://github.com/XGWYTWGDYU/TwimShelf" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini libgomp1 && rm -rf /var/lib/apt/lists/*
 COPY --from=server /twimshelf-server /app/twimshelf-server
+COPY --from=server /llama /app/llama
 # `docker exec -it <container> twimshelf passwd`
 RUN ln -s /app/twimshelf-server /usr/local/bin/twimshelf
 COPY --from=web /src/web/app/dist /app/web

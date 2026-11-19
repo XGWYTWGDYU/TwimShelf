@@ -188,6 +188,47 @@ fn orphan_files_are_swept_at_startup() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn partial_database_recovery_keeps_unclaimed_files_across_restarts() {
+    let dir = tmp("partial-recovery");
+    let first = b"\xff\xd8\xff\xe0 first";
+    let second = b"\xff\xd8\xff\xe0 second";
+    let (first_id, first_path, second_id, second_path) = {
+        let lib = Library::open(&dir).unwrap();
+        let db = lib.db();
+        db.upsert_post(&PostMeta { id: "p".into(), ..Default::default() }).unwrap();
+        let (a, ap) = lib.put_blob(first, "jpg").unwrap();
+        let (b, bp) = lib.put_blob(second, "jpg").unwrap();
+        db.add_media(&a, "p", 0, &MediaKind::Photo, &ap, false).unwrap();
+        db.add_media(&b, "p", 1, &MediaKind::Photo, &bp, false).unwrap();
+        (a, ap, b, bp)
+    };
+    std::fs::remove_file(dir.join("library.sqlite")).unwrap();
+
+    let restore = |lib: &Library, id: &str, ordinal, seq: i64| {
+        let mut ops = vec![];
+        if seq == 1 {
+            ops.push(op("peer", 1, Op::Post { meta: PostMeta { id: "p".into(), ..Default::default() }, hlc: 1 }));
+        }
+        ops.push(op("peer", seq + 1, Op::Media { id: id.into(), post_id: "p".into(), ordinal, kind: MediaKind::Photo, ext: "jpg".into() }));
+        lib.db().apply_remote_counted(&ops, |id, ext| dir.join(tl_core::oplog::blob_rel(id, ext)).exists()).unwrap();
+    };
+    {
+        let lib = Library::open(&dir).unwrap();
+        restore(&lib, &first_id, 0, 1);
+        assert!(lib.db().media_row(&first_id).unwrap().is_some());
+        assert!(lib.db().media_row(&second_id).unwrap().is_none());
+    }
+    {
+        let lib = Library::open(&dir).unwrap();
+        assert_eq!(std::fs::read(dir.join(first_path)).unwrap(), first);
+        assert_eq!(std::fs::read(dir.join(second_path)).unwrap(), second);
+        restore(&lib, &second_id, 1, 2);
+        assert!(lib.db().media_row(&second_id).unwrap().is_some());
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// The migration is one transaction: a database left half-migrated (the new tables there, the
 /// version not yet written) opens normally, and one written by a newer app is refused instead of
 /// downgraded.

@@ -359,7 +359,8 @@ def desktop(c):
     d = c.get('desktop', {})
     check_id('desktop.app_id', d['app_id'])
     product = {'name': 'TwimShelf', 'appId': d['app_id'], 'desktopId': d['app_id'],
-               'version': str(c['version']), 'buildNumber': str(c['build_number'])}
+               'version': str(c['version']), 'buildNumber': str(c['build_number']),
+               'updateRepo': os.environ.get('TL_UPDATE_REPO', '')}
     write('web/electron/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
     icon = ROOT / icon_set(c) / 'mac-512.png'
     target = ROOT / 'web/electron/icon.png'

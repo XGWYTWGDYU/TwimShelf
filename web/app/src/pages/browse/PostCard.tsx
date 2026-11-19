@@ -36,8 +36,14 @@ export interface PostCardProps {
   highlight?: number;
 }
 
+const savedPages = new Map<string, number>();
+
 export const PostCard = memo(function PostCard({ post, width, onOpen, onContext, onTag, onTagMenu, onAddTag, marks, highlight }: PostCardProps) {
-  const [page, setPage] = useState(0);
+  const [page, setPageState] = useState(() => savedPages.get(post.id) ?? 0);
+  const setPage = (to: number) => {
+    savedPages.set(post.id, to);
+    setPageState(to);
+  };
   /** The page sliding out while the new one slides in (a push, 0.22 s, as FeedCard.slide). */
   const [leaving, setLeaving] = useState<{ index: number; dir: 'l' | 'r'; n: number } | null>(null);
   const [shake, setShake] = useState(0);

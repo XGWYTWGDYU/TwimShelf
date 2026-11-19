@@ -9,6 +9,9 @@ import { PetLayer } from './components/PetLayer';
 import { ActivityPanel } from './components/ActivityPanel';
 import { useRoute, type Route } from './lib/router';
 import { installAppMenu } from './lib/commands';
+import { core } from './lib/core';
+import { checkForUpdate } from './lib/update';
+import { enableAutoTagging } from './pages/settings/aiTagging';
 import { ViewerHost } from './viewer/Viewer';
 import BrowsePage from './pages/browse/BrowsePage';
 import './App.css';
@@ -21,6 +24,12 @@ import SettingsPage from './pages/settings/SettingsPage';
 export default function App() {
   const r = useRoute();
   useEffect(installAppMenu, []);
+  useEffect(() => {
+    enableAutoTagging();
+    void core.read(core.b.tl_trash_expire()).catch(() => {});
+    const t = window.setTimeout(() => void checkForUpdate(false), 4000);
+    return () => window.clearTimeout(t);
+  }, []);
   // 浏览 keeps its search while another page is shown
   const lastBrowse = useRef<Extract<Route, { page: 'browse' }>>({ page: 'browse' });
   if (r.page === 'browse') lastBrowse.current = r;

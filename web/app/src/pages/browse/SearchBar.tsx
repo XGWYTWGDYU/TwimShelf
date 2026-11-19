@@ -8,7 +8,7 @@ import {
   AlertTriangle, BadgeCheck, CheckCircle2, CircleDashed, CircleUser, Clock, Download, Folder, History, Image, Images,
   LayoutGrid, MinusCircle, Quote, Search, Sparkles, Tag, User, Video, X,
 } from 'lucide-react';
-import { KEYWORDS, folderKey, keyFor, keyTitle, keywordAliases, keywordHint, keywordWord, isExcluded, L, PENDING_FOLDER, splitQuery, termKey, type SearchKeyword, type TagCount } from '@twimshelf/core';
+import { KEYWORDS, folderKey, keyFor, keyTitle, keywordAliases, keywordHint, keywordWord, isExcluded, L, PENDING_FOLDER, quoteSearchWord, splitQuery, termKey, type SearchKeyword, type TagCount } from '@twimshelf/core';
 import { core } from '../../lib/core';
 import { useStore } from '../../lib/hooks';
 import { folders, libraryVersion, stats } from '../../lib/library';
@@ -141,8 +141,8 @@ function sectionsFor(raw: string, keys: string[], tags: TagCount[], folderList: 
 function wordOf(key: string): string {
   const ex = isExcluded(key) ? '-' : '';
   const bare = ex ? key.slice(1) : key;
-  if (bare.startsWith('t:')) return ex + bare.slice(2);
-  if (bare.startsWith('d:')) return `${ex}${keywordWord(KEYWORDS.find((k) => k.key === PENDING_FOLDER)!)} ${bare.slice(2)}`;
+  if (bare.startsWith('t:')) return ex + quoteSearchWord(bare.slice(2));
+  if (bare.startsWith('d:')) return `${ex}${keywordWord(KEYWORDS.find((k) => k.key === PENDING_FOLDER)!)} ${quoteSearchWord(bare.slice(2))}`;
   const k = KEYWORDS.find((x) => x.key === bare);
   return k ? ex + keywordWord(k) : ex + bare;
 }

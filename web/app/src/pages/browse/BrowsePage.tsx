@@ -3,14 +3,15 @@
 // post, or per media with 按帖子分组 off. The title and the totals on the left of the toolbar, the
 // search capsule and its round buttons on the right; the cards scroll under the toolbar.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, Clock, Layers, Shuffle, X } from 'lucide-react';
-import { L, TokenQuery, type FeedItem, type FeedQuery } from '@twimshelf/core';
+import { ArrowDown, Clock, Layers, Share, Shuffle, X } from 'lucide-react';
+import { L, TokenQuery, quoteSearchWord, type FeedItem, type FeedQuery } from '@twimshelf/core';
 import { Spinner } from '../../components/ui';
 import { Toolbar } from '../../components/Toolbar';
 import { openMenu } from '../../components/Menu';
+import { toast } from '../../components/toast';
 import { cardMenu, tagMenu } from './cardMenu';
 import { core } from '../../lib/core';
-import { onCommand } from '../../lib/commands';
+import { onCommand, setMenuState } from '../../lib/commands';
 import { useAsync, useStore } from '../../lib/hooks';
 import { libraryVersion, stats } from '../../lib/library';
 import { go, type Route } from '../../lib/router';
@@ -20,13 +21,13 @@ import { Masonry, type MasonryHandle } from './Masonry';
 import { PostCard } from './PostCard';
 import { estimateCard, groupPosts, type Post } from './posts';
 import { SearchBar } from './SearchBar';
+import { SearchExportDialog } from './SearchExport';
 import { QuickDownload } from './QuickDownload';
 import { cardDensity } from './density';
 import { markPattern } from './SearchMarks';
 import { revealRequest } from './reveal';
-import { pickTag } from '../../components/pickers';
-import { addTag } from '../../lib/actions';
-import { libraryChanged } from '../../lib/library';
+import { openTagPicker } from '../../components/pickers';
+import { activeEmbedder, fuzzySearch, queryVectors } from '../settings/aiTagging';
 import './BrowsePage.css';
 
 type BrowseRoute = Extract<Route, { page: 'browse' }>;
@@ -57,13 +58,23 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
   const version = useStore(libraryVersion);
   const s = useStore(stats);
   const density = useStore(cardDensity);
+  const fuzzy = useStore(fuzzySearch);
+  const embedder = useStore(activeEmbedder);
   const [byAdded, setByAdded] = useState(() => pref('feed.byAdded') === '1');
   const [seed, setSeed] = useState(() => { const v = Number(pref('feed.seed')); return v > 0 ? v : newSeed(); });
   const [grouped, setGrouped] = useState(() => pref('grouped') !== '0');
   useEffect(() => setPref('feed.seed', String(seed)), [seed]);
   const query = useMemo(() => queryFor(route, { newest: byAdded, seed: byAdded ? null : seed }, grouped),
     [route.q, route.kind, route.folder, route.view, byAdded, seed, grouped]);
-  const feed = useAsync(() => query ? core.feed(query) : Promise.resolve([]), [query, version]);
+  const feed = useAsync(async () => {
+    if (!query) return [];
+    let q = query;
+    if (query.terms && query.terms.length > 0 && fuzzy && embedder) {
+      const vec = await queryVectors(query.terms);
+      if (vec) q = { ...query, fuzzy: true, term_vectors: vec.vectors, embed_model: vec.embedModel };
+    }
+    return core.feed(q);
+  }, [query, version, fuzzy, embedder]);
   const marks = useMemo(() => {
     const pattern = markPattern(query?.terms ?? []);
     if (!query || !pattern) return;
@@ -83,8 +94,16 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
   const masonry = useRef<MasonryHandle>(null);
   const browse = useRef<HTMLDivElement>(null);
 
-  const reshuffle = useCallback(() => { setByAdded(false); setPref('feed.byAdded', '0'); setSeed(newSeed()); masonry.current?.scrollToTop(); }, []);
-  useEffect(() => onCommand('reshuffle', () => { if (active) reshuffle(); }), [active, reshuffle]);
+  const searching = !!route.q;
+  const reshuffle = useCallback(() => {
+    if (searching) return;
+    setByAdded(false);
+    setPref('feed.byAdded', '0');
+    setSeed(newSeed());
+    masonry.current?.scrollToTop();
+  }, [searching]);
+  useEffect(() => setMenuState({ onBrowse: active, searching, grouped, byAdded }), [active, searching, grouped, byAdded]);
+  useEffect(() => onCommand('reshuffle', () => { if (active && !searching && !byAdded) reshuffle(); }), [active, searching, byAdded, reshuffle]);
   useEffect(() => onCommand('groupByPost', () => setGrouped((g) => { setPref('grouped', g ? '0' : '1'); return !g; })), []);
 
   // a card's media opens the viewer; ← → go through every media of the feed
@@ -111,8 +130,11 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
 
   const search = useCallback((q: string) => go({ page: 'browse', q: q || undefined }), []);
   const addTerm = useCallback((w: string) => {
-    const words = (route.q ?? '').split(/\s+/).filter(Boolean);
-    if (!words.includes(w)) search([...words, w].join(' '));
+    const quoted = quoteSearchWord(w);
+    const cur = (route.q ?? '').trim();
+    if (!cur) { search(quoted); return; }
+    if (cur.split(/\s+/).includes(quoted)) return;
+    search(`${cur} ${quoted}`);
   }, [route.q, search]);
   const host = useMemo(() => ({ search, addTerm }), [search, addTerm]);
   const context = useCallback(async (p: Post, media: number, e: React.MouseEvent) => {
@@ -123,9 +145,8 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
     const t = item.tags.find((x) => x.label === label);
     if (t) openMenu({ clientX: e.clientX, clientY: e.clientY }, tagMenu(item, t, host));
   }, [host]);
-  const onAddTag = useCallback(async (item: FeedItem) => {
-    const label = await pickTag(L('card.menu.tagMedia'));
-    if (label) { await addTag(item, label); libraryChanged(); }
+  const onAddTag = useCallback((item: FeedItem, post: FeedItem[]) => {
+    void openTagPicker({ item, post, initialScope: 'media' });
   }, []);
 
   // "Show Post in Browse" from a grid: the search goes if it hides the post, then the card is shown
@@ -135,7 +156,12 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
     if (!reveal || !active || !feed.data) return;
     const key = grouped ? reveal.item.post_id : reveal.item.media_id;
     const i = posts.findIndex((p) => p.id === key);
-    if (i < 0) { if (route.q) { search(''); return; } revealRequest.set(null); return; }
+    if (i < 0) {
+      if (route.q) { search(''); return; }
+      revealRequest.set(null);
+      toast(L('feed.reveal.notFound'));
+      return;
+    }
     revealRequest.set(null);
     const page = Math.max(0, posts[i].media.findIndex((m) => m.media_id === reveal.item.media_id));
     setFlash({ id: key, page });
@@ -143,12 +169,18 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
     window.setTimeout(() => setFlash(null), 1600);
   }, [reveal, active, feed.data, posts, grouped, route.q, search]);
 
-  const searching = !!route.q;
   const [quick, setQuick] = useState<HTMLElement | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const closeQuick = useCallback(() => setQuick(null), []);
   const buttons = (
     <>
-      {searching && <button className="round-btn" aria-label={L('search.exit')} title={L('search.exit')} onClick={() => search('')}><X size={14} strokeWidth={2.2} /></button>}
+      {searching && (
+        <>
+          <button className="round-btn" aria-label={L('search.export')} title={L('search.export')} disabled={items.length === 0}
+            onClick={() => setExportOpen(true)}><Share size={14} strokeWidth={2} /></button>
+          <button className="round-btn" aria-label={L('search.exit')} title={L('search.exit')} onClick={() => search('')}><X size={14} strokeWidth={2.2} /></button>
+        </>
+      )}
       {!searching && <>
         <button className={`round-btn${byAdded ? ' on' : ''}`} aria-label={L('feed.sortByAdded')} title={L('feed.sortByAdded')}
           onClick={() => { const v = !byAdded; setByAdded(v); setPref('feed.byAdded', v ? '1' : '0'); masonry.current?.scrollToTop(); }}><Clock size={14} strokeWidth={2} /></button>
@@ -156,11 +188,12 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
           onClick={() => { const v = !grouped; setGrouped(v); setPref('grouped', v ? '1' : '0'); }}><Layers size={14} strokeWidth={2} /></button>
         <button className={`round-btn${quick ? ' on' : ''}`} aria-label={L('search.download')} title={L('search.download')} aria-expanded={!!quick}
           onClick={(e) => { const el = e.currentTarget; setQuick((q) => (q ? null : el)); }}><ArrowDown size={14} strokeWidth={2.2} /></button>
+        <div className={`shuffle-slot${byAdded ? ' gone' : ''}`}>
+          <button className="round-btn" aria-label={L('feed.reshuffle')} title={L('feed.reshuffle')} disabled={byAdded} onClick={reshuffle}><Shuffle size={14} strokeWidth={2} /></button>
+        </div>
       </>}
-      <div className={`shuffle-slot${byAdded ? ' gone' : ''}`}>
-        <button className="round-btn" aria-label={L('feed.reshuffle')} title={L('feed.reshuffle')} disabled={byAdded} onClick={reshuffle}><Shuffle size={14} strokeWidth={2} /></button>
-      </div>
       {quick && <QuickDownload anchor={quick} onClose={closeQuick} />}
+      {exportOpen && <SearchExportDialog mediaIds={items.map((m) => m.media_id)} queryLabel={route.q ?? ''} onClose={() => setExportOpen(false)} />}
     </>
   );
 
@@ -179,7 +212,7 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
         : posts.length === 0 ? <div className="browse-empty">{L(route.q ? 'feed.empty.noMatch' : 'feed.empty.library')}</div>
         : <Masonry ref={masonry} items={posts} active={active} density={density} keyOf={(p) => p.id} estimate={estimateCard} top={52 + 12} footer={end}
           render={(p, w) => <PostCard post={p} width={w} onOpen={openPost} onContext={(post, m, e) => void context(post, m, e)}
-            onTag={addTerm} onTagMenu={onTagMenu} onAddTag={(it) => void onAddTag(it)}
+            onTag={addTerm} onTagMenu={onTagMenu} onAddTag={(it) => onAddTag(it, p.media)}
             marks={marks} highlight={flash?.id === p.id ? flash.page : undefined} />} />}
       {toolbar}
     </div>

@@ -5,12 +5,14 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   L,
-  type DownloadStatus, type ImportProgress, type ModelDownloadStatus, type SyncStatus, type VerifyStatus,
+  type DownloadStatus, type ImportProgress, type LibraryStats,
+  type ModelDownloadStatus, type SyncStatus, type VerifyStatus,
 } from '@twimshelf/core';
 import { core } from '../lib/core';
 import { useStore } from '../lib/hooks';
+import { libraryChanged, refreshLibrary } from '../lib/library';
 import { viewerState } from '../viewer/Viewer';
-import { activeTagger, externalModels, modelTitle, tagging } from '../pages/settings/aiTagging';
+import { tagging, type TaggingState } from '../pages/settings/aiTagging';
 import { size } from '../pages/settings/serverFiles';
 import { ActivityRow, type ActivityKind } from '../pages/settings/settingsControls';
 import './ActivityPanel.css';
@@ -24,18 +26,36 @@ type Activity = {
   previewIsVideo?: boolean;
 };
 
+interface Snap {
+  dl: DownloadStatus | null;
+  modelDl: ModelDownloadStatus | null;
+  sync: SyncStatus | null;
+  imp: ImportProgress | null;
+  verify: VerifyStatus | null;
+  list: Activity[];
+}
+
 const isVideoPath = (p?: string | null) => !!p && /\.(mp4|mov|m4v|webm)$/i.test(p);
 
+function outcomeTitle(outcome: string | null | undefined, base: string): { prefix: string; ok: boolean } {
+  switch (outcome) {
+    case 'failed': return { prefix: L('activity.failed'), ok: false };
+    case 'paused': return { prefix: L('activity.paused'), ok: false };
+    case 'cancelled':
+    case 'stopped': return { prefix: L('activity.stopped'), ok: false };
+    case 'partial': return { prefix: L('activity.partial'), ok: false };
+    default: return { prefix: L('activity.done'), ok: true };
+  }
+}
+
 /** Everything running now, read from the core (and the page's own AI tagging). */
-async function running(tag: { running: boolean; done: number }, taggerId: string): Promise<Activity[]> {
-  const [dl, modelDl, sync, imp, verify, counts, models] = await Promise.all([
+async function pollSnapshot(tag: TaggingState): Promise<Snap> {
+  const [dl, modelDl, sync, imp, verify] = await Promise.all([
     core.read<DownloadStatus>(core.b.tl_download_status()).catch(() => null),
     core.read<ModelDownloadStatus | null>(core.b.tl_model_status()).catch(() => null),
     core.read<SyncStatus>(core.b.tl_sync_status()).catch(() => null),
     core.read<ImportProgress | null>(core.b.tl_import_status()).catch(() => null),
     core.read<VerifyStatus | null>(core.b.tl_verify_status()).catch(() => null),
-    tag.running ? core.read<[number, number]>(core.b.tl_ai_counts()).catch(() => null) : Promise.resolve(null),
-    tag.running ? externalModels().catch(() => []) : Promise.resolve([]),
   ]);
   const list: Activity[] = [];
   if (dl?.running) {
@@ -59,13 +79,14 @@ async function running(tag: { running: boolean; done: number }, taggerId: string
     });
   }
   if (tag.running) {
-    const model = models.find((m) => m.id === taggerId);
-    const [done, total] = counts ?? [0, 0];
+    const total = Math.max(tag.total, tag.done);
     list.push({
       kind: 'tagging',
-      title: L('ai.activity.new', model ? modelTitle(model) : L('models.tagging')),
-      detail: L('web.ai.processed', tag.done),
-      progress: total > 0 ? done / total : undefined,
+      title: L('ai.activity.new', tag.modelName || L('models.tagging')),
+      detail: total > 0 ? `${tag.done} / ${total}` : L('web.ai.processed', tag.done),
+      progress: total > 0 ? tag.done / total : undefined,
+      previewPath: tag.currentPath,
+      previewIsVideo: tag.currentKind === 'video',
     });
   }
   if ((sync?.syncing ?? 0) > 0) {
@@ -105,24 +126,94 @@ async function running(tag: { running: boolean; done: number }, taggerId: string
       previewIsVideo: isVideoPath(verify.current),
     });
   }
-  return list;
+  return { dl, modelDl, sync, imp, verify, list };
+}
+
+function completedCard(kind: ActivityKind, last: Activity, snap: Snap, tag: TaggingState): Activity {
+  if (kind === 'download' && snap.dl) {
+    const dl = snap.dl;
+    const outcome = dl.paused > 0 ? 'paused' : dl.failed > 0 ? (dl.done > 0 ? 'partial' : 'failed') : 'succeeded';
+    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    return {
+      ...last,
+      title: `${prefix} · ${last.title}`,
+      detail: L('activity.downloadSummary', dl.done, dl.skipped, dl.failed, dl.total),
+      progress: ok ? 1 : last.progress,
+    };
+  }
+  if (kind === 'model' && snap.modelDl) {
+    const m = snap.modelDl;
+    const outcome = m.error ? 'failed' : m.finished ? 'succeeded' : 'stopped';
+    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    return {
+      ...last,
+      title: `${prefix} · ${last.title}`,
+      detail: m.error ? L(m.error) : last.detail,
+      progress: ok ? 1 : last.progress,
+    };
+  }
+  if (kind === 'tagging') {
+    const outcome = tag.error ? 'failed' : 'succeeded';
+    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    return {
+      ...last,
+      title: `${prefix} · ${last.title}`,
+      detail: tag.error ? L(tag.error) : last.detail,
+      progress: ok ? 1 : last.progress,
+    };
+  }
+  if (kind === 'importing' && snap.imp) {
+    const imp = snap.imp;
+    const outcome = imp.issues > 0 ? 'partial' : 'succeeded';
+    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    return {
+      ...last,
+      title: `${prefix} · ${last.title}`,
+      detail: L('activity.importSummary', imp.folders_done, imp.folders_total, imp.files_done, imp.issues),
+      progress: ok ? 1 : last.progress,
+    };
+  }
+  if (kind === 'verify' && snap.verify) {
+    const v = snap.verify;
+    const outcome = v.bad > 0 ? 'partial' : 'succeeded';
+    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    return {
+      ...last,
+      title: `${prefix} · ${last.title}`,
+      detail: L('activity.verifySummary', v.checked, v.total, v.bad),
+      progress: ok ? 1 : last.progress,
+    };
+  }
+  return { ...last, title: `${L('activity.done')} · ${last.title}`, progress: 1 };
 }
 
 /** A card stays at least two seconds (ActivityCenter.minimumShown), and a moment after its work
- *  ends it shows that it is done. */
+ *  ends it shows its final outcome. */
 const MINIMUM_SHOWN_MS = 2000;
-const DONE_FOR_MS = 1200;
+const DONE_FOR_MS = 1600;
 
 export function ActivityPanel() {
   const tag = useStore(tagging);
-  const taggerId = useStore(activeTagger);
   const viewer = useStore(viewerState);
   const [list, setList] = useState<Activity[]>([]);
-  const memory = useRef(new Map<ActivityKind, { since: number; last: Activity; until?: number }>());
+  const memory = useRef(new Map<ActivityKind, { since: number; last: Activity; doneCard?: Activity; until?: number }>());
+  const lastDlRecent = useRef<string | undefined>(undefined);
   const tagNow = useRef(tag);
   tagNow.current = tag;
-  const taggerNow = useRef(taggerId);
-  taggerNow.current = taggerId;
+
+  // Resume interrupted downloads 3s after startup (matching ActivityCenter.resumeInterruptedDownloads)
+  useEffect(() => {
+    const t = window.setTimeout(async () => {
+      try {
+        const s = await core.read<LibraryStats>(core.b.tl_stats());
+        if (s.pending_jobs > 0) {
+          const dl = await core.read<DownloadStatus>(core.b.tl_download_status()).catch(() => null);
+          if (!dl?.running) await core.read(core.b.tl_download_resume('{}')).catch(() => null);
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => window.clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -131,19 +222,30 @@ export function ActivityPanel() {
       // a hidden window asks for nothing (it is read again as soon as it is shown)
       if (!document.hidden) {
         const now = Date.now();
-        const current = await running(tagNow.current, taggerNow.current);
+        const snap = await pollSnapshot(tagNow.current);
         if (!live) return;
+        const recent = snap.dl?.recent.at(-1);
+        if (recent && recent !== lastDlRecent.current) {
+          lastDlRecent.current = recent;
+          void refreshLibrary();
+        }
         const kept = memory.current;
-        const out = [...current];
-        const seen = new Set(current.map((a) => a.kind));
-        for (const a of current) {
+        const out = [...snap.list];
+        const seen = new Set(snap.list.map((a) => a.kind));
+        for (const a of snap.list) {
           const m = kept.get(a.kind);
           kept.set(a.kind, { since: m && m.until === undefined ? m.since : now, last: a });
         }
         for (const [kind, m] of kept) {
           if (seen.has(kind)) continue;
-          m.until ??= Math.max(m.since + MINIMUM_SHOWN_MS, now + DONE_FOR_MS);
-          if (now < m.until) out.push({ ...m.last, title: `${L('activity.done')} · ${m.last.title}`, progress: 1 });
+          if (m.until === undefined) {
+            m.until = Math.max(m.since + MINIMUM_SHOWN_MS, now + DONE_FOR_MS);
+            m.doneCard = completedCard(kind, m.last, snap, tagNow.current);
+            if (kind === 'download' || kind === 'importing' || kind === 'verify' || kind === 'model' || kind === 'sync') {
+              libraryChanged();
+            }
+          }
+          if (now < m.until) out.push(m.doneCard ?? m.last);
           else kept.delete(kind);
         }
         setList(out);

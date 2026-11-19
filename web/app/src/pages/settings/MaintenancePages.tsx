@@ -9,7 +9,7 @@ import { core } from '../../lib/core';
 import { clearVideoFrames, thumbnailDirectories } from '../../lib/thumbs';
 import { useAsync, useInterval, useStore } from '../../lib/hooks';
 import { libraryChanged, libraryVersion } from '../../lib/library';
-import { dateStamp, exportFile, info, readText, removeFile, size } from './serverFiles';
+import { clearSecrets, dateStamp, exportFile, info, readText, removeFile, size } from './serverFiles';
 import { setAuto, selectTagger, stopTagging } from './aiTagging';
 import {
   Card, CardRow, Pill, RowDivider, SectionHeading, SettingsScreen, SlimBar, settings,
@@ -512,13 +512,12 @@ export function WipePage() {
       setAuto(false);
       selectTagger('');
       stopTagging();
-      await removeFile(`${server.data}/app/secrets.json`);
       await core.b.tl_set_cookies('', '');
       await core.b.tl_discovery_stop();
       await core.b.tl_ext_pair_cancel();
       await change(core.read(core.b.tl_wipe(models)));
       const cleanup = await Promise.allSettled([
-        removeFile(`${server.data}/app/secrets.key`),
+        clearSecrets(),
         removeFile(`${server.library}/downloads.queue.json`),
         removeFile(server.uploads),
         removeFile(server.exports),

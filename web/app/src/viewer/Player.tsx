@@ -152,6 +152,7 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
         if (!v) return;
         boosting.current = true;
         v.playbackRate = 2.5;
+        if (v.paused) void v.play().catch(() => {});
         flash('2.5× ▶▶', true);
       }, 250);
     };

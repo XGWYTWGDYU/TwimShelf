@@ -51,19 +51,50 @@ export function keyFor(word: string, after?: string | null): string {
   return keywordFrom(word)?.key ?? termKey(word);
 }
 
+export function quoteSearchWord(word: string): string {
+  if (!/[ 　\n\t"]/.test(word)) return word;
+  return `"${word.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 /** The finished words of `text` as keys, and the word still being typed. */
 export function splitQuery(text: string): { keys: string[]; rest: string } {
-  const sep = /[ 　\n\t]/;
-  const lastSep = Math.max(...[' ', '　', '\n', '\t'].map((c) => text.lastIndexOf(c)));
-  if (lastSep < 0) return { keys: [], rest: text };
+  const isSep = (c: string) => c === ' ' || c === '　' || c === '\n' || c === '\t';
+  const words: string[] = [];
+  let i = 0;
+  let rest = '';
+  while (i < text.length) {
+    while (i < text.length && isSep(text[i])) i++;
+    if (i >= text.length) break;
+    const start = i;
+    let buf = '';
+    let inQuote = false;
+    let closed = false;
+    while (i < text.length) {
+      const ch = text[i];
+      if (inQuote) {
+        if (ch === '\\' && i + 1 < text.length) { buf += text[i + 1]; i += 2; continue; }
+        if (ch === '"') { inQuote = false; closed = true; i++; continue; }
+        buf += ch; i++;
+      } else {
+        if (isSep(ch)) break;
+        if (ch === '"') { inQuote = true; i++; continue; }
+        buf += ch; i++;
+      }
+    }
+    if (i < text.length && isSep(text[i])) {
+      if (buf || closed) words.push(buf);
+    } else {
+      rest = text.slice(start);
+    }
+  }
   const keys: string[] = [];
-  for (const word of text.slice(0, lastSep).split(sep).filter(Boolean)) {
+  for (const word of words) {
     const previous = keys.length ? keys[keys.length - 1] : null;
     const key = keyFor(word, previous);
     if (previous === PENDING_FOLDER || previous === `-${PENDING_FOLDER}`) keys[keys.length - 1] = key;
     else keys.push(key);
   }
-  return { keys, rest: text.slice(lastSep + 1) };
+  return { keys, rest };
 }
 
 /** A key as shown in its capsule. */
@@ -174,11 +205,26 @@ export class TokenQuery {
     return f;
   }
 
-  request(o: { over?: Partial<FeedFilter>; seed?: number | null; newestFirst?: boolean; wholePosts?: boolean } = {}): FeedQuery {
+  request(o: {
+    over?: Partial<FeedFilter>;
+    seed?: number | null;
+    newestFirst?: boolean;
+    wholePosts?: boolean;
+    fuzzy?: boolean;
+    termVectors?: number[][];
+    embedModel?: string | null;
+  } = {}): FeedQuery {
     return {
-      terms: this.terms, scope: this.scope, seed: o.seed ?? null, newest_first: o.newestFirst ?? false,
-      // as in the apps: a term matches its tag exactly
-      fuzzy: false, fields: this.searchFields, filter: this.filter(o.over), whole_posts: o.wholePosts ?? false,
+      terms: this.terms,
+      scope: this.scope,
+      seed: o.seed ?? null,
+      newest_first: o.newestFirst ?? false,
+      fuzzy: o.fuzzy ?? false,
+      term_vectors: o.termVectors ?? [],
+      embed_model: o.embedModel ?? null,
+      fields: this.searchFields,
+      filter: this.filter(o.over),
+      whole_posts: o.wholePosts ?? false,
     };
   }
 }

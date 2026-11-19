@@ -391,8 +391,8 @@ function Viewer({ items, index: start, source, squarePreview, onClose }: {
         {multi && index < items.length - 1 && !chromeHidden && !(video && idle) && (
           <button className="viewer-round viewer-next" aria-label={L('viewer.next.mac')} title={L('viewer.next.mac')} onMouseDown={(e) => e.stopPropagation()} onClick={() => step(1)}><ChevronRight size={20} strokeWidth={2.4} /></button>
         )}
-        {!chromeHidden && captionShows(item) && !(video && idle) && (
-          <Caption item={item} maxHeight={size.h * 0.5} trailing={video ? 16 : 110} bottom={video ? 76 : 0} opacity={captionOpacity} />
+        {!chromeHidden && captionShows(item) && (
+          <Caption item={item} maxHeight={size.h * 0.5} trailing={video ? 16 : 110} bottom={video ? 76 : 0} opacity={video && idle ? 0 : captionOpacity} />
         )}
         {!video && !chromeHidden && (
           <div className="viewer-corner" onMouseDown={(e) => e.stopPropagation()}>

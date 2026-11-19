@@ -6,9 +6,14 @@ const { contextBridge, ipcRenderer } = require('electron');
 const menuListeners = new Set();
 ipcRenderer.on('app-menu', (_e, id) => { for (const f of menuListeners) f(id); });
 
+const meta = ipcRenderer.sendSync('desktop-meta') || {};
+
 contextBridge.exposeInMainWorld('twimshelf', {
   desktop: true,
   platform: process.platform,
+  arch: meta.arch || 'x64',
+  appVersion: meta.appVersion || '',
+  updateRepo: meta.updateRepo || '',
   /** A context menu at the pointer: [{id, label, enabled, checked, danger, children}] or 'separator'.
    *  Resolves to the chosen item's id, or null when the menu was dismissed. */
   popupMenu: (items, x, y) => ipcRenderer.invoke('popup-menu', items, x, y),
@@ -22,4 +27,9 @@ contextBridge.exposeInMainWorld('twimshelf', {
   showItemInFolder: (path) => ipcRenderer.send('show-item', String(path)),
   getMascotEnabled: () => ipcRenderer.invoke('get-mascot-enabled'),
   setMascotEnabled: (enabled) => ipcRenderer.invoke('set-mascot-enabled', !!enabled),
+  getLoginItem: () => ipcRenderer.invoke('get-login-item'),
+  setLoginItem: (enabled) => ipcRenderer.invoke('set-login-item', !!enabled),
+  getUpdatePrefs: () => ipcRenderer.invoke('get-update-prefs'),
+  setUpdatePrefs: (prefs) => ipcRenderer.invoke('set-update-prefs', prefs),
+  installUpdate: (serverFile) => ipcRenderer.invoke('install-update', String(serverFile)),
 });

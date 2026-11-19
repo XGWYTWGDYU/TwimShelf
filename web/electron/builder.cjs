@@ -15,6 +15,7 @@ module.exports = {
   extraResources: [
     { from: process.env.TL_SERVER_BIN, to: 'server/twimshelf-server' },
     { from: process.env.TL_WEB_DIST, to: 'web' },
+    ...(process.env.TL_LLAMA_DIR ? [{ from: process.env.TL_LLAMA_DIR, to: 'server/llama' }] : []),
   ],
   asar: true,
   // the Electron this repository installed (no second download on this computer)

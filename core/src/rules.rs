@@ -369,6 +369,42 @@ pub fn valid_ext(e: &[u8]) -> bool {
     true
 }
 
+/// Charges one archive entry against the remaining restore budget.
+pub fn pack_bytes_left(remaining: u64, size: u64, max_entry: u64) -> Option<u64> {
+    if size > max_entry { return None; }
+    remaining.checked_sub(size)
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn pack_budget_accepts_exactly_restorable_entries() {
+    let remaining: u64 = kani::any();
+    let size: u64 = kani::any();
+    let max_entry: u64 = kani::any();
+    let next = pack_bytes_left(remaining, size, max_entry);
+    assert_eq!(next.is_some(), size <= remaining && size <= max_entry);
+    if let Some(next) = next {
+        assert_eq!(next.checked_add(size), Some(remaining));
+        assert!(next <= remaining);
+    }
+}
+
+/// Decide whether to preserve files without database references. Once noticed, recovery
+/// persists across later startups until an explicit reset clears the saved mode.
+pub fn preserve_unclaimed_blobs(saved: Option<bool>, had_blobs: bool, missing_db: bool, has_media_rows: bool) -> bool {
+    saved.unwrap_or(had_blobs && (missing_db || !has_media_rows))
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn partial_recovery_cannot_enable_orphan_sweeping() {
+    assert!(preserve_unclaimed_blobs(None, true, kani::any(), false));
+    assert!(preserve_unclaimed_blobs(None, true, true, kani::any()));
+    assert!(preserve_unclaimed_blobs(Some(true), kani::any(), kani::any(), kani::any()));
+    assert!(!preserve_unclaimed_blobs(Some(false), kani::any(), kani::any(), kani::any()));
+    assert!(!preserve_unclaimed_blobs(None, false, kani::any(), kani::any()));
+}
+
 /// A media path inside the library as stored in the database: `blobs/<2 hex>/<id>.<ext>`.
 /// Anything else is never opened or deleted (an older or forged row cannot point outside).
 pub fn is_blob_path(p: &[u8]) -> bool {

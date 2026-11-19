@@ -1,7 +1,7 @@
 // The TwimShelf desktop app (Linux; a macOS build exists for testing only): starts the bundled
 // TwimShelf server on 127.0.0.1 with a token only this app knows, and shows the React app the
 // server serves. The window and the web page are the same code; only the server is local.
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, screen, session, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -132,13 +132,90 @@ function windowControls() {
 }
 nativeTheme.on('updated', () => { if (process.platform === 'linux') win?.setTitleBarOverlay(windowControls()); });
 
+const startedHidden = process.argv.includes('--autostart');
+
+function boundsFile() { return path.join(dataPaths().TL_DATA, 'window-bounds.json'); }
+
+function loadBounds() {
+  try {
+    const b = JSON.parse(fs.readFileSync(boundsFile(), 'utf8'));
+    if (!b || !Number.isFinite(b.width) || !Number.isFinite(b.height)) return null;
+    const width = Math.max(720, Math.round(b.width));
+    const height = Math.max(480, Math.round(b.height));
+    if (Number.isFinite(b.x) && Number.isFinite(b.y)) {
+      const rect = { x: Math.round(b.x), y: Math.round(b.y), width, height };
+      const area = screen.getDisplayMatching(rect).workArea;
+      const visible = rect.x + rect.width > area.x + 80 && rect.x < area.x + area.width - 80
+        && rect.y + rect.height > area.y + 80 && rect.y < area.y + area.height - 80;
+      if (visible) return { ...rect, maximized: !!b.maximized };
+    }
+    return { width, height, maximized: !!b.maximized };
+  } catch { return null; }
+}
+
+function saveBounds(w) {
+  if (!w || w.isDestroyed() || w.isFullScreen()) return;
+  try {
+    const maximized = w.isMaximized();
+    const rect = maximized ? w.getNormalBounds() : w.getBounds();
+    fs.writeFileSync(boundsFile(), JSON.stringify({ ...rect, maximized }));
+  } catch { /* ignore */ }
+}
+
+// Launch at Login: Linux uses an XDG autostart .desktop entry (~/.config/autostart/);
+// macOS test builds fall back to Electron's openAtLogin. Never used in Docker/Web.
+function autostartFile() {
+  const config = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  const id = product.desktopId || product.appId || 'twimshelf';
+  return path.join(config, 'autostart', `${id}.desktop`);
+}
+
+function getLoginItem() {
+  if (process.platform === 'linux') return fs.existsSync(autostartFile());
+  if (process.platform === 'darwin') return app.getLoginItemSettings().openAtLogin;
+  return false;
+}
+
+function setLoginItem(enabled) {
+  if (process.platform === 'linux') {
+    const file = autostartFile();
+    if (!enabled) {
+      fs.rmSync(file, { force: true });
+      return false;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const execPath = (process.env.APPIMAGE || process.execPath).replace(/(["\\`$])/g, '\\$1');
+    const id = product.desktopId || product.appId || 'twimshelf';
+    const desktop = [
+      '[Desktop Entry]',
+      'Type=Application',
+      `Name=${name}`,
+      `Exec="${execPath}" --autostart`,
+      `Icon=${id}`,
+      'Terminal=false',
+      'X-GNOME-Autostart-enabled=true',
+      '',
+    ].join('\n');
+    fs.writeFileSync(file, desktop, 'utf8');
+    return true;
+  }
+  if (process.platform === 'darwin') {
+    app.setLoginItemSettings({ openAtLogin: !!enabled, openAsHidden: true });
+    return app.getLoginItemSettings().openAtLogin;
+  }
+  return false;
+}
+
 async function createWindow() {
   const { base, token } = await startServer();
   await session.defaultSession.cookies.set({ url: base, name: 'tl_desktop', value: token, httpOnly: true, sameSite: 'strict' });
   const mac = process.platform === 'darwin';
+  const saved = loadBounds();
   win = new BrowserWindow({
     // as the native window (MacRootViewController: 1180 × 820, the content at least 480 wide)
-    width: 1180, height: 820, minWidth: 720, minHeight: 480, show: false,
+    width: saved?.width ?? 1180, height: saved?.height ?? 820,
+    ...(saved?.x !== undefined && saved?.y !== undefined ? { x: saved.x, y: saved.y } : {}),
+    minWidth: 720, minHeight: 480, show: false,
     title: name,
     ...(process.platform !== 'darwin' && fs.existsSync(icon) ? { icon } : {}),
     // the page looks exactly as on the web; only the window buttons move into its 52 pt toolbar
@@ -146,7 +223,28 @@ async function createWindow() {
     ...(mac ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 18, y: 18 } } : { titleBarStyle: 'hidden', titleBarOverlay: windowControls(), autoHideMenuBar: true }),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false },
   });
-  win.once('ready-to-show', () => win.show());
+  let saveTimer = null;
+  const queueSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => saveBounds(win), 300);
+  };
+  win.on('resize', queueSave);
+  win.on('move', queueSave);
+  win.on('maximize', queueSave);
+  win.on('unmaximize', queueSave);
+  win.on('close', (e) => {
+    clearTimeout(saveTimer);
+    saveBounds(win);
+    // When Launch at Login is enabled, closing the window keeps the local server running in background
+    if (!app.isQuitting && getLoginItem()) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+  win.once('ready-to-show', () => {
+    if (saved?.maximized) win.maximize();
+    if (!startedHidden) win.show();
+  });
   // an app, not a page: no pinch zoom of the whole window (and the menu bar has no zoom items)
   win.webContents.on('did-finish-load', () => { win.webContents.setVisualZoomLevelLimits(1, 1); win.webContents.setZoomLevel(0); });
   // links leave the app for the browser; the app stays on its own server
@@ -269,9 +367,59 @@ ipcMain.on('show-item', (e, p) => {
   if (inside) shell.showItemInFolder(real);
 });
 
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+ipcMain.on('desktop-meta', (e) => {
+  e.returnValue = {
+    updateRepo: product.updateRepo || process.env.TL_UPDATE_REPO || '',
+    appVersion: product.version || app.getVersion(),
+    arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+  };
+});
+
+ipcMain.handle('get-login-item', (e) => (fromPage(e) ? getLoginItem() : false));
+ipcMain.handle('set-login-item', (e, enabled) => (fromPage(e) ? setLoginItem(!!enabled) : false));
+
+function updatePrefsFile() { return path.join(dataPaths().TL_DATA, 'update.json'); }
+ipcMain.handle('get-update-prefs', (e) => {
+  if (!fromPage(e)) return {};
+  try { return JSON.parse(fs.readFileSync(updatePrefsFile(), 'utf8')); } catch { return {}; }
+});
+ipcMain.handle('set-update-prefs', (e, prefs) => {
+  if (!fromPage(e) || !prefs || typeof prefs !== 'object') return;
+  try { fs.writeFileSync(updatePrefsFile(), JSON.stringify(prefs)); } catch { /* ignore */ }
+});
+
+ipcMain.handle('install-update', async (e, serverFile) => {
+  if (!fromPage(e) || typeof serverFile !== 'string' || !fs.existsSync(serverFile)) {
+    throw new Error('common.notDone');
+  }
+  const real = fs.realpathSync(serverFile);
+  const inside = Object.values(dataPaths()).some((d) => fs.existsSync(d) && real.startsWith(fs.realpathSync(d) + path.sep));
+  if (!inside) throw new Error('common.notDone');
+  const dest = path.join(app.getPath('downloads'), path.basename(real));
+  const tmp = path.join(app.getPath('downloads'), `.twimshelf-update-${crypto.randomUUID()}.tmp`);
+  try {
+    await fs.promises.copyFile(real, tmp);
+    if (process.platform === 'linux') await fs.promises.chmod(tmp, 0o755);
+    await fs.promises.rename(tmp, dest);
+    await fs.promises.rm(real, { force: true }).catch(() => {});
+    shell.showItemInFolder(dest);
+    return dest;
+  } catch (err) {
+    await fs.promises.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+});
+
+app.on('second-instance', () => {
+  if (win) {
+    if (!win.isVisible()) win.show();
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+});
+app.on('activate', () => { if (win && !win.isVisible()) win.show(); });
 app.on('before-quit', () => { app.isQuitting = true; if (server) server.kill('SIGTERM'); });
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => { if (!getLoginItem()) app.quit(); });
 app.whenReady().then(() => {
   // run from the sources (not a packaged app): the Dock shows the app's own icon, not Electron's
   if (process.platform === 'darwin' && !app.isPackaged && fs.existsSync(icon)) app.dock.setIcon(icon);

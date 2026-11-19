@@ -6,6 +6,7 @@ use crate::library::{decode_text, kind_for, legacy_post_meta, Library};
 use crate::legacy::SIDECAR_NAME;
 use crate::model::MediaKind;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{BufReader, Read, Write};
@@ -240,7 +241,7 @@ impl Source for ZipSource {
     }
 }
 
-struct DirSource { root: PathBuf, files: Vec<PathBuf> }
+struct DirSource { root: PathBuf, files: Vec<PathBuf>, consumed: Option<Vec<(usize, String)>> }
 impl Source for DirSource {
     fn kind(&self) -> &'static str { "folder" }
     fn path(&self) -> String { self.root.to_string_lossy().into_owned() }
@@ -269,7 +270,115 @@ impl Source for DirSource {
     }
     fn store(&mut self, key: usize, lib: &Library, kind: &MediaKind, ext: &str) -> anyhow::Result<(String, String)> {
         regular_file(&self.files[key])?;
-        lib.put_file(&self.files[key], kind, ext)
+        let stored = lib.put_file(&self.files[key], kind, ext)?;
+        if let Some(consumed) = &mut self.consumed { consumed.push((key, stored.0.clone())); }
+        Ok(stored)
+    }
+}
+
+impl DirSource {
+    fn consume_stored(&self, lib: &Library) -> anyhow::Result<()> {
+        for (key, sha) in self.consumed.iter().flatten() {
+            let path = &self.files[*key];
+            // A file can have changed after the import read it. Keep anything we cannot verify.
+            let same_content = (|| -> anyhow::Result<bool> {
+                regular_file(path)?;
+                let mut hash = Sha256::new();
+                std::io::copy(&mut File::open(path)?, &mut hash)?;
+                Ok(hex::encode(hash.finalize()) == *sha)
+            })();
+            if !same_content.unwrap_or(false) { continue; }
+            let db = lib.db();
+            if db.trash_reg(sha)?.state == crate::rules::PURGED { continue; }
+            if let Some((_, _, _, rel)) = db.media_row(sha)? {
+                if lib.check_file(sha, &rel).is_none() { let _ = fs::remove_file(path); }
+            }
+        }
+        fn remove_empty(dir: &Path) {
+            let Ok(entries) = fs::read_dir(dir) else { return; };
+            for entry in entries.flatten() {
+                if entry.file_type().is_ok_and(|kind| kind.is_dir()) { remove_empty(&entry.path()); }
+            }
+            let _ = fs::remove_dir(dir);
+        }
+        remove_empty(&self.root);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod consume_tests {
+    use super::*;
+    use crate::rules::TrashAction;
+
+    #[test]
+    fn consume_preserves_media_that_was_purged_before_reimport() {
+        let root = std::env::temp_dir().join(format!("tl-consume-purged-{}", std::process::id()));
+        let lib = Library::open(root.join("library")).unwrap();
+        let share = root.join("share");
+        fs::create_dir_all(&share).unwrap();
+        let path = share.join("photo.jpg");
+        let bytes = crate::testutil::jpg(b"the only remaining copy");
+        fs::write(&path, &bytes).unwrap();
+        import_loose_dir(&lib, &share, None, false).unwrap();
+        let sha = hex::encode(Sha256::digest(&bytes));
+        lib.trash_apply(std::slice::from_ref(&sha), TrashAction::Trash).unwrap();
+        lib.trash_apply(std::slice::from_ref(&sha), TrashAction::Purge).unwrap();
+
+        let report = import_loose_dir(&lib, &share, None, true).unwrap();
+        assert_eq!(report.deleted, 1);
+        assert_eq!(fs::read(path).unwrap(), bytes);
+        assert!(lib.db().media_row(&sha).unwrap().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn consume_preserves_the_source_when_the_registered_copy_is_missing() {
+        let root = std::env::temp_dir().join(format!("tl-consume-missing-{}", std::process::id()));
+        let lib = Library::open(root.join("library")).unwrap();
+        let share = root.join("share");
+        fs::create_dir_all(&share).unwrap();
+        let path = share.join("photo.jpg");
+        let bytes = crate::testutil::jpg(b"registered under an older extension");
+        fs::write(&path, &bytes).unwrap();
+        let (id, rel) = lib.put_file(&path, &MediaKind::Photo, "jpeg").unwrap();
+        {
+            let db = lib.db();
+            db.upsert_post(&crate::model::PostMeta { id: "p".into(), ..Default::default() }).unwrap();
+            db.add_media(&id, "p", 0, &MediaKind::Photo, &rel, false).unwrap();
+        }
+        fs::remove_file(lib.dir.join(rel)).unwrap();
+
+        let report = import_loose_dir(&lib, &share, None, true).unwrap();
+        assert_eq!(report.duplicate_media, 1);
+        assert_eq!(fs::read(path).unwrap(), bytes);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn consume_preserves_new_and_replaced_files_after_the_scan() {
+        let root = std::env::temp_dir().join(format!("tl-consume-changed-{}", std::process::id()));
+        let lib = Library::open(root.join("library")).unwrap();
+        let share = root.join("share");
+        fs::create_dir_all(&share).unwrap();
+        let changed = share.join("changed.jpg");
+        let unchanged = share.join("unchanged.jpg");
+        let added = share.join("added.jpg");
+        fs::write(&changed, crate::testutil::jpg(b"before")).unwrap();
+        fs::write(&unchanged, crate::testutil::jpg(b"unchanged")).unwrap();
+
+        let _import = begin_in(&lib, "loose_share").unwrap();
+        let mut src = DirSource { root: share, files: vec![], consumed: Some(vec![]) };
+        assert_eq!(run_loose(&lib, &mut src, None).unwrap().new_media, 2);
+        let after = crate::testutil::jpg(b"after");
+        fs::write(&changed, &after).unwrap();
+        fs::write(&added, &after).unwrap();
+
+        src.consume_stored(&lib).unwrap();
+        assert_eq!(fs::read(changed).unwrap(), after);
+        assert_eq!(fs::read(added).unwrap(), after);
+        assert!(!unchanged.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -302,9 +411,8 @@ pub fn import_loose_zip(lib: &Library, path: &Path, folder: Option<&str>) -> any
 }
 
 /// Imports a folder of loose media (the share extensions' inbox: one folder per share). With
-/// `consume`, files that were imported (or that duplicate the library) are removed afterwards;
-/// only problem files stay, so the report can still export them, and deleting the report
-/// deletes them. An emptied folder is removed. With `keep_to`, a folder that still holds problem
+/// `consume`, media whose verified copy is in the library are removed afterwards. Other files
+/// stay. An emptied folder is removed. With `keep_to`, a folder that still holds problem
 /// files is moved there afterwards (out of the inbox, so it is not imported again) and the
 /// saved report points at the new place.
 pub fn import_loose_dir(lib: &Library, dir: &Path, folder: Option<&str>, consume: bool) -> anyhow::Result<ImportReport> {
@@ -312,7 +420,13 @@ pub fn import_loose_dir(lib: &Library, dir: &Path, folder: Option<&str>, consume
 }
 
 pub fn import_loose_dir_keep(lib: &Library, dir: &Path, folder: Option<&str>, consume: bool, keep_to: Option<&Path>, album: bool) -> anyhow::Result<ImportReport> {
-    let mut src = DirSource { root: dir.to_path_buf(), files: vec![] };
+    if consume || keep_to.is_some() {
+        let source = fs::canonicalize(dir)?;
+        let library = fs::canonicalize(&lib.dir)?;
+        let blobs = fs::canonicalize(library.join("blobs"))?;
+        anyhow::ensure!(!source.starts_with(&blobs) && !library.starts_with(&source), "import source overlaps managed library data");
+    }
+    let mut src = DirSource { root: dir.to_path_buf(), files: vec![], consumed: consume.then(Vec::new) };
     let _g = begin_in(lib, "loose_share")?;
     lib.diag_import_start("loose_share");
     let r = run_loose(lib, &mut src, folder);
@@ -320,24 +434,7 @@ pub fn import_loose_dir_keep(lib: &Library, dir: &Path, folder: Option<&str>, co
     let rep = r?;
     // what was shared from another app is 从相册导入; what was dropped on a window is only loose
     if album { lib.mark_album(&rep)?; }
-    if consume {
-        let keep: std::collections::HashSet<PathBuf> = rep.issues.iter().filter(|i| i.is_file() && i.category != "duplicate" && i.category != "in_bin")
-            .map(|i| dir.join(&i.path)).collect();
-        fn sweep(d: &Path, keep: &std::collections::HashSet<PathBuf>) -> bool {
-            let mut empty = true;
-            // a post's text stays with a media of that post that stayed
-            let keeps_post = keep.iter().any(|k| k.parent() == Some(d));
-            for e in fs::read_dir(d).into_iter().flatten().filter_map(|e| e.ok()) {
-                let p = e.path();
-                let ft = match e.file_type() { Ok(t) => t, Err(_) => { empty = false; continue } };
-                if ft.is_dir() { if sweep(&p, keep) { let _ = fs::remove_dir(&p); } else { empty = false; } }
-                else if keep.contains(&p) || (keeps_post && p.file_name().is_some_and(|n| n == SIDECAR_NAME)) { empty = false; }
-                else if fs::remove_file(&p).is_err() { empty = false; }
-            }
-            empty
-        }
-        if sweep(dir, &keep) { let _ = fs::remove_dir(dir); }
-    }
+    if consume { src.consume_stored(lib)?; }
     let mut rep = rep;
     if let Some(to) = keep_to.filter(|_| dir.exists()) {
         if let Some(p) = to.parent() { fs::create_dir_all(p)?; }
@@ -464,7 +561,7 @@ fn run_loose(lib: &Library, src: &mut dyn Source, folder: Option<&str>) -> anyho
 }
 
 pub fn import_dir(lib: &Library, root: &Path, folder: Option<&str>) -> anyhow::Result<ImportReport> {
-    run(lib, &mut DirSource { root: root.to_path_buf(), files: vec![] }, folder)
+    run(lib, &mut DirSource { root: root.to_path_buf(), files: vec![], consumed: None }, folder)
 }
 
 /// A file the import stored, with where it came from.

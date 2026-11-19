@@ -7,7 +7,7 @@ import { alertMessage, choose } from '../../components/pickers';
 import { core } from '../../lib/core';
 import { useAsync, useStore } from '../../lib/hooks';
 import { libraryVersion } from '../../lib/library';
-import { exportFile, fileName, info, size } from './serverFiles';
+import { exportFile, fileName, size } from './serverFiles';
 import {
   Card, CardRow, Pill, PopupSelect, RowDivider,
   SectionGroup, SettingsScreen,
@@ -60,9 +60,8 @@ export async function deleteImportRecordsFlow(files: string[], what: string): Pr
     { destructive: true },
   );
   if (ok == null) return false;
-  const server = await info();
   const result = await change(
-    core.readJson<DeletedReports>('tl_delete_import_reports', { reports: files, owned: [server.uploads] }),
+    core.readJson<DeletedReports>('tl_delete_import_reports', { reports: files }),
   );
   await alertMessage(
     L('mac.importHistory.deleted', result.reports),

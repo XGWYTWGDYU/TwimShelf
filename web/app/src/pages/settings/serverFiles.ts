@@ -5,12 +5,14 @@ import { saveFile } from '../../lib/saveFile';
 export interface ServerInfo {
   data: string;
   library: string;
+  models: string;
   cache: string;
   uploads: string;
   exports: string;
   version: string;
   device_name: string;
   sync_service: string;
+  local_ai?: { supported: boolean; devices: string | null };
 }
 
 export async function serverFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -96,45 +98,29 @@ export function openExternal(url: string): void {
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
-let secretWrites: Promise<unknown> = Promise.resolve();
-
-/** Same sealed server files used by Flutter and by the server at startup. */
-export function updateSecrets(values: Record<string, string | null>): Promise<void> {
-  const write = secretWrites.then(async () => {
-    const server = await info();
-    const keyPath = `${server.data}/app/secrets.key`;
-    const file = `${server.data}/app/secrets.json`;
-    const raw = await readText(file);
-    const records = raw ? JSON.parse(raw) as Record<string, string> : {};
-    let key = (await readText(keyPath))?.trim();
-    for (const [name, value] of Object.entries(values)) {
-      if (!value) {
-        delete records[name];
-        continue;
-      }
-      if (!key) {
-        key = await core.read<string>(core.b.tl_secret_key());
-        await writeText(keyPath, key);
-      }
-      records[name] = await core.read<string>(core.b.tl_secret_seal(key, value));
-    }
-    if (raw || Object.keys(records).length) await writeText(file, JSON.stringify(records));
-  });
-  secretWrites = write.catch(() => {});
-  return write.catch(() => { throw new Error('settings.cookie.notSaved'); });
+export async function updateSecrets(values: Record<string, string | null>): Promise<void> {
+  try {
+    await checked(await serverFetch(`${core.transport.base}/api/secrets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(values),
+    }));
+  } catch {
+    throw new Error('settings.cookie.notSaved');
+  }
 }
 
 export async function readSecret(name: string): Promise<string | null> {
-  await secretWrites;
   try {
-    const server = await info();
-    const raw = await readText(`${server.data}/app/secrets.json`);
-    const sealed = raw ? (JSON.parse(raw) as Record<string, string>)[name] : undefined;
-    const key = sealed && (await readText(`${server.data}/app/secrets.key`))?.trim();
-    return key && sealed ? await core.read<string>(core.b.tl_secret_open(key, sealed)) : null;
+    const response = await checked(await serverFetch(`${core.transport.base}/api/secrets/${encodeURIComponent(name)}`, { cache: 'no-store' }));
+    return await response.json() as string | null;
   } catch {
     throw new Error(L('settings.cookie.notSaved'));
   }
+}
+
+export async function clearSecrets(): Promise<void> {
+  await checked(await serverFetch(`${core.transport.base}/api/secrets`, { method: 'DELETE' }));
 }
 
 export async function copyText(text: string): Promise<void> {

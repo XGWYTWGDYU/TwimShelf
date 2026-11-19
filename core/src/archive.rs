@@ -293,6 +293,9 @@ fn write_pack_inner(lib: &Library, live: Vec<FeedItem>, bin: Vec<FeedItem>, opts
                 rep.skipped.push(ExportSkip { media_id: it.media_id.clone(), post_id: it.post_id.clone(), reason: tr!("export.damaged").into() });
                 continue;
             }
+            if !opts.media_only && crate::rules::pack_bytes_left(MAX_PACK_BYTES - rep.bytes, n, MAX_MEDIA_BYTES).is_none() {
+                bail!(tr!("pack.mediaTooBig"));
+            }
             rep.bytes += n;
             set_export(|p| p.bytes += n);
             rep.media += 1;
@@ -384,7 +387,7 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
             let mut store_failed = None;
             let read = (|| -> anyhow::Result<()> {
                 let mut e = z.by_name(&m.file).with_context(|| tr!("pack.missingFile", file = m.file))?;
-                if e.size() > MAX_MEDIA_BYTES || e.size() > remaining { bail!(tr!("pack.mediaTooBig")); }
+                if crate::rules::pack_bytes_left(remaining, e.size(), MAX_MEDIA_BYTES).is_none() { bail!(tr!("pack.mediaTooBig")); }
                 let mut media_bytes = 0u64;
                 let file = File::create(&tmp).inspect_err(|e| store_failed = Some(e.to_string()))?;
                 let mut w = BufWriter::new(file);
@@ -463,11 +466,12 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
         if c.post.id.len() > MAX_POST_ID_BYTES { continue; }
         let db = lib.db();
         let Some((_, _, kind, rel)) = db.media_row(&c.media)? else { continue };
+            if db.trash_reg(&c.media)?.state == crate::rules::PURGED { continue; }
         let kind = if kind == "video" { MediaKind::Video } else { MediaKind::Photo };
         let tx = db.conn().unchecked_transaction()?;
         let (meta, _) = c.post.clamped();
         db.upsert_post_checked(&meta, |id, ext| lib.dir.join(crate::oplog::blob_rel(id, ext)).exists())?;
-        db.add_media(&c.media, &meta.id, c.ordinal, &kind, &rel, false)?;
+            db.record_stored_media(&c.media, &meta.id, c.ordinal, &kind, &rel)?;
         tx.commit()?;
     }
     {
@@ -541,6 +545,16 @@ mod tests {
         assert!(bad.incomplete.is_none() && !bad.issues.is_empty(), "{bad:?}");
     }
 
+    #[test]
+    fn pack_budget_checks_both_limits_and_accepts_exact_boundaries() {
+        let remaining = crate::rules::pack_bytes_left(12, 8, 8).unwrap();
+        assert_eq!(remaining, 4);
+        assert_eq!(crate::rules::pack_bytes_left(remaining, 4, 8), Some(0));
+        assert_eq!(crate::rules::pack_bytes_left(remaining, 5, 8), None);
+        assert_eq!(crate::rules::pack_bytes_left(12, 9, 8), None);
+        assert_eq!(crate::rules::pack_bytes_left(u64::MAX, u64::MAX, u64::MAX), Some(0));
+    }
+
     /// Two posts share one file: the backup keeps both, though a feed lists it under one.
     #[test]
     fn a_backup_keeps_every_post_a_media_belongs_to() {
@@ -558,15 +572,25 @@ mod tests {
                 db.add_media(&sha, id, 0, &kind, &rel, false).unwrap();
             }
         }
-        let out = d.join("b.tlpack");
-        export_backup(&lib, &out).unwrap();
-        let back = Library::open(d.join("b")).unwrap();
-        import_pack(&back, &out).unwrap();
-        let db = back.db();
-        assert!(db.post_meta("1").unwrap().is_some());
-        assert_eq!(db.post_meta("2").unwrap().and_then(|m| m.text).as_deref(), Some("post 2"));
-        let claims: i64 = db.conn().query_row("SELECT count(*) FROM media_claim", [], |r| r.get(0)).unwrap();
-        assert_eq!(claims, 2);
+        use crate::rules::{LIVE, TRASHED, TrashAction};
+        for state in [LIVE, TRASHED] {
+            if state == TRASHED { lib.trash_apply(std::slice::from_ref(&sha), TrashAction::Trash).unwrap(); }
+            let out = d.join(format!("backup-{state}.tlpack"));
+            export_backup(&lib, &out).unwrap();
+            let back = Library::open(d.join(format!("restored-{state}"))).unwrap();
+            import_pack(&back, &out).unwrap();
+            assert_eq!(back.db().trash_reg(&sha).unwrap().state, state);
+            if state == TRASHED { back.trash_apply(std::slice::from_ref(&sha), TrashAction::Restore).unwrap(); }
+            assert_eq!(back.check_file(&sha, &rel), None);
+            let db = back.db();
+            assert!(db.post_meta("1").unwrap().is_some());
+            assert_eq!(db.post_meta("2").unwrap().and_then(|m| m.text).as_deref(), Some("post 2"));
+            let claims = db.secondary_claims().unwrap();
+            assert_eq!(claims.len(), 1);
+            assert_eq!(claims[0].0, sha);
+            assert_eq!(claims[0].2.id, "2");
+        }
+        fs::remove_dir_all(d).unwrap();
     }
     use crate::model::SearchScope;
     use crate::library::FeedRequest;

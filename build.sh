@@ -210,16 +210,42 @@ build_web() {
   (cd "$ROOT/web" && npm ci --no-audit --no-fund && npm run check && npm run build)
 }
 
+# on-device GGUF inference (llama.cpp + tl_llama) for the Linux desktop app
+build_llama_linux() {
+  need_tool cmake CMake cmake cmake cmake cmake
+  need_tool ninja Ninja ninja ninja-build ninja-build ninja
+  local build="$CACHE/llama-linux" out="$CACHE/llama-linux-out"
+  local extra=()
+  [[ -n "${TL_LLAMA_SOURCE:-}" ]] && extra+=("-DTL_LLAMA_SOURCE=$TL_LLAMA_SOURCE")
+  local vk=OFF; have glslc && vk=ON
+  cmake -S "$ROOT/flutter/tl_llama/src" -B "$build" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DTL_LLAMA_VULKAN=$vk "${extra[@]}"
+  cmake --build "$build" --target tl_llama
+  rm -rf "$out" && mkdir -p "$out"
+  find "$build" -maxdepth 4 -type f -name 'lib*.so*' \
+    \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
+    -exec cp -P {} "$out/" \;
+  find "$build" -maxdepth 4 -type l -name 'lib*.so*' \
+    \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
+    -exec cp -P {} "$out/" \;
+  echo "$out"
+}
+
 # the desktop app: React + the server binary in Electron
 build_electron() {   # build_electron <linux|mac>
   need_rust; build_web
   # Electron's own binary (npm ci does not run its download step everywhere; cached in $CACHE/electron)
   (cd "$ROOT/web" && node node_modules/electron/install.js)
   cargo build --manifest-path "$ROOT/Cargo.toml" -p tl-server --release --locked --target-dir "$CACHE/cargo-target"
+  local llama_dir=""
+  if [[ "$1" == "linux" ]]; then
+    llama_dir=$(build_llama_linux)
+  fi
   # name, id, version, build number and icon from config.yaml (product.json, icon.png)
   python3 "$ROOT/scripts/apply.py" desktop
   ELECTRON_OUT="$CACHE/electron-out"; local out=$ELECTRON_OUT; rm -rf "$out"
   (cd "$ROOT/web/electron" && TL_SERVER_BIN="$CACHE/cargo-target/release/twimshelf-server" TL_WEB_DIST="$ROOT/web/app/dist" \
+    ${llama_dir:+TL_LLAMA_DIR="$llama_dir"} \
     TL_ELECTRON_OUT="$out" npx electron-builder --config builder.cjs --"$1" --publish never)
 }
 

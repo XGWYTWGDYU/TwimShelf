@@ -23,6 +23,8 @@
 mod auth;
 mod dispatch;
 mod gate;
+mod llama;
+mod secrets;
 mod wire;
 
 use axum::body::Body;
@@ -47,6 +49,7 @@ pub struct Config {
     data: PathBuf,
     web: PathBuf,
     auth: auth::Auth,
+    secrets: secrets::Secrets,
     /// Answer requests from the internet too (`TL_ALLOW_PUBLIC`); the local network only otherwise.
     public: bool,
     /// The window that runs the web app's own background work (see `gate::lease`).
@@ -84,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
     let public = matches!(env("TL_ALLOW_PUBLIC", "").to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on");
     let config = Arc::new(Config {
         auth: auth::Auth::new(&data),
+        secrets: secrets::Secrets::new(data.join("app")),
         data,
         web: PathBuf::from(env("TL_WEB", "/app/web")),
         public,
@@ -111,14 +115,13 @@ async fn main() -> anyhow::Result<()> {
     // (the core runs its own async runtime: called from a plain thread)
     { let cfg = config.clone(); tokio::task::spawn_blocking(move || { apply_cookies(&cfg); start_sync(&cfg); gate::refresh_extension_options(&cfg); }).await?; }
 
-    let api = Router::new()
+    let api = file_routes()
         .route("/api/info", get(info))
-        .route("/api/call/{name}", post(call))
-        .route("/api/upload", post(upload).layer(DefaultBodyLimit::disable()))
         .route("/api/proxy", post(proxy).layer(DefaultBodyLimit::max(64 << 20)))
-        .route("/f/{*path}", get(file).put(put_file).delete(delete_file))
-        .route("/api/move", post(move_file))
         .route("/api/scaled", get(scaled))
+        .route("/api/ai/describe", post(ai_describe).layer(DefaultBodyLimit::max(32 << 20)))
+        .route("/api/ai/embed", post(ai_embed).layer(DefaultBodyLimit::max(4 << 20)))
+        .route("/api/ai/unload", post(ai_unload))
         .route("/gfonts/{*path}", get(gfont))
         .route("/api/lease", post(gate::lease))
         .route("/login", get(gate::login_page).post(gate::login).layer(DefaultBodyLimit::max(64 << 10)))
@@ -145,6 +148,16 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn file_routes() -> Router<Shared> {
+    Router::new()
+        .route("/api/call/{name}", post(call))
+        .route("/api/secrets", post(secrets::update).delete(secrets::clear).layer(DefaultBodyLimit::max(256 << 10)))
+        .route("/api/secrets/{name}", get(secrets::read))
+        .route("/api/upload", post(upload).layer(DefaultBodyLimit::disable()))
+        .route("/f/{*path}", get(file).put(put_file).delete(delete_file))
+        .route("/api/move", post(move_file))
+}
+
 /// config.yaml's version (the image build passes it), or the crate's for a plain `cargo build`.
 const VERSION: &str = match option_env!("TL_VERSION") { Some(v) if !v.is_empty() => v, _ => env!("CARGO_PKG_VERSION") };
 
@@ -155,7 +168,8 @@ pub fn device_name() -> String { env("TL_DEVICE_NAME", "TwimShelf Linux Server")
 /// sealed in `app/secrets.json`, as the desktop apps keep it), it syncs from start-up on, with
 /// no browser open.
 fn start_sync(cfg: &Config) {
-    let Some(account) = secret(cfg, "sync.key") else { return };
+    let account = cfg.secrets.read(["sync.key"]).inspect_err(|_| eprintln!("secrets: sync key cannot be read"));
+    let Ok([Some(account)]) = account else { return };
     let name = device_name();
     let service = env("TL_SYNC_SERVICE", "_twlib._tcp");
     let r = wire::take(tl_core::ffi::tl_sync_start(c(Path::new(&account)).as_ptr(), c(Path::new(&name)).as_ptr()));
@@ -163,33 +177,23 @@ fn start_sync(cfg: &Config) {
     eprintln!("sync: started as \"{name}\" ({r}, {d})");
 }
 
-/// A secret the web app keeps (sealed in `app/secrets.json` with `app/secrets.key`, as the
-/// desktop apps keep theirs).
-fn secret(cfg: &Config, name: &str) -> Option<String> {
-    let app = cfg.dir("app");
-    let key = std::fs::read_to_string(app.join("secrets.key")).ok()?;
-    let secrets = std::fs::read_to_string(app.join("secrets.json")).ok()?;
-    let blob = serde_json::from_str::<Value>(&secrets).ok()?.get(name)?.as_str()?.to_string();
-    let opened = wire::take(tl_core::ffi::tl_secret_open(c(Path::new(key.trim())).as_ptr(), c(Path::new(&blob)).as_ptr()));
-    let v = opened.as_str().and_then(|s| serde_json::from_str::<Value>(s).ok()).and_then(|v| v.get("ok").and_then(|k| k.as_str()).map(str::to_string));
-    if v.is_none() { eprintln!("secrets: {name} cannot be read"); }
-    v
-}
-
 /// The X session cookies the web app stored: downloads (from the browser extension too) can use
 /// them with no browser open.
 fn apply_cookies(cfg: &Config) {
-    if let (Some(a), Some(t)) = (secret(cfg, "auth_token"), secret(cfg, "ct0")) {
+    let cookies = cfg.secrets.read(["auth_token", "ct0"]).inspect_err(|_| eprintln!("secrets: download cookies cannot be read"));
+    if let Ok([Some(a), Some(t)]) = cookies {
         tl_core::ffi::tl_set_cookies(c(Path::new(&a)).as_ptr(), c(Path::new(&t)).as_ptr());
     }
 }
 
 async fn info(State(cfg): State<Shared>) -> Json<Value> {
     let d = |n: &str| cfg.dir(n).to_string_lossy().into_owned();
+    let (local_ai_supported, local_ai_devices) = tokio::task::spawn_blocking(llama::info).await.unwrap_or((false, None));
     Json(json!({
         "data": cfg.data.to_string_lossy(), "library": d("library"), "models": d("models"),
         "cache": d("cache"), "uploads": d("uploads"), "exports": d("exports"),
         "version": VERSION, "functions": dispatch::NAMES, "device_name": device_name(), "sync_service": env("TL_SYNC_SERVICE", "_twlib._tcp"),
+        "local_ai": { "supported": local_ai_supported, "devices": local_ai_devices },
     }))
 }
 
@@ -217,6 +221,12 @@ async fn call(State(cfg): State<Shared>, UrlPath(name): UrlPath<String>, body: a
         let mut args = args;
         // the data folders are the server's: a client cannot point the core elsewhere
         if name == "tl_set_models_dir" { args = vec![Value::String(models)]; }
+        if name == "tl_delete_import_reports" {
+            let mut options: serde_json::Map<String, Value> = serde_json::from_str(args.first().and_then(Value::as_str).unwrap_or_default())?;
+            let uploads = data_subpath(&cfg, "uploads", &cfg.dir("uploads"), true);
+            options.insert("owned".into(), json!(uploads.into_iter().collect::<Vec<_>>()));
+            args = vec![Value::String(serde_json::to_string(&options)?)];
+        }
         if let Some(paths) = storage_paths {
             let mut extra: Vec<Value> = args.first().and_then(Value::as_str)
                 .and_then(|text| serde_json::from_str(text).ok()).unwrap_or_default();
@@ -240,7 +250,8 @@ fn roots(cfg: &Config) -> Vec<PathBuf> {
 
 /// An absolute path as it really is, links resolved, also when its last parts do not exist yet.
 fn resolved(path: &Path) -> Option<PathBuf> {
-    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) { return None; }
+    if !path.is_absolute() || path.as_os_str().as_encoded_bytes().contains(&0)
+        || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) { return None; }
     let mut rest = Vec::new();
     let mut at = path;
     loop {
@@ -250,55 +261,98 @@ fn resolved(path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// A path a call of the core may use: inside the server's folders, and never the sign-in and
-/// secret files in `app` (only the web app's own `/f` requests reach those).
+/// A path a read-only argument may use.
 fn core_path_allowed(cfg: &Config, path: &str) -> bool {
     let Some(real) = resolved(Path::new(path)) else { return false };
-    let app = std::fs::canonicalize(cfg.dir("app")).unwrap_or_else(|_| cfg.dir("app"));
-    roots(cfg).iter().any(|r| real.starts_with(r)) && !real.starts_with(app)
+    roots(cfg).iter().any(|r| real.starts_with(r)) && !private(cfg, &real)
+}
+
+/// Resolve a path within a specific directory. Its descendants must be ordinary path entries.
+fn scoped_path(root: &Path, path: &Path, allow_root: bool) -> Option<PathBuf> {
+    let mut target = resolved(root)?;
+    let relative = path.strip_prefix(root).or_else(|_| path.strip_prefix(&target)).ok()?;
+    if !allow_root && relative.as_os_str().is_empty() { return None; }
+    for part in relative.components() {
+        let std::path::Component::Normal(name) = part else { return None };
+        target.push(name);
+        match std::fs::symlink_metadata(&target) {
+            Ok(info) if !info.is_symlink() => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => return None,
+        }
+    }
+    Some(target)
+}
+
+fn data_subpath(cfg: &Config, name: &str, path: &Path, allow_root: bool) -> Option<PathBuf> {
+    let root = cfg.data.join(name);
+    // Staging directories are managed by the server. A link at their root would give their
+    // permissions to a different directory, including when it points inside the data folder.
+    if root.is_symlink() { return None; }
+    let real_root = resolved(&root)?;
+    for protected in ["library", "models", "app"] {
+        let protected = cfg.dir(protected);
+        let protected = std::fs::canonicalize(&protected).ok().or_else(|| resolved(&protected))?;
+        if real_root.starts_with(&protected) || protected.starts_with(&real_root) { return None; }
+    }
+    scoped_path(&root, path, allow_root)
 }
 
 /// Whether every file path among a call's arguments stays inside the server's folders.
 fn paths_allowed(cfg: &Config, name: &str, args: &[Value]) -> bool {
     let text = |i: usize| args.get(i).and_then(Value::as_str).unwrap_or("");
     let json = |i: usize| serde_json::from_str::<Value>(text(i)).unwrap_or(Value::Null);
-    let at = |list: &[usize]| list.iter().all(|&i| core_path_allowed(cfg, text(i)));
-    let optional = |v: &Value| v.as_str().filter(|p| !p.is_empty()).is_none_or(|p| core_path_allowed(cfg, p));
-    let every = |v: &Value| v.as_array().is_none_or(|a| a.iter().all(|p| p.as_str().is_some_and(|p| core_path_allowed(cfg, p))));
+    let read = |i| core_path_allowed(cfg, text(i));
+    let in_dir = |dir, path, allow_root| data_subpath(cfg, dir, Path::new(path), allow_root).is_some();
+    let output = |path| in_dir("exports", path, false);
     match name {
         "tl_import_legacy_dir" | "tl_import_legacy_zip" | "tl_import_loose_zip" | "tl_import_pack" | "tl_parse_bookmarks"
-        | "tl_share_stage" | "tl_db_snapshot" | "tl_model_import" | "tl_import_report" | "tl_export_backup" | "tl_export_diagnostics" => at(&[0]),
-        "tl_update_download" | "tl_model_export_zip" => at(&[1]),
-        "tl_share_pack" => at(&[0, 1]),
-        "tl_thumbnail" | "tl_thumbnails_warm" => at(&[2]),
-        "tl_display_image" => at(&[0, 2]),
+        | "tl_model_import" | "tl_import_report" => read(0),
+        "tl_db_snapshot" | "tl_export_backup" | "tl_export_diagnostics" => output(text(0)),
+        "tl_update_download" => in_dir("exports", text(1), true),
+        "tl_model_export_zip" => output(text(1)),
+        "tl_share_stage" => in_dir("uploads", text(0), false),
+        "tl_share_pack" => in_dir("uploads", text(0), false) && (output(text(1)) || in_dir("uploads", text(1), false)),
+        "tl_thumbnail" | "tl_thumbnails_warm" => in_dir("cache", text(2), true),
+        "tl_display_image" => read(0) && in_dir("cache", text(2), true),
         // a report names the folder its problem files are copied from
-        "tl_import_export_issues" => at(&[0, 1]) && std::fs::read(text(0)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        "tl_import_export_issues" => read(0) && output(text(1)) && std::fs::read(text(0)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .is_none_or(|r| r["source"].as_str().is_none_or(|s| core_path_allowed(cfg, s))),
-        "tl_export_media" => core_path_allowed(cfg, json(0)["out"].as_str().unwrap_or("")),
-        "tl_import_loose_dir" => { let a = json(0); core_path_allowed(cfg, a["dir"].as_str().unwrap_or("")) && optional(&a["keep_to"]) }
-        "tl_storage_usage" => json(0).as_array().is_none_or(|a| a.iter().all(|e| optional(&e["path"]))),
-        "tl_delete_import_reports" => { let a = json(0); every(&a["reports"]) && every(&a["owned"]) }
+        "tl_export_media" => {
+            let args = json(0);
+            output(args["out"].as_str().unwrap_or(""))
+        }
+        "tl_import_loose_dir" => {
+            let args = json(0);
+            let dir = args["dir"].as_str().unwrap_or("");
+            let keep_to = args["keep_to"].as_str();
+            if args["consume"].as_bool() == Some(true) || keep_to.is_some() {
+                in_dir("uploads", dir, false) && keep_to.is_none_or(|p| in_dir("uploads", p, false))
+            } else {
+                core_path_allowed(cfg, dir)
+            }
+        }
+        "tl_storage_usage" => json(0).as_array().is_none_or(|a| a.iter().all(|e|
+            e["path"].as_str().filter(|p| !p.is_empty()).is_none_or(|p| core_path_allowed(cfg, p)))),
+        "tl_delete_import_reports" => json(0)["reports"].as_array().is_some_and(|reports|
+            reports.iter().all(|p| p.as_str().is_some_and(|p| core_path_allowed(cfg, p)))),
         _ => true,
     }
 }
 
 /// `path` resolved inside the server's folders, or None (outside them, or missing).
 fn inside_data(cfg: &Config, path: &str) -> Option<PathBuf> {
-    let p = PathBuf::from(if path.starts_with('/') { path.to_string() } else { format!("/{path}") });
-    let real = std::fs::canonicalize(&p).ok()?;
+    let real = std::fs::canonicalize(file_path(path)).ok()?;
     (roots(cfg).iter().any(|r| real.starts_with(r)) && !private(cfg, &real)).then_some(real)
 }
 
-/// The folders everything else lives in: never deleted or moved as a whole through `/f`.
-fn is_top_folder(cfg: &Config, p: &Path) -> bool {
-    roots(cfg).iter().any(|r| r == p) || std::fs::canonicalize(cfg.dir("app")).is_ok_and(|a| a == p)
+fn file_path(path: &str) -> PathBuf {
+    Path::new("/").join(path)
 }
 
-/// The sign-in files are the server's alone: never read, written or moved through `/f`.
+/// Internal application state is accessed through its own API.
 fn private(cfg: &Config, p: &Path) -> bool {
-    let app = std::fs::canonicalize(cfg.dir("app")).unwrap_or_else(|_| cfg.dir("app"));
-    [auth::file(&cfg.data), auth::initial_file(&cfg.data)].iter().any(|f| f.file_name() == p.file_name() && p.parent() == Some(app.as_path()))
+    resolved(&cfg.dir("app")).is_some_and(|app| p.starts_with(app))
 }
 
 /// A file of the data folder, with ranges and conditional requests (a video seeks by ranges).
@@ -319,53 +373,123 @@ async fn file(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>, req: Re
     res
 }
 
-/// `path` for writing: inside the server's folders (its folder made when missing), never a link out.
-fn writable(cfg: &Config, path: &str) -> Option<PathBuf> {
-    let p = PathBuf::from(if path.starts_with('/') { path.to_string() } else { format!("/{path}") });
-    let parent = p.parent()?;
-    let roots = roots(cfg);
-    // checked before anything is made: a refused request leaves nothing behind
-    if !roots.iter().any(|r| resolved(parent).is_some_and(|real| real.starts_with(r))) { return None; }
-    std::fs::create_dir_all(parent).ok()?;
-    let real_parent = std::fs::canonicalize(parent).ok()?;
-    if !roots.iter().any(|r| real_parent.starts_with(r)) { return None; }
-    if p.is_symlink() { return None; }
-    let target = real_parent.join(p.file_name()?);
-    if private(cfg, &target) { return None; }
-    Some(target)
+fn library_file(cfg: &Config, path: &Path, relative: &str) -> Option<PathBuf> {
+    let library = cfg.dir("library");
+    let file = scoped_path(&library, &library.join(relative), false)?;
+    (scoped_path(&library, path, false)? == file).then_some(file)
 }
 
-/// The web app's own small files (a download queue, settings it keeps beside the library).
+/// Browser-managed download options. Central library files are only written by the core.
 async fn put_file(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>, body: axum::body::Bytes) -> Response {
-    let Some(p) = writable(&cfg, &path) else { return StatusCode::FORBIDDEN.into_response() };
+    let Some(p) = library_file(&cfg, &file_path(&path), "downloads.queue.json") else { return StatusCode::FORBIDDEN.into_response() };
     let tmp = p.with_extension(format!("tmp{:08x}", rand::random::<u32>()));
-    let r = async { tokio::fs::write(&tmp, &body).await?; tokio::fs::rename(&tmp, &p).await }.await;
+    let mut file = match tokio::fs::File::create_new(&tmp).await {
+        Ok(file) => file,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let r = async {
+        file.write_all(&body).await?;
+        file.sync_all().await?;
+        drop(file);
+        tokio::fs::rename(&tmp, &p).await
+    }.await;
     match r { Ok(()) => StatusCode::NO_CONTENT.into_response(), Err(e) => { let _ = tokio::fs::remove_file(&tmp).await; (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() } }
 }
 
 async fn delete_file(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>) -> Response {
-    let Some(p) = inside_data(&cfg, &path) else { return StatusCode::NO_CONTENT.into_response() };
-    if is_top_folder(&cfg, &p) { return StatusCode::FORBIDDEN.into_response(); }
-    let r = if p.is_dir() { tokio::fs::remove_dir_all(&p).await } else { tokio::fs::remove_file(&p).await };
-    match r { Ok(()) => StatusCode::NO_CONTENT.into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
+    let path = file_path(&path);
+    let staging = ["uploads", "exports", "cache"].into_iter().find_map(|name| {
+        let path = data_subpath(&cfg, name, &path, true)?;
+        let root = data_subpath(&cfg, name, &cfg.dir(name), true)?;
+        Some((path == root, path))
+    });
+    let result = if let Some((keep_root, staged)) = staging {
+        remove_staging(&staged, keep_root).await
+    } else if let Some(file) = ["downloads.queue.json", "logs/app.log", "logs/app.1.log", "logs/diagnostics.log"]
+        .into_iter().find_map(|name| library_file(&cfg, &path, name))
+    {
+        tokio::fs::remove_file(file).await
+    } else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn remove_staging(path: &Path, keep_root: bool) -> std::io::Result<()> {
+    async fn remove_entry(path: &Path) -> std::io::Result<()> {
+        let meta = tokio::fs::symlink_metadata(path).await?;
+        if meta.is_dir() { tokio::fs::remove_dir_all(path).await } else { tokio::fs::remove_file(path).await }
+    }
+    if !keep_root { return remove_entry(path).await; }
+    let mut entries = tokio::fs::read_dir(path).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        match remove_entry(&entry.path()).await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            result => result?,
+        }
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
 struct MoveRequest { from: String, to: String }
 
 async fn move_file(State(cfg): State<Shared>, Json(m): Json<MoveRequest>) -> Response {
-    let (Some(from), Some(to)) = (inside_data(&cfg, &m.from), writable(&cfg, &m.to)) else { return StatusCode::FORBIDDEN.into_response() };
-    if is_top_folder(&cfg, &from) { return StatusCode::FORBIDDEN.into_response(); }
-    match tokio::fs::rename(&from, &to).await { Ok(()) => StatusCode::NO_CONTENT.into_response(), Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response() }
+    let staged = |path: &str| data_subpath(&cfg, "uploads", Path::new(path), false);
+    let (Some(from), Some(to)) = (staged(&m.from), staged(&m.to)) else { return StatusCode::FORBIDDEN.into_response() };
+    if !from.is_file() || !to.parent().is_some_and(|p| p.is_dir()) { return StatusCode::NOT_FOUND.into_response(); }
+    // Publish the new name without replacing an existing upload, then release the old name.
+    let result = async { tokio::fs::hard_link(&from, &to).await?; tokio::fs::remove_file(&from).await }.await;
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => StatusCode::CONFLICT.into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 #[derive(Deserialize)]
-struct ScaledQuery { path: String, side: u32 }
+struct ScaledQuery { path: String, side: u32, #[serde(default)] whole: Option<u8> }
 
 /// Pictures scaled at the same time.
 static PICTURES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(6);
 /// The largest picture decoded here (the core's own limit for HEIF).
 const MAX_PIXELS: u64 = 200_000_000;
+
+/// Fits a picture for vision models (same rules as native macOS ModelInput & Windows TaggingImage):
+/// long side <= `side`, short side >= 112 (without exceeding `side`), black-padded to <= 4:1.
+fn fit_for_model(picture: image::DynamicImage, side: u32) -> image::DynamicImage {
+    use image::imageops::FilterType;
+    let (mut w, mut h) = (picture.width() as f64, picture.height() as f64);
+    if w <= 0.0 || h <= 0.0 { return picture; }
+    let limit = side as f64;
+    let fit = (limit / w.max(h)).min(1.0);
+    w *= fit;
+    h *= fit;
+    let short_side = w.min(h);
+    let long_side = w.max(h);
+    let max_grow = if long_side > 0.0 { (limit / long_side).max(1.0) } else { 1.0 };
+    let grow = (112.0 / short_side).clamp(1.0, max_grow);
+    let sw = (w * grow).round().max(1.0) as u32;
+    let sh = (h * grow).round().max(1.0) as u32;
+    let scaled = if sw != picture.width() || sh != picture.height() {
+        picture.resize_exact(sw, sh, FilterType::Triangle)
+    } else {
+        picture
+    };
+    let cw = sw.max((sh as f64 / 4.0).ceil() as u32);
+    let ch = sh.max((sw as f64 / 4.0).ceil() as u32);
+    if cw == sw && ch == sh { return scaled; }
+    let mut canvas = image::RgbImage::new(cw, ch);
+    let rgb = scaled.to_rgb8();
+    let ox = (cw - sw) / 2;
+    let oy = (ch - sh) / 2;
+    image::imageops::overlay(&mut canvas, &rgb, i64::from(ox), i64::from(oy));
+    image::DynamicImage::ImageRgb8(canvas)
+}
 
 /// A picture of the data folder upright (its EXIF orientation applied) and no longer than
 /// `side` on its long edge, as a JPEG: what AI tagging sends, made here so the page decodes a
@@ -373,19 +497,42 @@ const MAX_PIXELS: u64 = 200_000_000;
 async fn scaled(State(cfg): State<Shared>, Query(q): Query<ScaledQuery>) -> Response {
     let Some(src) = inside_data(&cfg, &q.path) else { return StatusCode::NOT_FOUND.into_response() };
     let side = q.side.clamp(32, 4096);
+    let whole = q.whole.unwrap_or(0) != 0;
+    let Some(cache_dir) = data_subpath(&cfg, "cache", &cfg.dir("cache"), true) else { return StatusCode::FORBIDDEN.into_response(); };
     // a page of cards asks for many at once: each one decodes a whole picture
     let Ok(_turn) = PICTURES.acquire().await else { return StatusCode::SERVICE_UNAVAILABLE.into_response() };
     let made = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
         use image::ImageDecoder;
-        let mut decoder = image::ImageReader::open(&src)?.with_guessed_format()?.into_decoder()?;
+        // HEIC/HEIF/AVIF go through the core's libheif first so `image` can decode the JPEG
+        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        let decode_path = if matches!(ext.as_str(), "heic" | "heif" | "avif") {
+            let raw = wire::take(tl_core::ffi::tl_display_image(
+                c(&src).as_ptr(),
+                side,
+                c(&cache_dir).as_ptr(),
+            ));
+            raw.as_str()
+                .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                .and_then(|v| v.get("ok").and_then(Value::as_str).map(PathBuf::from))
+                .unwrap_or_else(|| src.clone())
+        } else {
+            src.clone()
+        };
+        let mut decoder = image::ImageReader::open(&decode_path)?.with_guessed_format()?.into_decoder()?;
         let (w, h) = decoder.dimensions();
         anyhow::ensure!(u64::from(w) * u64::from(h) <= MAX_PIXELS, "picture too large");
         let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
         let mut picture = image::DynamicImage::from_decoder(decoder)?;
         picture.apply_orientation(orientation);
-        if picture.width().max(picture.height()) > side { picture = picture.thumbnail(side, side); }
+        let quality = if whole {
+            picture = fit_for_model(picture, side);
+            80
+        } else {
+            if picture.width().max(picture.height()) > side { picture = picture.thumbnail(side, side); }
+            95
+        };
         let mut out = std::io::Cursor::new(Vec::new());
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 95).encode_image(&picture.to_rgb8())?;
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality).encode_image(&picture.to_rgb8())?;
         Ok(out.into_inner())
     }).await;
     match made {
@@ -396,21 +543,94 @@ async fn scaled(State(cfg): State<Shared>, Query(q): Query<ScaledQuery>) -> Resp
 }
 
 #[derive(Deserialize)]
+struct LocalDescribeRequest {
+    model_id: String,
+    image_b64: String,
+    system: String,
+    question: String,
+    #[serde(default)]
+    max_tokens: Option<i32>,
+}
+
+#[derive(Deserialize)]
+struct LocalEmbedRequest {
+    model_id: String,
+    texts: Vec<String>,
+}
+
+fn find_local_gguf(model_id: &str) -> anyhow::Result<(PathBuf, Option<PathBuf>, bool)> {
+    let raw = wire::take(tl_core::ffi::tl_models_installed());
+    let envelope: Value = serde_json::from_str(raw.as_str().unwrap_or("{}"))?;
+    let list = envelope.get("ok").and_then(Value::as_array).ok_or_else(|| anyhow::anyhow!("models unavailable"))?;
+    let m = list.iter().find(|x| x.get("id").and_then(Value::as_str) == Some(model_id))
+        .ok_or_else(|| anyhow::anyhow!("models.external.err.noModel"))?;
+    let format = m.get("format").and_then(Value::as_str).unwrap_or("");
+    anyhow::ensure!(format == "gguf", "only gguf local models are supported");
+    let dir = PathBuf::from(m.get("path").and_then(Value::as_str).unwrap_or(""));
+    let weights_name = m.get("weights").and_then(Value::as_str).filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("models.external.err.noModel"))?;
+    let weights = dir.join(weights_name);
+    let projector = m.get("projector").and_then(Value::as_str).filter(|s| !s.is_empty()).map(|p| dir.join(p));
+    let vision = m.get("vision").and_then(Value::as_bool).unwrap_or(false);
+    Ok((weights, projector, vision))
+}
+
+async fn ai_describe(State(cfg): State<Shared>, Json(req): Json<LocalDescribeRequest>) -> Response {
+    let cache = cfg.dir("cache");
+    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        let (weights, projector, _vision) = find_local_gguf(&req.model_id)?;
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&req.image_b64)?;
+        let tmp = cache.join(format!("ai-frame-{:016x}.jpg", rand::random::<u64>()));
+        std::fs::write(&tmp, &bytes)?;
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+        let _guard = Cleanup(tmp.clone());
+        llama::describe(&weights, projector.as_deref(), &tmp, &req.system, &req.question, req.max_tokens.unwrap_or(160))
+    }).await;
+    match res {
+        Ok(Ok(text)) => Json(json!({ "ok": text })).into_response(),
+        Ok(Err(e)) => Json(json!({ "error": format!("{e:#}") })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn ai_embed(Json(req): Json<LocalEmbedRequest>) -> Response {
+    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<(usize, Vec<Vec<f32>>)> {
+        let (weights, _, _) = find_local_gguf(&req.model_id)?;
+        llama::embed(&weights, &req.texts)
+    }).await;
+    match res {
+        Ok(Ok((dim, vectors))) => Json(json!({ "ok": { "dim": dim, "vectors": vectors } })).into_response(),
+        Ok(Err(e)) => Json(json!({ "error": format!("{e:#}") })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn ai_unload() -> Response {
+    let _ = tokio::task::spawn_blocking(llama::unload_all).await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(Deserialize)]
 struct UploadQuery { name: String }
 
 /// A file from the browser, streamed to `uploads/<random>/<name>`; answers its path on the server.
 async fn upload(State(cfg): State<Shared>, Query(q): Query<UploadQuery>, body: Body) -> Response {
     let name: String = Path::new(&q.name).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     if name.is_empty() || name.starts_with('.') { return (StatusCode::BAD_REQUEST, "file name").into_response(); }
-    let dir = cfg.dir("uploads").join(format!("{:016x}", rand::random::<u64>()));
+    let uploads = cfg.dir("uploads");
+    let Some(uploads) = data_subpath(&cfg, "uploads", &uploads, true) else { return StatusCode::FORBIDDEN.into_response(); };
+    let dir = uploads.join(format!("{:016x}", rand::random::<u64>()));
+    if let Err(e) = tokio::fs::create_dir(&dir).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
     // a browser that goes away mid-upload ends this request here: nothing half-written stays
     struct Unfinished(Option<PathBuf>);
     impl Drop for Unfinished { fn drop(&mut self) { if let Some(d) = self.0.take() { let _ = std::fs::remove_dir_all(d); } } }
     let mut unfinished = Unfinished(Some(dir.clone()));
     let r: anyhow::Result<PathBuf> = async {
-        tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join(&name);
-        let mut f = tokio::fs::File::create(&path).await?;
+        let mut f = tokio::fs::File::create_new(&path).await?;
         let mut stream = body.into_data_stream();
         while let Some(chunk) = stream.try_next().await? { f.write_all(&chunk).await?; }
         f.sync_all().await?;
@@ -451,6 +671,7 @@ async fn gfont(State(cfg): State<Shared>, UrlPath(path): UrlPath<String>) -> Res
         && path.chars().all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c));
     if !ok { return StatusCode::NOT_FOUND.into_response(); }
     let file = cfg.dir("cache").join("fonts").join(&path);
+    let Some(file) = data_subpath(&cfg, "cache", &file, false) else { return StatusCode::FORBIDDEN.into_response(); };
     let bytes = match tokio::fs::read(&file).await {
         Ok(b) => b,
         Err(_) => {
@@ -503,14 +724,18 @@ mod tests {
     use super::*;
 
     fn config(data: &Path) -> Config {
-        Config { auth: auth::Auth::new(data), data: data.to_path_buf(), web: PathBuf::new(), public: false, lease: std::sync::Mutex::new(None), desktop: None }
+        Config { auth: auth::Auth::new(data), secrets: secrets::Secrets::new(data.join("app")), data: data.to_path_buf(), web: PathBuf::new(), public: false, lease: std::sync::Mutex::new(None), desktop: Some("test-desktop-token".into()) }
+    }
+
+    fn data_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tl-paths-{:016x}", rand::random::<u64>()));
+        for d in ["library", "models", "cache", "uploads", "exports", "app"] { std::fs::create_dir_all(dir.join(d)).unwrap(); }
+        std::fs::canonicalize(dir).unwrap()
     }
 
     #[test]
     fn calls_of_the_core_stay_inside_the_data_folder() {
-        let dir = std::env::temp_dir().join(format!("tl-paths-{:08x}", rand::random::<u32>()));
-        for d in ["library", "models", "cache", "uploads", "exports", "app"] { std::fs::create_dir_all(dir.join(d)).unwrap(); }
-        let dir = std::fs::canonicalize(&dir).unwrap();
+        let dir = data_dir();
         let cfg = config(&dir);
         let p = |s: &str| dir.join(s).to_string_lossy().into_owned();
         assert!(paths_allowed(&cfg, "tl_export_backup", &[json!(p("exports/new/a.tlpack"))]));
@@ -526,9 +751,150 @@ mod tests {
         assert!(!paths_allowed(&cfg, "tl_import_export_issues", &[json!(p("exports/r.json")), json!(p("exports/o.zip"))]));
         // refused writes make nothing, and the top folders cannot be deleted
         let outside = std::env::temp_dir().join(format!("tl-outside-{:08x}", rand::random::<u32>()));
-        assert!(writable(&cfg, &outside.join("a/b").to_string_lossy()).is_none());
+        assert!(library_file(&cfg, &outside.join("a/b"), "downloads.queue.json").is_none());
         assert!(!outside.exists());
-        assert!(is_top_folder(&cfg, &dir) && is_top_folder(&cfg, &dir.join("library")) && !is_top_folder(&cfg, &dir.join("cache")));
+        assert!(!paths_allowed(&cfg, "tl_export_backup", &[json!(p("library/library.sqlite"))]));
+        assert!(!paths_allowed(&cfg, "tl_thumbnail", &[json!("media"), json!(256), json!(p("library"))]));
+        assert!(!paths_allowed(&cfg, "tl_share_stage", &[json!(p("library"))]));
+        assert!(!paths_allowed(&cfg, "tl_import_loose_dir", &[json!(json!({ "dir": p("library/blobs"), "consume": true }).to_string())]));
+        assert!(paths_allowed(&cfg, "tl_import_loose_dir", &[json!(json!({ "dir": p("uploads/share"), "consume": true }).to_string())]));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn routes(dir: &Path) -> Router {
+        let cfg = Arc::new(config(dir));
+        file_routes().layer(middleware::from_fn_with_state(cfg.clone(), gate::gate)).with_state(cfg)
+    }
+
+    async fn request(app: &Router, method: &str, uri: &str, body: impl Into<Body>, signed_in: bool) -> Response {
+        let mut request = Request::builder().method(method).uri(uri)
+            .header(header::CONTENT_TYPE, "application/json")
+            .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 1000))));
+        if signed_in { request = request.header(header::COOKIE, "tl_desktop=test-desktop-token"); }
+        app.clone().oneshot(request.body(body.into()).unwrap()).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn file_routes_protect_library_data_and_keep_staged_operations_working() {
+        let dir = data_dir();
+        let app = routes(&dir);
+        let path = |rel| dir.join(rel).to_string_lossy().into_owned();
+        let uri = |rel| format!("/f{}", path(rel));
+        let mv = |from, to| json!({ "from": path(from), "to": path(to) }).to_string();
+        for (rel, bytes) in [
+            ("library/library.sqlite", "database"),
+            ("library/blobs/example.jpg", "media"),
+            ("library/logs/app.log", "log"),
+            ("app/secrets.key", "key"),
+            ("app/secrets.json", "{}"),
+            ("uploads/one/a.jpg", "a"),
+            ("uploads/two/b.jpg", "b"),
+            ("exports/old.tlpack", "backup"),
+        ] {
+            let file = dir.join(rel);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, bytes).unwrap();
+        }
+        assert_eq!(request(&app, "PUT", &uri("library/library.sqlite"), "overwritten", true).await.status(), StatusCode::FORBIDDEN);
+        assert_eq!(request(&app, "DELETE", &uri("library/blobs"), Body::empty(), true).await.status(), StatusCode::FORBIDDEN);
+        assert_eq!(request(&app, "POST", "/api/move", mv("uploads/one/a.jpg", "library/library.sqlite"), true).await.status(), StatusCode::FORBIDDEN);
+        assert_eq!(request(&app, "POST", "/api/move", mv("library/blobs/example.jpg", "uploads/two/out.jpg"), true).await.status(), StatusCode::FORBIDDEN);
+        assert_eq!(request(&app, "GET", &uri("app/secrets.key"), Body::empty(), true).await.status(), StatusCode::NOT_FOUND);
+        assert_eq!(request(&app, "GET", &uri("app/secrets.json"), Body::empty(), true).await.status(), StatusCode::NOT_FOUND);
+        assert_eq!(request(&app, "DELETE", &uri("app/secrets.json"), Body::empty(), true).await.status(), StatusCode::FORBIDDEN);
+        assert_eq!(std::fs::read_to_string(dir.join("library/library.sqlite")).unwrap(), "database");
+        let response = request(&app, "GET", &uri("library/blobs/example.jpg"), Body::empty(), true).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(axum::body::to_bytes(response.into_body(), 100).await.unwrap(), "media");
+
+        assert_eq!(request(&app, "POST", "/api/move", mv("uploads/one/a.jpg", "uploads/two/b.jpg"), true).await.status(), StatusCode::CONFLICT);
+        assert_eq!(std::fs::read_to_string(dir.join("uploads/two/b.jpg")).unwrap(), "b");
+        assert_eq!(request(&app, "POST", "/api/move", mv("uploads/one/a.jpg", "uploads/two/a.jpg"), true).await.status(), StatusCode::NO_CONTENT);
+        assert!(!dir.join("uploads/one/a.jpg").exists());
+        assert_eq!(std::fs::read_to_string(dir.join("uploads/two/a.jpg")).unwrap(), "a");
+        assert_eq!(request(&app, "PUT", &uri("library/downloads.queue.json"), "{}", true).await.status(), StatusCode::NO_CONTENT);
+        assert_eq!(request(&app, "DELETE", &uri("library/logs/app.log"), Body::empty(), true).await.status(), StatusCode::NO_CONTENT);
+        assert_eq!(request(&app, "DELETE", &uri("exports"), Body::empty(), true).await.status(), StatusCode::NO_CONTENT);
+        assert!(dir.join("exports").is_dir());
+        assert!(!dir.join("exports/old.tlpack").exists());
+        let uploaded = request(&app, "POST", "/api/upload?name=upload.jpg", "upload", true).await;
+        assert_eq!(uploaded.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(uploaded.into_body(), 4096).await.unwrap();
+        let reply: Value = serde_json::from_slice(&body).unwrap();
+        let uploaded_path = Path::new(reply["path"].as_str().unwrap());
+        assert!(uploaded_path.starts_with(dir.join("uploads")));
+        assert_eq!(std::fs::read_to_string(uploaded_path).unwrap(), "upload");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_a_report_only_deletes_server_owned_uploads() {
+        let dir = data_dir();
+        let library = dir.join("library");
+        assert!(tl_core::ffi::tl_open(c(&library).as_ptr()));
+        let reports = library.join("logs/import-reports");
+        std::fs::create_dir_all(&reports).unwrap();
+        let archive = dir.join("exports/keep.tlpack");
+        let upload = dir.join("uploads/remove.zip");
+        for path in [&archive, &upload] { std::fs::write(path, "contents").unwrap(); }
+        let mut paths = vec![];
+        for (n, source) in [archive.as_path(), upload.as_path()].into_iter().enumerate() {
+            let path = reports.join(format!("import-{n}.json"));
+            let mut report = tl_core::import::ImportReport::default();
+            report.source = source.to_string_lossy().into_owned();
+            std::fs::write(&path, serde_json::to_vec(&report).unwrap()).unwrap();
+            paths.push(path);
+        }
+        let payload = json!([json!({ "reports": paths, "owned": [dir] }).to_string()]).to_string();
+        let result = request(&routes(&dir), "POST", "/api/call/tl_delete_import_reports", payload, true).await;
+        assert_eq!(result.status(), StatusCode::OK);
+        assert!(paths.iter().all(|path| !path.exists()));
+        assert!(archive.is_file());
+        assert!(!upload.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scoped_paths_refuse_symlinks_even_inside_the_data_folder() {
+        let dir = data_dir();
+        let cfg = config(&dir);
+        let link = dir.join("exports/link");
+        std::os::unix::fs::symlink(dir.join("library"), &link).unwrap();
+        assert!(data_subpath(&cfg, "exports", &link.join("library.sqlite"), false).is_none());
+        assert!(data_subpath(&cfg, "exports", &dir.join("exports/../library"), false).is_none());
+        std::fs::remove_dir(dir.join("uploads")).unwrap();
+        std::os::unix::fs::symlink(dir.join("library"), dir.join("uploads")).unwrap();
+        assert!(data_subpath(&cfg, "uploads", &dir.join("uploads"), true).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_first_secret_writes_survive_reopen() {
+        let dir = data_dir();
+        let app = routes(&dir);
+        let account = r#"{"sync.key":"account"}"#;
+        assert_eq!(request(&app, "POST", "/api/secrets", account, false).await.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(request(&app, "GET", "/api/secrets/sync.key", Body::empty(), false).await.status(), StatusCode::UNAUTHORIZED);
+        let (sync, cookies) = tokio::join!(
+            request(&app, "POST", "/api/secrets", account, true),
+            request(&app, "POST", "/api/secrets", r#"{"auth_token":"token","ct0":"cookie"}"#, true)
+        );
+        assert_eq!(sync.status(), StatusCode::NO_CONTENT);
+        assert_eq!(cookies.status(), StatusCode::NO_CONTENT);
+        drop(app);
+        let reopened = routes(&dir);
+        for (name, expected) in [("sync.key", "account"), ("auth_token", "token"), ("ct0", "cookie")] {
+            let response = request(&reopened, "GET", &format!("/api/secrets/{name}"), Body::empty(), true).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+            let body = axum::body::to_bytes(response.into_body(), 100).await.unwrap();
+            assert_eq!(serde_json::from_slice::<String>(&body).unwrap(), expected);
+        }
+        assert_eq!(request(&reopened, "POST", "/api/secrets", r#"{"auth_token":null}"#, true).await.status(), StatusCode::NO_CONTENT);
+        assert_eq!(config(&dir).secrets.read(["auth_token", "sync.key"]).unwrap(), [None, Some("account".into())]);
+        assert_eq!(request(&reopened, "DELETE", "/api/secrets", Body::empty(), true).await.status(), StatusCode::NO_CONTENT);
+        assert_eq!(config(&dir).secrets.read(["sync.key", "ct0"]).unwrap(), [None, None]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

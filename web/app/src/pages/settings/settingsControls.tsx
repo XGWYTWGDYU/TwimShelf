@@ -15,7 +15,7 @@ import { poster } from '../../lib/thumbs';
 import { folders } from '../../lib/library';
 import { go } from '../../lib/router';
 import { selectTagger, setAuto, stopTagging } from './aiTagging';
-import { info, removeFile } from './serverFiles';
+import { clearSecrets, info, removeFile } from './serverFiles';
 import './settings.css';
 
 export type TileColor = 'blue' | 'accent' | 'purple' | 'teal' | 'green' | 'indigo' | 'orange' | 'brown' | 'yellow' | 'red' | 'pink' | 'gray' | 'secondary';
@@ -446,13 +446,12 @@ export async function runWipeFlow(): Promise<boolean> {
   setAuto(false);
   selectTagger('');
   stopTagging();
-  await removeFile(`${server.data}/app/secrets.json`).catch(() => {});
   await core.b.tl_set_cookies('', '');
   await core.b.tl_discovery_stop();
   await core.b.tl_ext_pair_cancel();
   await change(core.read(core.b.tl_wipe(includeModels)));
+  await clearSecrets();
   await Promise.allSettled([
-    removeFile(`${server.data}/app/secrets.key`),
     removeFile(`${server.library}/downloads.queue.json`),
     removeFile(server.uploads),
     removeFile(server.exports),

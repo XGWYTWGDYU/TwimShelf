@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   KEYWORDS, keywordWord, L,
   type DiscoveryStatus, type DownloadStatus, type ImportProgress,
   type ModelDownloadStatus, type SyncStatus, type VerifyStatus,
 } from '@twimshelf/core';
 import {
-  ChevronDown, Download, HardDrive, Info, LogOut, Package, Puzzle, Scale,
+  ArrowDownCircle, ChevronDown, Download, HardDrive, Info, LogOut, Package, Power, Puzzle, Scale,
   RefreshCw, Search, Sparkles, Tags, Trash2, Columns3,
 } from 'lucide-react';
 import { Button, Page } from '../../components/ui';
@@ -19,7 +19,11 @@ import { libraryVersion, stats } from '../../lib/library';
 import TagsPage from '../TagsPage';
 import { cardDensities, cardDensity, setCardDensity } from '../browse/density';
 import AIPage from './AIPage';
-import { activeTagger, enableAutoTagging, externalModels, modelTitle, tagging } from './aiTagging';
+import {
+  activeEmbedder, activeTagger, allTaggers, enableAutoTagging, fuzzySearch,
+  localAIInfo, setFuzzySearch, tagging,
+} from './aiTagging';
+import { checkForUpdate, updateRepo } from '../../lib/update';
 import DownloadsPage from './DownloadsPage';
 import ExtensionPage from './ExtensionPage';
 import ImportRecordsPage from './ImportRecordsPage';
@@ -64,15 +68,24 @@ function SettingsOverview() {
   const density = useStore(cardDensity);
   const version = useStore(libraryVersion);
   const selectedTagger = useStore(activeTagger);
+  const selectedEmbedder = useStore(activeEmbedder);
+  const fuzzy = useStore(fuzzySearch);
   const tagActivity = useStore(tagging);
   const mascot = useStore(mascotEnabled);
   const task = useTask();
+  const [loginItem, setLoginItem] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  useEffect(() => {
+    window.twimshelf?.getLoginItem?.().then(setLoginItem, () => {});
+  }, []);
 
   const live = useAsync(async () => {
-    const [dl, aiCounts, extModels, sync, discovery, ext, modelDl, verify, imp] = await Promise.all([
+    const [dl, aiCounts, taggers, localAI, sync, discovery, ext, modelDl, verify, imp] = await Promise.all([
       core.read<DownloadStatus>(core.b.tl_download_status()).catch(() => null),
       core.read<[number, number]>(core.b.tl_ai_counts()).catch(() => [0, 0] as [number, number]),
-      externalModels().catch(() => []),
+      allTaggers().catch(() => []),
+      localAIInfo(),
       core.read<SyncStatus>(core.b.tl_sync_status()).catch(() => null),
       core.read<DiscoveryStatus>(core.b.tl_discovery_status()).catch(() => null),
       core.read<{ clients: { id: string }[] }>(core.b.tl_ext_clients()).catch(() => null),
@@ -80,7 +93,7 @@ function SettingsOverview() {
       core.read<VerifyStatus | null>(core.b.tl_verify_status()).catch(() => null),
       core.read<ImportProgress | null>(core.b.tl_import_status()).catch(() => null),
     ]);
-    return { dl, aiCounts, extModels, sync, discovery, ext, modelDl, verify, imp };
+    return { dl, aiCounts, taggers, localAI, sync, discovery, ext, modelDl, verify, imp };
   }, [version]);
 
   useInterval(live.reload, live.loading ? null : 2000);
@@ -88,7 +101,8 @@ function SettingsOverview() {
   const d = live.data;
   const dl = d?.dl;
   const [aiDone = 0, aiTotal = 0] = d?.aiCounts ?? [0, 0];
-  const activeModel = d?.extModels.find((m) => m.id === selectedTagger);
+  const activeModel = d?.taggers.find((m) => m.id === selectedTagger);
+  const semanticAvailable = !!d?.localAI.supported && !!selectedEmbedder;
   const sync = d?.sync;
   const hasAccount = !!sync?.account_id;
   const onlinePeers = hasAccount
@@ -105,7 +119,7 @@ function SettingsOverview() {
       : undefined;
   const dlProgress = dl?.running && dl.total > 0 ? dlFinish / dl.total : undefined;
 
-  const aiDetail = (activeModel ? modelTitle(activeModel) : L('mac.models.none'))
+  const aiDetail = (activeModel ? activeModel.title : L('mac.models.none'))
     + (aiTotal > 0 ? L('mac.models.analysed', aiDone, aiTotal) : '');
   const aiProgress = aiTotal > 0 ? aiDone / aiTotal : undefined;
 
@@ -158,9 +172,11 @@ function SettingsOverview() {
     otherActivities.push({
       key: 'tagging',
       kind: 'tagging',
-      title: L('ai.activity.new', activeModel ? modelTitle(activeModel) : L('models.tagging')),
-      detail: L('web.ai.processed', tagActivity.done),
-      progress: aiTotal > 0 ? aiDone / aiTotal : undefined,
+      title: L('ai.activity.new', tagActivity.modelName || activeModel?.title || L('models.tagging')),
+      detail: tagActivity.total > 0 ? `${tagActivity.done} / ${Math.max(tagActivity.total, tagActivity.done)}` : L('web.ai.processed', tagActivity.done),
+      progress: tagActivity.total > 0 ? tagActivity.done / Math.max(tagActivity.total, tagActivity.done) : (aiTotal > 0 ? aiDone / aiTotal : undefined),
+      previewPath: tagActivity.currentPath,
+      previewIsVideo: tagActivity.currentKind === 'video',
     });
   }
   if (d?.imp?.running) {
@@ -321,9 +337,9 @@ function SettingsOverview() {
               icon={<Search size={15} strokeWidth={2} />}
               color="purple"
               title={L('settings.fuzzy')}
-              checked={false}
-              disabled
-              onChange={() => {}}
+              checked={semanticAvailable && fuzzy}
+              disabled={!semanticAvailable}
+              onChange={setFuzzySearch}
             />
             <div style={{ padding: 12, borderRadius: 12, background: 'var(--bg-subtle)' }}>
               <div className="chips-row" style={{ gap: 6 }}>
@@ -334,6 +350,44 @@ function SettingsOverview() {
             </div>
           </Card>
         </SectionGroup>
+
+        {window.twimshelf?.desktop && window.twimshelf.getLoginItem && (
+          <SectionGroup footer={L('settings.launchAtLogin.footer')}>
+            <Card spacing={12}>
+              <ToggleRow
+                icon={<Power size={15} strokeWidth={2} />}
+                color="green"
+                title={L('settings.launchAtLogin')}
+                checked={loginItem}
+                onChange={(v) => {
+                  void window.twimshelf?.setLoginItem?.(v).then(setLoginItem, () => {});
+                }}
+              />
+            </Card>
+          </SectionGroup>
+        )}
+
+        {!!updateRepo() && (
+          <SectionGroup footer={L('update.footer')}>
+            <Card spacing={12}>
+              <CardRow
+                icon={<ArrowDownCircle size={15} strokeWidth={2} />}
+                color="blue"
+                title={L('update.check')}
+                trailing={
+                  <Button
+                    disabled={checkingUpdate}
+                    onClick={() => {
+                      setCheckingUpdate(true);
+                      void checkForUpdate(true).finally(() => setCheckingUpdate(false));
+                    }}>
+                    {checkingUpdate ? L('update.checking') : L('update.check')}
+                  </Button>
+                }
+              />
+            </Card>
+          </SectionGroup>
+        )}
 
         <SectionGroup title={L('mascot.title')} footer={L('mascot.footer')}>
           <Card spacing={12}>

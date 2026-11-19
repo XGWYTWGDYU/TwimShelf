@@ -576,6 +576,12 @@ impl Store {
             if !revive { return Ok(false); }
             self.trash_action(id, crate::rules::TrashAction::Reimport)?;
         }
+        self.record_stored_media(id, post_id, ordinal, kind, path)?;
+        Ok(true)
+    }) }
+
+    /// Records a claim inside the caller's transaction without changing the trash state.
+    pub(crate) fn record_stored_media(&self, id: &str, post_id: &str, ordinal: i64, kind: &MediaKind, path: &str) -> rusqlite::Result<()> {
         // Log every new claim (a file seen in another post too), not only new files, so all
         // devices see the same set of claims and pick the same owner.
         let new_claim = !self.conn.prepare_cached("SELECT 1 FROM media_claim WHERE media_id=?1 AND post_id=?2 AND ordinal=?3")?.exists(params![id, post_id, ordinal])?;
@@ -584,8 +590,8 @@ impl Store {
             let ext = path.rsplit('.').next().unwrap_or("bin").to_string();
             self.record(&crate::oplog::Op::Media { id: id.into(), post_id: post_id.into(), ordinal, kind: kind.clone(), ext })?;
         }
-        Ok(true)
-    }) }
+        Ok(())
+    }
 
     // ---------- recycle bin ----------
 

@@ -12,6 +12,9 @@ declare global {
     twimshelf?: {
       desktop: true;
       platform: string;
+      arch?: string;
+      appVersion?: string;
+      updateRepo?: string;
       popupMenu?: (items: NativeMenuItem[], x: number, y: number) => Promise<string | null>;
       setAppMenu?: (menus: { label: string; role?: string; items: (NativeMenuItem | 'separator')[] }[]) => void;
       onAppMenu?: (f: (id: string) => void) => () => void;
@@ -21,6 +24,11 @@ declare global {
       showItemInFolder?: (path: string) => void;
       getMascotEnabled?: () => Promise<boolean>;
       setMascotEnabled?: (enabled: boolean) => Promise<void>;
+      getLoginItem?: () => Promise<boolean>;
+      setLoginItem?: (enabled: boolean) => Promise<boolean>;
+      getUpdatePrefs?: () => Promise<{ lastCheck?: number; skipped?: string }>;
+      setUpdatePrefs?: (prefs: { lastCheck?: number; skipped?: string }) => Promise<void>;
+      installUpdate?: (serverFile: string) => Promise<string>;
     };
   }
 }

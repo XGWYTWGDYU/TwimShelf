@@ -3,13 +3,13 @@
 // selection's actions live in the toolbar (AppDelegate's grid / folderGrid / selecting modes).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Ellipsis, FolderMinus, FolderPlus, Minus, Plus, Trash2, Undo2 } from 'lucide-react';
-import { KEYWORDS, keywordWord, L, type FeedItem, type TrashItem } from '@twimshelf/core';
+import { KEYWORDS, keywordWord, L, quoteSearchWord, type ExportReport, type FeedItem, type TrashItem } from '@twimshelf/core';
 import { Toolbar, ToolButton, ToolGroup, ToolSegment } from '../../components/Toolbar';
 import { openMenu, openMenuBelow, type MenuEntry } from '../../components/Menu';
 import { alertMessage, choose, prompt } from '../../components/pickers';
 import { toast } from '../../components/toast';
 import { action, binChanged, binSnapshot, offerUndo, undo } from '../../lib/actions';
-import { onCommand } from '../../lib/commands';
+import { onCommand, setMenuState } from '../../lib/commands';
 import { core } from '../../lib/core';
 import { deleteFolder, renameFolder } from '../../lib/folderActions';
 import { useAsync, useStore } from '../../lib/hooks';
@@ -18,6 +18,7 @@ import { folderRoute, go, type GridPlace } from '../../lib/router';
 import { cachedThumb } from '../../lib/thumbs';
 import { openViewer } from '../../viewer/Viewer';
 import { revealInBrowse } from '../browse/reveal';
+import { exportFile, size } from '../settings/serverFiles';
 import { ZoomGrid, type ZoomGridHandle } from './ZoomGrid';
 import type { ZoomGridTile } from './scene';
 import './grid.css';
@@ -33,7 +34,7 @@ function browseQuery(place: GridPlace, folder?: string): string {
   switch (place) {
     case 'photos': return kw('photo');
     case 'videos': return kw('video');
-    case 'folder': return `${kw('folder')} ${folder ?? ''}`;
+    case 'folder': return `${kw('folder')} ${quoteSearchWord(folder ?? '')}`;
     case 'loose': return kw('external');
     case 'album': return kw('album');
     case 'unreviewed': return kw('unreviewed');
@@ -209,6 +210,33 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
     return m;
   };
 
+  const exportFolderZip = async () => {
+    if (!folder) return;
+    const ids = entries.flatMap((e) => e.map((m) => m.media_id));
+    if (!ids.length) { toast(L('export.search.none')); return; }
+    toast(L('export.running', ids.length));
+    try {
+      const safe = folder.replace(/[\\/:*?"<>|]/g, '_');
+      const report = await exportFile<ExportReport>(
+        `${safe}.zip`,
+        (out) => core.readJson<ExportReport>('tl_export_media', {
+          media_ids: ids,
+          options: { tags: false, folders: false, media_only: true },
+          out,
+        }),
+      );
+      if (!report) return;
+      toast(`${L('export.done')} · ${L('export.summaryMedia', report.media, size(report.bytes))}`);
+    } catch (e) {
+      await alertMessage(L('export.failed'), e instanceof Error ? L(e.message) : L('common.notDone'));
+    }
+  };
+
+  useEffect(() => {
+    setMenuState({ onGrid: true, selecting });
+    return () => setMenuState({ onGrid: false, selecting: false });
+  }, [selecting]);
+
   const moreMenu = (): MenuEntry[] => {
     if (bin) {
       const keep = data.data?.keep ?? 30;
@@ -225,6 +253,8 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
     }
     const m: MenuEntry[] = [{ label: L('grid.revealMedia'), run: () => go({ page: 'browse', q: browseQuery(place, folder) }) }];
     if (folder) m.push('separator',
+      { label: L('folder.exportZip'), run: () => void exportFolderZip() },
+      'separator',
       { label: L('folder.renameEllipsis'), run: () => void renameFolder(folder).then((n) => n && go(folderRoute(n))) },
       { label: L('folder.deleteEllipsis'), run: () => void deleteFolder(folder) });
     return m;
