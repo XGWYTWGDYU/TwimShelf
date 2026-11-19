@@ -28,7 +28,7 @@ export default function ExtensionPage() {
   const before = useRef<Set<string> | undefined>(undefined);
   const pairing = state.data?.pairing;
 
-  useInterval(state.reload, pairing ? 1200 : 3000);
+  useInterval(state.reload, state.loading ? null : pairing ? 1200 : 3000);
 
   useEffect(() => {
     return () => {

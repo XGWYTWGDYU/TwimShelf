@@ -7,7 +7,7 @@ import { alertMessage, choose } from '../../components/pickers';
 import { core } from '../../lib/core';
 import { useAsync, useStore } from '../../lib/hooks';
 import { libraryVersion } from '../../lib/library';
-import { deliver, fileName, info, outPath, size } from './serverFiles';
+import { exportFile, fileName, info, size } from './serverFiles';
 import {
   Card, CardRow, Pill, PopupSelect, RowDivider,
   SectionGroup, SettingsScreen,
@@ -157,10 +157,8 @@ export function ImportReportModal({ file, report, onClose, onDeleted }: {
             disabled={task.busy}
             onClick={() => void task.run(async () => {
               const name = L('import.problemsZip');
-              const path = outPath(await info(), name);
-              const count = await core.read<number>(core.b.tl_import_export_issues(file, path));
-              await deliver(path, name);
-              await alertMessage(L('mac.models.exported'), L('import.exported.message', count));
+              const { report: count, status } = await exportFile(name, (path) => core.read<number>(core.b.tl_import_export_issues(file, path)));
+              if (status === 'saved') await alertMessage(L('mac.models.exported'), L('import.exported.message', count));
             })}>
             {L('import.export')}
           </Button>

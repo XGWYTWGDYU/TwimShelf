@@ -6,6 +6,7 @@ import { Toasts } from './components/toast';
 import { MenuHost } from './components/Menu';
 import { DropImport } from './components/DropImport';
 import { PetLayer } from './components/PetLayer';
+import { ActivityPanel } from './components/ActivityPanel';
 import { useRoute, type Route } from './lib/router';
 import { installAppMenu } from './lib/commands';
 import { ViewerHost } from './viewer/Viewer';
@@ -39,6 +40,7 @@ export default function App() {
             </Suspense>
           </div>
         )}
+        <ActivityPanel />
       </main>
       <PetLayer />
       <ViewerHost />

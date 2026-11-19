@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('twimshelf', {
   /** The viewer covers the window: no window buttons (macOS), as in the native app. */
   setViewerMode: (on) => ipcRenderer.send('viewer-mode', !!on),
   toggleFullScreen: () => ipcRenderer.send('toggle-fullscreen'),
+  saveFile: (url, name) => ipcRenderer.invoke('save-file', url, name),
   showItemInFolder: (path) => ipcRenderer.send('show-item', String(path)),
   getMascotEnabled: () => ipcRenderer.invoke('get-mascot-enabled'),
   setMascotEnabled: (enabled) => ipcRenderer.invoke('set-mascot-enabled', !!enabled),

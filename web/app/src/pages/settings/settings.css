@@ -17,6 +17,38 @@
   gap: 10px;
 }
 
+.browse-card-density {
+  display: inline-block;
+  position: relative;
+}
+
+.browse-card-density .control-select {
+  appearance: none;
+  display: block;
+  min-inline-size: 86px;
+  padding-inline: 12px 32px;
+}
+
+.browse-card-density-arrow {
+  position: absolute;
+  inset-inline-end: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-2);
+  pointer-events: none;
+}
+
+.browse-card-density .control-select:focus {
+  border-color: var(--control-edge);
+  box-shadow: none;
+  outline: none;
+}
+
+.browse-card-density .control-select:focus-visible:not([data-pointer-focus]) {
+  outline: 2px solid var(--fg-2);
+  outline-offset: 2px;
+}
+
 .section-heading {
   display: flex;
   align-items: baseline;
@@ -1029,25 +1061,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-.problem-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 10px 14px;
-}
-.problem-row + .problem-row {
-  border-top: 1px solid var(--line);
-}
-.problem-bar {
-  width: 4px;
-  align-self: stretch;
-  border-radius: 999px;
-  background: var(--orange);
-  flex: none;
-}
-.problem-bar.error {
-  background: var(--danger);
-}
+.problem-row { min-width: 0; padding: 10px 14px; overflow-wrap: anywhere; }
+.problem-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.problem-row-head .s-pill { max-width: 100%; white-space: normal; }
+.problem-row-time, .problem-row-detail { color: var(--fg-2); font-size: 12px; }
+.problem-row-msg, .problem-row-detail { margin-top: 4px; white-space: pre-wrap; }
 
 /* ImportReport table (MacImportReport.swift) */
 .report-toolbar {
@@ -1199,9 +1217,6 @@
   text-align: left;
   min-width: 0;
 }
-.tag-card:active {
-  background: var(--bg-active);
-}
 .tag-card-head {
   display: flex;
   align-items: flex-start;
@@ -1221,11 +1236,8 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.tag-card-arrow {
-  color: var(--fg-3);
-  flex: none;
-  margin-top: 2px;
-}
+.icon-btn.tag-card-action { width: 24px; height: 24px; }
+.tag-card-arrow:hover { color: var(--accent); }
 .tag-card-count-row {
   display: flex;
   align-items: baseline;

@@ -247,11 +247,11 @@ export function SearchBar({ value, onSearch }: { value: string; onSearch: (q: st
             const ks = text.trim() ? commit(text.trim().split(/[ 　]+/)) : keys;
             search(ks);
             input.current?.blur();
-          } else if (e.key === 'Backspace' && !text && keys.length) {
-            const last = keys[keys.length - 1];
-            setKeys(keys.slice(0, -1));
-            setText(last.startsWith('t:') ? last.slice(2) : '');
+          } else if ((e.key === 'Backspace' || e.key === 'Delete') && !text && keys.length) {
             e.preventDefault();
+            const remaining = keys.slice(0, -1);
+            setKeys(remaining);
+            search(remaining);
           } else if (e.key === 'Escape') {
             if (open) { setOpen(false); return; }
             setKeys([]); setText(''); search([]); input.current?.blur();

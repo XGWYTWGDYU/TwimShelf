@@ -1,13 +1,15 @@
 // The TwimShelf desktop app (Linux; a macOS build exists for testing only): starts the bundled
 // TwimShelf server on 127.0.0.1 with a token only this app knows, and shows the React app the
 // server serves. The window and the web page are the same code; only the server is local.
-const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, session, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 
 const product = (() => {
   try { return require('./product.json'); } catch { return {}; }
@@ -85,6 +87,14 @@ function webFolder() {
   return process.env.TL_WEB || path.join(process.resourcesPath, 'web');
 }
 
+function applicationPaths() {
+  const runtime = process.platform === 'darwin'
+    ? [path.resolve(process.execPath, '../../..')]
+    : [process.execPath, process.resourcesPath];
+  if (!app.isPackaged) return [...runtime, app.getAppPath(), serverBinary(), webFolder()];
+  return process.platform === 'linux' && process.env.APPIMAGE ? [process.env.APPIMAGE] : runtime;
+}
+
 async function startServer() {
   const paths = dataPaths();
   fs.mkdirSync(paths.TL_DATA, { recursive: true });
@@ -92,6 +102,7 @@ async function startServer() {
   const token = crypto.randomBytes(32).toString('hex');
   const env = {
     ...process.env, ...paths, TL_PORT: String(port), TL_WEB: webFolder(), TL_DESKTOP_TOKEN: token,
+    TL_DESKTOP_APP_PATHS: JSON.stringify(applicationPaths()),
     TL_DEVICE_NAME: `TwimShelf · ${os.hostname()}`,
   };
   const log = fs.openSync(path.join(env.TL_DATA, 'desktop-server.log'), 'a');
@@ -152,6 +163,36 @@ async function createWindow() {
 
 /** Whether a message comes from the app's own page. */
 const fromPage = (e) => !!win && e.sender === win.webContents;
+ipcMain.handle('save-file', async (e, input, name) => {
+  if (!fromPage(e) || e.senderFrame !== e.sender.mainFrame || typeof input !== 'string' || typeof name !== 'string') {
+    throw new Error('common.notDone');
+  }
+  const url = new URL(input, e.sender.getURL());
+  if (url.origin !== new URL(e.sender.getURL()).origin || !url.pathname.startsWith('/f/')) {
+    throw new Error('common.notDone');
+  }
+  const safeName = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_');
+  const fileName = !safeName || safeName === '.' || safeName === '..' ? 'download' : safeName;
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(app.getPath('downloads'), fileName),
+  });
+  if (canceled || !filePath) return null;
+
+  const temporary = path.join(path.dirname(filePath), `.twimshelf-${crypto.randomUUID()}.tmp`);
+  try {
+    const response = await e.sender.session.fetch(url.href, { credentials: 'include', redirect: 'error' });
+    if (!response.ok || !response.body) throw new Error('Download failed');
+    await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(temporary, { flags: 'wx' }));
+    await fs.promises.rename(temporary, filePath);
+    return path.basename(filePath);
+  } catch (error) {
+    console.error('Could not save the file', error);
+    throw new Error('common.notDone');
+  } finally {
+    await fs.promises.rm(temporary, { force: true }).catch(() => {});
+  }
+});
+
 /** The system menu items the page may ask for. */
 const ROLES = new Set(['about', 'hide', 'hideOthers', 'unhide', 'quit', 'close', 'undo', 'redo', 'cut', 'copy', 'paste', 'selectAll', 'minimize', 'zoom', 'front', 'togglefullscreen', 'windowMenu', 'appMenu', 'editMenu', 'viewMenu', 'fileMenu']);
 const role = (r) => (ROLES.has(r) ? r : undefined);

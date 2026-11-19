@@ -93,7 +93,7 @@ export default function SyncPage() {
   const changes = status?.changes;
   const joinKey = status?.join.account_key;
 
-  useInterval(state.reload, 1200);
+  useInterval(state.reload, state.loading ? null : 1200);
   useEffect(() => { if (changes !== undefined) libraryChanged(); }, [changes]);
 
   useEffect(() => {

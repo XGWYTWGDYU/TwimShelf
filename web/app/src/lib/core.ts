@@ -17,6 +17,7 @@ declare global {
       onAppMenu?: (f: (id: string) => void) => () => void;
       setViewerMode?: (on: boolean) => void;
       toggleFullScreen?: () => void;
+      saveFile?: (url: string, name: string) => Promise<string | null>;
       showItemInFolder?: (path: string) => void;
       getMascotEnabled?: () => Promise<boolean>;
       setMascotEnabled?: (enabled: boolean) => Promise<void>;

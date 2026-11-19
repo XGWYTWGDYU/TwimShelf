@@ -1,10 +1,5 @@
-// The sidebar: a source list as the native one (MacSidebarViewController): 资料库 (浏览), 媒体类型,
-// 文件夹 (all folders, then each), 其他 (the collections and the recycle bin), App (设置). Counts on
-// the trailing side; a folder's menu renames or deletes it; the 文件夹 rows offer a new folder.
-// 190–320 px wide (drag its edge), hidden with the toolbar's button, and it folds away by itself
-// when the window gets narrow and comes back when it is wide again (as in Mail).
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { CheckCircle2, Folder, GalleryVerticalEnd, Image, Images, Layers2, PanelLeft, Settings, SquareDashed, TriangleAlert, Trash2, Video, BadgeCheck } from 'lucide-react';
+import { useEffect, type ReactNode } from 'react';
+import { CheckCircle2, Folder, GalleryVerticalEnd, Image, Images, Layers2, Settings, SquareDashed, TriangleAlert, Trash2, Video, BadgeCheck } from 'lucide-react';
 import { L, store } from '@twimshelf/core';
 import { useStore } from '../lib/hooks';
 import { folders, stats } from '../lib/library';
@@ -17,14 +12,6 @@ import './Sidebar.css';
 function readNumber(k: string, d: number): number { try { const v = Number(localStorage.getItem(k)); return v > 0 ? v : d; } catch { return d; } }
 function save(k: string, v: string): void { try { localStorage.setItem(k, v); } catch { /* private window */ } }
 
-/** Shown or hidden (by hand, or by a narrow window). */
-export const sidebarShown = store(true);
-const byHand = { hidden: false };
-export function toggleSidebar(): void {
-  const on = !sidebarShown.get();
-  byHand.hidden = !on;
-  sidebarShown.set(on);
-}
 const width = store(Math.min(320, Math.max(190, readNumber('sidebar.width', 242))));
 
 function same(a: Route, b: Route): boolean {
@@ -67,31 +54,15 @@ const newFolderMenu = (): MenuEntry[] => [{ label: L('common.newFolderEllipsis')
 export function Sidebar() {
   const s = useStore(stats);
   const f = useStore(folders);
-  const shown = useStore(sidebarShown);
   const w = useStore(width);
   const r = useRoute();
   const z = 16, sw = 2;
-
-  // folds away by itself in a narrow window (under 900), back when wider than 1000
-  useEffect(() => {
-    let auto = false;
-    const fit = () => {
-      const ww = window.innerWidth;
-      if (ww < 900 && sidebarShown.get() && !byHand.hidden) { auto = true; sidebarShown.set(false); }
-      else if (ww > 1000 && !sidebarShown.get() && auto) { auto = false; sidebarShown.set(true); }
-    };
-    fit();
-    window.addEventListener('resize', fit);
-    return () => window.removeEventListener('resize', fit);
-  }, []);
 
   // a folder that was open and is gone: back to all folders
   useEffect(() => {
     if (r.page === 'grid' && r.place === 'folder' && f && !f.folders.some((x) => x.name === r.folder)) go({ page: 'folders' });
   }, [f, r]);
 
-  const drag = useRef<{ x: number; w: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
   const folderMenu = (name: string) => (): MenuEntry[] => [
     { label: L('folder.renameShort'), run: () => void renameFolder(name).then((n) => { if (n && r.page === 'grid' && r.folder === name) go(folderRoute(n)); }) },
     { label: L('folder.deleteNamed', name), run: () => void deleteFolder(name) },
@@ -100,16 +71,12 @@ export function Sidebar() {
   ];
   const trashed = s?.trashed ?? 0;
   return (
-    // folds away and comes back with a slide (the split view's animator), its contents keeping
-    // their width meanwhile
-    <div className={`sidebar-fold${shown ? '' : ' folded'}${dragging ? ' dragging' : ''}`} style={{ width: shown ? w : 0 }} aria-hidden={!shown}>
     <nav className="sidebar" style={{ width: w }} role="tree" aria-label="sidebar">
-      <div className="side-top">
-        <button className="side-toggle" aria-label={L('menu.showSidebar')} title={L('menu.showSidebar')} onClick={toggleSidebar}><PanelLeft size={16} strokeWidth={1.8} /></button>
-      </div>
+      <div className="side-top" />
       <div className="side-scroll">
         <Section title={L('sidebar.library')}>
           <Row to={{ page: 'browse' }} mascotName="home" icon={<Layers2 size={z} strokeWidth={sw} />} label={L('place.browse')} />
+          <Row to={{ page: 'settings' }} mascotName="settings" icon={<Settings size={z} strokeWidth={sw} />} label={L('place.settings')} />
         </Section>
         <Section title={L('sidebar.mediaTypes')}>
           <Row to={{ page: 'grid', place: 'photos' }} mascotName="image" icon={<Image size={z} strokeWidth={sw} />} label={L('place.photos')} count={f?.photos ?? s?.photos} />
@@ -129,19 +96,14 @@ export function Sidebar() {
           {(s?.bad ?? 0) > 0 && <Row to={{ page: 'grid', place: 'bad' }} icon={<TriangleAlert size={z} strokeWidth={sw} />} label={L('place.bad')} count={s?.bad} tint="var(--danger)" />}
           <Row to={{ page: 'grid', place: 'trash' }} icon={<Trash2 size={z} strokeWidth={sw} />} label={L('place.trash')} count={trashed > 0 ? trashed : null} />
         </Section>
-        <Section title={L('sidebar.app')}>
-          <Row to={{ page: 'settings' }} mascotName="settings" icon={<Settings size={z} strokeWidth={sw} />} label={L('place.settings')} />
-        </Section>
       </div>
       <div className="side-resize" onMouseDown={(e) => {
-        drag.current = { x: e.clientX, w };
-        setDragging(true);
-        const move = (ev: MouseEvent) => { if (drag.current) width.set(Math.min(320, Math.max(190, drag.current.w + ev.clientX - drag.current.x))); };
-        const up = () => { drag.current = null; setDragging(false); save('sidebar.width', String(width.get())); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+        const x = e.clientX;
+        const move = (ev: MouseEvent) => width.set(Math.min(320, Math.max(190, w + ev.clientX - x)));
+        const up = () => { save('sidebar.width', String(width.get())); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
         window.addEventListener('mousemove', move);
         window.addEventListener('mouseup', up);
       }} />
     </nav>
-    </div>
   );
 }

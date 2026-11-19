@@ -13,7 +13,7 @@ import { folders, libraryVersion } from '../../lib/library';
 import {
   deleteImportRecordsFlow, formatImportSummary, ImportReportModal, type RecordRow,
 } from './ImportRecordsPage';
-import { dateStamp, deliver, fileName, info, outPath, size, upload } from './serverFiles';
+import { dateStamp, exportFile, fileName, size, upload } from './serverFiles';
 import {
   ActivityRow, Card, CardRow, IconTile, NavRow, NavTile, Pill,
   PopupSelect, RowDivider, SectionGroup, settings, SettingsScreen,
@@ -70,10 +70,8 @@ export default function TransferPage() {
     () => (phase === 'backup' ? core.read<ExportProgress | null>(core.b.tl_export_status()) : Promise.resolve(null)),
     [phase],
   );
-  useInterval(
-    phase === 'import' ? incoming.reload : outgoing.reload,
-    phase && phase !== 'upload' ? 700 : null,
-  );
+  useInterval(incoming.reload, phase === 'import' && !incoming.loading ? 700 : null);
+  useInterval(outgoing.reload, phase === 'backup' && !outgoing.loading ? 700 : null);
 
   function pickFile(kind: ImportKind) {
     if (task.busy) return;
@@ -131,9 +129,8 @@ export default function TransferPage() {
       setPhase('backup');
       try {
         const name = `${L('settings.backup.fileName', dateStamp()).replaceAll('{app}', L('web.appName'))}.tlpack`;
-        const path = outPath(await info(), name);
-        const report = await core.read<ExportReport>(core.b.tl_export_backup(path));
-        await deliver(path, name);
+        const { report, status } = await exportFile(name, (path) => core.read<ExportReport>(core.b.tl_export_backup(path)));
+        if (status === 'cancelled' || (status === 'download' && !report.skipped.length)) return;
         let msg = L('mac.backup.result', report.posts, report.media, report.trashed, size(report.bytes));
         if (report.skipped.length) {
           msg += L('settings.backup.skipped', report.skipped.length);
@@ -148,7 +145,7 @@ export default function TransferPage() {
           if (report.skipped.length > 15) msg += L('export.skip.more', report.skipped.length - 15);
         }
         await alertMessage(
-          L(report.skipped.length ? 'settings.backup.doneIncomplete' : 'settings.backup.done'),
+          L(status === 'download' ? 'mac.backup.title' : report.skipped.length ? 'settings.backup.doneIncomplete' : 'settings.backup.done'),
           msg,
         );
       } finally {

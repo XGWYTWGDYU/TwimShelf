@@ -1,13 +1,15 @@
 // The 浏览 grid (MacFeedMasonryLayout / FeedMasonry): cards as tall as their content in columns of
 // equal width, each card into the shortest column; 20 at the sides, 16 between columns, 18 between
-// cards, the footer under the tallest column. As many columns as cards of about 300 fit (at most
-// 6). Virtual: only the cards near the visible area exist, so 5000 posts scroll as 50. Heights
+// cards, the footer under the tallest column. Density sets how wide the cards should be. Virtual: only the cards near the visible area exist, so 5000 posts scroll as 50. Heights
 // start as estimates and are corrected as cards are measured.
 import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { cardColumns, type CardDensity } from './density';
 import './Masonry.css';
 
 export interface MasonryProps<T> {
   items: T[];
+  active: boolean;
+  density: CardDensity;
   keyOf: (item: T) => string;
   estimate: (item: T, width: number) => number;
   render: (item: T, width: number, index: number) => ReactNode;
@@ -26,7 +28,7 @@ interface Placed { key: string; index: number; x: number; y: number; h: number }
 
 const SIDE = 20, COL_GAP = 16, ROW_GAP = 18, FOOTER = 56;
 
-function MasonryInner<T>({ items, keyOf, estimate, render, top, footer }: MasonryProps<T>, ref: React.Ref<MasonryHandle>) {
+function MasonryInner<T>({ items, active, density, keyOf, estimate, render, top, footer }: MasonryProps<T>, ref: React.Ref<MasonryHandle>) {
   const scroller = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [view, setView] = useState({ top: 0, height: 800 });
@@ -38,25 +40,29 @@ function MasonryInner<T>({ items, keyOf, estimate, render, top, footer }: Masonr
   const [resizing, setResizing] = useState(false);
   const resizeTimer = useRef(0);
   useLayoutEffect(() => {
+    if (!active) return;
     const el = scroller.current!;
-    setWidth(el.clientWidth);
-    setView((v) => ({ ...v, height: el.clientHeight || v.height }));
     let lastW = el.clientWidth;
-    const ro = new ResizeObserver(() => {
-      if (el.clientWidth !== lastW) {
-        lastW = el.clientWidth;
+    const measure = () => {
+      const { clientWidth, clientHeight, scrollTop } = el;
+      if (!clientWidth || !clientHeight) return;
+      if (clientWidth !== lastW) {
+        lastW = clientWidth;
         setResizing(true);
         window.clearTimeout(resizeTimer.current);
         resizeTimer.current = window.setTimeout(() => setResizing(false), 250);
       }
-      setWidth(el.clientWidth); setView((v) => ({ ...v, height: el.clientHeight }));
-    });
+      setWidth(clientWidth);
+      setView({ top: scrollTop, height: clientHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [active]);
 
-  const columns = Math.max(1, Math.min(6, Math.floor((width - 40) / 300)));
-  const colW = Math.floor((width - SIDE * 2 - (columns - 1) * COL_GAP) / columns);
+  const columns = cardColumns(width - SIDE * 2, density);
+  const colW = Math.max(1, Math.floor((width - SIDE * 2 - (columns - 1) * COL_GAP) / columns));
   const widthKey = colW;
 
   const layout = useMemo(() => {

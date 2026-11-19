@@ -20,7 +20,7 @@ import {
   setAuto, setSetting, stopTagging, tagging, testModel, type ExternalModel, type Prompt,
 } from './aiTagging';
 import { ModelProgress } from './ModelHubPage';
-import { deliver, info, outPath, readSecret, removeFile, size, upload } from './serverFiles';
+import { exportFile, readSecret, removeFile, size, upload } from './serverFiles';
 import {
   ActivityRow, Banner, Card, CardRow, IconTile, Pill, PlaceholderEditor,
   PopupSelect, ProgressRing, RowDivider, SectionGroup, SegmentedControl, settings, SettingsScreen,
@@ -73,7 +73,7 @@ export default function AIPage() {
   const [remoteError, setRemoteError] = useState<string>();
   const task = useTask();
 
-  useInterval(status.reload, 1600);
+  useInterval(status.reload, status.loading ? null : 1600);
 
   const modelList = models.data ?? [];
   const model = modelList.find((candidate) => candidate.id === selected);
@@ -395,9 +395,7 @@ export default function AIPage() {
                           disabled: task.busy,
                           run: () => void task.run(async () => {
                             const name = `${item.id.replaceAll('/', '-')}.zip`;
-                            const path = outPath(await info(), name);
-                            await core.read(core.b.tl_model_export_zip(item.id, path));
-                            await deliver(path, name);
+                            await exportFile(name, (path) => core.read(core.b.tl_model_export_zip(item.id, path)));
                           }),
                         },
                         'separator',

@@ -97,6 +97,8 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(if ok { 0 } else { 1 });
     }
     for d in ["library", "models", "cache", "uploads", "exports", "app"] { std::fs::create_dir_all(config.dir(d))?; }
+    // video frames are taken by the page now: what earlier versions made here is not used any more
+    let _ = std::fs::remove_dir_all(config.dir("cache").join("posters"));
     // the desktop app signs its window in with its token: no web password there
     if config.desktop.is_none() { config.auth.prepare(&config.data)?; }
     if config.public { eprintln!("access: from anywhere (TL_ALLOW_PUBLIC); put it behind HTTPS"); } else { eprintln!("access: local network only (TL_ALLOW_PUBLIC=true to allow the internet)"); }
@@ -116,7 +118,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/proxy", post(proxy).layer(DefaultBodyLimit::max(64 << 20)))
         .route("/f/{*path}", get(file).put(put_file).delete(delete_file))
         .route("/api/move", post(move_file))
-        .route("/api/poster", get(poster))
         .route("/api/scaled", get(scaled))
         .route("/gfonts/{*path}", get(gfont))
         .route("/api/lease", post(gate::lease))
@@ -202,10 +203,26 @@ async fn call(State(cfg): State<Shared>, UrlPath(name): UrlPath<String>, body: a
     if name == "tl_open" { return Json(json!({ "r": true })).into_response(); }
     if !paths_allowed(&cfg, &name, &args) { return (StatusCode::FORBIDDEN, "outside the data folder").into_response(); }
     let models = cfg.dir("models").to_string_lossy().into_owned();
+    let storage_paths = (name == "tl_storage_usage").then(|| {
+        let desktop_paths: Option<Vec<PathBuf>> = cfg.desktop.as_ref().and_then(|_| {
+            serde_json::from_str(&std::env::var("TL_DESKTOP_APP_PATHS").ok()?).ok()
+        });
+        desktop_paths.unwrap_or_else(|| {
+            let mut paths = vec![cfg.web.clone()];
+            paths.extend(std::env::current_exe().ok());
+            paths
+        })
+    });
     let r = tokio::task::spawn_blocking(move || {
         let mut args = args;
         // the data folders are the server's: a client cannot point the core elsewhere
         if name == "tl_set_models_dir" { args = vec![Value::String(models)]; }
+        if let Some(paths) = storage_paths {
+            let mut extra: Vec<Value> = args.first().and_then(Value::as_str)
+                .and_then(|text| serde_json::from_str(text).ok()).unwrap_or_default();
+            extra.extend(paths.into_iter().map(|path| json!({ "key": "app", "path": path })));
+            args = vec![Value::String(serde_json::to_string(&extra)?)];
+        }
         dispatch::call(&name, &wire::Args(args))
     }).await;
     match r {
@@ -345,9 +362,8 @@ async fn move_file(State(cfg): State<Shared>, Json(m): Json<MoveRequest>) -> Res
 #[derive(Deserialize)]
 struct ScaledQuery { path: String, side: u32 }
 
-/// Pictures scaled at the same time, and video frames taken at the same time.
+/// Pictures scaled at the same time.
 static PICTURES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(6);
-static POSTERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 /// The largest picture decoded here (the core's own limit for HEIF).
 const MAX_PIXELS: u64 = 200_000_000;
 
@@ -377,47 +393,6 @@ async fn scaled(State(cfg): State<Shared>, Query(q): Query<ScaledQuery>) -> Resp
         Ok(Err(e)) => (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:#}")).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
-}
-
-#[derive(Deserialize)]
-struct PosterQuery { path: String, side: u32, #[serde(default)] whole: u8 }
-
-/// A video's frame at half a second as a JPEG (the apps take it with the system's decoder; a
-/// browser cannot hand frames back): square `side`, or the whole frame with `side` as its long
-/// edge. Made once with ffmpeg, cached under `cache/posters`.
-async fn poster(State(cfg): State<Shared>, Query(q): Query<PosterQuery>) -> Response {
-    let Some(src) = inside_data(&cfg, &q.path) else { return StatusCode::NOT_FOUND.into_response() };
-    let side = q.side.clamp(32, 4096);
-    // named after the whole path: posts keep their files under the same names (video.mp4)
-    let name = { use sha2::Digest; hex::encode(sha2::Sha256::digest(src.to_string_lossy().as_bytes())) };
-    let kind = if q.whole == 1 { format!("whole{side}") } else { side.to_string() };
-    let out = cfg.dir("cache").join("posters").join(kind).join(format!("{name}.jpg"));
-    let turn = if out.exists() { None } else { POSTERS.acquire().await.ok() };
-    // (made by another request while this one waited)
-    if turn.is_some() && !out.exists() {
-        let _ = tokio::fs::create_dir_all(out.parent().unwrap()).await;
-        let filter = if q.whole == 1 {
-            format!("scale='if(gt(iw,ih),{side},-2)':'if(gt(iw,ih),-2,{side})'")
-        } else {
-            format!("scale={side}:{side}:force_original_aspect_ratio=increase,crop={side}:{side}")
-        };
-        let tmp = out.with_extension(format!("{:08x}.jpg", rand::random::<u32>()));
-        let made = async {
-            for at in ["0.5", "0"] {
-                let status = tokio::process::Command::new("ffmpeg")
-                    .args(["-nostdin", "-loglevel", "error", "-y", "-ss", at, "-i"]).arg(&src)
-                    .args(["-frames:v", "1", "-vf", &filter, "-q:v", "3"]).arg(&tmp)
-                    .status().await;
-                if matches!(status, Ok(s) if s.success()) && tmp.metadata().map_or(false, |m| m.len() > 0) { return true; }
-            }
-            false
-        }.await;
-        if !made || tokio::fs::rename(&tmp, &out).await.is_err() {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            return StatusCode::UNPROCESSABLE_ENTITY.into_response();
-        }
-    }
-    Json(json!({ "path": out.to_string_lossy() })).into_response()
 }
 
 #[derive(Deserialize)]

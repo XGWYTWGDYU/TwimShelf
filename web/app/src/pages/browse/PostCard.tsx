@@ -13,9 +13,18 @@ import { handedBack, position, savePosition } from '../../lib/videoPositions';
 import type { Post } from './posts';
 import { WheelStream } from '../../lib/wheelGesture';
 import { viewerState } from '../../viewer/Viewer';
+import { markMatches } from './SearchMarks';
 import './PostCard.css';
 
+interface Marks {
+  text?: RegExp;
+  author?: RegExp;
+  tag?: RegExp;
+  origins: number[];
+}
+
 export interface PostCardProps {
+  marks?: Marks;
   post: Post;
   width: number;
   onOpen: (post: Post, media: number) => void;
@@ -27,7 +36,7 @@ export interface PostCardProps {
   highlight?: number;
 }
 
-export const PostCard = memo(function PostCard({ post, width, onOpen, onContext, onTag, onTagMenu, onAddTag, highlight }: PostCardProps) {
+export const PostCard = memo(function PostCard({ post, width, onOpen, onContext, onTag, onTagMenu, onAddTag, marks, highlight }: PostCardProps) {
   const [page, setPage] = useState(0);
   /** The page sliding out while the new one slides in (a push, 0.22 s, as FeedCard.slide). */
   const [leaving, setLeaving] = useState<{ index: number; dir: 'l' | 'r'; n: number } | null>(null);
@@ -75,7 +84,13 @@ export const PostCard = memo(function PostCard({ post, width, onOpen, onContext,
   // the media frame follows the page's proportions, with the native card's spring-like ease;
   // the masonry is told the height it is heading for, so the cards under it move in step
   const mediaH = Math.round(width / cardAspectRatio(m));
-  const author = loose ? `◌ ${m.album ? L('card.album') : L('card.loose')}` : [m.author_name, m.screen_name ? `@${m.screen_name}` : null].filter(Boolean).join('  ');
+  const author = loose ? `◌ ${m.album ? L('card.album') : L('card.loose')}` : (
+    <>
+      {m.author_name && markMatches(m.author_name, marks?.author)}
+      {m.author_name && m.screen_name && '  '}
+      {m.screen_name && <>@{markMatches(m.screen_name, marks?.author)}</>}
+    </>
+  );
   const out = leaving ? post.media[leaving.index] : null;
   return (
     <article className={`card${highlight != null ? ' flash' : ''}`} onContextMenu={(e) => { if (onContext) { e.preventDefault(); onContext(post, page, e); } }}>
@@ -95,23 +110,23 @@ export const PostCard = memo(function PostCard({ post, width, onOpen, onContext,
         {many && page > 0 && <button className="card-nav left" aria-label={L('viewer.previous')} onClick={(e) => { e.stopPropagation(); turn(-1); }}><ChevronLeft size={15} strokeWidth={3} /></button>}
         {many && page < post.media.length - 1 && <button className="card-nav right" aria-label={L('viewer.next')} onClick={(e) => { e.stopPropagation(); turn(1); }}><ChevronRight size={15} strokeWidth={3} /></button>}
       </div>
-      {(author || m.text || m.url) && (
+      {(loose || m.author_name || m.screen_name || m.text || m.url) && (
         <div className="card-caption">
-          {author && <div className={`card-author${loose ? ' loose' : ''}`}>{author}</div>}
-          {m.text && <p className="card-text selectable">{m.text}</p>}
+          {(loose || m.author_name || m.screen_name) && <div className={`card-author${loose ? ' loose' : ''}`}>{author}</div>}
+          {m.text && <p className="card-text selectable">{markMatches(m.text, marks?.text)}</p>}
           {m.url && (/^https?:\/\//i.test(m.url)
             ? <a className="card-link" href={m.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{m.url}</a>
             : <span className="card-link">{m.url}</span>)}
         </div>
       )}
-      <TagStrip item={m} onTag={onTag} onTagMenu={onTagMenu} onAdd={onAddTag} />
+      <TagStrip item={m} marks={marks} onTag={onTag} onTagMenu={onTagMenu} onAdd={onAddTag} />
     </article>
   );
 });
 
 /** The tags as pills in one row that scrolls sideways (TagStripView): "◷ Recently Added" first,
  *  then each tag in its colour (yours blue, an AI's purple with ✦, approved green with ✓), "+" last. */
-function TagStrip({ item, onTag, onTagMenu, onAdd }: { item: FeedItem; onTag?: (l: string) => void; onTagMenu?: (it: FeedItem, l: string, e: React.MouseEvent) => void; onAdd?: (it: FeedItem) => void }) {
+function TagStrip({ item, marks, onTag, onTagMenu, onAdd }: { item: FeedItem; marks?: Marks; onTag?: (l: string) => void; onTagMenu?: (it: FeedItem, l: string, e: React.MouseEvent) => void; onAdd?: (it: FeedItem) => void }) {
   const row = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = row.current!;
@@ -134,7 +149,7 @@ function TagStrip({ item, onTag, onTagMenu, onAdd }: { item: FeedItem; onTag?: (
           <span key={t.label} className={`pill pill-${kind}`} title={t.label}
             onClick={(e) => { e.stopPropagation(); onTag?.(t.label); }}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onTagMenu?.(item, t.label, e); }}>
-            {ai ? (mine ? '✓ ' : '✦ ') : ''}{t.label}
+            <span>{ai ? (mine ? '✓ ' : '✦ ') : ''}{markMatches(t.label, marks?.origins.includes(t.origin) ? marks.tag : undefined)}</span>
           </span>
         );
       })}

@@ -5,18 +5,19 @@ import {
   type ModelDownloadStatus, type SyncStatus, type VerifyStatus,
 } from '@twimshelf/core';
 import {
-  Download, HardDrive, Info, LogOut, Package, Puzzle, Scale,
-  RefreshCw, Search, Sparkles, Tags, Trash2,
+  ChevronDown, Download, HardDrive, Info, LogOut, Package, Puzzle, Scale,
+  RefreshCw, Search, Sparkles, Tags, Trash2, Columns3,
 } from 'lucide-react';
 import { Button, Page } from '../../components/ui';
 import { ClawdIcon, mascotEnabled, setMascotEnabled } from '../../components/Mascot';
 import { clawdLicense } from '../../components/clawdIcons.generated';
 import { alertMessage } from '../../components/pickers';
-import { useTask } from '../../components/libraryControls';
+import { Select, useTask } from '../../components/libraryControls';
 import { core } from '../../lib/core';
 import { useAsync, useInterval, useStore } from '../../lib/hooks';
 import { libraryVersion, stats } from '../../lib/library';
 import TagsPage from '../TagsPage';
+import { cardDensities, cardDensity, setCardDensity } from '../browse/density';
 import AIPage from './AIPage';
 import { activeTagger, enableAutoTagging, externalModels, modelTitle, tagging } from './aiTagging';
 import DownloadsPage from './DownloadsPage';
@@ -48,14 +49,24 @@ const pages = {
 };
 
 export default function SettingsPage({ sub }: { sub?: string }) {
+  useEffect(enableAutoTagging, []);
+
+  if (sub && Object.hasOwn(pages, sub)) {
+    const Screen = pages[sub as keyof typeof pages];
+    return <Screen key={sub} />;
+  }
+
+  return <SettingsOverview />;
+}
+
+function SettingsOverview() {
   const counts = useStore(stats);
+  const density = useStore(cardDensity);
   const version = useStore(libraryVersion);
   const selectedTagger = useStore(activeTagger);
   const tagActivity = useStore(tagging);
   const mascot = useStore(mascotEnabled);
   const task = useTask();
-
-  useEffect(enableAutoTagging, []);
 
   const live = useAsync(async () => {
     const [dl, aiCounts, extModels, sync, discovery, ext, modelDl, verify, imp] = await Promise.all([
@@ -72,12 +83,7 @@ export default function SettingsPage({ sub }: { sub?: string }) {
     return { dl, aiCounts, extModels, sync, discovery, ext, modelDl, verify, imp };
   }, [version]);
 
-  useInterval(live.reload, sub ? null : 2000);
-
-  if (sub && Object.hasOwn(pages, sub)) {
-    const Screen = pages[sub as keyof typeof pages];
-    return <Screen />;
-  }
+  useInterval(live.reload, live.loading ? null : 2000);
 
   const d = live.data;
   const dl = d?.dl;
@@ -287,6 +293,28 @@ export default function SettingsPage({ sub }: { sub?: string }) {
         </SectionGroup>
 
         <SectionGroup title={L('mac.prefs')}>
+          <Card>
+            <CardRow
+              icon={<Columns3 size={15} />}
+              color="teal"
+              title={L('cards.section')}
+              detail={L('cards.footer')}
+              trailing={(
+                <span className="browse-card-density">
+                  <Select
+                    label={L('cards.section')}
+                    value={density}
+                    options={cardDensities.map((value) => ({ value, label: L(`cards.${value}`) }))}
+                    onChange={(value) => {
+                      const selected = cardDensities.find((option) => option === value);
+                      if (selected) setCardDensity(selected);
+                    }}
+                  />
+                  <ChevronDown className="browse-card-density-arrow" size={14} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+              )}
+            />
+          </Card>
           <Card spacing={14}>
             <div className="card-group-label">{L('common.search')}</div>
             <ToggleRow

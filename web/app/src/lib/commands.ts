@@ -5,9 +5,8 @@ import { L } from '@twimshelf/core';
 import type { NativeMenuItem } from './core';
 import { createFolder } from './folderActions';
 import { folderRoute, go } from './router';
-import { toggleSidebar } from '../components/Sidebar';
 
-export type Command = 'newFolder' | 'toggleSidebar' | 'zoomIn' | 'zoomOut' | 'select' | 'groupByPost' | 'reshuffle' | 'fullScreen'
+export type Command = 'newFolder' | 'zoomIn' | 'zoomOut' | 'select' | 'groupByPost' | 'reshuffle' | 'fullScreen'
   | 'goBrowse' | 'goFolders' | 'goPhotos' | 'goVideos' | 'settings';
 
 const handlers = new Map<Command, Set<() => void>>();
@@ -23,7 +22,6 @@ export function onCommand(c: Command, f: () => void): () => void {
 export function run(c: Command): void {
   switch (c) {
     case 'newFolder': void createFolder().then((n) => n && go(folderRoute(n))); return;
-    case 'toggleSidebar': toggleSidebar(); return;
     case 'goBrowse': go({ page: 'browse' }); return;
     case 'goFolders': go({ page: 'folders' }); return;
     case 'goPhotos': go({ page: 'grid', place: 'photos' }); return;
@@ -72,8 +70,6 @@ export function installAppMenu(): () => void {
       item('select', L('common.select')),
     ] },
     { label: L('menu.view'), items: [
-      item('toggleSidebar', L('menu.showSidebar'), 'Ctrl+CmdOrCtrl+S'),
-      'separator',
       item('zoomIn', L('grid.zoomIn'), 'CmdOrCtrl+Plus'),
       item('zoomOut', L('grid.zoomOut'), 'CmdOrCtrl+-'),
       'separator',
@@ -104,7 +100,6 @@ function installKeys(): () => void {
     const k = e.key.toLowerCase();
     let c: Command | null = null;
     if (k === 'n' && e.shiftKey) c = 'newFolder';
-    else if (k === 's' && e.ctrlKey && e.metaKey) c = 'toggleSidebar';
     else if ((k === '=' || k === '+') && !e.shiftKey) c = 'zoomIn';
     else if (k === '+') c = 'zoomIn';
     else if (k === '-') c = 'zoomOut';

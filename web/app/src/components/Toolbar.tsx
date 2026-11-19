@@ -3,10 +3,8 @@
 // capsule of glass, since the photos scroll under it: MacGlassTitle), then the page's own
 // controls on the right as glass buttons. It is the window's title bar too (drag to move).
 import type { ReactNode } from 'react';
-import { ChevronLeft, PanelLeft } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { L } from '@twimshelf/core';
-import { sidebarShown, toggleSidebar } from './Sidebar';
-import { useStore } from '../lib/hooks';
 import './Toolbar.css';
 
 export function Toolbar({ title, subtitle, back, pill, children, overlay, center }: {
@@ -21,10 +19,8 @@ export function Toolbar({ title, subtitle, back, pill, children, overlay, center
   center?: ReactNode;
   children?: ReactNode;
 }) {
-  const shown = useStore(sidebarShown);
   return (
-    <header className={`toolbar${overlay ? ' toolbar-overlay' : ''}${shown ? '' : ' sidebar-hidden'}`}>
-      {!shown && <ToolButton label={L('menu.showSidebar')} onClick={toggleSidebar} className="toolbar-sidebar"><PanelLeft size={16} strokeWidth={1.8} /></ToolButton>}
+    <header className={`toolbar${overlay ? ' toolbar-overlay' : ''}`}>
       {back && <ToolButton label={L('mac.toolbar.back')} onClick={back}><ChevronLeft size={18} strokeWidth={2} /></ToolButton>}
       {title !== undefined && (pill ? (
         <div className="toolbar-pill glass">

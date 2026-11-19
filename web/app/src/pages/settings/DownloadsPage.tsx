@@ -1,46 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
-import { L, type CookieCheck, type DownloadRequest, type DownloadRoute, type DownloadStatus } from '@twimshelf/core';
+import { L, type CookieCheck, type DownloadRequest, type DownloadStatus } from '@twimshelf/core';
 import {
   Check, Download, FileText, Folder, Globe, Inbox, KeyRound,
   Lock, LockOpen, Plus, TriangleAlert, WandSparkles,
 } from 'lucide-react';
 import { Button, TextField } from '../../components/ui';
-import { change, LoadState, useTask } from '../../components/libraryControls';
+import { change, errorText, LoadState, useTask } from '../../components/libraryControls';
 import { alertMessage, prompt } from '../../components/pickers';
 import { toast } from '../../components/toast';
 import { core } from '../../lib/core';
 import { useAsync, useInterval, useStore } from '../../lib/hooks';
 import { folders, libraryChanged } from '../../lib/library';
-import { info, readSecret, readText, removeFile, updateSecrets, upload, writeText } from './serverFiles';
+import { readSecret, removeFile, updateSecrets, upload, writeText } from './serverFiles';
+import {
+  defaultDownloadOptions, downloadLinks, downloadOptionFile, downloadRoutes, parseLinks,
+  readDownloadOptionFile, type DownloadOptions,
+} from './downloadLinks';
 import {
   ActivityRow, Card, ChipButton, CustomSlider, IconTile, OptionCard,
   Pill, PlaceholderEditor, SectionGroup, SettingsScreen,
 } from './settingsControls';
 
-type Options = { route: DownloadRoute; concurrency: number; intervalMs: number; folder: string | null };
-const defaults: Options = { route: 'auto', concurrency: 3, intervalMs: 500, folder: null };
-const routes = ['auto', 'fx', 'cookie'] as const;
-
-const POST_URL_RE = /^https?:\/\/(?:(?:www\.|mobile\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx)\.com)\/(?:[^/\s]+\/status|i\/(?:web\/)?status)\/\d+/i;
-
-function parseLinks(raw: string): { goodUrls: string[]; badUrls: string[]; good: number; bad: number } {
-  const lines = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  const goodUrls: string[] = [];
-  const badUrls: string[] = [];
-  for (const line of lines) {
-    if (POST_URL_RE.test(line)) goodUrls.push(line);
-    else badUrls.push(line);
-  }
-  return { goodUrls, badUrls, good: goodUrls.length, bad: badUrls.length };
-}
-
-async function optionFile(): Promise<string> {
-  return `${(await info()).library}/downloads.queue.json`;
-}
-
-async function readOptions(path: string): Promise<Record<string, unknown>> {
-  return JSON.parse((await readText(path)) ?? '{}') as Record<string, unknown>;
-}
+type Options = DownloadOptions;
+const defaults = defaultDownloadOptions;
+let optionWrites: Promise<void> = Promise.resolve();
+const routes = downloadRoutes;
+const optionFile = downloadOptionFile;
+const readOptions = readDownloadOptionFile;
 
 export default function DownloadsPage() {
   const folderList = useStore(folders);
@@ -55,22 +41,27 @@ export default function DownloadsPage() {
   }, []);
   const [localConcurrency, setLocalConcurrency] = useState<number>();
   const [localInterval, setLocalInterval] = useState<number>();
-  const [links, setLinks] = useState('');
+  const links = useStore(downloadLinks);
+  const setLinks = (text: string) => downloadLinks.set(text);
   const [batch, setBatch] = useState<{ name: string; urls: string[] }>();
   const [dropTargeted, setDropTargeted] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<number | undefined>(undefined);
   const task = useTask();
   const status = useAsync(() => core.read<DownloadStatus>(core.b.tl_download_status()), []);
-  useInterval(status.reload, 1200);
+  useInterval(status.reload, status.loading ? null : 1200);
   const current = status.data;
   const done = current?.done ?? 0;
   useEffect(() => { if (done) libraryChanged(); }, [done, current?.generation]);
 
   async function save(next: Partial<Options>) {
-    const path = await optionFile();
-    const saved = await readOptions(path);
-    await writeText(path, JSON.stringify({ ...defaults, ...saved, ...next }));
+    const write = optionWrites.then(async () => {
+      const path = await optionFile();
+      const saved = await readOptions(path);
+      await writeText(path, JSON.stringify({ ...defaults, ...saved, ...next }));
+    });
+    optionWrites = write.catch(() => {});
+    await write;
     options.reload();
   }
 
@@ -81,7 +72,11 @@ export default function DownloadsPage() {
   const scheduleSave = (next: Partial<Options>) => {
     unsaved.current = { ...unsaved.current, ...next };
     if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => { const all = unsaved.current; unsaved.current = {}; void save(all); }, 250);
+    saveTimer.current = window.setTimeout(() => {
+      const all = unsaved.current;
+      unsaved.current = {};
+      void save(all).catch((error) => toast(errorText(error)));
+    }, 250);
   };
 
   function download(urls: string[], bookmarks: boolean, resume = false) {
@@ -132,9 +127,11 @@ export default function DownloadsPage() {
     });
   }
 
+  const config = options.error ? undefined : options.data;
+  const canConfigure = !!config && !task.busy;
   const parsed = parseLinks(links);
-  const concurrency = localConcurrency ?? options.data?.concurrency ?? defaults.concurrency;
-  const intervalMs = localInterval ?? options.data?.intervalMs ?? defaults.intervalMs;
+  const concurrency = localConcurrency ?? config?.concurrency ?? defaults.concurrency;
+  const intervalMs = localInterval ?? config?.intervalMs ?? defaults.intervalMs;
 
   const phaseKey = !current
     ? 'download.notYet'
@@ -189,7 +186,7 @@ export default function DownloadsPage() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13.5, fontWeight: 500 }}>{L('mac.download.paused', current.paused)}</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Button kind="primary" disabled={task.busy || !options.data} onClick={() => download([], false, true)}>{L('settings.resume')}</Button>
+              <Button kind="primary" disabled={!canConfigure} onClick={() => download([], false, true)}>{L('settings.resume')}</Button>
               <Button kind="danger" disabled={task.busy} onClick={() => void task.run(async () => {
                 await change(core.read(core.b.tl_download_stop(false)));
                 status.reload();
@@ -200,212 +197,217 @@ export default function DownloadsPage() {
         </Card>
       )}
 
-      {!options.data || options.error ? <LoadState error={options.error} reload={options.reload} /> : (
-        <>
-          <SectionGroup title={L('settings.method')} note={L('mac.method.footer')}>
-            <div className="option-cards-grid">
-              <OptionCard
-                title={L('common.auto')}
-                detail={L('mac.method.auto')}
-                icon={<WandSparkles size={16} strokeWidth={2} />}
-                color="blue"
-                selected={options.data.route === 'auto'}
-                onClick={() => update({ route: 'auto' })}
+      {!!options.error && <LoadState error={options.error} reload={options.reload} />}
+      {!!status.error && <LoadState error={status.error} reload={status.reload} />}
+      <SectionGroup title={L('settings.method')} note={L('mac.method.footer')}>
+        <div className="option-cards-grid">
+          <OptionCard
+            title={L('common.auto')}
+            detail={L('mac.method.auto')}
+            icon={<WandSparkles size={16} strokeWidth={2} />}
+            color="blue"
+            disabled={!canConfigure}
+            selected={config?.route === 'auto'}
+            onClick={() => update({ route: 'auto' })}
+          />
+          <OptionCard
+            title={L('settings.method.fx')}
+            detail={L('mac.method.fx')}
+            icon={<Globe size={16} strokeWidth={2} />}
+            color="teal"
+            disabled={!canConfigure}
+            selected={config?.route === 'fx'}
+            onClick={() => update({ route: 'fx' })}
+          />
+          <OptionCard
+            title={L('settings.method.cookie')}
+            detail={L('mac.method.cookie')}
+            icon={<KeyRound size={16} strokeWidth={2} />}
+            color="orange"
+            disabled={!canConfigure}
+            selected={config?.route === 'cookie'}
+            onClick={() => update({ route: 'cookie' })}
+          />
+        </div>
+
+        <Card spacing={10}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500 }}>
+            <Folder size={15} strokeWidth={2} />
+            <span>{L('mac.saveToFolder')}</span>
+          </div>
+          <div className="chips-row">
+            <ChipButton
+              title={L('mac.noFolder')}
+              disabled={!canConfigure}
+              selected={config?.folder === null}
+              onClick={() => update({ folder: null })}
+            />
+            {(folderList?.folders ?? []).map((f) => (
+              <ChipButton
+                key={f.name}
+                title={f.name}
+                icon={<Folder size={11} strokeWidth={2.2} />}
+                disabled={!canConfigure}
+                selected={config?.folder === f.name}
+                onClick={() => update({ folder: f.name })}
               />
-              <OptionCard
-                title={L('settings.method.fx')}
-                detail={L('mac.method.fx')}
-                icon={<Globe size={16} strokeWidth={2} />}
-                color="teal"
-                selected={options.data.route === 'fx'}
-                onClick={() => update({ route: 'fx' })}
+            ))}
+            {config?.folder && !(folderList?.folders ?? []).some((f) => f.name === config.folder) && (
+              <ChipButton
+                title={config.folder}
+                icon={<Folder size={11} strokeWidth={2.2} />}
+                selected
+                disabled
+                onClick={() => {}}
               />
-              <OptionCard
-                title={L('settings.method.cookie')}
-                detail={L('mac.method.cookie')}
-                icon={<KeyRound size={16} strokeWidth={2} />}
-                color="orange"
-                selected={options.data.route === 'cookie'}
-                onClick={() => update({ route: 'cookie' })}
-              />
+            )}
+            <ChipButton
+              title={L('common.newFolderEllipsis')}
+              icon={<Plus size={11} strokeWidth={2.4} />}
+              dashed
+              disabled={!canConfigure}
+              onClick={() => void createNewFolder()}
+            />
+          </div>
+        </Card>
+      </SectionGroup>
+
+      <SectionGroup title={L('common.downloadPosts')} note={L('mac.links.footer')}>
+        <Card spacing={12}>
+          <PlaceholderEditor
+            value={links}
+            onChange={setLinks}
+            placeholder={L('mac.links.placeholder')}
+            label={L('mac.links.label')}
+            minHeight={120}
+            disabled={task.busy}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {parsed.good > 0 && (
+              <Pill text={L('mac.links.good', parsed.good)} color="green" icon={<Check size={10} strokeWidth={3} />} />
+            )}
+            {parsed.bad > 0 && (
+              <Pill text={L('mac.links.bad', parsed.bad)} color="orange" icon={<TriangleAlert size={10} strokeWidth={2.5} />} />
+            )}
+            <div style={{ flex: 1 }} />
+            <Button
+              kind="primary"
+              disabled={!canConfigure || (parsed.good === 0 && parsed.bad === 0)}
+              onClick={() => {
+                if (parsed.bad > 0) {
+                  void alertMessage(L('settings.links.unrecognized'), parsed.badUrls.slice(0, 3).join('\n'));
+                  return;
+                }
+                download(parsed.goodUrls, false);
+              }}>
+              <Download size={14} strokeWidth={2.2} />
+              <span>{L('common.download')}</span>
+            </Button>
+          </div>
+        </Card>
+      </SectionGroup>
+
+      <SectionGroup title={L('settings.batch')}>
+        <Card spacing={16}>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) loadBatchFile(file);
+            }}
+          />
+          <button
+            type="button"
+            className={`batch-dropzone${dropTargeted ? ' targeted' : ''}`}
+            disabled={task.busy}
+            onClick={() => fileInput.current?.click()}
+            onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDropTargeted(true); }}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropTargeted(true); }}
+            onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDropTargeted(false); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDropTargeted(false);
+              const file = e.dataTransfer?.files?.[0];
+              if (file) loadBatchFile(file);
+            }}>
+            <IconTile
+              icon={batch ? <FileText size={20} strokeWidth={2} /> : <Inbox size={20} strokeWidth={2} />}
+              color={batch ? 'green' : 'indigo'}
+              size={42}
+            />
+            <div className="card-row-texts">
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
+                {batch ? batch.name : L('mac.batch.drop')}
+              </div>
+              <div className="card-row-detail">
+                {batch ? L('mac.batch.loaded', batch.urls.length) : L('mac.batch.drop.detail')}
+              </div>
             </div>
+            {batch && (
+              <Pill text={L('mac.batch.count', batch.urls.length)} color="green" icon={<Check size={10} strokeWidth={3} />} />
+            )}
+          </button>
 
-            <Card spacing={10}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500 }}>
-                <Folder size={15} strokeWidth={2} />
-                <span>{L('mac.saveToFolder')}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="slider-row">
+              <div className="slider-row-meta">
+                <div className="slider-row-title">{L('mac.batch.concurrency')}</div>
+                <div className="slider-row-note">{L('mac.batch.concurrency.detail')}</div>
               </div>
-              <div className="chips-row">
-                <ChipButton
-                  title={L('mac.noFolder')}
-                  selected={!options.data.folder}
-                  onClick={() => update({ folder: null })}
-                />
-                {(folderList?.folders ?? []).map((f) => (
-                  <ChipButton
-                    key={f.name}
-                    title={f.name}
-                    icon={<Folder size={11} strokeWidth={2.2} />}
-                    selected={options.data!.folder === f.name}
-                    onClick={() => update({ folder: f.name })}
-                  />
-                ))}
-                {options.data.folder && !(folderList?.folders ?? []).some((f) => f.name === options.data!.folder) && (
-                  <ChipButton
-                    title={options.data.folder}
-                    icon={<Folder size={11} strokeWidth={2.2} />}
-                    selected
-                    onClick={() => {}}
-                  />
-                )}
-                <ChipButton
-                  title={L('common.newFolderEllipsis')}
-                  icon={<Plus size={11} strokeWidth={2.4} />}
-                  dashed
-                  onClick={() => void createNewFolder()}
-                />
-              </div>
-            </Card>
-          </SectionGroup>
-
-          <SectionGroup title={L('common.downloadPosts')} note={L('mac.links.footer')}>
-            <Card spacing={12}>
-              <PlaceholderEditor
-                value={links}
-                onChange={setLinks}
-                placeholder={L('mac.links.placeholder')}
-                label={L('mac.links.label')}
-                minHeight={120}
-                disabled={task.busy}
-              />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {parsed.good > 0 && (
-                  <Pill text={L('mac.links.good', parsed.good)} color="green" icon={<Check size={10} strokeWidth={3} />} />
-                )}
-                {parsed.bad > 0 && (
-                  <Pill text={L('mac.links.bad', parsed.bad)} color="orange" icon={<TriangleAlert size={10} strokeWidth={2.5} />} />
-                )}
-                <div style={{ flex: 1 }} />
-                <Button
-                  kind="primary"
-                  disabled={task.busy || (parsed.good === 0 && parsed.bad === 0)}
-                  onClick={() => {
-                    if (parsed.bad > 0) {
-                      void alertMessage(L('settings.links.unrecognized'), parsed.badUrls.slice(0, 3).join('\n'));
-                      return;
-                    }
-                    download(parsed.goodUrls, false);
-                  }}>
-                  <Download size={14} strokeWidth={2.2} />
-                  <span>{L('common.download')}</span>
-                </Button>
-              </div>
-            </Card>
-          </SectionGroup>
-
-          <SectionGroup title={L('settings.batch')}>
-            <Card spacing={16}>
-              <input
-                ref={fileInput}
-                type="file"
-                accept=".json,application/json"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = '';
-                  if (file) loadBatchFile(file);
+              <CustomSlider
+                label={L('mac.batch.concurrency')}
+                value={concurrency}
+                min={1}
+                max={16}
+                step={1}
+                disabled={!canConfigure}
+                onChange={(v) => {
+                  setLocalConcurrency(v);
+                  scheduleSave({ concurrency: v });
                 }}
               />
-              <button
-                type="button"
-                className={`batch-dropzone${dropTargeted ? ' targeted' : ''}`}
-                disabled={task.busy}
-                onClick={() => fileInput.current?.click()}
-                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDropTargeted(true); }}
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropTargeted(true); }}
-                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDropTargeted(false); }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setDropTargeted(false);
-                  const file = e.dataTransfer?.files?.[0];
-                  if (file) loadBatchFile(file);
-                }}>
-                <IconTile
-                  icon={batch ? <FileText size={20} strokeWidth={2} /> : <Inbox size={20} strokeWidth={2} />}
-                  color={batch ? 'green' : 'indigo'}
-                  size={42}
-                />
-                <div className="card-row-texts">
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>
-                    {batch ? batch.name : L('mac.batch.drop')}
-                  </div>
-                  <div className="card-row-detail">
-                    {batch ? L('mac.batch.loaded', batch.urls.length) : L('mac.batch.drop.detail')}
-                  </div>
-                </div>
-                {batch && (
-                  <Pill text={L('mac.batch.count', batch.urls.length)} color="green" icon={<Check size={10} strokeWidth={3} />} />
-                )}
-              </button>
+              <div className="slider-row-value">{config ? concurrency : '–'}</div>
+            </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div className="slider-row">
-                  <div className="slider-row-meta">
-                    <div className="slider-row-title">{L('mac.batch.concurrency')}</div>
-                    <div className="slider-row-note">{L('mac.batch.concurrency.detail')}</div>
-                  </div>
-                  <CustomSlider
-                    label={L('mac.batch.concurrency')}
-                    value={concurrency}
-                    min={1}
-                    max={16}
-                    step={1}
-                    disabled={task.busy}
-                    onChange={(v) => {
-                      setLocalConcurrency(v);
-                      scheduleSave({ concurrency: v });
-                    }}
-                  />
-                  <div className="slider-row-value">{concurrency}</div>
-                </div>
-
-                <div className="slider-row">
-                  <div className="slider-row-meta">
-                    <div className="slider-row-title">{L('settings.batch.interval')}</div>
-                    <div className="slider-row-note">{L('mac.batch.interval.detail')}</div>
-                  </div>
-                  <CustomSlider
-                    label={L('settings.batch.interval')}
-                    value={intervalMs}
-                    min={0}
-                    max={10000}
-                    step={250}
-                    disabled={task.busy}
-                    onChange={(v) => {
-                      setLocalInterval(v);
-                      scheduleSave({ intervalMs: v });
-                    }}
-                  />
-                  <div className="slider-row-value">
-                    {L('settings.batch.seconds', (intervalMs / 1000).toFixed(2))}
-                  </div>
-                </div>
+            <div className="slider-row">
+              <div className="slider-row-meta">
+                <div className="slider-row-title">{L('settings.batch.interval')}</div>
+                <div className="slider-row-note">{L('mac.batch.interval.detail')}</div>
               </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <Button
-                  kind="primary"
-                  disabled={task.busy || !batch?.urls.length}
-                  onClick={() => batch && download(batch.urls, true)}>
-                  <Download size={14} strokeWidth={2.2} />
-                  <span>{L('settings.batch.start')}</span>
-                </Button>
+              <CustomSlider
+                label={L('settings.batch.interval')}
+                value={intervalMs}
+                min={0}
+                max={10000}
+                step={250}
+                disabled={!canConfigure}
+                onChange={(v) => {
+                  setLocalInterval(v);
+                  scheduleSave({ intervalMs: v });
+                }}
+              />
+              <div className="slider-row-value">
+                {config ? L('settings.batch.seconds', (intervalMs / 1000).toFixed(2)) : '–'}
               </div>
-            </Card>
-          </SectionGroup>
-        </>
-      )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button
+              kind="primary"
+              disabled={!canConfigure || !batch?.urls.length}
+              onClick={() => batch && download(batch.urls, true)}>
+              <Download size={14} strokeWidth={2.2} />
+              <span>{L('settings.batch.start')}</span>
+            </Button>
+          </div>
+        </Card>
+      </SectionGroup>
 
       <CookieSettings />
 
@@ -437,6 +439,7 @@ function CookieSettings() {
     return { hasAuth: !!a, hasCt0: !!c, auth: a ?? '', ct0: c ?? '' };
   }, []);
 
+  const loading = !stored.data && !stored.error;
   const auth = token.trim();
   const ct0 = csrf.trim();
   const valid = Boolean(auth) === Boolean(ct0);
@@ -448,7 +451,7 @@ function CookieSettings() {
       note={L('mac.cookie.footer')}
       trailing={
         <Pill
-          text={isSet ? L('mac.set') : L('mac.notSet')}
+          text={L(loading ? 'mac.preparing' : isSet ? 'mac.set' : 'mac.notSet')}
           color={isSet ? 'green' : 'secondary'}
           icon={isSet ? <Lock size={10} strokeWidth={2.5} /> : <LockOpen size={10} strokeWidth={2.5} />}
         />
@@ -460,7 +463,7 @@ function CookieSettings() {
             type="password"
             value={token}
             onChange={setToken}
-            placeholder={stored.data?.hasAuth ? L('mac.set') : L('mac.notSet')}
+            placeholder={loading ? undefined : L(stored.data?.hasAuth ? 'mac.set' : 'mac.notSet')}
           />
         </div>
         <div className="secret-field-row">
@@ -469,7 +472,7 @@ function CookieSettings() {
             type="password"
             value={csrf}
             onChange={setCsrf}
-            placeholder={stored.data?.hasCt0 ? L('mac.set') : L('mac.notSet')}
+            placeholder={loading ? undefined : L(stored.data?.hasCt0 ? 'mac.set' : 'mac.notSet')}
           />
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -488,7 +491,7 @@ function CookieSettings() {
           </Button>
           <Button
             kind="primary"
-            disabled={task.busy || !valid}
+            disabled={task.busy || loading || !valid}
             onClick={() => void task.run(async () => {
               await updateSecrets({ auth_token: auth || null, ct0: ct0 || null });
               await core.b.tl_set_cookies(auth, ct0);

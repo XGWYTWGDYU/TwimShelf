@@ -11,7 +11,7 @@ export class RemoteError extends Error {
 
 export interface Transport {
   call(name: string, args: unknown[]): Promise<unknown>;
-  /** Where the server's own routes (/f/…, /api/poster, …) are, '' for the page's origin. */
+  /** Where the server's own routes (/f/…, /api/scaled, …) are, '' for the page's origin. */
   readonly base: string;
 }
 

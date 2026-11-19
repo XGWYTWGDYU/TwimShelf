@@ -6,9 +6,10 @@ import { change, LoadState, useTask } from '../../components/libraryControls';
 import { alertMessage, choose } from '../../components/pickers';
 import { toast } from '../../components/toast';
 import { core } from '../../lib/core';
+import { clearVideoFrames, thumbnailDirectories } from '../../lib/thumbs';
 import { useAsync, useInterval, useStore } from '../../lib/hooks';
 import { libraryChanged, libraryVersion } from '../../lib/library';
-import { dateStamp, deliver, info, outPath, readText, removeFile, size } from './serverFiles';
+import { dateStamp, exportFile, info, readText, removeFile, size } from './serverFiles';
 import { setAuto, selectTagger, stopTagging } from './aiTagging';
 import {
   Card, CardRow, Pill, RowDivider, SectionHeading, SettingsScreen, SlimBar, settings,
@@ -132,12 +133,12 @@ export function StoragePage() {
   const version = useStore(libraryVersion);
   const usage = useAsync(async () => {
     const server = await info();
-    const clearable: Record<string, string> = {
-      thumbnails: `${server.cache}/posters`,
-      cache: `${server.cache}/fonts`,
+    const clearable: Record<string, string[]> = {
+      thumbnails: thumbnailDirectories(server.cache),
+      cache: [`${server.cache}/fonts`],
     };
     const data = await core.readJson<StorageUsage>('tl_storage_usage', [
-      ...Object.entries(clearable).map(([key, path]) => ({ key, path })),
+      ...Object.entries(clearable).flatMap(([key, paths]) => paths.map((path) => ({ key, path }))),
       { key: 'libraryOther', path: server.uploads },
       { key: 'libraryOther', path: server.exports },
     ]);
@@ -168,9 +169,9 @@ export function StoragePage() {
     });
   }, [data]);
 
-  // the parts that take space, largest first (StorageUsageView.parts)
+  // Show every category, sorted by usage.
   const orderedGroups: StorageGroup[] = data
-    ? STORAGE_ORDER.map((key) => data.groups.find((g) => g.key === key) ?? { key, bytes: 0, files: 0 }).filter((g) => g.bytes > 0).sort((a, b) => b.bytes - a.bytes)
+    ? STORAGE_ORDER.map((key) => data.groups.find((g) => g.key === key) ?? { key, bytes: 0, files: 0 }).sort((a, b) => b.bytes - a.bytes)
     : [];
 
   const selectedBytes = orderedGroups
@@ -211,8 +212,9 @@ export function StoragePage() {
       for (const key of selected) {
         if (key === 'bin') {
           await change(core.read(core.b.tl_trash_empty()));
-        } else if (usage.data.clearable[key]) {
-          await removeFile(usage.data.clearable[key]);
+        } else {
+          if (key === 'thumbnails') await clearVideoFrames();
+          await Promise.all((usage.data.clearable[key] ?? []).map(removeFile));
         }
       }
       await usage.reload();
@@ -296,7 +298,7 @@ export function AboutPage() {
   const task = useTask();
   const integrity = useAsync(() => extras ? core.read<IntegritySummary>(core.b.tl_integrity_summary()) : Promise.resolve(null), [extras]);
   const status = integrity.data?.last;
-  useInterval(integrity.reload, extras && status?.running ? 1000 : null);
+  useInterval(integrity.reload, extras && status?.running && !integrity.loading ? 1000 : null);
   const stopped = !!status?.finished;
   useEffect(() => { if (stopped) libraryChanged(); }, [stopped]);
 
@@ -368,13 +370,12 @@ export function AboutPage() {
           detail={L('settings.maintenance.footer')}
           trailing={<Button disabled={task.busy} onClick={() => void task.run(async () => {
             const name = L('settings.diagnostics.fileName', dateStamp()).replaceAll('{app}', L('web.appName'));
-            const path = outPath(await info(), name);
-            await core.read(core.b.tl_export_diagnostics(path, JSON.stringify({
-              platform: window.twimshelf?.platform ?? 'web',
-              exported_at: new Date().toISOString(),
-            })));
-            await deliver(path, name);
-            await alertMessage(L('diag.exported'), L('diag.exported.detail', name));
+            const result = await exportFile(name, (path) =>
+              core.read<number>(core.b.tl_export_diagnostics(path, JSON.stringify({
+                platform: window.twimshelf?.platform ?? 'web',
+                exported_at: new Date().toISOString(),
+              }))));
+            if (result.status === 'saved') await alertMessage(L('diag.exported'), L('diag.exported.detail', result.report, result.savedName));
           })}>{L('mac.exportEllipsis')}</Button>}
         />
       </Card>
@@ -475,7 +476,7 @@ export function ProblemsPage() {
       </Button>}
     </>}
   >
-    {problems.error ? <LoadState error={problems.error} reload={problems.reload} /> : list.length === 0 ? <Card>
+    {!problems.data || problems.error ? <LoadState error={problems.error} reload={problems.reload} /> : list.length === 0 ? <Card>
       <Empty
         icon={<CheckCircle2 size={32} />}
         title={L('mac.problems.none')}

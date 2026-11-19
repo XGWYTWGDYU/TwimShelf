@@ -11,7 +11,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ChevronLeft, ChevronRight, Share, X } from 'lucide-react';
 import { L, store, type FeedItem } from '@twimshelf/core';
 import { useStore } from '../lib/hooks';
-import { core } from '../lib/core';
+import { saveFile } from '../lib/saveFile';
 import { openMenuBelow, type MenuEntry } from '../components/Menu';
 import { toast } from '../components/toast';
 import { PhotoPage, previewOf, type PhotoHandle } from './PhotoPage';
@@ -269,10 +269,7 @@ function Viewer({ items, index: start, source, squarePreview, onClose }: {
   }, [items]);
   const saveAs = useCallback(() => {
     const it = items[st.current.index];
-    const a = document.createElement('a');
-    a.href = core.fileUrl(it.path);
-    a.download = it.path.split(/[\\/]/).pop() ?? 'media';
-    a.click();
+    void saveFile(it.path, it.path.split(/[\\/]/).pop() ?? 'media').catch(() => toast(L('common.notDone')));
   }, [items]);
   const share = useCallback((el: Element) => {
     const it = items[st.current.index];

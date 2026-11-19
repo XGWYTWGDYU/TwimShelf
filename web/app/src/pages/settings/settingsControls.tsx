@@ -11,6 +11,7 @@ import { alertMessage, choose, prompt } from '../../components/pickers';
 import { ClawdIcon, mascotEnabled } from '../../components/Mascot';
 import { core } from '../../lib/core';
 import { useStore } from '../../lib/hooks';
+import { poster } from '../../lib/thumbs';
 import { folders } from '../../lib/library';
 import { go } from '../../lib/router';
 import { selectTagger, setAuto, stopTagging } from './aiTagging';
@@ -199,11 +200,11 @@ export function NavTile({ title, detail, icon, color = 'blue', progress, badge, 
   );
 }
 
-export function OptionCard({ title, detail, icon, color = 'blue', selected, onClick }: {
-  title: string; detail: string; icon: ReactNode; color?: TileColor; selected: boolean; onClick: () => void;
+export function OptionCard({ title, detail, icon, color = 'blue', selected, disabled, onClick }: {
+  title: string; detail: string; icon: ReactNode; color?: TileColor; selected: boolean; disabled?: boolean; onClick: () => void;
 }) {
   return (
-    <button type="button" className={`option-card${selected ? ' selected' : ''}`} aria-pressed={selected} onClick={onClick}>
+    <button type="button" className={`option-card${selected ? ' selected' : ''}`} aria-pressed={selected} disabled={disabled} onClick={onClick}>
       <div className="option-card-top">
         <IconTile icon={icon} color={selected ? color : 'gray'} size={32} />
         <span className="option-card-check">
@@ -218,14 +219,15 @@ export function OptionCard({ title, detail, icon, color = 'blue', selected, onCl
   );
 }
 
-export function ChipButton({ title, icon, selected = false, dashed = false, onClick }: {
-  title: string; icon?: ReactNode; selected?: boolean; dashed?: boolean; onClick: () => void;
+export function ChipButton({ title, icon, selected = false, dashed = false, disabled, onClick }: {
+  title: string; icon?: ReactNode; selected?: boolean; dashed?: boolean; disabled?: boolean; onClick: () => void;
 }) {
   return (
     <button
       type="button"
       className={`chip-btn${selected ? ' selected' : ''}${dashed ? ' dashed' : ''}`}
       aria-pressed={selected}
+      disabled={disabled}
       onClick={onClick}>
       {icon}
       <span>{title}</span>
@@ -275,16 +277,12 @@ export function ActivityRow({ kind, title, detail, progress, previewPath, previe
   useEffect(() => {
     setThumbUrl(undefined);
     if (!previewPath) return;
-    const q = new URLSearchParams({ path: previewPath, side: '140' });
     if (!previewIsVideo) {
-      setThumbUrl(`${core.transport.base}/api/scaled?${q}`);
+      setThumbUrl(`${core.transport.base}/api/scaled?${new URLSearchParams({ path: previewPath, side: '140' })}`);
       return;
     }
     let live = true;
-    fetch(`${core.transport.base}/api/poster?${q}`, { credentials: 'same-origin' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { path?: string } | null) => { if (live && d?.path) setThumbUrl(core.fileUrl(d.path)); })
-      .catch(() => {});
+    poster(previewPath, 140).then((url) => { if (live) setThumbUrl(url); }, () => {});
     return () => { live = false; };
   }, [previewPath, previewIsVideo]);
 

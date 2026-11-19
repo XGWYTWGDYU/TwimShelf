@@ -50,7 +50,13 @@ export interface Option {
 export function Select({ label, value, options, onChange, disabled }: {
   label: string; value: string; options: Option[]; onChange: (value: string) => void; disabled?: boolean;
 }) {
+  // Chromium can match :focus-visible even when a native select was clicked.
+  const [pointerFocus, setPointerFocus] = useState(false);
   return <select className="field control-select" aria-label={label} value={value} disabled={disabled}
+    data-pointer-focus={pointerFocus || undefined}
+    onPointerDown={() => setPointerFocus(true)}
+    onBlur={() => setPointerFocus(false)}
+    onKeyDown={(event) => { if (event.key !== 'Escape') setPointerFocus(false); }}
     onChange={(event) => onChange(event.target.value)}>
     {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
   </select>;

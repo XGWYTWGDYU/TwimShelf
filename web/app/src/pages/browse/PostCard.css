@@ -48,3 +48,5 @@
 .pill-approved { color: var(--approved); background: var(--approved-soft); }
 .pill-recent { color: #fff; background: var(--orange); font-weight: 700; }
 .pill-add { width: 24px; padding: 0; justify-content: center; color: var(--fg-2); background: color-mix(in srgb, var(--fg-2) 12%, transparent); }
+
+.search-mark { background: light-dark(#ffe394, #775314); color: light-dark(#332100, #fff2c2); border-radius: 2px; }

@@ -1,5 +1,6 @@
 import { L, RemoteError } from '@twimshelf/core';
 import { core } from '../../lib/core';
+import { saveFile } from '../../lib/saveFile';
 
 export interface ServerInfo {
   data: string;
@@ -24,8 +25,16 @@ async function checked(response: Response): Promise<Response> {
   return response;
 }
 
-export async function info(): Promise<ServerInfo> {
-  return (await checked(await serverFetch(`${core.transport.base}/api/info`))).json();
+let serverInfo: Promise<ServerInfo> | undefined;
+
+export function info(): Promise<ServerInfo> {
+  return serverInfo ??= serverFetch(`${core.transport.base}/api/info`)
+    .then(checked)
+    .then((response) => response.json() as Promise<ServerInfo>)
+    .catch((error) => {
+      serverInfo = undefined;
+      throw error;
+    });
 }
 
 export async function readText(path: string): Promise<string | null> {
@@ -47,19 +56,19 @@ export async function upload(file: File): Promise<string> {
   return ((await response.json()) as { path: string }).path;
 }
 
-export async function deliver(path: string, name: string): Promise<void> {
-  const url = core.fileUrl(path);
-  // Electron's renderer may have a different origin from its authenticated file server.
-  const href = window.twimshelf ? URL.createObjectURL(await (await checked(await serverFetch(url))).blob()) : url;
-  const link = document.createElement('a');
-  link.href = href;
-  link.download = name;
-  link.click();
-  if (window.twimshelf) setTimeout(() => URL.revokeObjectURL(href), 60_000);
-}
-
-export function outPath(server: ServerInfo, name: string): string {
-  return `${server.exports}/${crypto.getRandomValues(new Uint32Array(2)).join('-')}-${name.replaceAll('/', '_').replaceAll('\\', '_')}`;
+export async function exportFile<T>(name: string, generate: (path: string) => Promise<T>) {
+  const safeName = name.replaceAll('/', '_').replaceAll('\\', '_');
+  const path = `${(await info()).exports}/${crypto.getRandomValues(new Uint32Array(2)).join('-')}-${safeName}`;
+  let downloading = false;
+  try {
+    const report = await generate(path);
+    const result = await saveFile(path, name);
+    downloading = result.status === 'download';
+    return { report, ...result };
+  } finally {
+    // The browser still needs the staged file after handing it to its download manager.
+    if (!downloading) await removeFile(path).catch(() => {});
+  }
 }
 
 export function fileName(path: string): string {

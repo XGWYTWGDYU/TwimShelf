@@ -20,6 +20,9 @@ import { Masonry, type MasonryHandle } from './Masonry';
 import { PostCard } from './PostCard';
 import { estimateCard, groupPosts, type Post } from './posts';
 import { SearchBar } from './SearchBar';
+import { QuickDownload } from './QuickDownload';
+import { cardDensity } from './density';
+import { markPattern } from './SearchMarks';
 import { revealRequest } from './reveal';
 import { pickTag } from '../../components/pickers';
 import { addTag } from '../../lib/actions';
@@ -53,14 +56,25 @@ export function queryFor(r: BrowseRoute, order: { newest: boolean; seed: number 
 export default function BrowsePage({ route, active }: { route: BrowseRoute; active: boolean }) {
   const version = useStore(libraryVersion);
   const s = useStore(stats);
+  const density = useStore(cardDensity);
   const [byAdded, setByAdded] = useState(() => pref('feed.byAdded') === '1');
   const [seed, setSeed] = useState(() => { const v = Number(pref('feed.seed')); return v > 0 ? v : newSeed(); });
   const [grouped, setGrouped] = useState(() => pref('grouped') !== '0');
   useEffect(() => setPref('feed.seed', String(seed)), [seed]);
-  const feed = useAsync(async () => {
-    const q = queryFor(route, { newest: byAdded, seed: byAdded ? null : seed }, grouped);
-    return q ? core.feed(q) : [];
-  }, [route.q, route.kind, route.folder, route.view, byAdded, seed, grouped, version]);
+  const query = useMemo(() => queryFor(route, { newest: byAdded, seed: byAdded ? null : seed }, grouped),
+    [route.q, route.kind, route.folder, route.view, byAdded, seed, grouped]);
+  const feed = useAsync(() => query ? core.feed(query) : Promise.resolve([]), [query, version]);
+  const marks = useMemo(() => {
+    const pattern = markPattern(query?.terms ?? []);
+    if (!query || !pattern) return;
+    const { fields, scope, filter } = query;
+    return {
+      text: fields?.text ? pattern : undefined,
+      author: fields?.author ? pattern : undefined,
+      tag: fields?.tags ? pattern : undefined,
+      origins: filter?.origins ?? { both: [1, 2, 3], mine: [1, 3], ai: [2, 3], common: [3] }[scope ?? 'both'],
+    };
+  }, [query]);
   const posts = useMemo<Post[]>(() => {
     const items = feed.data ?? [];
     return grouped ? groupPosts(items) : items.map((m) => ({ id: m.media_id, media: [m] }));
@@ -130,6 +144,8 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
   }, [reveal, active, feed.data, posts, grouped, route.q, search]);
 
   const searching = !!route.q;
+  const [quick, setQuick] = useState<HTMLElement | null>(null);
+  const closeQuick = useCallback(() => setQuick(null), []);
   const buttons = (
     <>
       {searching && <button className="round-btn" aria-label={L('search.exit')} title={L('search.exit')} onClick={() => search('')}><X size={14} strokeWidth={2.2} /></button>}
@@ -138,11 +154,13 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
           onClick={() => { const v = !byAdded; setByAdded(v); setPref('feed.byAdded', v ? '1' : '0'); masonry.current?.scrollToTop(); }}><Clock size={14} strokeWidth={2} /></button>
         <button className={`round-btn${grouped ? ' on' : ''}`} aria-label={L('feed.groupByPost')} title={L('feed.groupByPost')}
           onClick={() => { const v = !grouped; setGrouped(v); setPref('grouped', v ? '1' : '0'); }}><Layers size={14} strokeWidth={2} /></button>
-        <button className="round-btn" aria-label={L('search.download')} title={L('search.download')} onClick={() => go({ page: 'settings', sub: 'downloads' })}><ArrowDown size={14} strokeWidth={2.2} /></button>
+        <button className={`round-btn${quick ? ' on' : ''}`} aria-label={L('search.download')} title={L('search.download')} aria-expanded={!!quick}
+          onClick={(e) => { const el = e.currentTarget; setQuick((q) => (q ? null : el)); }}><ArrowDown size={14} strokeWidth={2.2} /></button>
       </>}
       <div className={`shuffle-slot${byAdded ? ' gone' : ''}`}>
         <button className="round-btn" aria-label={L('feed.reshuffle')} title={L('feed.reshuffle')} disabled={byAdded} onClick={reshuffle}><Shuffle size={14} strokeWidth={2} /></button>
       </div>
+      {quick && <QuickDownload anchor={quick} onClose={closeQuick} />}
     </>
   );
 
@@ -159,10 +177,10 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
     <div ref={browse} className="browse-page">
       {feed.loading && !feed.data ? <div className="center"><Spinner /></div>
         : posts.length === 0 ? <div className="browse-empty">{L(route.q ? 'feed.empty.noMatch' : 'feed.empty.library')}</div>
-        : <Masonry ref={masonry} items={posts} keyOf={(p) => p.id} estimate={estimateCard} top={52 + 12} footer={end}
+        : <Masonry ref={masonry} items={posts} active={active} density={density} keyOf={(p) => p.id} estimate={estimateCard} top={52 + 12} footer={end}
           render={(p, w) => <PostCard post={p} width={w} onOpen={openPost} onContext={(post, m, e) => void context(post, m, e)}
             onTag={addTerm} onTagMenu={onTagMenu} onAddTag={(it) => void onAddTag(it)}
-            highlight={flash?.id === p.id ? flash.page : undefined} />} />}
+            marks={marks} highlight={flash?.id === p.id ? flash.page : undefined} />} />}
       {toolbar}
     </div>
   );

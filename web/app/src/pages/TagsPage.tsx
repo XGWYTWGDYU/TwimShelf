@@ -125,7 +125,6 @@ export default function TagsPage({ back }: { back?: () => void }) {
 
   function tagMenu(t: TagCount): MenuEntry[] {
     return [
-      { label: L('tags.onlyInBrowse', t.label), run: () => go({ page: 'browse', q: t.label }) },
       { label: L('tags.allToFolder', t.count), run: () => void toFolder(t) },
       'separator',
       { label: L('tags.renameOrMerge'), run: () => void renameTag(t) },
@@ -244,20 +243,14 @@ export default function TagsPage({ back }: { back?: () => void }) {
                 return (
                   <div
                     key={t.label}
-                    role="button"
-                    tabIndex={0}
                     className="tag-card"
-                    aria-label={L('tags.cell.spoken', t.label, t.count, t.user, t.ai)}
-                    onClick={() => go({ page: 'browse', q: t.label })}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go({ page: 'browse', q: t.label }); } }}
                     onContextMenu={(e) => openMenu(e, tagMenu(t))}>
                     <div className="tag-card-head">
                       <span className="tag-card-label">{t.label}</span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                         <button
                           type="button"
-                          className="icon-btn"
-                          style={{ width: 24, height: 24 }}
+                          className="icon-btn tag-card-action"
                           aria-label={L('grid.more')}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -265,7 +258,14 @@ export default function TagsPage({ back }: { back?: () => void }) {
                           }}>
                           <Ellipsis size={14} strokeWidth={2} />
                         </button>
-                        <ArrowUpRight size={13} strokeWidth={2.2} className="tag-card-arrow" />
+                        <button
+                          type="button"
+                          className="icon-btn tag-card-action tag-card-arrow"
+                          aria-label={L('tags.onlyInBrowse', t.label)}
+                          title={L('tags.onlyInBrowse', t.label)}
+                          onClick={() => go({ page: 'browse', q: t.label })}>
+                          <ArrowUpRight size={13} strokeWidth={2.2} />
+                        </button>
                       </span>
                     </div>
 

@@ -108,7 +108,7 @@ export default function ModelHubPage() {
     () => core.read<ModelInfo[]>(core.b.tl_models_installed()),
     [status.data?.finished, status.data?.repo],
   );
-  useInterval(status.reload, 1500);
+  useInterval(status.reload, status.loading ? null : 1500);
 
   async function runSearch(q: string, unc: boolean, nextToken: string | null) {
     const runId = nextToken === null ? ++generation.current : generation.current;

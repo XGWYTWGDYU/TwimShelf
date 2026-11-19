@@ -12,3 +12,11 @@
 /* the end of the feed: a full-width divider with the count (MacFeedEnd) */
 .feed-end { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 20px; color: var(--fg-2); font-size: 12px; }
 .feed-end::before, .feed-end::after { content: ""; flex: 1; height: 0.5px; background: var(--line); }
+
+@media (max-width: 540px) {
+  .browse-page .toolbar-titles { display: none; }
+  .browse-page .toolbar { padding-inline: 8px; }
+  .browse-search { width: 100%; box-sizing: border-box; gap: 3px; }
+  .browse-search .round-btn { width: 24px; height: 24px; }
+  .browse-search .shuffle-slot:not(.gone) { width: 24px; }
+}

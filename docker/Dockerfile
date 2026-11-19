@@ -45,7 +45,7 @@ LABEL org.opencontainers.image.title="TwimShelf" \
       org.opencontainers.image.source="https://github.com/XGWYTWGDYU/TwimShelf" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini && rm -rf /var/lib/apt/lists/*
 COPY --from=server /twimshelf-server /app/twimshelf-server
 # `docker exec -it <container> twimshelf passwd`
 RUN ln -s /app/twimshelf-server /usr/local/bin/twimshelf

@@ -9,6 +9,9 @@ const proxied = ['/api', '/f', '/login', '/logout', '/ext', '/gfonts'];
 export default defineConfig({
   plugins: [react()],
   base: './',
-  build: { outDir: 'dist', sourcemap: false },
+  // the CSS is not minified: Lightning CSS wrote `backdrop-filter: blur(20px)saturate(1.6)`, with
+  // no space between the functions and only the prefixed name, which Chromium rejects, so no
+  // glass was ever blurred (the server compresses what it sends anyway)
+  build: { outDir: 'dist', sourcemap: false, cssMinify: false },
   server: { proxy: Object.fromEntries(proxied.map((p) => [p, { target: server, changeOrigin: false }])) },
 });
