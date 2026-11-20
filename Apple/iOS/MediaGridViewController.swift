@@ -22,10 +22,10 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
     private var items: [FeedItem] = []
     private let grid = MediaGridView()
     private let emptyLabel = UILabel()
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
     private let reloadWork = LatestWork()
     private var generation = 0
-    private var grouped: Bool { UserDefaults.standard.object(forKey: "grouped") as? Bool ?? true }
+    private var grouped: Bool { LibraryPrefs.feedGrouped }
 
     init(title: String, filter: FeedFilter, folder: String? = nil, bin: Bool = false) {
         self.filter = filter
@@ -58,7 +58,10 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         emptyLabel.isHidden = true
         view.addSubview(emptyLabel)
         NSLayoutConstraint.activate([emptyLabel.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)])
-        observer = NotificationCenter.default.addObserver(forName: .libraryChanged, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.reload() } }
+        observers = [
+            NotificationCenter.default.addObserver(forName: .libraryChanged, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.reload() } },
+            NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.rebuild() } },
+        ]
         updateBarItems()
         reload()
         // media past the retention period leave the bin
@@ -66,7 +69,7 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
             DispatchQueue.global(qos: .userInitiated).async { if Core.expireTrash() > 0 { DispatchQueue.main.async { NotificationCenter.default.post(name: .libraryChanged, object: nil) } } }
         }
     }
-    deinit { observer.map(NotificationCenter.default.removeObserver) }
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)

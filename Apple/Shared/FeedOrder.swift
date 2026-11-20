@@ -73,6 +73,15 @@ enum LibraryPrefs {
         set { UserDefaults.standard.set(newValue, forKey: "feed.sortByAdded") }
     }
 
+    /// Group media by post in 浏览 and media grids (Settings → 浏览与播放).
+    static var feedGrouped: Bool {
+        get { UserDefaults.standard.object(forKey: "grouped") as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "grouped")
+            NotificationCenter.default.post(name: changed, object: nil)
+        }
+    }
+
     /// How many cards a row of 浏览 holds on a large screen, as a rough level for each
     /// orientation (0 fewer, 1 medium, 2 more): the exact count follows the width.
     static var cardDensityPortrait: Int {

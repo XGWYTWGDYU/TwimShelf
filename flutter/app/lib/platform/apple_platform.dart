@@ -1,4 +1,6 @@
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'os.dart';
@@ -56,7 +58,10 @@ class ApplePlatform with WidgetsBindingObserver {
   }
 
   @override
-  void didChangeMetrics() => _update();
+  void didChangeMetrics() {
+    unawaited(_update());
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_update()));
+  }
 
   Future<void> _update() async {
     try {

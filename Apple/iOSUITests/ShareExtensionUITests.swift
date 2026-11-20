@@ -15,9 +15,10 @@ final class ShareExtensionUITests: XCTestCase {
         // the totals are at the end of the list under the search field
         func totals() -> String {
             let field = app.descendants(matching: .any).matching(identifier: "search").firstMatch
+            if !field.exists { app.buttons["searchButton"].firstMatch.tap() }
             if field.waitForExistence(timeout: 5) { field.tap() }
             let t = app.descendants(matching: .any).matching(identifier: "statsLine").firstMatch.label
-            let cancel = app.descendants(matching: .any).matching(identifier: "searchCancel").firstMatch
+            let cancel = app.descendants(matching: .any).matching(identifier: "searchExit").firstMatch
             if cancel.exists { cancel.tap() }
             return t
         }

@@ -16,7 +16,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private var terms: [String] { query.terms }
     /// Settings → 搜索 → 语义模糊搜索.
     private var fuzzy: Bool { LibraryPrefs.fuzzySearch }
-    private var grouped = UserDefaults.standard.object(forKey: "grouped") as? Bool ?? true
+    private var grouped: Bool { LibraryPrefs.feedGrouped }
     /// Random order from the system RNG; ranks survive reloads until the next reshuffle.
     private var order = FeedOrder()
     /// "Only this author" / "only this tag" filters set from the long-press menus.
@@ -24,24 +24,32 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     // Views
     private var collectionView: UICollectionView!
+    private let topFrostView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
+    private var topFrostHeight: NSLayoutConstraint!
+    private var scrolledUnder = false
     private let searchChrome = UIView()
-    /// iPad, landscape, with the floating tab bar: while nothing is searched, the search bar is
-    /// folded into a magnifier (and a ⋯ menu for its buttons) at the end of the tab bar's row, so
-    /// the cards start right under the tab bar; the bar comes back while searching. Here: the
-    /// navigation item of 浏览's page while that row has room (nil elsewhere), and whether it is
-    /// folded now.
+    private let browseChrome = UIView()
+    private let browseRow = UIStackView()
+    private let browseActions = UIStackView()
+    private weak var landscapeActionsHost: UIView?
+    private let browseTitle = UILabel()
+    private let browsePill = UIView()
+    private let browseDownloadButton = UIButton(type: .system)
+    private let browseSortButton = UIButton(type: .system)
+    private let browseSearchButton = UIButton(type: .system)
+    /// The controls share the native tab bar row when there is room.
     private weak var foldItem: UINavigationItem?
+    private var lastFoldedRowBottom: CGFloat?
+    private var sidebarTransitionTopInset: CGFloat?
+    private var updatingInsets = false
+    private var showsBrowseTitle = true
     private var searchFolded = false
-    /// The bar is fading out on its way back to the magnifier.
     private var folding = false
-    /// The magnifier was tapped: the bar stays open until this search ends.
     private var unfolded = false
+    private var chromeHiddenForTransition = false
     private let header = FollowedView()
     /// The filter chips (仅 #标签, 文件夹…) float on their own under the search bar, not inside it.
     private let searchField = UISearchTextField()
-    private let downloadButton = RoundSearchButton(symbol: "arrow.down", label: L("common.downloadPosts"), identifier: "quickDownload")
-    /// 按添加时间排序: with the quick download button, at the same times.
-    private let sortButton = RoundSearchButton(symbol: "clock", label: L("feed.sortByAdded"), identifier: "sortByAdded")
     /// The round × beside the search bar (not inside it): ends the search.
     private let exitButton = UIButton(type: .system)
     /// Exports what the search shows; beside the ×, shown while a search or filter is in effect.
@@ -113,12 +121,21 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             }
         }
         NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateSearchIcon(); self?.reload(); if self?.searching == true { self?.rebuildSuggestions() } }
+            MainActor.assumeIsolated {
+                self?.updateSearchIcon()
+                self?.updateSortButtons()
+                self?.updateShuffleControl()
+                self?.reload()
+                if self?.searching == true { self?.rebuildSuggestions() }
+            }
         }
         buildCollection()
+        buildTopFrost()
         // a new text size: every card's text is measured again
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in self.masonry.invalidateHeights() }
         buildHeader()
+        buildBrowseChrome()
+        syncSearchFold(animated: false)
         activityPanel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(activityPanel)
         NSLayoutConstraint.activate([
@@ -188,48 +205,101 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        restoreSearchToContent()
+        hostLandscapeActions(in: nil)
+        restoreSearchToContent(showsTitle: false)
         detachInline()   // (not just paused: a paused video layer can go black)
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutSearchChrome()
-        // the settings panel opens over the cards: the grid starts under the bar
-        // (folded, the bar is out of sight: the cards start under the tab bar)
-        let last: UIView? = searchFolded ? nil : searchRow
-        // folded: the navigation bar that holds the magnifier adds its own height to the safe area,
-        // though it shares the tab bar's row: start under that row, not under the safe area
-        let top = last.map { max(0, $0.convert($0.bounds, to: view).maxY + 12 - view.safeAreaInsets.top) }
-            ?? ((foldedRowBottom ?? view.safeAreaInsets.top) + 12 - view.safeAreaInsets.top)
-        suggestions.topInset = max(view.safeAreaInsets.top, header.convert(header.bounds, to: view).maxY) + 8
+        let safe = view.safeAreaInsets
+        if searchFolded, foldItem != nil, let rowBottom = foldedRowBottom {
+            lastFoldedRowBottom = rowBottom
+        }
+        let defaultContentBottom = safe.top + 54
+        let bottom: CGFloat
+        let landscapeRowBottom = landscapeActionsHost.flatMap { host -> CGFloat? in
+            guard let window = host.window else { return nil }
+            return window.convert(window.safeAreaLayoutGuide.layoutFrame, to: view).minY + Self.landscapeActionTop + Self.browseActionHeight
+        }
+        if let landscapeRowBottom {
+            bottom = landscapeRowBottom
+        } else if foldItem != nil {
+            if searchFolded || searching || isUnfiltered {
+                bottom = (searchFolded ? foldedRowBottom : nil) ?? lastFoldedRowBottom ?? safe.top
+            } else {
+                bottom = max(defaultContentBottom, header.convert(header.bounds, to: view).maxY)
+            }
+        } else if !searchFolded && !searching && !isUnfiltered {
+            bottom = max(defaultContentBottom, searchRow.convert(searchRow.bounds, to: view).maxY)
+        } else {
+            bottom = defaultContentBottom
+        }
+        let top = sidebarTransitionTopInset ?? (bottom + 20)
+        if let landscapeRowBottom {
+            topFrostHeight.constant = landscapeRowBottom + 6
+        } else {
+            topFrostHeight.constant = (foldItem != nil && searchFolded)
+            ? ((foldedRowBottom ?? lastFoldedRowBottom ?? safe.top) + 6)
+            : max(browseChrome.frame.maxY, (!searchFolded && !searching && !isUnfiltered) ? header.convert(header.bounds, to: view).maxY : 0) + 6
+        }
+        suggestions.topInset = landscapeActionsHost != nil ? 0 : max(view.safeAreaInsets.top, header.convert(header.bounds, to: view).maxY) + 8
         let keyboardTop = view.keyboardLayoutGuide.layoutFrame.minY
-        let below = max(view.bounds.maxY - keyboardTop, view.safeAreaInsets.bottom)
+        let below = landscapeActionsHost != nil ? 0 : max(view.bounds.maxY - keyboardTop, view.safeAreaInsets.bottom)
         if suggestions.table.contentInset.bottom != below {
             suggestions.table.contentInset.bottom = below
             suggestions.table.verticalScrollIndicatorInsets.bottom = below
         }
-        let insets = UIEdgeInsets(top: top + 8, left: 0, bottom: 12, right: 0)
-        if collectionView.contentInset != insets { collectionView.contentInset = insets; collectionView.verticalScrollIndicatorInsets = insets }
-        // resting at the top: stay at the top of the new space (the bar folded or came back)
-        let topOffset = -collectionView.adjustedContentInset.top
-        if restingAtTop, !collectionView.isTracking, !collectionView.isDecelerating, abs(collectionView.contentOffset.y - topOffset) > 0.5 {
-            collectionView.contentOffset.y = topOffset
+        // Apply the safe area and the chrome as one inset. UIKit must not add the navigation
+        // bar's safe area again during the switch back to the shared tab bar row.
+        let insets = UIEdgeInsets(top: top, left: safe.left, bottom: safe.bottom + 12, right: safe.right)
+        let oldInsets = collectionView.contentInset
+        let oldOffset = collectionView.contentOffset
+        let changed = oldInsets != insets
+        if changed {
+            updatingInsets = true
+            collectionView.contentInset = insets
+            collectionView.verticalScrollIndicatorInsets = insets
+            if !collectionView.isTracking, !collectionView.isDecelerating {
+                let y: CGFloat
+                if restingAtTop {
+                    y = -insets.top
+                } else if abs(insets.top - oldInsets.top) > 0.5 {
+                    y = max(-insets.top, oldOffset.y + oldInsets.top - insets.top)
+                } else {
+                    y = max(oldOffset.y, -insets.top)
+                }
+                let x = abs(insets.left - oldInsets.left) > 0.5 ? -insets.left : oldOffset.x
+                if abs(collectionView.contentOffset.y - y) > 0.5 || abs(collectionView.contentOffset.x - x) > 0.5 {
+                    collectionView.contentOffset = CGPoint(x: x, y: y)
+                }
+            }
+            updatingInsets = false
         }
+        updateTopFrost(animated: false)
     }
 
-    /// Back to the bar above the cards (another tab, a portrait or narrow window, the sidebar).
-    func restoreSearchToContent() { setSearchFoldable(in: nil) }
+    var usesSharedNavigationBar: Bool { searchFolded && foldItem != nil }
 
-    /// The row beside the floating tab bar has room (`item`: 浏览's navigation item) or not (nil).
-    func setSearchFoldable(in item: UINavigationItem?) {
+    func restoreSearchToContent(showsTitle: Bool = true) { setSearchFoldable(in: nil, showsTitle: showsTitle) }
+
+    func setSearchFoldable(in item: UINavigationItem?, showsTitle: Bool = false) {
         guard isViewLoaded else { return }
+        let layoutChanged = foldItem !== item || showsBrowseTitle != showsTitle
         if foldItem !== item {
             foldItem?.rightBarButtonItems = nil
             foldItem = item
-            if item == nil { unfolded = false }
+            if let item {
+                let a = UINavigationBarAppearance()
+                a.configureWithTransparentBackground()
+                item.standardAppearance = a
+                item.scrollEdgeAppearance = a
+                item.compactAppearance = a
+            }
         }
-        syncSearchFold(animated: false)
+        showsBrowseTitle = showsTitle
+        syncSearchFold(animated: false, layoutChanged: layoutChanged)
     }
 
     private lazy var foldSearchItem: UIBarButtonItem = {
@@ -238,10 +308,17 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         b.accessibilityIdentifier = "searchButton"
         return b
     }()
-    private lazy var foldMoreItem: UIBarButtonItem = {
-        let b = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: nil)
-        b.accessibilityLabel = L("sidebar.other")
-        b.accessibilityIdentifier = "browseMore"
+    private lazy var foldSortItem: UIBarButtonItem = {
+        let b = UIBarButtonItem(image: UIImage(systemName: "clock"), primaryAction: UIAction { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) })
+        b.accessibilityLabel = L("feed.sortByAdded")
+        b.accessibilityIdentifier = "sortByAdded"
+        b.isSelected = LibraryPrefs.feedByAdded
+        return b
+    }()
+    private lazy var foldDownloadItem: UIBarButtonItem = {
+        let b = UIBarButtonItem(image: UIImage(systemName: "arrow.down"), primaryAction: UIAction { [weak self] _ in self?.showQuickDownload() })
+        b.accessibilityLabel = L("common.downloadPosts")
+        b.accessibilityIdentifier = "quickDownload"
         return b
     }()
 
@@ -252,86 +329,106 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         searchField.becomeFirstResponder()
     }
 
-    /// Folds or unfolds as the state asks: folded while the row has room and nothing is searched,
-    /// typed or filtered (a search in effect keeps its bar, so its capsules stay in sight).
-    private func syncSearchFold(animated: Bool) {
+    /// The search stays visible while editing or while it still has a query.
+    private func syncSearchFold(animated: Bool, layoutChanged: Bool = false) {
+        guard !folding else { return }
         let idle = !searching && !searchField.isFirstResponder && searchField.tokens.isEmpty && (searchField.text ?? "").isEmpty && currentFilter.isEmpty
-        let folded = foldItem != nil && !unfolded && idle
-        let nav = (parent as? FeedHost)?.navigationController
-        // Folding back to the magnifier (the search closed): the bar fades where it is, together
-        // with the list, and only then gives its place back. Moving it while the navigation bar
-        // returns would replay the opening animation backwards.
+        let folded = !unfolded && idle
         if folded, !searchFolded, animated {
-            guard !folding else { return }
             folding = true
             searchChrome.isUserInteractionEnabled = false
+            // Keep the closing field, x, and export button in place until their fade ends.
             UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
                 self.searchChrome.alpha = 0
             } completion: { _ in
                 self.folding = false
-                self.syncSearchFold(animated: false)
-                // (searched again meanwhile: it stays open)
-                if !self.searchFolded { self.searchChrome.alpha = 1; self.searchChrome.isUserInteractionEnabled = true }
+                UIView.performWithoutAnimation {
+                    self.syncSearchFold(animated: false, layoutChanged: true)
+                    self.updateExitButton()
+                }
             }
             return
         }
-        guard !folding else { return }
-        if folded {
-            foldMoreItem.menu = UIMenu(children: browseActions())
-            if foldItem?.rightBarButtonItems?.count != 2 { foldItem?.rightBarButtonItems = [foldSearchItem, foldMoreItem] }
-            nav?.setNavigationBarHidden(false, animated: false)
-        } else if foldItem != nil || searchFolded {
-            foldItem?.rightBarButtonItems = nil
-            nav?.setNavigationBarHidden(true, animated: false)
-        }
-        guard folded != searchFolded else { return }
+
+        let changed = folded != searchFolded
         searchFolded = folded
-        searchChrome.isUserInteractionEnabled = !folded
-        searchChrome.accessibilityElementsHidden = folded
+        let sharedRow = folded && foldItem != nil
+        let nav = (parent as? FeedHost)?.navigationController
+        let navChanged = nav.map { $0.isNavigationBarHidden == sharedRow } ?? false
+        if sharedRow && landscapeActionsHost == nil {
+            nav?.navigationBar.tintAdjustmentMode = .normal
+            if #available(iOS 26.0, *) {
+                if foldItem?.rightBarButtonItems?.count != 4 {
+                    foldItem?.rightBarButtonItems = [foldSearchItem, .fixedSpace(), foldSortItem, foldDownloadItem]
+                }
+            } else if foldItem?.rightBarButtonItems?.count != 3 {
+                foldItem?.rightBarButtonItems = [foldSearchItem, foldSortItem, foldDownloadItem]
+            }
+        } else {
+            foldItem?.rightBarButtonItems = nil
+            nav?.navigationBar.tintAdjustmentMode = .automatic
+        }
+        if navChanged { nav?.setNavigationBarHidden(!sharedRow, animated: false) }
+        guard changed || layoutChanged || navChanged else { return }
+        if folded { updateSortButtons() }
         let change = {
-            self.searchChrome.alpha = folded ? 0 : 1
+            self.updateChromeVisibility()
             self.layoutSearchChrome()
+            if navChanged { nav?.view.layoutIfNeeded() }
             self.view.setNeedsLayout()
             self.view.layoutIfNeeded()
         }
-        if animated {
+        if animated, changed {
             UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.88, initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: change)
         } else { UIView.performWithoutAnimation(change) }
     }
 
+    private func updateChromeVisibility() {
+        let showSearch = !chromeHiddenForTransition && !searchFolded && !folding
+        let showBrowse = !chromeHiddenForTransition && searchFolded && foldItem == nil
+        searchChrome.alpha = showSearch ? 1 : 0
+        searchChrome.isUserInteractionEnabled = showSearch
+        searchChrome.accessibilityElementsHidden = !showSearch
+        browseActions.isHidden = !searchFolded
+        browseChrome.alpha = showBrowse ? 1 : 0
+        browseChrome.isUserInteractionEnabled = showBrowse
+        browseChrome.accessibilityElementsHidden = !showBrowse
+        browseTitle.isHidden = !showsBrowseTitle || sidebarTransitionTopInset != nil
+    }
+
     func hideSearchDuringTransition(_ hidden: Bool) {
-        // Fade, keeping the layout footprint: removing the view makes UIKit jump between layouts
-        // before the sidebar's animation has finished. (A folded bar stays out of sight.)
-        searchChrome.isUserInteractionEnabled = !hidden && !searchFolded
-        searchChrome.accessibilityElementsHidden = hidden || searchFolded
+        chromeHiddenForTransition = hidden
         UIView.animate(withDuration: hidden ? 0.12 : 0.2,
                        delay: hidden ? 0 : 0.03,
                        options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut]) {
-            self.searchChrome.alpha = hidden || self.searchFolded ? 0 : 1
+            self.updateChromeVisibility()
         }
     }
 
-    /// 下载帖子, 按添加时间, 按帖子 (and export / exit while a search is in effect): the folded
-    /// bar's ⋯ menu.
-    private func browseActions() -> [UIMenuElement] {
-        [
-            UIAction(title: L("common.downloadPosts"), image: UIImage(systemName: "arrow.down")) { [weak self] _ in self?.showQuickDownload() },
-            UIAction(title: L("feed.sortByAdded"), image: UIImage(systemName: "clock"), state: LibraryPrefs.feedByAdded ? .on : .off) { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) },
-            UIAction(title: groupToggle.accessibilityLabel ?? L("common.posts"), image: UIImage(systemName: "square.stack"), state: grouped ? .on : .off) { [weak self] _ in
-                guard let self else { return }
-                self.groupToggle.isOn.toggle()
-                self.groupChanged()
-            },
-        ]
+    func setSidebarTransitioning(_ transitioning: Bool) {
+        guard isViewLoaded else { return }
+        // UIKit can reserve space for the incoming tab bar before the sidebar header is gone.
+        // Keep the grid's top inset until the new header and safe area are laid out.
+        sidebarTransitionTopInset = transitioning ? collectionView.contentInset.top : nil
+        updateChromeVisibility()
+        view.setNeedsLayout()
     }
 
-    private func updateSearchActions() {
-        let hasTokens = !searchField.tokens.isEmpty || !(searchField.text ?? "").isEmpty
-        let hidden = searching || hasTokens || !currentFilter.isEmpty
-        downloadButton.isHidden = hidden
-        sortButton.isHidden = hidden
-        groupToggle.isHidden = hidden
-        if searchFolded { foldMoreItem.menu = UIMenu(children: browseActions()) }
+    private func updateSortButtons() {
+        let on = LibraryPrefs.feedByAdded
+        foldSortItem.isSelected = on
+        var config: UIButton.Configuration = on ? .filled() : .plain()
+        config.image = UIImage(systemName: "clock")
+        config.preferredSymbolConfigurationForImage = .init(pointSize: 17, weight: .medium)
+        config.cornerStyle = .capsule
+        if on {
+            config.baseBackgroundColor = .tintColor
+            config.baseForegroundColor = .white
+        } else {
+            config.baseForegroundColor = .label
+        }
+        browseSortButton.configuration = config
+        browseSortButton.isSelected = on
     }
 
     #if DEBUG
@@ -340,9 +437,30 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     private func layoutSearchChrome() {
         let safe = cornerGuide.layoutFrame
-        searchChrome.frame = CGRect(x: safe.minX + 10, y: view.safeAreaInsets.top + 6,
+        browseChrome.frame = CGRect(x: safe.minX + 10, y: view.safeAreaInsets.top + 6,
                                     width: max(0, safe.width - 20), height: 56)
-        // folded: the chips (and the cards) start right under the tab bar
+        guard let host = landscapeActionsHost, let window = host.window else {
+            searchChrome.frame = browseChrome.frame
+            suggestions.frame = view.bounds
+            return
+        }
+        let area = window.convert(window.safeAreaLayoutGuide.layoutFrame, to: host)
+        let right = area.maxX - 16
+        let tabRight = tabBarController?.tabBar.items?.compactMap { $0.frame(in: host) }
+            .filter { !$0.isEmpty && $0.intersects(area) }.map(\.maxX).max()
+        let left = showsBrowseTitle ? view.convert(safe, to: host).minX + 16
+            : max(area.midX + 154, tabRight ?? 0) + 32
+        let belowTabs = right - left < 230
+        let width = searchFolded ? Self.browseActionHeight
+            : min(400, max(0, right - (belowTabs ? area.minX + 16 : left)))
+        let y = area.minY + Self.landscapeActionTop - 4 + (belowTabs && !searchFolded ? 64 : 0)
+        searchChrome.frame = CGRect(x: right - width, y: y, width: width, height: 56)
+        let listTop = searchChrome.frame.maxY + 6
+        let keyboard = view.convert(view.keyboardLayoutGuide.layoutFrame, to: host)
+        let limit = min(area.maxY, keyboard.minY)
+        suggestions.frame = CGRect(x: right - width, y: listTop, width: width,
+                                   height: min(380, max(0, limit - listTop - 12)))
+
     }
 
     /// Folded: the bottom of the row the tab bar and the magnifier share.
@@ -372,8 +490,11 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         }
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        collectionView.accessibilityIdentifier = "browseCards"
         collectionView.backgroundColor = .clear
-        collectionView.contentInsetAdjustmentBehavior = .always
+        collectionView.contentInsetAdjustmentBehavior = .never
+        collectionView.automaticallyAdjustsScrollIndicatorInsets = false
+        if #available(iOS 26.0, *) { collectionView.topEdgeEffect.isHidden = true }
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.keyboardDismissMode = .onDrag
@@ -396,6 +517,34 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, multiplier: 0.8),
         ])
+    }
+
+    private func buildTopFrost() {
+        topFrostView.isUserInteractionEnabled = false
+        topFrostView.alpha = 0
+        topFrostView.accessibilityIdentifier = "topFrost"
+        topFrostView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(topFrostView)
+        topFrostHeight = topFrostView.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            topFrostView.topAnchor.constraint(equalTo: view.topAnchor),
+            topFrostView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topFrostView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topFrostHeight,
+        ])
+    }
+
+    private func updateTopFrost(animated: Bool = true) {
+        let under = !allItems.isEmpty && collectionView.contentOffset.y > -collectionView.adjustedContentInset.top + 2
+        guard under != scrolledUnder else { return }
+        scrolledUnder = under
+        if animated {
+            UIView.animate(withDuration: 0.18, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                self.topFrostView.alpha = under ? 1 : 0
+            }
+        } else {
+            topFrostView.alpha = under ? 1 : 0
+        }
     }
 
     private func glass(_ host: UIView, corner: CGFloat) {
@@ -460,14 +609,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         searchChrome.addSubview(exportButton)
 
         searchRow.addArrangedSubview(searchField)
-        downloadButton.addAction(UIAction { [weak self] _ in self?.showQuickDownload() }, for: .touchUpInside)
-        sortButton.addAction(UIAction { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) }, for: .touchUpInside)
-        updateSortButton()
-        groupToggle.isOn = grouped
-        groupToggle.addAction(UIAction { [weak self] _ in UISelectionFeedbackGenerator().selectionChanged(); self?.groupChanged() }, for: .touchUpInside)
-        searchRow.addArrangedSubview(sortButton)
-        searchRow.addArrangedSubview(groupToggle)
-        searchRow.addArrangedSubview(downloadButton)
         searchRow.spacing = 6
         searchRow.alignment = .center
 
@@ -501,18 +642,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
         // the list under the field while searching: it covers 浏览 (the field floats
         // above it) and ends at the keyboard
-        suggestions.translatesAutoresizingMaskIntoConstraints = false
         suggestions.isHidden = true
         suggestions.alpha = 0
         view.addSubview(suggestions)
-        NSLayoutConstraint.activate([
-            suggestions.topAnchor.constraint(equalTo: view.topAnchor),
-            suggestions.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            suggestions.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            // the list goes on behind the keyboard (its rounded corners and the space beside
-            // them show the list, not 浏览); its rows end above the keyboard
-            suggestions.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
         view.keyboardLayoutGuide.usesBottomSafeArea = false
         // an invisible view on the keyboard's top edge: the keyboard moving lays the view out
         // again, which updates where the list's rows end
@@ -523,10 +655,113 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         NSLayoutConstraint.activate([probe.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
                                      probe.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                                      probe.widthAnchor.constraint(equalToConstant: 1), probe.heightAnchor.constraint(equalToConstant: 1)])
-        if searchChrome.superview === view { view.bringSubviewToFront(searchChrome) }
+        searchChrome.superview?.bringSubviewToFront(searchChrome)
         searchChrome.bringSubviewToFront(exitButton)
         searchChrome.bringSubviewToFront(exportButton)
         updatePlaceholder()
+    }
+
+    private static let landscapeActionTop: CGFloat = 4
+    private static let browseActionHeight: CGFloat = 48
+
+    private func buildBrowseChrome() {
+        view.addSubview(browseChrome)
+        browseTitle.text = L("place.browse")
+        browseTitle.font = UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: .systemFont(ofSize: 34, weight: .bold))
+        browseTitle.adjustsFontForContentSizeCategory = true
+        browseTitle.adjustsFontSizeToFitWidth = true
+        browseTitle.minimumScaleFactor = 0.6
+        browseTitle.accessibilityIdentifier = "browseTitle"
+        browseTitle.accessibilityTraits = .header
+        browseTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        glass(browsePill, corner: 24)
+        browsePill.translatesAutoresizingMaskIntoConstraints = false
+        for (button, symbol, label, identifier) in [
+            (browseDownloadButton, "arrow.down", L("common.downloadPosts"), "quickDownload"),
+            (browseSortButton, "clock", L("feed.sortByAdded"), "sortByAdded"),
+        ] {
+            var config = UIButton.Configuration.plain()
+            config.image = UIImage(systemName: symbol)
+            config.preferredSymbolConfigurationForImage = .init(pointSize: 17, weight: .medium)
+            config.cornerStyle = .capsule
+            config.baseForegroundColor = .label
+            button.configuration = config
+            button.accessibilityLabel = label
+            button.accessibilityIdentifier = identifier
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: 44),
+                button.heightAnchor.constraint(equalToConstant: 40),
+            ])
+        }
+        var searchConfig: UIButton.Configuration
+        if #available(iOS 26.0, *) { searchConfig = .glass() } else { searchConfig = .gray() }
+        searchConfig.image = UIImage(systemName: "magnifyingglass")
+        searchConfig.cornerStyle = .capsule
+        searchConfig.baseForegroundColor = .label
+        browseSearchButton.configuration = searchConfig
+        browseSearchButton.accessibilityLabel = L("search.placeholder")
+        browseSearchButton.accessibilityIdentifier = "searchButton"
+        NSLayoutConstraint.activate([
+            browseSearchButton.widthAnchor.constraint(equalToConstant: 48),
+            browseSearchButton.heightAnchor.constraint(equalToConstant: Self.browseActionHeight),
+        ])
+        browseDownloadButton.addAction(UIAction { [weak self] _ in self?.showQuickDownload() }, for: .touchUpInside)
+        browseSortButton.tintAdjustmentMode = .normal
+        browseSortButton.addAction(UIAction { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) }, for: .touchUpInside)
+        browseSearchButton.addAction(UIAction { [weak self] _ in self?.unfoldSearch() }, for: .touchUpInside)
+        updateSortButtons()
+        let pillRow = UIStackView(arrangedSubviews: [browseDownloadButton, browseSortButton])
+        pillRow.spacing = 2
+        pillRow.alignment = .center
+        pillRow.translatesAutoresizingMaskIntoConstraints = false
+        browsePill.addSubview(pillRow)
+        NSLayoutConstraint.activate([
+            browsePill.heightAnchor.constraint(equalToConstant: 48),
+            pillRow.topAnchor.constraint(equalTo: browsePill.topAnchor, constant: 4),
+            pillRow.bottomAnchor.constraint(equalTo: browsePill.bottomAnchor, constant: -4),
+            pillRow.leadingAnchor.constraint(equalTo: browsePill.leadingAnchor, constant: 6),
+            pillRow.trailingAnchor.constraint(equalTo: browsePill.trailingAnchor, constant: -6),
+        ])
+        browseActions.spacing = 8
+        browseActions.alignment = .center
+        browseActions.addArrangedSubview(browsePill)
+        browseActions.addArrangedSubview(browseSearchButton)
+        let row = browseRow
+        [browseTitle, UIView(), browseActions].forEach(row.addArrangedSubview)
+        row.spacing = 8
+        row.alignment = .center
+        row.translatesAutoresizingMaskIntoConstraints = false
+        browseChrome.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: browseChrome.leadingAnchor, constant: 8),
+            row.trailingAnchor.constraint(equalTo: browseChrome.trailingAnchor),
+            row.centerYAnchor.constraint(equalTo: browseChrome.centerYAnchor),
+        ])
+    }
+
+    func hostLandscapeActions(in host: UIView?) {
+        guard landscapeActionsHost !== host else { return }
+        browseActions.removeFromSuperview()
+        let focused = searchField.isFirstResponder
+        landscapeActionsHost = host
+        let searchHost = host ?? view!
+        searchHost.addSubview(suggestions)
+        searchHost.addSubview(searchChrome)
+        suggestions.isDropdown = host != nil
+        suggestions.layer.cornerRadius = host == nil ? 0 : 18
+        suggestions.clipsToBounds = host != nil
+        if focused { searchField.becomeFirstResponder() }
+        if let host, let window = host.window {
+            host.addSubview(browseActions)
+            browseActions.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                browseActions.trailingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+                browseActions.topAnchor.constraint(equalTo: window.safeAreaLayoutGuide.topAnchor, constant: Self.landscapeActionTop),
+            ])
+        } else {
+            browseRow.addArrangedSubview(browseActions)
+        }
+        syncSearchFold(animated: false, layoutChanged: true)
     }
 
     /// A rail or sidebar came over the side, or the window turned: the cards fit the new room.
@@ -535,7 +770,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         masonry.invalidateLayout()
     }
 
-    private let groupToggle = RoundSearchButton(symbol: "square.stack.3d.up", label: L("feed.groupByPost"), identifier: "groupToggle", onValue: L("feed.groupOn"), offValue: L("feed.groupOff"))
     /// Another place brings 浏览 to the front (a tag chosen on the tags page…).
     var onShowBrowse: (() -> Void)?
 
@@ -680,23 +914,29 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             return
         }
         if let r = restore {
+            updatingInsets = true
             collectionView.reloadData()
             collectionView.layoutIfNeeded()
-            collectionView.setContentOffset(CGPoint(x: 0, y: r.y - collectionView.adjustedContentInset.top), animated: false)
+            collectionView.setContentOffset(CGPoint(x: -collectionView.adjustedContentInset.left, y: r.y - collectionView.adjustedContentInset.top), animated: false)
+            updatingInsets = false
             restingAtTop = r.y <= 1
+            updateTopFrost(animated: false)
             emptyLabel.isHidden = !allItems.isEmpty
             DispatchQueue.main.async { self.updateInlinePlayback() }
             return
         }
         let offset = collectionView.contentOffset
+        updatingInsets = true
         collectionView.reloadData()
         if keepPosition {
             collectionView.layoutIfNeeded()
             collectionView.setContentOffset(offset, animated: false)
         } else {
-            collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: false)
+            collectionView.setContentOffset(CGPoint(x: -collectionView.adjustedContentInset.left, y: -collectionView.adjustedContentInset.top), animated: false)
             restingAtTop = true
         }
+        updatingInsets = false
+        updateTopFrost(animated: false)
         if allItems.isEmpty {
             emptyLabel.text = isUnfiltered ? L("feed.empty.library") : L("feed.empty.noMatch")
         }
@@ -776,6 +1016,11 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     func textFieldShouldReturn(_ tf: UITextField) -> Bool {
         commitTypedText()
+        if landscapeActionsHost != nil {
+            tf.resignFirstResponder()
+            rebuildSuggestions()
+            return false
+        }
         exitSearch()
         return true
     }
@@ -801,9 +1046,11 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private func clearSearch() {
         searchField.tokens = []
         searchField.text = nil
-        applyTokens()
-        exitSearch()
-        updateExitButton()
+        if searching {
+            exitSearch()
+        } else {
+            applyTokens()
+        }
     }
 
     /// A tag was renamed: the search follows the new name.
@@ -842,8 +1089,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         view.layoutIfNeeded()   // the field's final place (it may have just unfolded) before the list is placed under it
         suggestions.scrollToTop()
         suggestions.isHidden = false
-        view.bringSubviewToFront(suggestions)
-        if searchChrome.superview === view { view.bringSubviewToFront(searchChrome) }
+        suggestions.superview?.bringSubviewToFront(suggestions)
+        searchChrome.superview?.bringSubviewToFront(searchChrome)
         searchChrome.bringSubviewToFront(exitButton)
         searchChrome.bringSubviewToFront(exportButton)
         UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { self.suggestions.alpha = 1 }
@@ -939,9 +1186,10 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// The capsules decide the search: conditions, then the texts (all must match).
     private func applyTokens() {
         let q = TokenQuery(keys: searchField.tokens.compactMap { $0.representedObject as? String })
-        updateExitButton()
-        guard q != query else { return }
+        let changed = q != query
         query = q
+        updateExitButton()
+        guard changed else { return }
         updateSearchIcon()
         reload()
     }
@@ -951,10 +1199,10 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private func updateExitButton() {
         let words = searchField.tokens.compactMap { ($0.representedObject as? String).map(tokenTitle) } + [searchField.text ?? ""].filter { !$0.isEmpty }
         syncSearchFold(animated: true)
+        guard !folding else { return }
         let show = searching || !words.isEmpty
         // exporting is offered while a search or a filter is in effect (not while only typing begins)
         let showExport = !words.isEmpty || !currentFilter.isEmpty
-        updateSearchActions()
         // These buttons are siblings of the header, so hiding the header cannot hide them.
         exitButton.isHidden = !show
         exportButton.isHidden = !showExport
@@ -1010,6 +1258,14 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// A real popover on the iPhone too (not a full sheet).
     func adaptivePresentationStyle(for controller: UIPresentationController, traitCollection: UITraitCollection) -> UIModalPresentationStyle { .none }
 
+    func popoverPresentationController(_ controller: UIPopoverPresentationController,
+                                       willRepositionPopoverTo rect: UnsafeMutablePointer<CGRect>,
+                                       in sourceView: AutoreleasingUnsafeMutablePointer<UIView>) {
+        guard controller.sourceView === view, let frame = foldDownloadItem.frame(in: view), !frame.isEmpty else { return }
+        sourceView.pointee = view
+        rect.pointee = frame
+    }
+
     private func updatePlaceholder() {
         searchField.placeholder = L("search.placeholder")
     }
@@ -1058,19 +1314,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         rebuildSuggestions()
     }
 
-    private func groupChanged() {
-        grouped.toggle()
-        groupToggle.isOn = grouped
-        UserDefaults.standard.set(grouped, forKey: "grouped")
-        rebuildEntries()
-        masonry.invalidateHeights()
-        collectionView.reloadData()
-        DispatchQueue.main.async { self.updateInlinePlayback() }
-        #if DEBUG
-        debugCheckCards()
-        #endif
-    }
-
     /// The links typed into the quick download card; they stay when it closes without downloading.
     private let quickDownloadDraft = QuickDownloadDraft()
 
@@ -1110,9 +1353,20 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         // The system popover supplies one continuous glass surface, including its arrow.
         host.view.backgroundColor = .clear
         if let pop = host.popoverPresentationController {
-            let anchor = downloadButton
-            pop.sourceView = anchor
-            pop.sourceRect = anchor.bounds
+            if searchFolded, foldItem != nil, landscapeActionsHost == nil {
+                if let frame = foldDownloadItem.frame(in: view), !frame.isEmpty {
+                    // In the shared tab bar row UIKit hosts the item outside the feed's navigation bar.
+                    // Anchor in feed coordinates to keep the popover below the other controls.
+                    pop.sourceView = view
+                    pop.sourceRect = frame
+                } else {
+                    pop.sourceItem = foldDownloadItem
+                }
+            } else {
+                let anchor = searchFolded ? browseDownloadButton : searchChrome
+                pop.sourceView = anchor
+                pop.sourceRect = searchFolded ? anchor.bounds : CGRect(x: anchor.bounds.maxX - 22, y: 0, width: 22, height: anchor.bounds.height)
+            }
             pop.permittedArrowDirections = [.up, .down]
             pop.delegate = self
         }
@@ -1143,13 +1397,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: w)
     }
 
-    private func updateSortButton() {
-        sortButton.isOn = LibraryPrefs.feedByAdded
-    }
-
     private func setByAdded(_ on: Bool) {
         LibraryPrefs.feedByAdded = on
-        updateSortButton()
+        updateSortButtons()
         updateShuffleControl()
         savedBrowse = nil   // a new order: the old position means nothing
         reload()
@@ -1235,11 +1485,18 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private var restingAtTop = true
 
     func scrollViewDidScroll(_ sv: UIScrollView) {
-        if sv === collectionView, sv.isTracking || sv.isDecelerating {
-            restingAtTop = sv.contentOffset.y <= -sv.adjustedContentInset.top + 1
-        }
         guard sv === collectionView else { return }
+        if !updatingInsets {
+            restingAtTop = sv.contentOffset.y <= -sv.adjustedContentInset.top + 1
+            updateTopFrost()
+        }
         scheduleInlineUpdate()
+    }
+
+    func scrollViewDidScrollToTop(_ sv: UIScrollView) {
+        guard sv === collectionView else { return }
+        restingAtTop = true
+        updateTopFrost()
     }
 
     func feedCellPageDidChange(_ cell: FeedCell) {
@@ -1733,53 +1990,6 @@ final class FollowedView: UIView {
 /// The 浏览 grid: cards as tall as their content in columns (as many as the width allows, each
 /// card in the shortest column), and the footer at the end.
 /// The placement is `FeedMasonry` (shared with the Mac).
-/// A button of the search row: a round plate, filled while on (as in Control Center). The symbol
-/// stays the same in both states and is never a filled or circled one: inside a round plate those
-/// read as a circle in a circle.
-final class RoundSearchButton: UIControl {
-    private let icon = UIImageView()
-    private let circle = UIView()
-    private let onValue: String?, offValue: String?
-
-    var isOn = false { didSet { update() } }
-
-    init(symbol: String, label: String, identifier: String, onValue: String? = nil, offValue: String? = nil) {
-        self.onValue = onValue
-        self.offValue = offValue
-        super.init(frame: .zero)
-        circle.isUserInteractionEnabled = false
-        circle.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(circle)
-        icon.image = UIImage(systemName: symbol)
-        icon.contentMode = .scaleAspectFit
-        icon.preferredSymbolConfiguration = .init(pointSize: 15, weight: .semibold)
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(icon)
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 44), heightAnchor.constraint(equalToConstant: 44),
-            circle.centerXAnchor.constraint(equalTo: centerXAnchor), circle.centerYAnchor.constraint(equalTo: centerYAnchor),
-            circle.widthAnchor.constraint(equalToConstant: 36), circle.heightAnchor.constraint(equalToConstant: 36),
-            icon.centerXAnchor.constraint(equalTo: centerXAnchor), icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        circle.layer.cornerRadius = 18
-        isAccessibilityElement = true
-        accessibilityLabel = label
-        accessibilityIdentifier = identifier
-        update()
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func update() {
-        circle.backgroundColor = isOn ? .tintColor : .tertiarySystemFill
-        icon.tintColor = isOn ? .white : .label
-        accessibilityTraits = isOn ? [.button, .selected] : .button
-        accessibilityValue = isOn ? onValue : offValue
-    }
-
-    override func tintColorDidChange() { super.tintColorDidChange(); update() }
-    override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.5 : 1 } }
-}
-
 final class FeedMasonryLayout: UICollectionViewLayout {
     /// The height of entry `i` at a column width.
     var height: ((Int, CGFloat) -> CGFloat)?

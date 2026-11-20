@@ -9,7 +9,9 @@ import 'package:tl_core/tl_core.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../platform/apple_platform.dart';
 import '../platform/quick_action.dart';
+import '../platform/window_chrome.dart';
 import '../actions/media_actions.dart';
 import '../actions/tag_picker.dart';
 import '../app/library.dart';
@@ -40,6 +42,8 @@ class BrowsePage extends StatefulWidget {
   @override
   State<BrowsePage> createState() => _BrowsePageState();
 }
+
+enum _BrowseAction { download, sort, reshuffle }
 
 class _BrowsePageState extends State<BrowsePage> {
   List<List<FeedItem>>? _cards;
@@ -78,8 +82,13 @@ class _BrowsePageState extends State<BrowsePage> {
     QuickAction.requests.addListener(_quickDownloadSoon);
     _quickDownloadSoon();
     _scroll.addListener(_scrolledUnder);
+    ApplePlatform.instance.windowControls.addListener(_windowControlsChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _showFilter());
     _load();
+  }
+
+  void _windowControlsChanged() {
+    if (mounted) setState(() {});
   }
 
   /// The post asked for (在浏览中查看帖子) goes first, marked for a moment, and the list scrolls
@@ -141,6 +150,7 @@ class _BrowsePageState extends State<BrowsePage> {
     widget.library.revealRequest.removeListener(_reveal);
     widget.library.filterRequest.removeListener(_showFilter);
     QuickAction.requests.removeListener(_quickDownloadSoon);
+    ApplePlatform.instance.windowControls.removeListener(_windowControlsChanged);
     _addKey.dispose();
     _setKeys.dispose();
     _scroll.dispose();
@@ -148,21 +158,52 @@ class _BrowsePageState extends State<BrowsePage> {
   }
 
   final _downloadButton = GlobalKey();
+  final _searchField = GlobalKey<CapsuleSearchState>();
+  bool _searchEditing = false;
 
-  /// 下载帖子 on the app's icon: the same card, under its button (under the search field's corner
-  /// while a search has the button away), once the shell has come back to this page.
+  void _openBrowseSearch(bool fullScreen) {
+    if (fullScreen) {
+      _searchField.currentState?.openSearch();
+      return;
+    }
+    setState(() => _searchEditing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchField.currentState?.openSearch();
+    });
+  }
+
+  void _showQuickDownload({BuildContext? anchor}) {
+    final button = anchor ?? _downloadButton.currentContext;
+    final size = MediaQuery.sizeOf(context);
+    final pad = MediaQuery.paddingOf(context);
+    final dense = ShellLayout.of(size) == ShellLayout.bar;
+    final topPad = dense ? math.max(pad.top, WindowChrome.top(context)) : pad.top;
+    final top = topPad + 58;
+    final right = size.width - pad.right - 12;
+    showQuickDownload(
+      button ?? context,
+      downloads: widget.library.downloads,
+      library: widget.library,
+      at: button == null ? Rect.fromLTRB(right, top, right, top) : null,
+    );
+  }
+
+  void _browseAction(_BrowseAction action) {
+    switch (action) {
+      case _BrowseAction.download:
+        _showQuickDownload();
+      case _BrowseAction.sort:
+        setState(() => Prefs.instance.feedByAdded = !Prefs.instance.feedByAdded);
+        if (_scroll.hasClients) _scroll.jumpTo(0);
+        _load();
+      case _BrowseAction.reshuffle:
+        _shuffle();
+    }
+  }
+
   void _quickDownloadSoon() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !QuickAction.take()) return;
-      final button = _downloadButton.currentContext;
-      final size = MediaQuery.sizeOf(context);
-      final top = MediaQuery.paddingOf(context).top + 58;
-      showQuickDownload(
-        button ?? context,
-        downloads: widget.library.downloads,
-        library: widget.library,
-        at: button == null ? Rect.fromLTRB(size.width - 12, top, size.width - 12, top) : null,
-      );
+      if (mounted && QuickAction.take()) _showQuickDownload();
     });
   }
 
@@ -192,10 +233,19 @@ class _BrowsePageState extends State<BrowsePage> {
   int _density = Prefs.instance.densityPortrait * 3 + Prefs.instance.densityLandscape;
   void _prefsChanged() {
     final density = Prefs.instance.densityPortrait * 3 + Prefs.instance.densityLandscape;
+    final grouped = Prefs.instance.feedGrouped;
+    var changed = false;
     if (density != _density) {
       _density = density;
-      setState(() {});
+      changed = true;
     }
+    if (grouped != _grouped) {
+      _grouped = grouped;
+      _cards = _group(_items);
+      changed = true;
+      unawaited(_load());
+    }
+    if (changed) setState(() {});
   }
 
   void _changed() {
@@ -277,93 +327,149 @@ class _BrowsePageState extends State<BrowsePage> {
     final pad = MediaQuery.paddingOf(context);
     const headerHeight = 64.0;
     final scheme = Theme.of(context).colorScheme;
-    // a phone's width leaves the search field its room beside the buttons
-    final dense = ShellLayout.of(MediaQuery.sizeOf(context)) == ShellLayout.bar;
+    final screen = MediaQuery.sizeOf(context);
+    final dense = ShellLayout.of(screen) == ShellLayout.bar;
+    final topPad = dense ? math.max(pad.top, WindowChrome.top(context)) : pad.top;
+    final showSearch = (!dense && _searchEditing) || _query.keys.isNotEmpty;
+    final under = cards != null && cards.isNotEmpty && _under;
+    final sortSelected = Prefs.instance.feedByAdded;
+    final actionStyle = IconButton.styleFrom(
+      backgroundColor: scheme.surfaceContainerHighest,
+      foregroundColor: scheme.onSurface,
+      minimumSize: const Size.square(48),
+    );
+    final pillButtonStyle = IconButton.styleFrom(
+      foregroundColor: scheme.onSurface,
+      minimumSize: const Size(44, 40),
+      padding: EdgeInsets.zero,
+      shape: const StadiumBorder(),
+    );
+    final sortStyle = IconButton.styleFrom(
+      shape: const StadiumBorder(),
+      backgroundColor: sortSelected ? scheme.primary : Colors.transparent,
+      foregroundColor: sortSelected ? scheme.onPrimary : scheme.onSurface,
+      minimumSize: const Size(44, 40),
+      padding: EdgeInsets.zero,
+    );
+    final browseRow = SizedBox(
+      height: headerHeight,
+      child: Padding(
+        padding: EdgeInsets.only(left: pad.left + 16, right: pad.right + 12),
+        child: Row(children: [
+          Expanded(
+            child: Semantics(
+              header: true,
+              child: Text(L('place.browse'), maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          Material(
+            key: const ValueKey('browseActionPill'),
+            color: scheme.surfaceContainerHighest,
+            shape: const StadiumBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              height: 48,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  KeyedSubtree(
+                    key: _downloadButton,
+                    child: IconButton(
+                      key: const ValueKey('quickDownload'),
+                      style: pillButtonStyle,
+                      tooltip: L('common.downloadPosts'),
+                      icon: const Icon(Icons.arrow_downward),
+                      onPressed: () => _showQuickDownload(anchor: _downloadButton.currentContext),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  IconButton(
+                    key: const ValueKey('sortByAdded'),
+                    isSelected: sortSelected,
+                    style: sortStyle,
+                    tooltip: L('feed.sortByAdded'),
+                    icon: const Icon(Icons.schedule),
+                    onPressed: () => _browseAction(_BrowseAction.sort),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            key: const ValueKey('searchButton'),
+            style: actionStyle,
+            tooltip: L('search.placeholder'),
+            icon: const Icon(Icons.search),
+            onPressed: () => _openBrowseSearch(dense),
+          ),
+        ]),
+      ),
+    );
     final searchRow = SizedBox(
-              height: dense ? 56 : 64,
-              child: Row(children: [
-                SizedBox(width: dense ? 4 : 12),
-                Expanded(
-                  child: CapsuleSearch(
-              flat: dense,
-              // a phone's width searches full screen, as the native iPhone app
-              fullScreen: ShellLayout.of(MediaQuery.sizeOf(context)) == ShellLayout.bar,
-              initialKeys: _query.keys,
-              addKey: _addKey,
-              setKeys: _setKeys,
-              folders: () => [for (final f in widget.library.folders?.folders ?? const <Folder>[]) (name: f.name, count: f.count)],
-              onChanged: (q) {
-                _query = q;
-                _load();
-              },
-                  ),
-                ),
-              // 导出搜索结果 (while searching)
-              if (_query.keys.isNotEmpty)
-                _RoundButton(
-                  key: const ValueKey('searchExport'),
-                  tooltip: L('export.search.title'),
-                  icon: Icons.ios_share,
-                  dense: dense,
-                  onPressed: () => exportSearchResult(context, _items, terms: _query.terms),
-                ),
-              // 按添加时间排序, 按帖子分组 and 快捷下载, as native: with nothing searched for
-              if (_query.keys.isEmpty) ...[
-                _RoundButton(
-                  key: const ValueKey('sortByAdded'),
-                  tooltip: L('feed.sortByAdded'),
-                  icon: Icons.schedule,
-                  dense: dense,
-                  selected: Prefs.instance.feedByAdded,
-                  onPressed: () {
-                    setState(() => Prefs.instance.feedByAdded = !Prefs.instance.feedByAdded);
-                    if (_scroll.hasClients) _scroll.jumpTo(0);
-                    _load();
-                  },
-                ),
-                _RoundButton(
-                  key: const ValueKey('groupToggle'),
-                  tooltip: L('feed.groupByPost'),
-                  icon: Icons.layers_outlined,
-                  dense: dense,
-                  selected: _grouped,
-                  onPressed: () {
-                    setState(() {
-                      _grouped = !_grouped;
-                      Prefs.instance.feedGrouped = _grouped;
-                      _cards = _group(_items);
-                    });
-                    // a search finds whole posts only as post cards
-                    _load();
-                  },
-                ),
-                Builder(
-                  key: _downloadButton,
-                  builder: (button) => _RoundButton(
-                    key: const ValueKey('quickDownload'),
-                    tooltip: L('common.downloadPosts'),
-                    icon: Icons.arrow_downward,
-                    dense: dense,
-                    onPressed: () => showQuickDownload(button, downloads: widget.library.downloads, library: widget.library),
-                  ),
-                ),
-              ],
-              // by date there is nothing to shuffle: it leaves, and comes back with the random order.
-              // Phones and tablets pull down at the top instead, or tap 浏览 twice.
-              if (!_touchShuffle)
-                CollapsingButton(
-                  shown: !Prefs.instance.feedByAdded,
-                  child: _RoundButton(
-                    key: const ValueKey('reshuffle'),
-                    tooltip: L('feed.reshuffle'),
-                    icon: Icons.shuffle,
-                    dense: dense,
-                    onPressed: _shuffle,
-                  ),
-                ),
-              SizedBox(width: dense ? 8 : 4),
-              ]),
-            );
+      height: dense ? 56 : 64,
+      child: Row(children: [
+        SizedBox(width: dense ? 4 : 12),
+        Expanded(
+          child: CapsuleSearch(
+            key: _searchField,
+            flat: dense,
+            fullScreen: dense,
+            initialKeys: _query.keys,
+            addKey: _addKey,
+            setKeys: _setKeys,
+            folders: () => [for (final f in widget.library.folders?.folders ?? const <Folder>[]) (name: f.name, count: f.count)],
+            onEditingChanged: (editing) {
+              if (_searchEditing != editing) setState(() => _searchEditing = editing);
+            },
+            onChanged: (q) {
+              setState(() => _query = q);
+              _load();
+            },
+          ),
+        ),
+        if (_query.keys.isNotEmpty)
+          _RoundButton(
+            key: const ValueKey('searchExport'),
+            tooltip: L('export.search.title'),
+            icon: Icons.ios_share,
+            dense: dense,
+            onPressed: () => exportSearchResult(context, _items, terms: _query.terms),
+          ),
+        if (_query.keys.isEmpty) ...[
+          _RoundButton(
+            key: const ValueKey('sortByAdded'),
+            tooltip: L('feed.sortByAdded'),
+            icon: Icons.schedule,
+            dense: dense,
+            selected: Prefs.instance.feedByAdded,
+            onPressed: () => _browseAction(_BrowseAction.sort),
+          ),
+          Builder(
+            builder: (button) => _RoundButton(
+              key: const ValueKey('quickDownload'),
+              tooltip: L('common.downloadPosts'),
+              icon: Icons.arrow_downward,
+              dense: dense,
+              onPressed: () => _showQuickDownload(anchor: button),
+            ),
+          ),
+        ],
+        if (!_touchShuffle)
+          CollapsingButton(
+            shown: !Prefs.instance.feedByAdded,
+            child: _RoundButton(
+              key: const ValueKey('reshuffle'),
+              tooltip: L('feed.reshuffle'),
+              icon: Icons.shuffle,
+              dense: dense,
+              onPressed: _shuffle,
+            ),
+          ),
+        SizedBox(width: dense ? 8 : 4),
+      ]),
+    );
     // at a phone's width: a capsule of its own, like the bar below (Material 3 Expressive's
     // floating toolbar), with the cards passing under it and the status bar kept readable
     final Widget floatingHeader = Stack(children: [
@@ -371,7 +477,7 @@ class _BrowsePageState extends State<BrowsePage> {
         left: 0,
         right: 0,
         top: 0,
-        height: pad.top + 28,
+        height: topPad + 28,
         child: IgnorePointer(
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -381,7 +487,7 @@ class _BrowsePageState extends State<BrowsePage> {
         ),
       ),
       Padding(
-        padding: EdgeInsets.only(top: pad.top + 6),
+        padding: EdgeInsets.only(top: topPad + 6, left: pad.left, right: pad.right),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -399,20 +505,20 @@ class _BrowsePageState extends State<BrowsePage> {
     ]);
     // the search area floats over the cards: clear over the top of the list, frosted (blurred
     // and tinted) once cards scroll underneath it
-    final header = dense ? floatingHeader : ClipRect(
+    final searchHeader = dense ? floatingHeader : ClipRect(
       child: BackdropFilter(
-        filter: _under ? ImageFilter.blur(sigmaX: 18, sigmaY: 18) : ImageFilter.blur(),
+        filter: under ? ImageFilter.blur(sigmaX: 18, sigmaY: 18) : ImageFilter.blur(),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          color: _under ? scheme.surface.withValues(alpha: 0.72) : scheme.surface.withValues(alpha: 0),
-          padding: EdgeInsets.only(top: pad.top),
+          color: under ? scheme.surface.withValues(alpha: 0.72) : scheme.surface.withValues(alpha: 0),
+          padding: EdgeInsets.only(top: topPad, left: pad.left, right: pad.right),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             searchRow,
           ]),
         ),
       ),
     );
-    final top = pad.top + headerHeight;
+    final top = topPad + headerHeight;
     final Widget body = cards == null
             ? const Center(child: CircularProgressIndicator())
             : cards.isEmpty
@@ -442,7 +548,7 @@ class _BrowsePageState extends State<BrowsePage> {
                       slivers: [
                         SliverPadding(
                           // the cards start below the floating search area and pass under it
-                          padding: EdgeInsets.fromLTRB(side, top + 4, side, 16),
+                          padding: EdgeInsets.fromLTRB(side + pad.left, top + 4, side + pad.right, 16),
                           sliver: SliverKnownMasonry(
                             columns: columns,
                             mainAxisSpacing: 18,
@@ -487,7 +593,25 @@ class _BrowsePageState extends State<BrowsePage> {
         removeTop: true,
         child: Stack(children: [
           Positioned.fill(child: cards == null || cards.isEmpty ? Padding(padding: EdgeInsets.only(top: top), child: body) : body),
-          Positioned(left: 0, right: 0, top: 0, child: header),
+          Positioned(left: 0, right: 0, top: 0, child: Stack(children: [
+            // Keep the field mounted for filters sent from elsewhere in the app.
+            Offstage(
+              offstage: !showSearch,
+              child: ExcludeFocus(excluding: !showSearch, child: searchHeader),
+            ),
+            if (!showSearch)
+              ClipRect(
+                child: BackdropFilter(
+                  filter: under ? ImageFilter.blur(sigmaX: 18, sigmaY: 18) : ImageFilter.blur(),
+                  child: AnimatedContainer(
+                    key: const ValueKey('browseHeaderBackdrop'),
+                    duration: const Duration(milliseconds: 180),
+                    color: under ? scheme.surface.withValues(alpha: 0.72) : scheme.surface.withValues(alpha: 0),
+                    child: Padding(padding: EdgeInsets.only(top: topPad), child: browseRow),
+                  ),
+                ),
+              ),
+          ])),
         ]),
       ),
     );

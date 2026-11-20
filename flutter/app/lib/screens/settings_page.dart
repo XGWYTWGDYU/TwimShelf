@@ -181,6 +181,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ]),
               _Section(title: L('settings.section.browse'), children: [
+                SwitchListTile(
+                  key: const ValueKey('settings-group-by-post'),
+                  secondary: const SettingsIcon(Icons.layers_outlined),
+                  title: Text(L('feed.groupByPost')),
+                  value: prefs.feedGrouped,
+                  onChanged: withHaptic((v) => prefs.feedGrouped = v),
+                ),
                 // iPhone and iPad only
                 if (OS.isIOS) SwitchListTile(
                   secondary: const SettingsIcon(Icons.headphones),

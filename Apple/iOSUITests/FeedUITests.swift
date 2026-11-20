@@ -20,6 +20,29 @@ final class FeedUITests: XCTestCase {
 
     private func el(_ id: String) -> XCUIElement { app.descendants(matching: .any).matching(identifier: id).firstMatch }
 
+    private func searchField() -> XCUIElement {
+        let field = el("search")
+        if !field.exists {
+            let button = el("searchButton")
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            button.tap()
+        }
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        return field
+    }
+
+    private func setGrouped(_ on: Bool) {
+        let settingsTab = app.tabBars.buttons["设置"].firstMatch
+        if settingsTab.exists { settingsTab.tap() } else { el("manage").tap() }
+        let sw = app.switches["按帖子分组"].firstMatch
+        for _ in 0..<4 where !sw.exists { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(sw.waitForExistence(timeout: 5))
+        let isOn = (sw.value as? String) == "1"
+        if isOn != on { sw.tap() }
+        let browseTab = app.tabBars.buttons["浏览"].firstMatch
+        if browseTab.exists { browseTab.tap() }
+    }
+
     private func snap(_ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot()); a.name = name; a.lifetime = .keepAlways; add(a)
     }
@@ -27,7 +50,7 @@ final class FeedUITests: XCTestCase {
     /// Taps the search field: the list of suggestions opens under it.
     private func openSearchSettings() {
         if el("searchSuggestions").exists { return }
-        let f = el("search")
+        let f = searchField()
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap()
         XCTAssertTrue(el("searchSuggestions").waitForExistence(timeout: 3), "the list opens under the field")
@@ -88,7 +111,7 @@ final class FeedUITests: XCTestCase {
     func testSearchChipsAndGrouping() {
         XCTAssertTrue(el("media-photo").waitForExistence(timeout: 5) || el("media-video").exists)
         XCTAssertTrue(stats().contains("帖子"), "totals shown on the main screen")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("墙\n")
         XCTAssertTrue(searchShows("墙"), "chip should appear")
@@ -96,16 +119,15 @@ final class FeedUITests: XCTestCase {
         exitSearch()
         XCTAssertFalse(el("searchExit").exists, "the search ended")
 
-        let toggle = app.buttons["groupToggle"]
-        let before = toggle.isSelected
-        toggle.tap()
-        XCTAssertNotEqual(before, toggle.isSelected)
-        toggle.tap()
+        XCTAssertTrue(el("quickDownload").exists)
+        XCTAssertTrue(el("sortByAdded").exists)
+        setGrouped(false)
+        setGrouped(true)
     }
 
     func testSearchPostTextAndAuthor() {
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("今天的天空\n")   // a folder name = post text in the sample library
         XCTAssertTrue(searchShows("今天的天空"))
@@ -116,7 +138,7 @@ final class FeedUITests: XCTestCase {
 
     /// No condition capsule: the words are looked for everywhere (here: only in a post's text).
     func testSearchWithoutConditionsLooksEverywhere() {
-        let search = el("search")
+        let search = searchField()
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         search.typeText("测试帖子3\n")
@@ -128,7 +150,7 @@ final class FeedUITests: XCTestCase {
     /// 视频 / 照片 are condition words: a capsule that limits the results to that kind.
     func testSearchMediaKindConditions() {
         XCTAssertTrue(el("media-photo").waitForExistence(timeout: 5) || el("media-video").exists)
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("视频\n")
         XCTAssertTrue(searchShows("视频"), "the word becomes a capsule")
@@ -146,7 +168,7 @@ final class FeedUITests: XCTestCase {
 
     func testLongTextKeepsTagsVisible() {
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("非常长的测试正文\n")
         let plus = el("addTag")
@@ -235,7 +257,7 @@ final class FeedUITests: XCTestCase {
     func testSearchResultExport() {
         XCTAssertTrue(el("media-photo").waitForExistence(timeout: 5) || el("media-video").exists)
         XCTAssertFalse(el("searchExport").exists, "no search, no export button")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("墙\n")
         XCTAssertTrue(searchShows("墙"))
@@ -292,10 +314,10 @@ final class FeedUITests: XCTestCase {
     }
 
     func testPlayerGestures() throws {
-        if app.buttons["groupToggle"].isSelected { app.buttons["groupToggle"].tap() }
+        setGrouped(false)
         // Find the sample's video post by its text (the feed is random and mostly photos).
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("城市夜景合集\n")
         let video = el("media-video")
@@ -344,7 +366,7 @@ final class FeedUITests: XCTestCase {
 
     private func searchText(_ t: String) {
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText(t + "\n")
     }
@@ -365,7 +387,7 @@ final class FeedUITests: XCTestCase {
 
     func testTagChipLongPressFiltersByTag() {
         // The feed is random and only some sample media carry 收藏: search it so every card does.
-        let search = el("search")
+        let search = searchField()
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         search.typeText("收藏\n")
@@ -459,7 +481,7 @@ final class FeedUITests: XCTestCase {
 
     func testPlayerLockCloseAndPiPButtons() {
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("城市夜景合集\n")
         let video = el("media-video")
@@ -496,7 +518,7 @@ final class FeedUITests: XCTestCase {
     }
 
     func testRenameTagFromChipAndUndo() {
-        let search = el("search")
+        let search = searchField()
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         search.typeText("收藏\n")
@@ -538,7 +560,7 @@ final class FeedUITests: XCTestCase {
         for _ in 0..<6 { app.swipeUp(velocity: .fast) }
         sleep(1)
         let before = firstVisibleCardText()
-        let search = el("search")
+        let search = searchField()
         // scroll back up to reach the search field, as a user would… the header is pinned, so just tap it
         search.tap()
         search.typeText("墙\n")
@@ -550,7 +572,7 @@ final class FeedUITests: XCTestCase {
 
     func testInlineVideoAutoplaysMuted() {
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("城市夜景合集\n")
         let video = el("media-video")
@@ -607,7 +629,7 @@ final class FeedUITests: XCTestCase {
 
     func testPlayerRotateButton() {
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("城市夜景合集\n")
         let video = el("media-video")
@@ -632,7 +654,7 @@ final class FeedUITests: XCTestCase {
     /// 浏览 is portrait again.
     func testClosingTurnedPlayerReturnsToPortrait() {
         toggleSearchScope("in-text")
-        let search = el("search")
+        let search = searchField()
         search.tap()
         search.typeText("城市夜景合集\n")
         let video = el("media-video")
@@ -668,8 +690,7 @@ final class FeedUITests: XCTestCase {
     }
 
     func testPhotoViewerPagesThroughThePostAndShares() throws {
-        // grouped cards (another test may have switched grouping off); a multi-media post shows "1/N"
-        if !app.buttons["groupToggle"].isSelected { app.buttons["groupToggle"].tap() }
+        setGrouped(true)
         let counter = app.staticTexts.matching(NSPredicate(format: "label MATCHES '1/[2-9]'")).firstMatch
         for _ in 0..<8 where !(counter.exists && counter.isHittable) { app.swipeUp(velocity: .slow) }
         guard counter.exists else { throw XCTSkip("no multi-media post visible in the sample") }
@@ -805,7 +826,7 @@ final class FeedUITests: XCTestCase {
 
     /// "最近" and "外部导入" are conditions too; the × ends the search.
     func testTokenRecentAndExternal() {
-        let f = el("search")
+        let f = searchField()
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap()
         f.typeText("外部导入 ")
@@ -825,7 +846,7 @@ final class FeedUITests: XCTestCase {
     /// Search tokens: condition words and texts typed with spaces become capsules, interleaved;
     /// the suggestions complete a condition; Return keeps the search and closes the list.
     func testTokenSearchTurnsWordsIntoCapsules() {
-        let f = el("search")
+        let f = searchField()
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap()
         XCTAssertTrue(el("sugg-kw-tags").waitForExistence(timeout: 3), "conditions suggested")
@@ -928,7 +949,7 @@ final class FeedUITests: XCTestCase {
         snap("diagnostics-sheet")
         // a tap outside the half-height share sheet closes it first (system behaviour); then 完成
         for _ in 0..<2 where app.navigationBars["资料库"].exists { done.tap(); sleep(1) }
-        XCTAssertTrue(el("search").waitForExistence(timeout: 3))
+        XCTAssertTrue(el("searchButton").waitForExistence(timeout: 3))
         XCTAssertFalse(app.navigationBars["资料库"].exists, "back on the home screen")
     }
 

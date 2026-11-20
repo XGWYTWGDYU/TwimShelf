@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +8,8 @@ import 'package:tl_core/tl_core.dart';
 import '../app/prefs.dart';
 import '../l10n/l10n.dart';
 import '../mascot/mascot.dart';
+import '../platform/apple_platform.dart';
+import '../platform/window_chrome.dart';
 import '../search/history.dart';
 import '../search/query.dart';
 import '../search/suggestions.dart';
@@ -19,6 +22,7 @@ class CapsuleSearch extends StatefulWidget {
   const CapsuleSearch({
     super.key,
     required this.onChanged,
+    this.onEditingChanged,
     required this.folders,
     this.initialKeys = const [],
     this.fullScreen = false,
@@ -39,6 +43,7 @@ class CapsuleSearch extends StatefulWidget {
   /// Beside the field in the inline layout (the full-screen page's 完成).
   final Widget Function(List<String> keys)? trailing;
   final void Function(TokenQuery query) onChanged;
+  final ValueChanged<bool>? onEditingChanged;
   final List<String> initialKeys;
   /// A phone's way (the native iPhone app's): the field only shows the query; a tap opens
   /// searching full screen, and the query chosen there comes back.
@@ -51,10 +56,10 @@ class CapsuleSearch extends StatefulWidget {
   final List<SearchFolder> Function() folders;
 
   @override
-  State<CapsuleSearch> createState() => _CapsuleSearchState();
+  CapsuleSearchState createState() => CapsuleSearchState();
 }
 
-class _CapsuleSearchState extends State<CapsuleSearch> {
+class CapsuleSearchState extends State<CapsuleSearch> {
   final _text = TextEditingController();
   final _focus = FocusNode();
   final _panel = OverlayPortalController();
@@ -73,14 +78,19 @@ class _CapsuleSearchState extends State<CapsuleSearch> {
     widget.addKey?.addListener(_external);
     widget.setKeys?.addListener(_replaced);
     _focus.addListener(() {
-      if (widget.fullScreen || widget.inline) return;
+      if (widget.inline) return;
       if (_focus.hasFocus) {
+        if (widget.fullScreen) return;
         unawaited(_loadTags());
         _panel.show();
+        widget.onEditingChanged?.call(true);
       } else {
         // a tap on a panel row arrives after the field loses focus
         Future.delayed(const Duration(milliseconds: 150), () {
-          if (mounted && !_focus.hasFocus) _panel.hide();
+          if (mounted && !_focus.hasFocus) {
+            _panel.hide();
+            widget.onEditingChanged?.call(false);
+          }
         });
       }
       setState(() {});
@@ -125,6 +135,14 @@ class _CapsuleSearchState extends State<CapsuleSearch> {
       final tags = await coreRunAsync(Core.allTags);
       if (mounted) setState(() => _tags = tags);
     } catch (_) {}
+  }
+
+  void openSearch() {
+    if (widget.fullScreen) {
+      unawaited(_openFullScreen());
+    } else {
+      _focus.requestFocus();
+    }
   }
 
   /// Opens searching full screen with the current capsules; what is chosen there comes back.
@@ -424,24 +442,37 @@ class SearchScreen extends StatelessWidget {
   final List<SearchFolder> Function() folders;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
-            child: CapsuleSearch(
-              key: const ValueKey('searchScreen'),
-              inline: true,
-              autofocus: true,
-              initialKeys: initialKeys,
-              folders: folders,
-              onChanged: (_) {},
-              trailing: (keys) => TextButton(
-                key: const ValueKey('searchDone'),
-                onPressed: () => Navigator.of(context).pop(keys),
-                child: Text(L('common.done')),
+  Widget build(BuildContext context) => ValueListenableBuilder<Rect>(
+        valueListenable: ApplePlatform.instance.windowControls,
+        builder: (context, _, _) {
+          final mq = MediaQuery.of(context);
+          final chromeTop = WindowChrome.top(context);
+          final data = chromeTop > mq.padding.top
+              ? mq.copyWith(padding: mq.padding.copyWith(top: math.max(mq.padding.top, chromeTop)))
+              : mq;
+          return MediaQuery(
+            data: data,
+            child: Scaffold(
+              body: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
+                  child: CapsuleSearch(
+                    key: const ValueKey('searchScreen'),
+                    inline: true,
+                    autofocus: true,
+                    initialKeys: initialKeys,
+                    folders: folders,
+                    onChanged: (_) {},
+                    trailing: (keys) => TextButton(
+                      key: const ValueKey('searchDone'),
+                      onPressed: () => Navigator.of(context).pop(keys),
+                      child: Text(L('common.done')),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       );
 }

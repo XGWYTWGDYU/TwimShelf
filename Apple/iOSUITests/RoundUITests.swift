@@ -28,6 +28,7 @@ final class RoundUITests: XCTestCase {
 
     /// "-猫 " becomes a minus capsule (read out as 排除：猫); "-" lists the exclusions.
     func testMinusWordsBecomeExclusionCapsules() {
+        if !el("search").exists { el("searchButton").tap() }
         let f = el("search")
         XCTAssertTrue(f.waitForExistence(timeout: 5))
         f.tap()

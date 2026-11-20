@@ -129,7 +129,7 @@ void main() {
     });
   });
 
-  testWidgets('pictures of the floating search bar and the folders page, at a phone\'s width', (t) async {
+  testWidgets('pictures of the browse controls and the folders page, at a phone\'s width', (t) async {
     t.view.physicalSize = const Size(780, 1500);
     t.view.devicePixelRatio = 2;
     addTearDown(t.view.reset);
@@ -167,8 +167,12 @@ void main() {
       });
     }
 
-    await picture('floating-search', MediaQuery(data: MediaQueryData(size: const Size(390, 750), padding: const EdgeInsets.only(top: 44)), child: BrowsePage(library: library)));
-    expect(find.byKey(const ValueKey('floatingSearch')), findsOneWidget);
+    await picture('browse-controls', MediaQuery(data: MediaQueryData(size: const Size(390, 750), padding: const EdgeInsets.only(top: 44)), child: BrowsePage(library: library)));
+    expect(find.byKey(const ValueKey('searchButton')), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('searchButton')));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const ValueKey('searchScreen')), findsOneWidget);
     await picture('folders-page', FoldersPage(library: library, onOpen: (_) {}));
     expect(find.byKey(const ValueKey('folder-猫猫')), findsOneWidget);
   });

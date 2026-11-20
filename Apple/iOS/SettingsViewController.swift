@@ -126,9 +126,8 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
                     self?.navigationController?.pushViewController(TagListViewController(style: .insetGrouped), animated: true) },
             ]),
             Section(id: "view", header: L("settings.section.browse"), rows: [
-            ] + [
+                .toggle(L("feed.groupByPost"), LibraryPrefs.feedGrouped, icon: .init("square.stack", .systemBlue), id: "t:groupByPost") { on in LibraryPrefs.feedGrouped = on },
                 .toggle(L("settings.headphonesOnly"), AudioPolicy.headphonesOnly, icon: .init("headphones", .systemPink), id: "t:headphones") { on in AudioPolicy.headphonesOnly = on },
-            ] + [
                 .toggle(L("settings.noGestures"), LibraryPrefs.playerGesturesOff, icon: .init("hand.raised.slash.fill", .systemIndigo), id: "t:playerGestures") { on in LibraryPrefs.playerGesturesOff = on },
                 .toggle(L("settings.autoLandscape"), LibraryPrefs.autoLandscape, icon: .init("rectangle.landscape.rotate", .systemOrange), id: "t:landscape") { on in LibraryPrefs.autoLandscape = on },
             ]),

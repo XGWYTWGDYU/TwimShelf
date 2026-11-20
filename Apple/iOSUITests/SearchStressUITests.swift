@@ -39,6 +39,9 @@ final class SearchStressUITests: XCTestCase {
         app.launchEnvironment["TL_SYNC_OFF"] = "1"
         app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
+        let searchButton = el("searchButton")
+        XCTAssertTrue(searchButton.waitForExistence(timeout: 60))
+        searchButton.tap()
         let search = el("search")
         XCTAssertTrue(search.waitForExistence(timeout: 60))
         let list = app.collectionViews.firstMatch
@@ -93,7 +96,7 @@ final class SearchStressUITests: XCTestCase {
                 // back to the search itself: cleared, and typed again
                 el("searchExit").tap()
                 responds("clearing the search (round \(round))") { !el("searchExit").exists || el("search").exists }
-                search.tap()
+                if !search.exists { searchButton.tap() } else { search.tap() }
                 search.typeText(query + "\n")
                 responds("the search again (round \(round))") { el("searchExit").exists && list.cells.count > 0 }
             }
