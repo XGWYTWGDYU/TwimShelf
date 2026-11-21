@@ -366,7 +366,21 @@ public sealed partial class BrowsePage : UserControl, IShellPage
     void OpenViewer(FeedItem item)
     {
         var all = (_cards ?? []).SelectMany(c => c).ToList();
-        Viewer.Open(all, Math.Max(0, all.FindIndex(i => i.MediaId == item.MediaId)));
+        var root = MainWindow.Current?.Content as UIElement;
+        var initialRect = root != null ? _masonry.ViewerSourceFrame(item, root) : null;
+        Viewer.Open(all, Math.Max(0, all.FindIndex(i => i.MediaId == item.MediaId)), new ViewerOpenOptions
+        {
+            CropSource = false,
+            SourceCornerRadius = 8,
+            SourceRect = current =>
+            {
+                if (root == null) return null;
+                return _masonry.ViewerSourceFrame(current, root) ?? (current.MediaId == item.MediaId ? initialRect : null);
+            },
+            ActiveMediaChanged = id => _masonry.SetHiddenMedia(id),
+            SyncBeforeClose = current => _masonry.SyncCardPageForMedia(current),
+            PreviewImage = current => _masonry.PreviewImageFor(current.MediaId),
+        });
     }
 
     public void Shown()

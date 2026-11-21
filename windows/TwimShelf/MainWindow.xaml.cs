@@ -77,7 +77,7 @@ public sealed partial class MainWindow : Window
             if (App.Quitting || !LaunchAtLogin.IsOn) return;
             e.Cancel = true;
             SaveSize();
-            if (Viewer.IsOpen) Viewer.Shown?.Close();
+            if (Viewer.IsOpen) Viewer.Shown?.Close(immediate: true);
             InlineVideo.StopAll();
             AppWindow.Hide();
             App.WindowHidden();

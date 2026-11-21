@@ -141,6 +141,7 @@ public sealed partial class StorageSettings(LibraryModel library) : SettingsSubp
                 }
             return left;
         });
+        if (keys.Contains("thumbnails")) Thumbnails.NotifyCleared();
         if (bin) { try { await TlCore.Run(TlCore.EmptyTrash); } catch (Exception e) { skipped.Add($"{L("storage.group.bin")}\n{e.Message}"); } await library.Refresh(); }
         await Measure();
         var after = _usage?.Total ?? before;

@@ -21,12 +21,30 @@ public static class Thumbnails
     static readonly HashSet<string> Failed = [];
     /// A thumbnail that could not be decoded (the app marks the media damaged).
     public static event Action<string>? OnFailed;
+    /// Fired when cached thumbnails on disk are cleared (storage settings / data wipe).
+    public static event Action? Cleared;
+
+    /// Warms the disk thumbnail cache for a list of photo media IDs in the background.
+    public static void Warm(IEnumerable<string> mediaIds, uint side = SmallSide)
+    {
+        var list = mediaIds as List<string> ?? [.. mediaIds];
+        if (list.Count == 0 || string.IsNullOrEmpty(CacheDir)) return;
+        var dir = CacheDir;
+        _ = Task.Run(() => { try { TlCore.WarmThumbnails(list, side, dir); } catch { } });
+    }
+
+    public static void NotifyCleared()
+    {
+        lock (Failed) Failed.Clear();
+        try { TlCore.CancelThumbnailsWarm(); } catch { }
+        Cleared?.Invoke();
+    }
 
     /// Downloads (or another device) may have replaced damaged files: they get another try.
     /// 清除所有数据: every cached picture goes. False when some could not be removed.
     public static bool Clear()
     {
-        lock (Failed) Failed.Clear();
+        NotifyCleared();
         try
         {
             if (Directory.Exists(CacheDir)) Directory.Delete(CacheDir, true);
@@ -79,11 +97,9 @@ public static class Thumbnails
         return new BitmapImage { DecodePixelWidth = pixels, DecodePixelType = DecodePixelType.Physical, UriSource = new Uri(file) };
     }
 
-    /// The shell's thumbnail of a video (or any file it can draw), made once into the cache like a
-    /// photo's and shown from the file.
-    public static async Task<ImageSource?> VideoPoster(string path, uint pixels, CancellationToken cancel)
+    /// The cached file of a video's poster, made when missing (safe to call off the UI thread).
+    public static async Task<string?> VideoPosterPath(string path, uint side, CancellationToken cancel)
     {
-        var side = pixels > SmallSide ? LargeSide : SmallSide;
         var made = Path.Combine(CacheDir, "video-" + side, PosterName(path));
         if (!File.Exists(made))
         {
@@ -99,7 +115,16 @@ public static class Thumbnails
             catch { return null; }
             finally { Workers.Release(); }
         }
-        if (cancel.IsCancellationRequested) return null;
+        return cancel.IsCancellationRequested ? null : made;
+    }
+
+    /// The shell's thumbnail of a video (or any file it can draw), made once into the cache like a
+    /// photo's and shown from the file.
+    public static async Task<ImageSource?> VideoPoster(string path, uint pixels, CancellationToken cancel)
+    {
+        var side = pixels > SmallSide ? LargeSide : SmallSide;
+        var made = await VideoPosterPath(path, side, cancel);
+        if (made == null || cancel.IsCancellationRequested) return null;
         return new BitmapImage { DecodePixelWidth = (int)pixels, DecodePixelType = DecodePixelType.Physical, UriSource = new Uri(made) };
     }
 
@@ -126,6 +151,24 @@ public static class Thumbnails
             await input.CopyToAsync(output, cancel);
         File.Move(partial, made, true);
         return true;
+    }
+
+    /// Returns an already-cached on-disk tile thumbnail/poster path without blocking or generating.
+    public static string? PeekCachedTilePath(FeedItem item)
+    {
+        if (string.IsNullOrEmpty(CacheDir)) return null;
+        if (item.IsVideo)
+        {
+            var name = PosterName(item.Path);
+            var lg = Path.Combine(CacheDir, "video-" + LargeSide, name);
+            if (File.Exists(lg)) return lg;
+            var sm = Path.Combine(CacheDir, "video-" + SmallSide, name);
+            return File.Exists(sm) ? sm : null;
+        }
+        var lgPhoto = Path.Combine(CacheDir, LargeSide.ToString(), item.MediaId + ".jpg");
+        if (File.Exists(lgPhoto)) return lgPhoto;
+        var smPhoto = Path.Combine(CacheDir, SmallSide.ToString(), item.MediaId + ".jpg");
+        return File.Exists(smPhoto) ? smPhoto : null;
     }
 
     /// A photo shown large (the viewer, a card): HEIC and AVIF through the core as JPEG, the rest as they are.

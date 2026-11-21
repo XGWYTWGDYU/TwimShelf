@@ -10,9 +10,11 @@ using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using TwimShelf.Controls.ViewerEngine;
 using TwimShelf.Core;
 using TwimShelf.Search;
 using TwimShelf.Services;
+using Windows.Foundation;
 using static TwimShelf.Services.Strings;
 
 namespace TwimShelf.Controls;
@@ -321,6 +323,7 @@ public sealed partial class PostCard : UserControl
         var item = Media[Page];
         _image.Source = null;
         _video.Stop();
+        _video.BindPath(item.IsVideo ? item.Path : null, OnScreen);
         if (item.IsVideo)
         {
             _ = Poster(item, cancel.Token);
@@ -348,11 +351,58 @@ public sealed partial class PostCard : UserControl
         if (!cancel.IsCancellationRequested && src != null) _image.Source = src;
     }
 
+    /// Already-decoded card preview for instant Frame-0 display when opening the viewer.
+    public ImageSource? CurrentPreviewImage => _image.Source;
+
+    /// Hides or reveals the media content while the viewer zooms out of or back into this card.
+    public void SetMediaHidden(bool hidden)
+    {
+        var op = hidden ? 0.0 : 1.0;
+        _image.Opacity = op;
+        _video.Opacity = op;
+    }
+
+    /// Turns this card to the page containing `mediaId` if it belongs to this post.
+    public bool SetPageForMedia(string mediaId)
+    {
+        var idx = Media.FindIndex(m => m.MediaId == mediaId);
+        if (idx < 0) return false;
+        if (idx == Page) return true;
+        Page = idx;
+        ShowPage();
+        PageChanged?.Invoke(idx);
+        return true;
+    }
+
+    /// Fitted rect of the currently displayed media in `relativeTo` coordinates, or null if scrolled out of view.
+    public Rect? ViewerSourceFrame(UIElement relativeTo, Rect visibleBoundsInRelative)
+    {
+        if (!IsLoaded || XamlRoot == null || Media.Count == 0 || _mediaArea.ActualWidth <= 0 || _mediaArea.ActualHeight <= 0)
+            return null;
+        try
+        {
+            var pt = _mediaArea.TransformToVisual(relativeTo).TransformPoint(new Point(0, 0));
+            var area = new Rect(pt.X, pt.Y, _mediaArea.ActualWidth, _mediaArea.ActualHeight);
+            var item = Media[Page];
+            double w = item.Width, h = item.Height;
+            if ((w <= 0 || h <= 0) && _image.Source is BitmapImage bi && bi.PixelWidth > 0 && bi.PixelHeight > 0)
+            {
+                w = bi.PixelWidth;
+                h = bi.PixelHeight;
+            }
+            var frame = w > 0 && h > 0 ? ViewerMath.FitMedia(area, w, h) : ViewerMath.FitAspect(area, item.CardAspectRatio);
+            var vis = ViewerMath.Intersect(frame, visibleBoundsInRelative);
+            return vis.Width > 1 && vis.Height > 1 ? frame : null;
+        }
+        catch { return null; }
+    }
+
     /// The card is on screen (half or more) or left it: its video plays or stops.
     public void SetOnScreen(bool on)
     {
         if (on == OnScreen) return;
         OnScreen = on;
+        _video.SetCardOnScreen(on);
         UpdateVideo();
     }
 
@@ -361,6 +411,7 @@ public sealed partial class PostCard : UserControl
     {
         if (Media.Count == 0) return;
         var item = Media[Page];
+        _video.BindPath(item.IsVideo ? item.Path : null, OnScreen);
         // while the feed scrolls nothing starts, but what plays goes on (stopping it here also cut off
         // the player the viewer had just given back: closing the viewer lays the feed out again)
         if (item.IsVideo && OnScreen && !Viewer.IsOpen) { if (!InlineVideo.Held || _video.IsPlaying(item.Path)) _video.Play(item.Path); }
@@ -372,6 +423,8 @@ public sealed partial class PostCard : UserControl
         _loading?.Cancel();
         _image.Source = null;
         _video.Stop();
+        _video.BindPath(null, false);
+        SetMediaHidden(false);
         OnScreen = false;
     }
 }

@@ -1,17 +1,18 @@
-// A collection beside the sidebar (a folder, 图片, 视频, 散装媒体, the recycle bin …), as the Mac app's
-// MacMediaGridPage: the grid and nothing else. The title, the zoom, 选择 and the selection's actions
-// are in the title bar. A plain grid of square tiles (Windows Photos has no pinch zoom either): the
-// zoom steps the tile size, from the buttons, Ctrl+wheel or Ctrl+plus/minus.
-using Microsoft.UI.Input;
+// A collection beside the sidebar (a folder, 图片, 视频, 散装媒体, the recycle bin …), as the Mac
+// app's MacMediaGridPage: the GPU-accelerated zoomable grid (`ZoomGridView`) and the page's floating
+// action bar. Zoom smoothly with the buttons, Ctrl+wheel / touchpad pinch, touchscreen pinch, or
+// Ctrl+plus/minus.
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using TwimShelf.Controls;
+using TwimShelf.Controls.ZoomGrid;
 using TwimShelf.Core;
 using TwimShelf.Models;
 using TwimShelf.Search;
 using TwimShelf.Services;
+using Windows.Foundation;
 using static TwimShelf.Services.Strings;
 
 namespace TwimShelf.Pages;
@@ -25,15 +26,13 @@ public sealed class GridEntry(List<FeedItem> items)
 
 public sealed partial class GridPage : UserControl, IShellPage
 {
-    static readonly double[] Sides = [72, 100, 140, 190, 260, 360];
     readonly LibraryModel _library;
     readonly Place _place;
-    readonly GridView _grid;
+    readonly ZoomGridView _grid;
     readonly TextBlock _empty;
     List<FeedItem> _items = [];
     List<GridEntry> _entries = [];
     Dictionary<string, long> _trashedAt = [];
-    int _level;
     int _revision = -1, _generation;
     string _counts = "";
     bool Bin => _place == Place.Trash;
@@ -49,29 +48,27 @@ public sealed partial class GridPage : UserControl, IShellPage
     {
         _library = library;
         _place = place;
-        _level = Array.IndexOf(Sides, Prefs.Instance.GridTile) is var i and >= 0 ? i : 2;
-        _grid = new GridView
+        _grid = new ZoomGridView(FloatingBar.Space)
         {
-            SelectionMode = ListViewSelectionMode.None,
-            IsItemClickEnabled = true,
-            Padding = new Thickness(16, FloatingBar.Space, 16, 24),
-            ItemTemplate = (DataTemplate)Application.Current.Resources["GridTileTemplate"],
-            CanDragItems = false,
+            InitialLevel = Prefs.Instance.GridLevel,
+            KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden,
         };
-        // the width decides the columns (ApplySize); the panel exists once the grid has loaded
-        _grid.SizeChanged += (_, _) => ApplySize();
-        _grid.Loaded += (_, _) => ApplySize();
-        _grid.ItemClick += (_, e) => Open((GridEntry)e.ClickedItem);
-        _grid.SelectionChanged += (_, _) => { BuildCommands(); ChromeChanged?.Invoke(); };
-        _grid.ContainerContentChanging += OnContainer;
-        _grid.RightTapped += OnRightTapped;
-        _grid.PointerWheelChanged += OnWheel;
+        _grid.TileOpened += OnTileOpened;
+        _grid.TileContextRequested += OnTileContextRequested;
+        _grid.SelectionChanged += () => { BuildCommands(); ChromeChanged?.Invoke(); };
+        _grid.SettledAtLevel += level =>
+        {
+            Prefs.Instance.GridLevel = level;
+            BuildCommands();
+        };
+        _grid.ZoomStateChanged += BuildCommands;
         // (no shortcut tips: WinUI would float "Ctrl+-" over the grid on hover)
-        _grid.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
-        _grid.KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Add, () => Zoom(1)));
-        _grid.KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)187, () => Zoom(1)));
-        _grid.KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Subtract, () => Zoom(-1)));
-        _grid.KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)189, () => Zoom(-1)));
+        KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
+        KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Add, () => _grid.Step(-1)));
+        KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)187, () => _grid.Step(-1)));
+        KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Subtract, () => _grid.Step(1)));
+        KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)189, () => _grid.Step(1)));
+
         _empty = new TextBlock
         {
             Text = Bin ? L("grid.trashEmpty") : L("grid.empty"),
@@ -81,8 +78,7 @@ public sealed partial class GridPage : UserControl, IShellPage
             VerticalAlignment = VerticalAlignment.Center,
             Visibility = Visibility.Collapsed,
         };
-        Content = new Grid { Children = { _grid, _freeze, _empty, _bar } };
-        ApplySize();
+        Content = new Microsoft.UI.Xaml.Controls.Grid { Children = { _grid, _empty, _bar } };
         BuildCommands();
         _library.Changed += OnLibraryChanged;
         Unloaded += (_, _) => _library.Changed -= OnLibraryChanged;
@@ -129,7 +125,6 @@ public sealed partial class GridPage : UserControl, IShellPage
     void Rebuild()
     {
         _entries = Grouped ? [.. FeedOrder.PostsInPlace(_items).Select(p => new GridEntry(p))] : [.. _items.Select(i => new GridEntry([i]))];
-        _grid.ItemsSource = _entries;
         _empty.Visibility = _entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         var videos = _items.Count(i => i.IsVideo);
         var photos = _items.Count - videos;
@@ -137,227 +132,56 @@ public sealed partial class GridPage : UserControl, IShellPage
         if (photos > 0) parts.Add(L("grid.photos", photos));
         if (videos > 0) parts.Add(L("grid.videos", videos));
         _counts = string.Join(L("list.separator"), parts);
+        _grid.SetTiles([.. _entries.Select(e => new ZoomGridTile(e.First, e.Items.Count))], _counts);
         BuildCommands();
         ChromeChanged?.Invoke();
     }
 
-    // ---- tiles ------------------------------------------------------------------------------
-
-    /// The zoom level's size: the most a tile is. Tiles fill the width exactly, so they are a
-    /// little smaller (`_tile`), as many columns as fit at this size.
-    double Side => Sides[_level];
-    double _tile = Sides[2];
-
-    /// Columns that fill the width: as many as fit at the zoom level's size, then each one
-    /// stretched so no gap is left at the right. The panel is reached with a cast that asks the
-    /// object itself (As): a plain cast fails in the AOT build (the panel comes back as its base).
-    void ApplySize()
-    {
-        var width = _grid.ActualWidth - _grid.Padding.Left - _grid.Padding.Right - 2;
-        if (width <= 0) return;
-        var columns = Math.Max(1, (int)Math.Floor(width / (Side + 4)));
-        var cell = Math.Floor(width / columns);
-        _tile = cell - 4;
-        if (_grid.ItemsPanelRoot is { } panel && WinRT.CastExtensions.As<ItemsWrapGrid>(panel) is { } wrap)
-        {
-            wrap.ItemWidth = cell;
-            wrap.ItemHeight = cell;
-        }
-        foreach (var e in _entries)
-            if (TileOf(_grid.ContainerFromItem(e)) is { } g) g.Width = g.Height = _tile;
-    }
-
-    /// A container's tile. The container is reached with a cast that asks the object (As): in the
-    /// AOT build it can come back as its base type, a plain `is GridViewItem` is false, and zooming
-    /// then left every tile at its old size.
-    static Grid? TileOf(DependencyObject? container)
-    {
-        if (container == null) return null;
-        try { return WinRT.CastExtensions.As<Microsoft.UI.Xaml.Controls.Primitives.SelectorItem>(container).ContentTemplateRoot as Grid; }
-        catch { return null; }
-    }
-
-    void OnContainer(ListViewBase sender, ContainerContentChangingEventArgs args)
-    {
-        if (args.ItemContainer.ContentTemplateRoot is not Grid tile || args.Item is not GridEntry e) return;
-        tile.Width = tile.Height = _tile;
-        args.ItemContainer.Margin = new Thickness(2);
-        var image = (Image)tile.Children[0];
-        var video = (Border)tile.Children[1];
-        var count = (Border)tile.Children[2];
-        if (args.InRecycleQueue)
-        {
-            (tile.Tag as CancellationTokenSource)?.Cancel();
-            image.Source = null;
-            return;
-        }
-        video.Visibility = e.First.IsVideo ? Visibility.Visible : Visibility.Collapsed;
-        count.Visibility = e.Items.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-        ((TextBlock)count.Child).Text = e.Items.Count.ToString();
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(args.ItemContainer, e.First.Text ?? e.First.AuthorName ?? e.First.MediaId);
-        image.Source = null;
-        Fill(tile, e);
-    }
-
-    /// The tile's picture at its current size (again after a zoom: a bigger one needs more pixels).
-    void Fill(Grid tile, GridEntry e)
-    {
-        var image = (Image)tile.Children[0];
-        (tile.Tag as CancellationTokenSource)?.Cancel();
-        var cancel = new CancellationTokenSource();
-        tile.Tag = cancel;
-        var scale = XamlRoot?.RasterizationScale ?? 1;
-        _ = Load(image, e.First, (int)(_tile * scale), cancel.Token);
-    }
-
-    int _loads; // pictures on their way (a zoom's cover waits for them)
-
-    async Task Load(Image image, FeedItem item, int pixels, CancellationToken cancel)
-    {
-        _loads++;
-        try
-        {
-            var src = await Thumbnails.Tile(item.MediaId, item.Path, item.IsVideo, pixels, cancel);
-            if (!cancel.IsCancellationRequested && src != null) image.Source = src;
-        }
-        catch { }
-        finally { _loads--; }
-    }
-
-    // A zoom changes every tile's size, and the grid then makes all its tiles anew: for a frame or
-    // two every tile is empty (white) until its picture is back. What was shown is pictured first
-    // and laid over the grid, and fades once the new tiles have their pictures.
-    readonly Image _freeze = new() { Stretch = Stretch.Fill, IsHitTestVisible = false, Visibility = Visibility.Collapsed, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
-    int _freezeGeneration;
-    bool _freezing;
-
-    async void Zoom(int by)
-    {
-        var l = Math.Clamp(_level + by, 0, Sides.Length - 1);
-        if (l == _level || _freezing) return;
-        var gen = ++_freezeGeneration;
-        // (zooming again while the picture is still up, as with the wheel: it stays, it is not taken again)
-        if (_freeze.Visibility != Visibility.Visible || _freeze.Opacity < 1)
-        {
-            _freezing = true;
-            try
-            {
-                var shot = new Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap();
-                // at half size: it is up for a fifth of a second, and pictured faster so
-                await shot.RenderAsync(_grid, (int)(_grid.ActualWidth / 2), (int)(_grid.ActualHeight / 2));
-                _freeze.Source = shot;
-                _freeze.Width = _grid.ActualWidth;
-                _freeze.Height = _grid.ActualHeight;
-                _freeze.Opacity = 1;
-                _freeze.Visibility = Visibility.Visible;
-            }
-            catch { }
-            finally { _freezing = false; }
-            if (gen != _freezeGeneration) return;
-        }
-        ZoomTo(l);
-        // until the tiles in view have their pictures (half a second at most), then a short fade
-        for (var waited = 0; waited < 700 && !TilesFilled(); waited += 16) await Task.Delay(16);
-        // the grid draws its new tiles over the next frames: a few of them go by before the fade
-        await Frames(6);
-        for (var waited = 0; waited < 300 && !TilesFilled(); waited += 16) await Task.Delay(16);
-        if (gen != _freezeGeneration) return;
-        for (var o = 0.75; o > 0; o -= 0.25) { _freeze.Opacity = o; await Task.Delay(16); if (gen != _freezeGeneration) return; }
-        _freeze.Visibility = Visibility.Collapsed;
-        _freeze.Source = null;
-    }
-
-    /// After a zoom: a tile whose picture has fewer pixels than it now shows (smaller ones keep
-    /// theirs, scaled down: replacing a picture blanks the tile until the new one is decoded).
-    bool NeedsMore(Grid tile)
-    {
-        if (tile.Children[0] is not Image { Source: Microsoft.UI.Xaml.Media.Imaging.BitmapImage b }) return true;
-        var want = _tile * (XamlRoot?.RasterizationScale ?? 1);
-        return b.DecodePixelWidth > 0 && b.DecodePixelWidth < want * 0.9;
-    }
-
-    static Task Frames(int n)
-    {
-        var done = new TaskCompletionSource();
-        var left = n;
-        void Tick(object? s, object e) { if (--left > 0) return; Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= Tick; done.TrySetResult(); }
-        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += Tick;
-        return done.Task;
-    }
-
-    /// The tiles on screen all show a decoded picture (asked of the tiles there, not by index: the
-    /// grid's visible range is only updated a layout or two after a zoom).
-    bool TilesFilled() => EmptyTiles() == 0 && _loads == 0;
-
-    int EmptyTiles()
-    {
-        if (_grid.ItemsPanelRoot is not { } panel) return 0;
-        var view = new Windows.Foundation.Rect(0, 0, _grid.ActualWidth, _grid.ActualHeight);
-        var empty = 0;
-        foreach (var child in panel.Children)
-        {
-            if (TileOf(child) is not { } g || g.Children[0] is not Image im) continue;
-            Windows.Foundation.Rect r;
-            try { r = g.TransformToVisual(_grid).TransformBounds(new Windows.Foundation.Rect(0, 0, g.ActualWidth, g.ActualHeight)); } catch { continue; }
-            r.Intersect(view);
-            if (r.IsEmpty || r.Width < 1 || r.Height < 1) continue;
-            if (im.Source == null || im.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage { PixelWidth: 0 }) empty++;
-        }
-        return empty;
-    }
-
-    void ZoomTo(int l)
-    {
-        _level = l;
-        Prefs.Instance.GridTile = Side;
-        // the same items stay in view: the first one shown before is the first one shown after
-        var wrap = _grid.ItemsPanelRoot is { } panel ? WinRT.CastExtensions.As<ItemsWrapGrid>(panel) : null;
-        var first = wrap?.FirstVisibleIndex ?? -1;
-        ApplySize();
-        _grid.UpdateLayout();
-        if (first >= 0 && first < _entries.Count) _grid.ScrollIntoView(_entries[first], ScrollIntoViewAlignment.Leading);
-        _grid.UpdateLayout();
-        if (wrap != null)
-            for (var i = Math.Max(0, wrap.FirstCacheIndex); i <= wrap.LastCacheIndex && i < _entries.Count; i++)
-                if (TileOf(_grid.ContainerFromIndex(i)) is { } g && NeedsMore(g)) Fill(g, _entries[i]);
-        BuildCommands();
-    }
-
-    void OnWheel(object sender, PointerRoutedEventArgs e)
-    {
-        if (!e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control)) return;
-        var d = e.GetCurrentPoint(_grid).Properties.MouseWheelDelta;
-        Zoom(d > 0 ? 1 : -1);
-        e.Handled = true;
-    }
-
     // ---- open, menus ----------------------------------------------------------------------------
 
-    void Open(GridEntry e)
+    void OnTileOpened(int index)
     {
-        if (Selecting) return;
+        if (Selecting || index < 0 || index >= _entries.Count) return;
+        var e = _entries[index];
         // ← → goes through every media of the grid, starting here
         var all = Grouped ? _entries.SelectMany(x => x.Items).ToList() : _items;
-        Viewer.Open(all, Math.Max(0, all.FindIndex(i => i.MediaId == e.First.MediaId)), _place);
+        var root = MainWindow.Current?.Content as UIElement;
+
+        string? CoverIdFor(string mediaId) =>
+            _entries.FirstOrDefault(entry => entry.Items.Any(m => m.MediaId == mediaId))?.First.MediaId;
+
+        var initialRect = root != null ? _grid.ViewerSourceFrame(e.First.MediaId, root) : null;
+        Viewer.Open(all, Math.Max(0, all.FindIndex(i => i.MediaId == e.First.MediaId)), new ViewerOpenOptions
+        {
+            Place = _place,
+            CropSource = true,
+            SourceCornerRadius = GridConfig.CornerRadius,
+            SourceRect = item =>
+            {
+                if (root == null) return null;
+                var coverId = CoverIdFor(item.MediaId);
+                if (coverId != null && _grid.ViewerSourceFrame(coverId, root) is { } r) return r;
+                return item.MediaId == e.First.MediaId ? initialRect : null;
+            },
+            ActiveMediaChanged = id => _grid.SetHiddenMedia(id == null ? null : CoverIdFor(id)),
+            SquarePreviewPath = item => Thumbnails.PeekCachedTilePath(item),
+        });
     }
 
-    void OnRightTapped(object sender, RightTappedRoutedEventArgs e)
+    void OnTileContextRequested(int index, Point point)
     {
-        var item = (e.OriginalSource as FrameworkElement)?.DataContext as GridEntry;
-        if (item == null) return;
+        if (index < 0 || index >= _entries.Count) return;
+        var item = _entries[index];
         var m = Selecting ? SelectionMenu(item) : EntryMenu(item);
-        m.ShowAt(_grid, e.GetPosition(_grid));
-        e.Handled = true;
+        m.ShowAt(_grid, point);
     }
 
     MenuFlyout SelectionMenu(GridEntry e)
     {
         var m = new MenuFlyout();
-        var on = _grid.SelectedItems.Contains(e);
-        m.Items.Add(FolderActions.Item(on ? L("common.deselect") : L("common.select"), null, () =>
-        {
-            if (on) _grid.SelectedItems.Remove(e); else _grid.SelectedItems.Add(e);
-        }));
+        var id = e.First.MediaId;
+        var on = _grid.Selected.Contains(id);
+        m.Items.Add(FolderActions.Item(on ? L("common.deselect") : L("common.select"), null, () => _grid.SetSelected(id, !on)));
         return m;
     }
 
@@ -371,13 +195,13 @@ public sealed partial class GridPage : UserControl, IShellPage
             m.Items.Add(new MenuFlyoutItem { Text = left, IsEnabled = false });
             m.Items.Add(new MenuFlyoutSeparator());
         }
-        m.Items.Add(I(L("common.select"), "", () => { SetSelecting(true); _grid.SelectedItems.Add(e); }));
+        m.Items.Add(I(L("common.select"), "\uE762", () => { SetSelecting(true); _grid.SetSelected(e.First.MediaId, true); }));
         if (Bin)
         {
             var n = ids.Count > 1 ? L("grid.countSuffix", ids.Count) : "";
-            m.Items.Add(I(L("common.restore") + n, "", () => _ = Restore(ids)));
+            m.Items.Add(I(L("common.restore") + n, "\uE7A7", () => _ = Restore(ids)));
             m.Items.Add(new MenuFlyoutSeparator());
-            m.Items.Add(I(L("common.deletePermanently") + n + "…", "", () => _ = MediaActions.Purge(ids)));
+            m.Items.Add(I(L("common.deletePermanently") + n + "…", "\uE74D", () => _ = MediaActions.Purge(ids)));
             return m;
         }
         // the shared media menu, then this grid's own
@@ -406,20 +230,19 @@ public sealed partial class GridPage : UserControl, IShellPage
 
     // ---- selection ----------------------------------------------------------------------------
 
-    bool Selecting => _grid.SelectionMode == ListViewSelectionMode.Multiple;
-    List<GridEntry> SelectedEntries => [.. _grid.SelectedItems.OfType<GridEntry>()];
+    bool Selecting => _grid.Selecting;
+    List<GridEntry> SelectedEntries => [.. _entries.Where(e => _grid.Selected.Contains(e.First.MediaId))];
     List<FeedItem> SelectedMedia => [.. SelectedEntries.SelectMany(e => e.Items)];
 
     void SetSelecting(bool on)
     {
         if (Selecting == on) return;
-        _grid.SelectionMode = on ? ListViewSelectionMode.Multiple : ListViewSelectionMode.None;
-        _grid.IsItemClickEnabled = !on;
+        _grid.Selecting = on;
         BuildCommands();
         ChromeChanged?.Invoke();
     }
 
-    // ---- title bar --------------------------------------------------------------------------------
+    // ---- floating action bar ------------------------------------------------------------------
 
     void BuildCommands()
     {
@@ -437,23 +260,23 @@ public sealed partial class GridPage : UserControl, IShellPage
         {
             var any = SelectedEntries.Count > 0;
             var all = _entries.Count > 0 && SelectedEntries.Count == _entries.Count;
-            bar.PrimaryCommands.Add(B("", all ? L("grid.deselectAll") : L("grid.selectAll"), () => { if (all) _grid.DeselectRange(new Microsoft.UI.Xaml.Data.ItemIndexRange(0, (uint)_entries.Count)); else _grid.SelectAll(); }));
+            bar.PrimaryCommands.Add(B("\uE8B3", all ? L("grid.deselectAll") : L("grid.selectAll"), () => _grid.SelectAll(!all)));
             if (Bin)
             {
-                bar.PrimaryCommands.Add(B("", L("common.restore"), () => _ = Restore([.. SelectedMedia.Select(i => i.MediaId)]), any));
-                bar.PrimaryCommands.Add(B("", L("common.deletePermanently"), async () => { await MediaActions.Purge([.. SelectedMedia.Select(i => i.MediaId)]); SetSelecting(false); }, any));
+                bar.PrimaryCommands.Add(B("\uE7A7", L("common.restore"), () => _ = Restore([.. SelectedMedia.Select(i => i.MediaId)]), any));
+                bar.PrimaryCommands.Add(B("\uE74D", L("common.deletePermanently"), async () => { await MediaActions.Purge([.. SelectedMedia.Select(i => i.MediaId)]); SetSelecting(false); }, any));
             }
             else
             {
-                bar.PrimaryCommands.Add(B("", L("common.addToFolder"), async () => { await MediaActions.AddToFolder(SelectedMedia); SetSelecting(false); }, any));
+                bar.PrimaryCommands.Add(B("\uE8F4", L("common.addToFolder"), async () => { await MediaActions.AddToFolder(SelectedMedia); SetSelecting(false); }, any));
                 if (_place.Folder is { } folder)
-                    bar.PrimaryCommands.Add(B("", L("common.removeFromFolder"), async () =>
+                    bar.PrimaryCommands.Add(B("\uE8F6", L("common.removeFromFolder"), async () =>
                     {
                         var ids = SelectedMedia.Select(i => i.MediaId).ToList();
                         SetSelecting(false);
                         await MediaActions.Run(ActionKind.FolderRemove, ids, folder: folder, done: n => L("folder.removed", n, folder));
                     }, any));
-                bar.PrimaryCommands.Add(B("", L("grid.moveToTrash"), async () =>
+                bar.PrimaryCommands.Add(B("\uE74D", L("grid.moveToTrash"), async () =>
                 {
                     var ids = SelectedMedia.Select(i => i.MediaId).ToList();
                     if (!await Dialogs.Confirm(MainWindow.Current!, L("grid.trashConfirm.title"), L("grid.trashConfirm", ids.Count), L("grid.moveToTrash"), destructive: true)) return;
@@ -461,21 +284,21 @@ public sealed partial class GridPage : UserControl, IShellPage
                     await MediaActions.Run(ActionKind.Trash, ids, done: n => L("trash.moved", n));
                 }, any));
             }
-            var done = new AppBarButton { Label = L("common.done"), Icon = new FontIcon { Glyph = "" } };
+            var done = new AppBarButton { Label = L("common.done"), Icon = new FontIcon { Glyph = "\uE73E" } };
             done.Click += (_, _) => SetSelecting(false);
             bar.PrimaryCommands.Add(new AppBarSeparator());
             bar.PrimaryCommands.Add(done);
         }
         else
         {
-            bar.PrimaryCommands.Add(B("", L("grid.zoomOut"), () => Zoom(-1), _level > 0, iconOnly: true));
-            bar.PrimaryCommands.Add(B("", L("grid.zoomIn"), () => Zoom(1), _level < Sides.Length - 1, iconOnly: true));
-            bar.PrimaryCommands.Add(B("", L("common.select"), () => SetSelecting(true), _entries.Count > 0));
+            bar.PrimaryCommands.Add(B("\uE71F", L("grid.zoomOut"), () => _grid.Step(1), _grid.CanZoomOut, iconOnly: true));
+            bar.PrimaryCommands.Add(B("\uE8A3", L("grid.zoomIn"), () => _grid.Step(-1), _grid.CanZoomIn, iconOnly: true));
+            bar.PrimaryCommands.Add(B("\uE762", L("common.select"), () => SetSelecting(true), _entries.Count > 0));
             if (!Bin && _place.Filter != null)
-                bar.PrimaryCommands.Add(B("", L("grid.revealMedia"), () => _library.ShowInBrowse(_place.Filter!)));
+                bar.PrimaryCommands.Add(B("\uE8A1", L("grid.revealMedia"), () => _library.ShowInBrowse(_place.Filter!)));
             // the menu only has a folder's or the bin's own actions
             if (!Bin && _place.Folder == null) { _bar.Child = bar; return; }
-            var more = new AppBarButton { Icon = new FontIcon { Glyph = "" }, Label = L("grid.more"), LabelPosition = CommandBarLabelPosition.Collapsed, Flyout = MoreMenu() };
+            var more = new AppBarButton { Icon = new FontIcon { Glyph = "\uE712" }, Label = L("grid.more"), LabelPosition = CommandBarLabelPosition.Collapsed, Flyout = MoreMenu() };
             ToolTipService.SetToolTip(more, L("grid.more"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(more, L("grid.more"));
             bar.PrimaryCommands.Add(more);
@@ -505,15 +328,15 @@ public sealed partial class GridPage : UserControl, IShellPage
             }
             m.Items.Add(retention);
             m.Items.Add(new MenuFlyoutSeparator());
-            m.Items.Add(I(L("trash.restoreAll"), "", () => _ = Restore(null)));
-            m.Items.Add(I(L("trash.emptyEllipsis"), "", () => _ = MediaActions.Purge(null)));
+            m.Items.Add(I(L("trash.restoreAll"), "\uE7A7", () => _ = Restore(null)));
+            m.Items.Add(I(L("trash.emptyEllipsis"), "\uE74D", () => _ = MediaActions.Purge(null)));
             return m;
         }
         if (_place.Folder is { } folder)
         {
-            m.Items.Add(I(L("folder.exportZip"), "", () => _ = ExportZip(folder)));
-            m.Items.Add(I(L("folder.renameEllipsis"), "", async () => { if (await FolderActions.Rename(MainWindow.Current!, folder) is { } n) MainWindow.Current!.Go(Place.OfFolder(n)); }));
-            m.Items.Add(I(L("folder.deleteEllipsis"), "", () => _ = FolderActions.Delete(MainWindow.Current!, folder)));
+            m.Items.Add(I(L("folder.exportZip"), "\uEDE1", () => _ = ExportZip(folder)));
+            m.Items.Add(I(L("folder.renameEllipsis"), "\uE8AC", async () => { if (await FolderActions.Rename(MainWindow.Current!, folder) is { } n) MainWindow.Current!.Go(Place.OfFolder(n)); }));
+            m.Items.Add(I(L("folder.deleteEllipsis"), "\uE74D", () => _ = FolderActions.Delete(MainWindow.Current!, folder)));
         }
         return m;
     }
@@ -535,5 +358,9 @@ public sealed partial class GridPage : UserControl, IShellPage
         catch (Exception e) { await Dialogs.Alert(w, L("common.notDone"), e.Message); }
     }
 
-    public void Hidden() => _library.Changed -= OnLibraryChanged;
+    public void Hidden()
+    {
+        _library.Changed -= OnLibraryChanged;
+        _grid.Dispose();
+    }
 }

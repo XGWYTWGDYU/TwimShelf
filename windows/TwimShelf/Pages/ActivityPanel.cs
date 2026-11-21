@@ -76,6 +76,7 @@ public sealed partial class ActivityPanel : UserControl
         LocalModels.Instance.Changed += Rebuild;
         library.Changed += () => { if (library.Downloads != null) { library.Downloads.Changed -= Rebuild; library.Downloads.Changed += Rebuild; } };
         if (library.Downloads != null) library.Downloads.Changed += Rebuild;
+        Viewer.Opened += Rebuild;
         Viewer.Closed += Rebuild;
         _poll = DispatcherQueue.CreateTimer();
         _poll.Interval = TimeSpan.FromSeconds(1);

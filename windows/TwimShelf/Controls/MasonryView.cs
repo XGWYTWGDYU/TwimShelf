@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using TwimShelf.Core;
 using TwimShelf.Search;
+using Windows.Foundation;
 using static TwimShelf.Services.Strings;
 
 namespace TwimShelf.Controls;
@@ -45,6 +46,7 @@ public sealed partial class MasonryView : UserControl
     readonly HashSet<PostCard> _placed = [];
     double _width = -1;
     bool _laying, _again;
+    string? _hiddenMediaId;
 
     public MasonryView()
     {
@@ -186,6 +188,7 @@ public sealed partial class MasonryView : UserControl
         c = _pool.Count > 0 ? _pool.Pop() : MakeCard();
         c.SetWidth(_width);
         c.Bind(_cards[i], PageOf(KeyOf(i)), Marks, Highlight == _cards[i][0].PostId);
+        c.SetMediaHidden(_hiddenMediaId != null && c.Media[c.Page].MediaId == _hiddenMediaId);
         c.Visibility = Visibility.Visible;
         if (_placed.Add(c)) _canvas.Children.Add(c);
         _live[i] = c;
@@ -347,6 +350,62 @@ public sealed partial class MasonryView : UserControl
         // what stopped starts again; what plays goes on (toggling them off and on restarted every
         // video, the one the viewer had just given back too)
         foreach (var c in _live.Values) c.UpdateVideo();
+    }
+
+    /// Hides or reveals the media inside whichever visible card currently displays `mediaId`.
+    public void SetHiddenMedia(string? mediaId)
+    {
+        _hiddenMediaId = mediaId;
+        foreach (var c in _live.Values)
+            c.SetMediaHidden(mediaId != null && c.Media.Count > 0 && c.Media[c.Page].MediaId == mediaId);
+    }
+
+    /// If a visible multi-media card contains `item.MediaId` on another page, turns that card to
+    /// `item`'s page so the viewer's zoom-close lands directly onto it.
+    public void SyncCardPageForMedia(FeedItem item)
+    {
+        foreach (var c in _live.Values)
+        {
+            if (c.Media.Count <= 1) continue;
+            if (c.Media.Any(m => m.MediaId == item.MediaId))
+            {
+                if (c.Media[c.Page].MediaId != item.MediaId && c.SetPageForMedia(item.MediaId))
+                {
+                    Layout();
+                    UpdateLayout();
+                }
+                return;
+            }
+        }
+    }
+
+    /// Returns the fitted rect of the visible card currently showing `item.MediaId` in `relativeTo` coords.
+    public Rect? ViewerSourceFrame(FeedItem item, UIElement relativeTo)
+    {
+        if (!Scroll.IsLoaded || Scroll.XamlRoot == null) return null;
+        Rect visible;
+        try
+        {
+            var pt = Scroll.TransformToVisual(relativeTo).TransformPoint(new Point(0, 0));
+            visible = new Rect(pt.X, pt.Y, Scroll.ViewportWidth, Scroll.ViewportHeight);
+        }
+        catch { return null; }
+
+        foreach (var c in _live.Values)
+        {
+            if (c.Media.Count > 0 && c.Media[c.Page].MediaId == item.MediaId)
+                return c.ViewerSourceFrame(relativeTo, visible);
+        }
+        return null;
+    }
+
+    /// Returns the already-decoded card preview ImageSource for `mediaId` if currently mounted.
+    public ImageSource? PreviewImageFor(string mediaId)
+    {
+        foreach (var c in _live.Values)
+            if (c.Media.Count > 0 && c.Media[c.Page].MediaId == mediaId)
+                return c.CurrentPreviewImage;
+        return null;
     }
 }
 

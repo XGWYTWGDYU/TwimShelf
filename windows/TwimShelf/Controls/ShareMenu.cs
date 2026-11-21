@@ -34,7 +34,7 @@ public static class ShareMenu
         catch (Exception e) { Services.Diagnostics.Log("save as: " + e.Message); Dialogs.Toast(w, L("viewer.copyFailed")); }
     }
 
-    static async Task Copy(Core.FeedItem item)
+    public static async Task Copy(Core.FeedItem item)
     {
         var w = MainWindow.Current!;
         try

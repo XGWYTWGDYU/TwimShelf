@@ -303,6 +303,10 @@ public static unsafe class TlCore
         try { return Ok(Native.tl_thumbnail(mediaId, side, cacheDir), J.ThumbnailResult); }
         catch (CoreException e) when (e.Message == "not_decodable") { throw new ThumbnailNotDecodableException(); }
     }
+    /// Warms missing square thumbnails on disk in the core's background coordinator.
+    public static void WarmThumbnails(IEnumerable<string> mediaIds, uint side, string cacheDir) =>
+        Done(Native.tl_thumbnails_warm(Json(Strings(mediaIds)), side, cacheDir));
+    public static void CancelThumbnailsWarm() => Native.tl_thumbnails_warm_cancel();
     /// A HEIC or AVIF file as a JPEG Windows can show, at most maxSide on its long edge.
     public static string DisplayImage(string path, uint maxSide, string cacheDir) => OkString(Native.tl_display_image(path, maxSide, cacheDir));
 

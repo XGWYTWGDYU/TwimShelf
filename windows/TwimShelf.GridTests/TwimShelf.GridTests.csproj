@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.22000.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\TwimShelf\Controls\Grid\GridConfig.cs" Link="Engine\GridConfig.cs" />
+    <Compile Include="..\TwimShelf\Controls\Grid\ZoomEngine.cs" Link="Engine\ZoomEngine.cs" />
+    <Compile Include="..\TwimShelf\Controls\Grid\GridScene.cs" Link="Engine\GridScene.cs" />
+    <Compile Include="..\TwimShelf\Controls\Viewer\ViewerMath.cs" Link="Engine\ViewerMath.cs" />
+  </ItemGroup>
+</Project>
