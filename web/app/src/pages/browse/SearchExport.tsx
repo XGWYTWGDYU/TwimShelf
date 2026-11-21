@@ -32,7 +32,7 @@ export function SearchExportDialog({
         ? L('export.search.fileName', clean)
         : L('export.search.fileNameAll')).replace('{app}', 'TwimShelf');
       const ext = mediaOnly ? '.zip' : '.tlpack';
-      const report = await exportFile<ExportReport>(
+      const { report, status } = await exportFile<ExportReport>(
         `${base}${ext}`,
         (out) => core.readJson<ExportReport>('tl_export_media', {
           media_ids: mediaIds,
@@ -44,7 +44,7 @@ export function SearchExportDialog({
           out,
         }),
       );
-      if (!report) return;
+      if (status === 'cancelled') return;
       const summary = mediaOnly
         ? L('export.summaryMedia', report.media, size(report.bytes))
         : L('export.summary', report.posts, report.media, size(report.bytes));

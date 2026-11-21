@@ -11,8 +11,6 @@ const mac = window.twimshelf?.platform === 'darwin' || (!window.twimshelf && /Ma
 if (mac) html.classList.add('platform-mac');
 // the macOS desktop window has its buttons over the sidebar's top
 if (window.twimshelf?.platform === 'darwin') html.classList.add('mac-titlebar');
-// the Linux desktop window has its buttons over the toolbar, on the side the desktop puts them
-if (window.twimshelf?.platform === 'linux') html.classList.add('linux-titlebar');
 if (window.twimshelf) html.classList.add('desktop');
 
 // An app, not a page. No browser menu (Back, Reload, Inspect…) on a right click outside text

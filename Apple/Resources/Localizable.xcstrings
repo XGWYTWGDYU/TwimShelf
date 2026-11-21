@@ -59,6 +59,66 @@
         }
       }
     },
+    "about.acknowledgments" : {
+      "comment" : "Section heading on the About page",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acknowledgments"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "謝辞"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "鸣谢"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "鳴謝"
+          }
+        }
+      }
+    },
+    "about.acknowledgments.ai" : {
+      "comment" : "Acknowledgment note for AI assistants on the About page",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Built with the assistance of Claude, ChatGPT, and Gemini."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本プロジェクトの開発を支援してくれた Claude、ChatGPT、Gemini に感謝します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感谢 Claude、ChatGPT 和 Gemini 对本项目开发提供的协助。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感謝 Claude、ChatGPT 與 Gemini 對本專案開發提供的協助。"
+          }
+        }
+      }
+    },
     "about.build" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -291,6 +351,35 @@
         }
       }
     },
+    "activity.downloadSummary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done %@ · Already there %@ · Failed %@ / %@ in all"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了 %@ · 既存 %@ · 失敗 %@ / 全 %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成 %@ · 已有 %@ · 失败 %@ / 共 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成 %@ · 已有 %@ · 失敗 %@ / 共 %@"
+          }
+        }
+      }
+    },
     "activity.downloadingModel" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -345,35 +434,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在下載貼文"
-          }
-        }
-      }
-    },
-    "activity.downloadSummary" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Done %@ · Already there %@ · Failed %@ / %@ in all"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完了 %@ · 既存 %@ · 失敗 %@ / 全 %@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完成 %@ · 已有 %@ · 失败 %@ / 共 %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完成 %@ · 已有 %@ · 失敗 %@ / 共 %@"
           }
         }
       }
@@ -473,35 +533,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : " · 發現 %@ 個損壞"
-          }
-        }
-      }
-    },
-    "activity.importing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Importing"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "読み込み中"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在导入"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在匯入"
           }
         }
       }
@@ -618,6 +649,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等待上一個匯入完成"
+          }
+        }
+      }
+    },
+    "activity.importing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importing"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み込み中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在导入"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在匯入"
           }
         }
       }
@@ -953,35 +1013,6 @@
         }
       }
     },
-    "activity.syncing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Syncing with other devices"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ほかのデバイスと同期中"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在与其他设备同步"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在與其他裝置同步"
-          }
-        }
-      }
-    },
     "activity.syncSeePage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1011,31 +1042,31 @@
         }
       }
     },
-    "activity.verifying" : {
+    "activity.syncing" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Checking media integrity"
+            "value" : "Syncing with other devices"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "メディアの整合性をチェック中"
+            "value" : "ほかのデバイスと同期中"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在检查媒体完整性"
+            "value" : "正在与其他设备同步"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在檢查媒體完整性"
+            "value" : "正在與其他裝置同步"
           }
         }
       }
@@ -1065,6 +1096,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已檢查 %@/%@ · 發現 %@ 個損壞"
+          }
+        }
+      }
+    },
+    "activity.verifying" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking media integrity"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メディアの整合性をチェック中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查媒体完整性"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在檢查媒體完整性"
           }
         }
       }
@@ -4259,6 +4319,35 @@
         }
       }
     },
+    "catalog.qwen25vl3b" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Qwen2.5-VL 3B Uncensored"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Qwen2.5-VL 3B 無検閲"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Qwen2.5-VL 3B 无审查"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Qwen2.5-VL 3B 無審查"
+          }
+        }
+      }
+    },
     "catalog.qwen3embedding" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4371,35 +4460,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Qwen3-VL 8B 無審查"
-          }
-        }
-      }
-    },
-    "catalog.qwen25vl3b" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Qwen2.5-VL 3B Uncensored"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Qwen2.5-VL 3B 無検閲"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Qwen2.5-VL 3B 无审查"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Qwen2.5-VL 3B 無審查"
           }
         }
       }
@@ -5100,35 +5160,6 @@
         }
       }
     },
-    "common.importing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Importing…"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "読み込み中…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在导入…"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在匯入…"
-          }
-        }
-      }
-    },
     "common.importRecords" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5183,6 +5214,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯入到資料夾？"
+          }
+        }
+      }
+    },
+    "common.importing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importing…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み込み中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在导入…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在匯入…"
           }
         }
       }
@@ -6434,35 +6494,6 @@
         }
       }
     },
-    "datahome.moved" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The data was copied and checked. The app restarts and runs from the new folder; the old one stays until you delete it."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "データをコピーして確認しました。アプリは再起動して新しいフォルダを使います。古いフォルダは削除するまで残ります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "数据已复制并校验完毕。应用将重新启动并使用新文件夹；旧文件夹会保留，直到你删除它。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "資料已複製並校驗完畢。應用程式將重新啟動並使用新資料夾；舊資料夾會保留，直到你刪除它。"
-          }
-        }
-      }
-    },
     "datahome.moveExisting" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6517,6 +6548,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法移動資料：%@。沒有做任何變更，應用程式繼續使用目前資料夾。"
+          }
+        }
+      }
+    },
+    "datahome.moved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The data was copied and checked. The app restarts and runs from the new folder; the old one stays until you delete it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "データをコピーして確認しました。アプリは再起動して新しいフォルダを使います。古いフォルダは削除するまで残ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数据已复制并校验完毕。应用将重新启动并使用新文件夹；旧文件夹会保留，直到你删除它。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "資料已複製並校驗完畢。應用程式將重新啟動並使用新資料夾；舊資料夾會保留，直到你刪除它。"
           }
         }
       }
@@ -9159,35 +9219,6 @@
         }
       }
     },
-    "folder.added" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Added %@ items to “%@”"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 件を「%@」に追加しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已将 %@ 个媒体加入「%@」"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已將 %@ 個媒體加入「%@」"
-          }
-        }
-      }
-    },
     "folder.addFailed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9213,6 +9244,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法加入資料夾：%@"
+          }
+        }
+      }
+    },
+    "folder.added" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added %@ items to “%@”"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 件を「%@」に追加しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已将 %@ 个媒体加入「%@」"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已將 %@ 個媒體加入「%@」"
           }
         }
       }
@@ -10500,6 +10560,35 @@
         }
       }
     },
+    "grid.selectItems" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select Items"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "項目を選択"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择项目"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇項目"
+          }
+        }
+      }
+    },
     "grid.selected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10537,35 +10626,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已選擇 %lld 個媒體"
-          }
-        }
-      }
-    },
-    "grid.selectItems" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select Items"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "項目を選択"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择项目"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選擇項目"
           }
         }
       }
@@ -14890,47 +14950,6 @@
         }
       }
     },
-    "mac.importHistory.deleted" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld record deleted"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld records deleted"
-                }
-              }
-            }
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 件の記録を削除しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已删除 %lld 条记录"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已刪除 %lld 條記錄"
-          }
-        }
-      }
-    },
     "mac.importHistory.deleteMessage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14985,6 +15004,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除%@？"
+          }
+        }
+      }
+    },
+    "mac.importHistory.deleted" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld record deleted"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld records deleted"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件の記録を削除しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已删除 %lld 条记录"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已刪除 %lld 條記錄"
           }
         }
       }
@@ -15656,35 +15716,6 @@
         }
       }
     },
-    "mac.models.exported" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Exported"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "書き出しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已导出"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已匯出"
-          }
-        }
-      }
-    },
     "mac.models.exportZip" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15710,6 +15741,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯出 ZIP…"
+          }
+        }
+      }
+    },
+    "mac.models.exported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exported"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書き出しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已导出"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已匯出"
           }
         }
       }
@@ -16277,35 +16337,6 @@
         }
       }
     },
-    "mac.models.testing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Testing %@…"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ をテスト中…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在测试 %@…"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在測試 %@…"
-          }
-        }
-      }
-    },
     "mac.models.testOK" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16331,6 +16362,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "✓ 測試成功："
+          }
+        }
+      }
+    },
+    "mac.models.testing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Testing %@…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ をテスト中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在测试 %@…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在測試 %@…"
           }
         }
       }
@@ -26458,35 +26518,6 @@
         }
       }
     },
-    "settings.downloading" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Downloading"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ダウンロード中"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下载"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下載"
-          }
-        }
-      }
-    },
     "settings.downloadStatus" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26512,6 +26543,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下載狀態"
+          }
+        }
+      }
+    },
+    "settings.downloading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Downloading"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロード中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下載"
           }
         }
       }
@@ -27444,6 +27504,35 @@
         }
       }
     },
+    "settings.pauseFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't Pause"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一時停止できません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法暂停"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法暫停"
+          }
+        }
+      }
+    },
     "settings.paused" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -27510,35 +27599,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暫停後需手動繼續。取消會移除未完成任務，已下載內容保留。"
-          }
-        }
-      }
-    },
-    "settings.pauseFailed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't Pause"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一時停止できません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法暂停"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法暫停"
           }
         }
       }
@@ -31337,35 +31397,6 @@
         }
       }
     },
-    "sync.err.noneOnline" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No online devices of this account found. Check that {app} is open on the other device and both are on the same network."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同じアカウントのオンラインのデバイスが見つかりません。もう一方のデバイスで {app} が開いていて、同じネットワークにいるか確認してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有找到同账户的在线设备。请确认另一台设备打开了 {app}，并且在同一个网络里。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沒有找到同帳戶的在線裝置。請確認另一台裝置打開了 {app}，並且在同一個網路裡。"
-          }
-        }
-      }
-    },
     "sync.err.noPeers" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31391,6 +31422,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "沒有發現同帳戶裝置，請讓另一台裝置保持 App 在前景"
+          }
+        }
+      }
+    },
+    "sync.err.noneOnline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No online devices of this account found. Check that {app} is open on the other device and both are on the same network."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じアカウントのオンラインのデバイスが見つかりません。もう一方のデバイスで {app} が開いていて、同じネットワークにいるか確認してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有找到同账户的在线设备。请确认另一台设备打开了 {app}，并且在同一个网络里。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有找到同帳戶的在線裝置。請確認另一台裝置打開了 {app}，並且在同一個網路裡。"
           }
         }
       }
@@ -31888,93 +31948,6 @@
         }
       }
     },
-    "sync.joined" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Joined"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "参加しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已加入"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已加入"
-          }
-        }
-      }
-    },
-    "sync.joined.mac" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This Mac now syncs on its own with the other devices of the account."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この Mac は同じアカウントのほかのデバイスと自動で同期します。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 Mac 会自动与同一账户的其他设备同步。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "這台 Mac 會自動與同一帳戶的其他裝置同步。"
-          }
-        }
-      }
-    },
-    "sync.joined.message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This device now syncs on its own with the other devices of the account."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このデバイスは同じアカウントのほかのデバイスと自動で同期します。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台设备会自动与同一账户的其他设备同步。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "這台裝置會自動與同一帳戶的其他裝置同步。"
-          }
-        }
-      }
-    },
     "sync.joinEllipsis" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32116,6 +32089,93 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加入「%@」的帳戶"
+          }
+        }
+      }
+    },
+    "sync.joined" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Joined"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "参加しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已加入"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已加入"
+          }
+        }
+      }
+    },
+    "sync.joined.mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Mac now syncs on its own with the other devices of the account."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この Mac は同じアカウントのほかのデバイスと自動で同期します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 会自动与同一账户的其他设备同步。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台 Mac 會自動與同一帳戶的其他裝置同步。"
+          }
+        }
+      }
+    },
+    "sync.joined.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device now syncs on its own with the other devices of the account."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは同じアカウントのほかのデバイスと自動で同期します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备会自动与同一账户的其他设备同步。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台裝置會自動與同一帳戶的其他裝置同步。"
           }
         }
       }
@@ -35092,35 +35152,6 @@
         }
       }
     },
-    "tags.renamed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Renamed"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "名前変更済み"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已改名"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已改名"
-          }
-        }
-      }
-    },
     "tags.renameOrMerge" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35146,6 +35177,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新命名或合併…"
+          }
+        }
+      }
+    },
+    "tags.renamed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Renamed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名前変更済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已改名"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已改名"
           }
         }
       }
@@ -35981,35 +36041,6 @@
         }
       }
     },
-    "trash.keep.7" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "7 days"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "7 日"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "7 天"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "7 天"
-          }
-        }
-      }
-    },
     "trash.keep.30" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36039,35 +36070,6 @@
         }
       }
     },
-    "trash.keep.90" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "90 days"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "90 日"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "90 天"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "90 天"
-          }
-        }
-      }
-    },
     "trash.keep.365" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36093,6 +36095,64 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 年"
+          }
+        }
+      }
+    },
+    "trash.keep.7" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 days"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 天"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 天"
+          }
+        }
+      }
+    },
+    "trash.keep.90" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "90 days"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "90 日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "90 天"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "90 天"
           }
         }
       }
@@ -36266,64 +36326,6 @@
         }
       }
     },
-    "trash.purged" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Deleted %@ permanently"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 件を完全に削除しました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已永久删除 %@ 个"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已永久刪除 %@ 個"
-          }
-        }
-      }
-    },
-    "trash.purged.skipped" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "; the rest had changed and were skipped"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "。残りは状態が変わったためスキップしました"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "；其余状态已变化，已跳过"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "；其餘狀態已變化，已略過"
-          }
-        }
-      }
-    },
     "trash.purgeFailed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36411,6 +36413,64 @@
         }
       }
     },
+    "trash.purged" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleted %@ permanently"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 件を完全に削除しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已永久删除 %@ 个"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已永久刪除 %@ 個"
+          }
+        }
+      }
+    },
+    "trash.purged.skipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "; the rest had changed and were skipped"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "。残りは状態が変わったためスキップしました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "；其余状态已变化，已跳过"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "；其餘狀態已變化，已略過"
+          }
+        }
+      }
+    },
     "trash.restoreAll" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36436,6 +36496,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部還原"
+          }
+        }
+      }
+    },
+    "trash.restoreFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't restore: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "復元できません：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法还原：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法還原：%@"
           }
         }
       }
@@ -36477,35 +36566,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已還原 %lld 個媒體"
-          }
-        }
-      }
-    },
-    "trash.restoreFailed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't restore: %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "復元できません：%@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法还原：%@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "無法還原：%@"
           }
         }
       }
@@ -36940,35 +37000,6 @@
         }
       }
     },
-    "update.opened.mac" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The installer is open. Drag the app into Applications, replacing the old one, then open it again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "インストーラを開きました。アプリを「アプリケーション」にドラッグして古いものと置き換え、もう一度開いてください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "安装包已打开。把应用拖到“应用程序”中替换旧版本，然后重新打开。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "安裝檔已開啟。把應用程式拖到「應用程式」中取代舊版本，然後重新開啟。"
-          }
-        }
-      }
-    },
     "update.openPage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36994,6 +37025,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "前往下載"
+          }
+        }
+      }
+    },
+    "update.opened.mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The installer is open. Drag the app into Applications, replacing the old one, then open it again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インストーラを開きました。アプリを「アプリケーション」にドラッグして古いものと置き換え、もう一度開いてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装包已打开。把应用拖到“应用程序”中替换旧版本，然后重新打开。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安裝檔已開啟。把應用程式拖到「應用程式」中取代舊版本，然後重新開啟。"
           }
         }
       }

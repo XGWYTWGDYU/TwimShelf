@@ -19,7 +19,7 @@ module.exports = {
   ],
   asar: true,
   // the Electron this repository installed (no second download on this computer)
-  electronDist: process.platform === 'darwin' ? path.join(__dirname, '..', 'node_modules', 'electron', 'dist') : undefined,
+  electronDist: path.join(__dirname, '..', 'node_modules', 'electron', 'dist'),
   linux: {
     target: ['AppImage'],
     // the program's file name on Linux (the Mac's app is named after productName)

@@ -368,10 +368,7 @@ export function enableAutoTagging() {
     if (activeEmbedder.get()) void embedMissingLabels();
   };
   interval = window.setInterval(tick, 15_000);
-  unsubLib = libraryVersion.on(() => {
-    if (autoTag.get() && activeTagger.get() && Date.now() >= retryAfter) void runTagging({ automatic: true });
-    if (activeEmbedder.get()) void embedMissingLabels();
-  });
+  unsubLib = libraryVersion.subscribe(tick);
   tick();
 }
 

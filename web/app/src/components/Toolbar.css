@@ -7,12 +7,6 @@
 /* over the content (the grid and the cards start below it): a plain bar in the page's colour,
    no soft fade at the edge */
 .toolbar-overlay { position: absolute; top: 0; left: 0; right: 0; background: var(--bg); }
-/* Linux: the room the window's buttons take, on whichever side the desktop puts them (nothing in
-   full screen, where the system reports no such area) */
-.linux-titlebar { --controls-left: env(titlebar-area-x, 0px); --controls-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
-.linux-titlebar .toolbar { padding-right: calc(16px + var(--controls-right)); }
-.linux-titlebar .side-top { margin-left: var(--controls-left); }
-.linux-titlebar .viewer-counter { left: calc(20px + var(--controls-left)); }
 .toolbar-titles { min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 4px; }
 .toolbar-title { font-size: 15px; font-weight: 600; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
 .toolbar-subtitle { font-size: 11px; line-height: 13px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -145,6 +145,18 @@ enum ClawdIconData {
             (fill: 0xDE886D, stroke: false, d: "M 6.5 11 L 17.5 11 L 17.5 18 L 6.5 18 Z"),
             (fill: 0x141414, stroke: false, d: "M 8.5 13 L 9.5 13 L 9.5 15 L 8.5 15 Z M 14.5 13 L 15.5 13 L 15.5 15 L 14.5 15 Z"),
         ],
+        "tablet": [
+            (fill: nil, stroke: true, d: "M 6.2 1 L 17.8 1 C 18.463 1 19 1.537 19 2.2 L 19 9.3 C 19 9.963 18.463 10.5 17.8 10.5 L 6.2 10.5 C 5.537 10.5 5 9.963 5 9.3 L 5 2.2 C 5 1.537 5.537 1 6.2 1 Z"),
+            (fill: nil, stroke: true, d: "M 11.5 2.4 L 12.5 2.4 M 10.5 9.1 L 13.5 9.1"),
+            (fill: 0xDE886D, stroke: false, d: "M 7.5 18 L 8.5 18 L 8.5 20 L 7.5 20 Z"),
+            (fill: 0xDE886D, stroke: false, d: "M 9.5 18 L 10.5 18 L 10.5 20 L 9.5 20 Z"),
+            (fill: 0xDE886D, stroke: false, d: "M 13.5 18 L 14.5 18 L 14.5 20 L 13.5 20 Z"),
+            (fill: 0xDE886D, stroke: false, d: "M 15.5 18 L 16.5 18 L 16.5 20 L 15.5 20 Z"),
+            (fill: 0xDE886D, stroke: false, d: "M 4.5 14 L 6.5 14 L 6.5 16 L 4.5 16 Z"),
+            (fill: 0xDE886D, stroke: false, d: "M 17.5 14 L 19.5 14 L 19.5 16 L 17.5 16 Z"),
+            (fill: 0xDE886D, stroke: false, d: "M 6.5 11 L 17.5 11 L 17.5 18 L 6.5 18 Z"),
+            (fill: 0x141414, stroke: false, d: "M 8.5 13 L 9.5 13 L 9.5 15 L 8.5 15 Z M 14.5 13 L 15.5 13 L 15.5 15 L 14.5 15 Z"),
+        ],
         "video": [
             (fill: 0xDE886D, stroke: false, d: "M 7.5 18 L 8.5 18 L 8.5 20 L 7.5 20 Z"),
             (fill: 0xDE886D, stroke: false, d: "M 9.5 18 L 10.5 18 L 10.5 20 L 9.5 20 Z"),

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { L, type IntegritySummary, type StorageGroup, type StorageUsage } from '@twimshelf/core';
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, FileArchive, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, FileArchive, RefreshCw, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { Button, Empty, Row, Section, TextField, Toggle } from '../../components/ui';
 import { change, LoadState, useTask } from '../../components/libraryControls';
 import { alertMessage, choose } from '../../components/pickers';
@@ -331,12 +331,25 @@ export function AboutPage() {
       {server.data && <Pill text={L('about.version', server.data.version)} color="secondary" />}
     </div>
 
+    <div className="section-group">
+      <SectionHeading title={L('about.acknowledgments')} />
+      <Card>
+        <CardRow
+          icon={<Sparkles size={17} />}
+          color="purple"
+          title="Claude · ChatGPT · Gemini"
+          detail={L('about.acknowledgments.ai')}
+        />
+      </Card>
+    </div>
+
     {extras && <div className="section-group">
       <SectionHeading title={L('settings.section.maintenance')} />
       <Card>
         <CardRow
           icon={<ShieldCheck size={17} />}
           color={tone === 'secondary' ? 'green' : tone}
+          mascot={!status?.running && integrity.data?.last && integrity.data.bad === 0 && integrity.data.unchecked === 0 ? 'shield' : undefined}
           title={L('mac.integrity')}
           detail={integrity.data ? integrityText(integrity.data) : integrity.error ? L('settings.checkUnreadable') : undefined}
           trailing={status?.running

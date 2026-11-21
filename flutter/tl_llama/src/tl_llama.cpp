@@ -93,6 +93,7 @@ static tl_llama *load_model(const char *weights, const char *projector, int32_t 
   cp.n_ctx = context > 0 ? context : 4096;
   cp.n_batch = cp.n_ctx;
   cp.embeddings = embeddings != 0;
+  if (cp.embeddings) cp.n_ubatch = cp.n_batch;
   m->embeddings = cp.embeddings;
   m->ctx = llama_init_from_model(m->model, cp);
   if (!m->ctx) { fail(error, "context"); tl_llama_unload(m); return nullptr; }
@@ -192,7 +193,48 @@ extern "C" char *tl_llama_describe(tl_llama *m, const char *image, const char *s
   return answer;
 }
 
-extern "C" int32_t tl_llama_dimensions(tl_llama *m) { return m ? llama_model_n_embd(m->model) : 0; }
+extern "C" int32_t tl_llama_dimensions(tl_llama *m) { return m ? llama_model_n_embd_out(m->model) : 0; }
+
+extern "C" int32_t tl_llama_embed(tl_llama *m, const char *text, float *out, char **error) {
+  if (!m || !m->embeddings || !text || !out) { fail(error, "no embedding model or input"); return -1; }
+  try {
+    const auto *vocab = llama_model_get_vocab(m->model);
+    const auto length = std::strlen(text);
+    if (length > INT32_MAX) { fail(error, "embedding input too long"); return -1; }
+    const auto text_size = static_cast<int32_t>(length);
+    const auto required = llama_tokenize(vocab, text, text_size, nullptr, 0, true, false);
+    if (required >= 0 || -static_cast<int64_t>(required) > llama_n_ctx(m->ctx)) {
+      fail(error, "invalid embedding token count");
+      return -1;
+    }
+    std::vector<llama_token> tokens(static_cast<size_t>(-required));
+    const auto count = llama_tokenize(vocab, text, text_size, tokens.data(), -required, true, false);
+    if (count <= 0) { fail(error, "embedding tokenization"); return -1; }
+    llama_memory_clear(llama_get_memory(m->ctx), true);
+    auto batch = llama_batch_get_one(tokens.data(), count);
+    const auto rc = llama_model_has_encoder(m->model) ? llama_encode(m->ctx, batch) : llama_decode(m->ctx, batch);
+    if (rc != 0) { fail(error, "embedding evaluation"); return -1; }
+    const auto pooling = llama_pooling_type(m->ctx);
+    const float *vector = pooling == LLAMA_POOLING_TYPE_NONE
+        ? llama_get_embeddings_ith(m->ctx, -1) : llama_get_embeddings_seq(m->ctx, 0);
+    const auto dimensions = tl_llama_dimensions(m);
+    if (!vector || dimensions <= 0 || pooling == LLAMA_POOLING_TYPE_RANK) {
+      fail(error, "no text embedding");
+      return -1;
+    }
+    double squared_norm = 0;
+    for (int32_t i = 0; i < dimensions; ++i) squared_norm += static_cast<double>(vector[i]) * vector[i];
+    if (squared_norm <= 0 || !std::isfinite(squared_norm)) { fail(error, "invalid embedding"); return -1; }
+    const auto norm = std::sqrt(squared_norm);
+    for (int32_t i = 0; i < dimensions; ++i) out[i] = static_cast<float>(vector[i] / norm);
+    return 0;
+  } catch (const std::exception &e) {
+    fail(error, e.what());
+  } catch (...) {
+    fail(error, "embedding engine");
+  }
+  return -1;
+}
 
 extern "C" void tl_llama_unload(tl_llama *m) {
   if (!m) return;

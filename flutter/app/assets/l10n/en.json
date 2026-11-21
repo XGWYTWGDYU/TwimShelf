@@ -1,6 +1,8 @@
 {
   "a11y.notSelected": "Not Selected",
   "a11y.selected": "Selected",
+  "about.acknowledgments": "Acknowledgments",
+  "about.acknowledgments.ai": "Built with the assistance of Claude, ChatGPT, and Gemini.",
   "about.build": "Build %@",
   "about.logs": "Log",
   "about.logs.empty": "Nothing logged yet",

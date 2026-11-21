@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 /// A masonry grid (each card goes to the shortest column) that knows where every card is without
@@ -85,6 +86,7 @@ class RenderSliverKnownMasonry extends RenderSliverMultiBoxAdaptor {
   set columns(int v) {
     v = math.max(1, v);
     if (v == _columns) return;
+    _captureGeometryTransition();
     _columns = v;
     _forgetPlaces();
     markNeedsLayout();
@@ -111,6 +113,7 @@ class RenderSliverKnownMasonry extends RenderSliverMultiBoxAdaptor {
   set items(Object v) {
     if (identical(v, _items)) return;
     _items = v;
+    _cancelTransition();
     _forgetPlaces();
     markNeedsLayout();
   }
@@ -128,6 +131,91 @@ class RenderSliverKnownMasonry extends RenderSliverMultiBoxAdaptor {
   final _measured = <Object, double>{};
   final _estimates = <Object, double>{};
   double _width = -1;
+  double _lastScrollOffset = 0;
+
+  // Smooth FLIP transition when columns or width change (e.g. device rotation).
+  static const _transitionDuration = Duration(milliseconds: 280);
+  Map<Object, Rect>? _transitionFrom;
+  int? _resizeAnchorIndex;
+  double _resizeAnchorRatio = 0;
+  Duration? _transitionStart;
+  double _transitionProgress = 1.0;
+  int? _frameCallbackId;
+
+  void _captureGeometryTransition() {
+    if (_width <= 0 || firstChild == null || _offset.isEmpty) return;
+    // Already captured for this rotation frame (e.g. columns changed just before width changed).
+    if (_transitionFrom != null && _transitionStart == null) return;
+    final rects = <Object, Rect>{};
+    int? anchor;
+    double anchorTop = double.infinity;
+    double anchorRatio = 0;
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      final i = indexOf(child);
+      if (i >= _offset.length || i >= _extent.length) continue;
+      final pd = child.parentData! as SliverGridParentData;
+      final x = pd.crossAxisOffset ?? 0.0;
+      final top = _offset[i] - _lastScrollOffset;
+      final h = _extent[i];
+      rects[keyOf(i)] = Rect.fromLTWH(x, top, _width, h);
+      if (_offset[i] + h > _lastScrollOffset && _offset[i] < anchorTop) {
+        anchorTop = _offset[i];
+        anchor = i;
+        anchorRatio = h > 0 ? ((_lastScrollOffset - _offset[i]) / h).clamp(0.0, 1.0) : 0.0;
+      }
+    }
+    if (rects.isEmpty) return;
+    _transitionFrom = rects;
+    _resizeAnchorIndex = anchor;
+    _resizeAnchorRatio = anchorRatio;
+    _transitionStart = null;
+    _transitionProgress = 0.0;
+  }
+
+  void _startTransition() {
+    if (_transitionFrom == null || _transitionStart != null) return;
+    _transitionStart = SchedulerBinding.instance.currentFrameTimeStamp;
+    _transitionProgress = 0.0;
+    _scheduleTransitionFrame();
+  }
+
+  void _scheduleTransitionFrame() {
+    if (_frameCallbackId != null || !attached) return;
+    _frameCallbackId = SchedulerBinding.instance.scheduleFrameCallback(_onTransitionFrame);
+  }
+
+  void _onTransitionFrame(Duration timestamp) {
+    _frameCallbackId = null;
+    final start = _transitionStart;
+    if (start == null || _transitionFrom == null) return;
+    final elapsed = timestamp - start;
+    final p = (elapsed.inMicroseconds / _transitionDuration.inMicroseconds).clamp(0.0, 1.0);
+    _transitionProgress = p;
+    markNeedsPaint();
+    if (p < 1.0) {
+      _scheduleTransitionFrame();
+    } else {
+      _transitionFrom = null;
+      _transitionStart = null;
+    }
+  }
+
+  void _cancelTransition() {
+    if (_frameCallbackId != null) {
+      SchedulerBinding.instance.cancelFrameCallbackWithId(_frameCallbackId!);
+      _frameCallbackId = null;
+    }
+    _transitionFrom = null;
+    _resizeAnchorIndex = null;
+    _transitionStart = null;
+    _transitionProgress = 1.0;
+  }
+
+  @override
+  void detach() {
+    _cancelTransition();
+    super.detach();
+  }
 
   // Where the first cards go (index → place); the cards after these are not placed yet.
   final _offset = <double>[];
@@ -283,6 +371,7 @@ class RenderSliverKnownMasonry extends RenderSliverMultiBoxAdaptor {
     final stride = (sc.crossAxisExtent + _crossAxisSpacing) / _columns;
     final width = math.max(0.0, stride - _crossAxisSpacing);
     if (width != _width) {
+      if (_width > 0) _captureGeometryTransition();
       _width = width;
       _measured.clear();
       _estimates.clear();
@@ -295,6 +384,31 @@ class RenderSliverKnownMasonry extends RenderSliverMultiBoxAdaptor {
       geometry = SliverGeometry.zero;
       childManager.didFinishLayout();
       return;
+    }
+    // Keep the topmost visible card anchored across rotation / width changes so the viewport
+    // does not jump to a different part of the list and destroy/recreate visible cards.
+    if (_resizeAnchorIndex != null) {
+      final anchorIdx = _resizeAnchorIndex!.clamp(0, count - 1);
+      final ratio = _resizeAnchorRatio;
+      _resizeAnchorIndex = null;
+      while (_offset.length <= anchorIdx) {
+        var c = 0;
+        for (var j = 1; j < _columns; j++) {
+          if (_bottoms[j] < _bottoms[c]) c = j;
+        }
+        final e = _heightOf(_offset.length);
+        _offset.add(_bottoms[c]);
+        _extent.add(e);
+        _column.add(c);
+        _bottoms[c] += e + _mainAxisSpacing;
+      }
+      final targetScroll = math.max(0.0, _offset[anchorIdx] + ratio * _extent[anchorIdx]);
+      final shift = targetScroll - sc.scrollOffset;
+      if (shift.abs() > 0.5 && sc.scrollOffset + shift >= 0) {
+        geometry = SliverGeometry(scrollOffsetCorrection: shift);
+        childManager.didFinishLayout();
+        return;
+      }
     }
     final cc = sc.asBoxConstraints(crossAxisExtent: width);
     final start = sc.scrollOffset + sc.cacheOrigin;
@@ -363,6 +477,52 @@ class RenderSliverKnownMasonry extends RenderSliverMultiBoxAdaptor {
       hasVisualOverflow: childEnd > sc.scrollOffset + sc.remainingPaintExtent || sc.scrollOffset > 0,
     );
     if (lastChild != null && indexOf(lastChild!) == count - 1) childManager.setDidUnderflow(true);
+    _lastScrollOffset = sc.scrollOffset;
+    if (_transitionFrom != null && _transitionStart == null) _startTransition();
     childManager.didFinishLayout();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final from = _transitionFrom;
+    if (from == null || _transitionProgress >= 1.0) {
+      super.paint(context, offset);
+      return;
+    }
+    final t = Curves.easeOutCubic.transform(_transitionProgress);
+    final inv = 1.0 - t;
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      final mainPos = childMainAxisPosition(child);
+      final crossPos = childCrossAxisPosition(child);
+      final paintOffset = offset + Offset(crossPos, mainPos);
+      final i = indexOf(child);
+      final oldRect = from[keyOf(i)];
+      if (oldRect == null) {
+        context.paintChild(child, paintOffset);
+        continue;
+      }
+      final newW = math.max(1.0, child.size.width);
+      final newH = math.max(1.0, child.size.height);
+      final dx = (oldRect.left - crossPos) * inv;
+      final dy = (oldRect.top - mainPos) * inv;
+      final sx = 1.0 + (oldRect.width / newW - 1.0) * inv;
+      final sy = 1.0 + (oldRect.height / newH - 1.0) * inv;
+      if (dx.abs() < 0.25 && dy.abs() < 0.25 && (sx - 1.0).abs() < 0.002 && (sy - 1.0).abs() < 0.002) {
+        context.paintChild(child, paintOffset);
+        continue;
+      }
+      final m = Matrix4.identity()
+        ..setEntry(0, 0, sx)
+        ..setEntry(1, 1, sy)
+        ..setEntry(0, 3, dx)
+        ..setEntry(1, 3, dy);
+      final currentChild = child;
+      context.pushTransform(
+        needsCompositing,
+        paintOffset,
+        m,
+        (innerContext, innerOffset) => innerContext.paintChild(currentChild, innerOffset),
+      );
+    }
   }
 }

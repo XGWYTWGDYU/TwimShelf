@@ -8,7 +8,7 @@ import { Button, Dialog, Page, Progress, Row, TextField, Toggle } from '../../co
 import { change, type Option } from '../../components/libraryControls';
 import { openMenuBelow, type MenuEntry } from '../../components/Menu';
 import { alertMessage, choose, prompt } from '../../components/pickers';
-import { ClawdIcon, mascotEnabled } from '../../components/Mascot';
+import { ClawdIcon, mascotEnabled, type MascotName } from '../../components/Mascot';
 import { core } from '../../lib/core';
 import { useStore } from '../../lib/hooks';
 import { poster } from '../../lib/thumbs';
@@ -70,7 +70,17 @@ export function Card({ tint, padding, spacing, className, children }: {
   );
 }
 
-export function IconTile({ icon, color = 'blue', size = 30 }: { icon: ReactNode; color?: TileColor; size?: number }) {
+export function IconTile({ icon, color = 'blue', size = 30, mascot, alwaysMascot = false }: {
+  icon?: ReactNode; color?: TileColor; size?: number; mascot?: MascotName; alwaysMascot?: boolean;
+}) {
+  const mascotOn = useStore(mascotEnabled);
+  if (mascot && (mascotOn || alwaysMascot)) {
+    return (
+      <span className="icon-tile-mascot" style={{ width: size, height: size }}>
+        <ClawdIcon name={mascot} size={size} />
+      </span>
+    );
+  }
   const radius = Math.round(size * 0.29);
   return (
     <span className={`icon-tile tile-${color}`} style={{ width: size, height: size, borderRadius: radius }}>
@@ -129,12 +139,12 @@ export function ProgressRing({ value, size = 104, lineWidth = 11, color = 'purpl
   );
 }
 
-export function CardRow({ icon, color = 'blue', title, detail, trailing, danger }: {
-  icon?: ReactNode; color?: TileColor; title: ReactNode; detail?: ReactNode; trailing?: ReactNode; danger?: boolean;
+export function CardRow({ icon, color = 'blue', mascot, alwaysMascot, title, detail, trailing, danger }: {
+  icon?: ReactNode; color?: TileColor; mascot?: MascotName; alwaysMascot?: boolean; title: ReactNode; detail?: ReactNode; trailing?: ReactNode; danger?: boolean;
 }) {
   return (
     <div className={`card-row${danger ? ' danger' : ''}`}>
-      {icon && <IconTile icon={icon} color={danger ? 'red' : color} size={30} />}
+      {(icon || mascot) && <IconTile icon={icon} color={danger ? 'red' : color} size={30} mascot={mascot} alwaysMascot={alwaysMascot} />}
       <div className="card-row-texts">
         <div className="card-row-title">{title}</div>
         {detail !== undefined && detail !== null && detail !== '' && <div className="card-row-detail">{detail}</div>}
@@ -154,14 +164,16 @@ export function NavRow({ icon, color = 'blue', title, detail, id, onClick }: {
   );
 }
 
-export function ToggleRow({ icon, color = 'blue', title, detail, checked, onChange, disabled }: {
-  icon?: ReactNode; color?: TileColor; title: string; detail?: ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean;
+export function ToggleRow({ icon, color = 'blue', mascot, alwaysMascot, title, detail, checked, onChange, disabled }: {
+  icon?: ReactNode; color?: TileColor; mascot?: MascotName; alwaysMascot?: boolean; title: string; detail?: ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean;
 }) {
   return (
     <div style={{ opacity: disabled ? 0.55 : 1 }}>
       <CardRow
         icon={icon}
         color={color}
+        mascot={mascot}
+        alwaysMascot={alwaysMascot}
         title={title}
         detail={detail}
         trailing={<Toggle label={title} checked={checked} onChange={onChange} disabled={disabled} />}
@@ -174,14 +186,14 @@ export function RowDivider({ inset = 0 }: { inset?: number }) {
   return <hr className="row-divider" style={inset ? { marginLeft: inset } : undefined} />;
 }
 
-export function NavTile({ title, detail, icon, color = 'blue', progress, badge, badgeColor = 'secondary', id, onClick }: {
-  title: string; detail?: string | null; icon: ReactNode; color?: TileColor; progress?: number;
+export function NavTile({ title, detail, icon, color = 'blue', mascot, progress, badge, badgeColor = 'secondary', id, onClick }: {
+  title: string; detail?: string | null; icon: ReactNode; color?: TileColor; mascot?: MascotName; progress?: number;
   badge?: string | null; badgeColor?: TileColor; id?: string; onClick: () => void;
 }) {
   return (
     <button type="button" className="nav-tile" data-testid={id} onClick={onClick}>
       <div className="nav-tile-top">
-        <IconTile icon={icon} color={color} size={40} />
+        <IconTile icon={icon} color={color} size={40} mascot={mascot} />
         <div className="nav-tile-top-right">
           {badge && <Pill text={badge} color={badgeColor} />}
           <ChevronRight size={14} strokeWidth={2.2} />

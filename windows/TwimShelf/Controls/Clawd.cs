@@ -164,6 +164,7 @@ public static class Clawd
     public static string? ForDevice(string? kind) => kind switch
     {
         "iphone" or "android-phone" => "mobile",
+        "ipad" or "android-tablet" => "tablet",
         "mac" or "windows" or "linux" => "laptop",
         _ => null,
     };

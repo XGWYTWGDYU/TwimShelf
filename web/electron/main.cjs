@@ -1,7 +1,7 @@
 // The TwimShelf desktop app (Linux; a macOS build exists for testing only): starts the bundled
 // TwimShelf server on 127.0.0.1 with a token only this app knows, and shows the React app the
 // server serves. The window and the web page are the same code; only the server is local.
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, screen, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, screen, session, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -122,16 +122,6 @@ async function startServer() {
   throw new Error('the server did not start');
 }
 
-// Linux: no separate title bar. The window's buttons float over the page's 52 pt toolbar, on the
-// page's colour (black over the viewer), and the toolbar keeps clear of them (theme.css).
-let viewerOpen = false;
-function windowControls() {
-  const dark = nativeTheme.shouldUseDarkColors;
-  if (viewerOpen) return { color: '#000000', symbolColor: '#ffffff', height: 52 };
-  return { color: dark ? '#111113' : '#fbfbfc', symbolColor: dark ? '#f4f4f5' : '#141416', height: 52 };
-}
-nativeTheme.on('updated', () => { if (process.platform === 'linux') win?.setTitleBarOverlay(windowControls()); });
-
 const startedHidden = process.argv.includes('--autostart');
 
 function boundsFile() { return path.join(dataPaths().TL_DATA, 'window-bounds.json'); }
@@ -218,9 +208,10 @@ async function createWindow() {
     minWidth: 720, minHeight: 480, show: false,
     title: name,
     ...(process.platform !== 'darwin' && fs.existsSync(icon) ? { icon } : {}),
-    // the page looks exactly as on the web; only the window buttons move into its 52 pt toolbar
+    // Linux keeps the native window frame so the desktop draws rounded corners and puts the
+    // window controls in the title bar above the toolbar; macOS places traffic lights in the toolbar.
     backgroundColor: '#111113',
-    ...(mac ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 18, y: 18 } } : { titleBarStyle: 'hidden', titleBarOverlay: windowControls(), autoHideMenuBar: true }),
+    ...(mac ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 18, y: 18 } } : { autoHideMenuBar: true }),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false },
   });
   let saveTimer = null;
@@ -353,9 +344,6 @@ ipcMain.on('viewer-mode', (e, on) => {
     w.setWindowButtonVisibility(!on);
     // showing them again puts them back at the default place: keep them in the 52 pt toolbar
     if (!on && w.setWindowButtonPosition) w.setWindowButtonPosition({ x: 18, y: 18 });
-  } else if (w && process.platform === 'linux') {
-    viewerOpen = !!on;
-    w.setTitleBarOverlay(windowControls());
   }
 });
 ipcMain.on('toggle-fullscreen', (e) => { if (fromPage(e)) win.setFullScreen(!win.isFullScreen()); });

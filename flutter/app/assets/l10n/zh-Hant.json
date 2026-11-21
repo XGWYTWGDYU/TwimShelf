@@ -1,6 +1,8 @@
 {
   "a11y.notSelected": "未選",
   "a11y.selected": "已選",
+  "about.acknowledgments": "鳴謝",
+  "about.acknowledgments.ai": "感謝 Claude、ChatGPT 與 Gemini 對本專案開發提供的協助。",
   "about.build": "組建 %@",
   "about.logs": "日誌",
   "about.logs.empty": "還沒有日誌",

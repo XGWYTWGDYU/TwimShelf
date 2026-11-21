@@ -167,6 +167,21 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     private var lastBrowseTap: Date?
     private var tabPulses: [ObjectIdentifier: MascotPulse] = [:]
     private var tabIcons: [ObjectIdentifier: UIImage] = [:]
+    private var sidebarOverlays: [ObjectIdentifier: SidebarMascotOverlay] = [:]
+
+    private final class SidebarMascotOverlay {
+        weak var iconView: UIImageView?
+        weak var mascotView: UIImageView?
+        var hideWork: DispatchWorkItem?
+        func cancel() {
+            hideWork?.cancel()
+            hideWork = nil
+            mascotView?.layer.removeAllAnimations()
+            mascotView?.removeFromSuperview()
+            iconView?.layer.removeAllAnimations()
+            iconView?.alpha = 1
+        }
+    }
 
     init(feed: FeedViewController, barOnly: Bool) {
         self.feed = feed
@@ -226,6 +241,166 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
 
     private var changingSidebar = false
     private var changingSize = false
+    #if DEBUG
+    private var stressStarted = false
+    private var stressLink: CADisplayLink?
+    private var stressPhase = "init"
+    private var stressSettled = false
+    private var stressAnomalies: [String] = []
+    private var stressFrames = 0
+    private var stressOpenedPhotos = 0
+    private var stressOpenedVideos = 0
+    private var stressCheckImmediately = false
+    private var stressBaselinePortraitNavY: CGFloat?
+
+    @objc private func stressTick() {
+        stressFrames += 1
+        guard stressSettled || stressCheckImmediately, !changingSize, !changingSidebar else { return }
+        let s = feed.debugChromeSnapshot()
+        guard !s.modalOpen else { return }
+        if s.isLandscape {
+            // Top-right 3 buttons MUST be visible on the right edge, never drifted to top-left!
+            let expectedRight = s.safeAreaInWindow.maxX - 16
+            let expectedTop = s.safeAreaInWindow.minY + 26
+            let r = s.browseActionsInWindow
+            if s.browseActionsHidden || s.browseActionsAlpha < 0.9 {
+                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] landscape browseActions hidden=\(s.browseActionsHidden) alpha=\(s.browseActionsAlpha)")
+            } else if r.minX < s.windowSize.width * 0.5 || abs(r.maxX - expectedRight) > 6 || abs(r.minY - expectedTop) > 8 {
+                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] landscape browseActions DRIFT rect=\(NSCoder.string(for: r)) expectedRight=\(expectedRight) expectedTop=\(expectedTop) win=\(NSCoder.string(for: s.windowSize))")
+            }
+        } else {
+            // Portrait: 3 buttons live in navigation bar, navBar visible, browseChrome hidden, no upward jump.
+            if s.navBarHidden {
+                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait navBarHidden=true")
+            }
+            if s.rightBarItemCount < 3 {
+                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait rightBarItemCount=\(s.rightBarItemCount)")
+            }
+            if s.browseChromeAlpha > 0.05 {
+                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait browseChromeAlpha=\(s.browseChromeAlpha)")
+            }
+            if let baseY = stressBaselinePortraitNavY, abs(s.navBarFrameInWindow.minY - baseY) > 2 {
+                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait navBar jumped minY=\(s.navBarFrameInWindow.minY) baseline=\(baseY)")
+            }
+        }
+        if s.contentInsetTop < 0 || s.contentInsetTop > 260 {
+            stressAnomalies.append("[\(stressPhase) f\(stressFrames)] bad contentInsetTop=\(s.contentInsetTop)")
+        }
+    }
+
+    private func runStressTest(outputPath: String) {
+        let link = CADisplayLink(target: self, selector: #selector(stressTick))
+        link.add(to: .main, forMode: .common)
+        stressLink = link
+
+        var steps: [(String, Double, () -> Void)] = []
+        func rotate(_ mask: UIInterfaceOrientationMask) {
+            view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+        }
+        // 1. Portrait baseline + photo open/close (check EVERY frame immediately on dismiss!)
+        steps.append(("portrait-init", 0.8, { self.stressSettled = false; self.stressCheckImmediately = false; rotate(.portrait) }))
+        steps.append(("portrait-baseline", 0.5, {
+            let s = self.feed.debugChromeSnapshot()
+            self.stressBaselinePortraitNavY = s.navBarFrameInWindow.minY
+            self.stressSettled = true
+        }))
+        steps.append(("portrait-open-photo", 0.8, {
+            self.stressSettled = false; self.stressCheckImmediately = false
+            if self.feed.debugOpenMedia(video: false) { self.stressOpenedPhotos += 1 }
+        }))
+        steps.append(("portrait-close-photo", 1.0, {
+            self.stressCheckImmediately = true
+            self.feed.presentedViewController?.dismiss(animated: true)
+        }))
+        // 2. Portrait video open/close (check EVERY frame immediately on dismiss!)
+        steps.append(("portrait-open-video", 0.8, {
+            self.stressSettled = false; self.stressCheckImmediately = false
+            if self.feed.debugOpenMedia(video: true) { self.stressOpenedVideos += 1 }
+        }))
+        steps.append(("portrait-close-video", 1.0, {
+            self.stressCheckImmediately = true
+            self.feed.presentedViewController?.dismiss(animated: true)
+        }))
+        // 3. Landscape photo open/close (the reported drift-to-top-left bug — check EVERY frame immediately!)
+        steps.append(("landscape-rotate", 1.0, { self.stressSettled = false; self.stressCheckImmediately = false; rotate(.landscapeLeft) }))
+        steps.append(("landscape-check", 0.5, { self.stressSettled = true }))
+        steps.append(("landscape-open-photo", 0.8, {
+            self.stressSettled = false; self.stressCheckImmediately = false
+            if self.feed.debugOpenMedia(video: false) { self.stressOpenedPhotos += 1 }
+        }))
+        steps.append(("landscape-close-photo", 1.0, {
+            self.stressCheckImmediately = true
+            self.feed.presentedViewController?.dismiss(animated: true)
+        }))
+        // 4. Landscape video open/close
+        steps.append(("landscape-open-video", 0.8, {
+            self.stressSettled = false; self.stressCheckImmediately = false
+            if self.feed.debugOpenMedia(video: true) { self.stressOpenedVideos += 1 }
+        }))
+        steps.append(("landscape-close-video", 1.0, {
+            self.stressCheckImmediately = true
+            self.feed.presentedViewController?.dismiss(animated: true)
+        }))
+        // 5. Landscape sidebar rapid toggle x4
+        for i in 0..<4 {
+            steps.append(("landscape-sidebar-\(i)", 0.65, {
+                self.stressSettled = false; self.stressCheckImmediately = true
+                self.sidebar.isHidden.toggle()
+            }))
+        }
+        // 6. Simultaneous rotate + sidebar toggle
+        for i in 0..<3 {
+            steps.append(("simul-to-portrait-\(i)", 1.0, {
+                self.stressSettled = false; self.stressCheckImmediately = false
+                self.sidebar.isHidden.toggle()
+                rotate(.portrait)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { self.stressSettled = true }
+            }))
+            steps.append(("simul-to-landscape-\(i)", 1.0, {
+                self.stressSettled = false; self.stressCheckImmediately = false
+                self.sidebar.isHidden.toggle()
+                rotate(.landscapeLeft)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { self.stressSettled = true }
+            }))
+        }
+        // 7. Rotate WHILE media viewer is open (landscape -> portrait -> close, portrait -> landscape -> close)
+        steps.append(("modal-rot-open-1", 0.7, {
+            self.stressSettled = false; self.stressCheckImmediately = false
+            if self.feed.debugOpenMedia(video: false) { self.stressOpenedPhotos += 1 }
+        }))
+        steps.append(("modal-rot-to-portrait", 0.8, { rotate(.portrait) }))
+        steps.append(("modal-rot-close-1", 1.0, {
+            self.feed.presentedViewController?.dismiss(animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { self.stressSettled = true }
+        }))
+        steps.append(("modal-rot-open-2", 0.7, {
+            self.stressSettled = false; self.stressCheckImmediately = false
+            if self.feed.debugOpenMedia(video: false) { self.stressOpenedPhotos += 1 }
+        }))
+        steps.append(("modal-rot-to-landscape", 0.8, { rotate(.landscapeLeft) }))
+        steps.append(("modal-rot-close-2", 1.0, {
+            self.feed.presentedViewController?.dismiss(animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { self.stressSettled = true }
+        }))
+
+        func run(_ idx: Int) {
+            guard idx < steps.count else {
+                self.stressLink?.invalidate()
+                self.stressLink = nil
+                let s = self.feed.debugChromeSnapshot()
+                let summary = "STRESS_DONE frames=\(self.stressFrames) photos=\(self.stressOpenedPhotos) videos=\(self.stressOpenedVideos) cells=\(s.visibleCellCount) anomalies=\(self.stressAnomalies.count)\n" + self.stressAnomalies.prefix(50).joined(separator: "\n") + "\n"
+                try? summary.write(toFile: outputPath, atomically: true, encoding: .utf8)
+                print(summary)
+                return
+            }
+            let (name, wait, action) = steps[idx]
+            self.stressPhase = name
+            action()
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { run(idx + 1) }
+        }
+        run(0)
+    }
+    #endif
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
@@ -247,6 +422,12 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         }) { [weak self] _ in
             guard let self else { return }
             self.changingSize = false
+            // If rotation ended in portrait while a landscape sidebar animation was in flight,
+            // clear the sidebar transition guard so portrait chrome lays out immediately.
+            if self.view.bounds.width <= self.view.bounds.height && self.changingSidebar {
+                self.changingSidebar = false
+                self.feed.setSidebarTransitioning(false)
+            }
             UIView.performWithoutAnimation {
                 self.layoutSearch()
                 self.view.layoutIfNeeded()
@@ -260,6 +441,12 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         super.viewDidAppear(animated)
         layoutSearch()
         #if DEBUG
+        if let out = ProcessInfo.processInfo.environment["TL_IPAD_STRESS_TEST"], !stressStarted {
+            stressStarted = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.runStressTest(outputPath: out)
+            }
+        }
         if let state = ProcessInfo.processInfo.environment["TL_SEARCH_LAYOUT_STATE"] {
             let orientation: UIInterfaceOrientationMask = state.hasPrefix("portrait") ? .portrait : .landscapeLeft
             view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: orientation))
@@ -341,6 +528,10 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     func tabBarController(_ tabBarController: UITabBarController,
                           sidebarVisibilityWillChange sidebar: UITabBarController.Sidebar,
                           animator: any UITabBarController.Sidebar.Animating) {
+        if sidebar.isHidden {
+            sidebarOverlays.values.forEach { $0.cancel() }
+            sidebarOverlays.removeAll()
+        }
         // In portrait on iPad the sidebar is a temporary overlay; buttons and card layout stay unchanged.
         guard !railOnly, view.bounds.width > view.bounds.height else { return }
         changingSidebar = true
@@ -380,10 +571,58 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         tabPulses.values.forEach { $0.cancel() }
         tabPulses.removeAll()
         tabIcons.removeAll()
+        sidebarOverlays.values.forEach { $0.cancel() }
+        sidebarOverlays.removeAll()
     }
 
     private func icon(_ p: LibraryPlace) -> UIImage? {
         return UIImage(systemName: p == .allFolders && railOnly ? "folder" : p.symbol)
+    }
+
+    /// Finds the icon `UIImageView` of `tab`'s visible cell in the iPad sidebar so we can animate
+    /// Clawd directly on screen without mutating `tab.image` (which causes `UITabBarController.Sidebar`
+    /// to drop bitmap frames and mis-size rasterized SF Symbols).
+    private func sidebarIconView(for tab: UITab) -> UIImageView? {
+        guard !railOnly, !sidebar.isHidden else { return nil }
+        let page = selectedViewController?.viewIfLoaded
+        func collectCollectionViews(in node: UIView, into out: inout [UICollectionView]) {
+            guard !node.isHidden, node.alpha > 0.01 else { return }
+            if let page, page === node || page.isDescendant(of: node) { return }
+            if let cv = node as? UICollectionView {
+                out.append(cv)
+                return
+            }
+            for child in node.subviews { collectCollectionViews(in: child, into: &out) }
+        }
+        func labels(in v: UIView) -> [UILabel] {
+            var out: [UILabel] = []
+            if let l = v as? UILabel { out.append(l) }
+            for s in v.subviews { out += labels(in: s) }
+            return out
+        }
+        func imageViews(in v: UIView) -> [UIImageView] {
+            var out: [UIImageView] = []
+            if let iv = v as? UIImageView, !iv.isHidden, iv.image != nil { out.append(iv) }
+            for s in v.subviews { out += imageViews(in: s) }
+            return out
+        }
+        var lists: [UICollectionView] = []
+        for child in view.subviews { collectCollectionViews(in: child, into: &lists) }
+        var candidates: [UICollectionViewCell] = []
+        for cv in lists {
+            for cell in cv.visibleCells where !cell.isHidden && cell.alpha > 0.01 {
+                if labels(in: cell.contentView).contains(where: { $0.text == tab.title }) {
+                    candidates.append(cell)
+                }
+            }
+        }
+        guard !candidates.isEmpty else { return nil }
+        let cell = (tab === selectedTab ? candidates.first(where: \.isSelected) : nil) ?? candidates.first!
+        let ivs = imageViews(in: cell.contentView).filter { $0.bounds.width >= 10 && $0.bounds.height >= 10 }
+        // Pick the leading icon image view (smallest minX in cell coordinates), not a trailing chevron.
+        return ivs.min { a, b in
+            a.convert(a.bounds, to: cell).minX < b.convert(b.bounds, to: cell).minX
+        }
     }
 
     private func pulse(_ tab: UITab) {
@@ -391,8 +630,67 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         let places: [LibraryPlace] = [.browse, .photos, .videos, .allFolders, .settings]
         let name = tab.identifier.hasPrefix("folder:") || tab === folderGroup
             ? "folder" : places.first { $0.id == tab.identifier }.flatMap { Mascot.name(for: $0) }
+        guard let name else { return }
         let key = ObjectIdentifier(tab)
-        guard let name, let normal = tabIcons[key] ?? tab.image else { return }
+        // Cancel any previous overlay before searching so we always find the cell's own icon view.
+        sidebarOverlays.removeValue(forKey: key)?.cancel()
+
+        // iPad sidebar: animate a real UIImageView overlay right over the cell's icon.
+        if let iconView = sidebarIconView(for: tab), let host = iconView.superview {
+            tabPulses[key]?.cancel()
+            tabPulses[key] = nil
+            if let normal = tabIcons.removeValue(forKey: key) { tab.image = normal }
+
+            let side = max(24, max(iconView.bounds.width, iconView.bounds.height))
+            let mascotView = UIImageView(image: Mascot.icon(name, side: side))
+            mascotView.contentMode = .scaleAspectFit
+            mascotView.isUserInteractionEnabled = false
+            let center = iconView.center
+            mascotView.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+            mascotView.center = center
+            mascotView.alpha = 0
+            mascotView.transform = CGAffineTransform(scaleX: 0.35, y: 0.35)
+            host.addSubview(mascotView)
+
+            let overlay = SidebarMascotOverlay()
+            overlay.iconView = iconView
+            overlay.mascotView = mascotView
+            sidebarOverlays[key] = overlay
+
+            UIView.animate(withDuration: 0.08, delay: 0, options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]) {
+                iconView.alpha = 0
+            }
+            UIView.animate(withDuration: 0.30, delay: 0, usingSpringWithDamping: 0.62, initialSpringVelocity: 0.8,
+                           options: [.allowUserInteraction, .beginFromCurrentState]) {
+                mascotView.alpha = 1
+                mascotView.transform = .identity
+            }
+
+            let hide = DispatchWorkItem { [weak self, weak overlay] in
+                guard let overlay, let mascotView = overlay.mascotView else {
+                    overlay?.iconView?.alpha = 1
+                    self?.sidebarOverlays[key] = nil
+                    return
+                }
+                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseIn, .allowUserInteraction, .beginFromCurrentState]) {
+                    mascotView.alpha = 0
+                    mascotView.transform = CGAffineTransform(scaleX: 0.35, y: 0.35)
+                } completion: { _ in
+                    mascotView.removeFromSuperview()
+                }
+                UIView.animate(withDuration: 0.18, delay: 0.06, options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]) {
+                    overlay.iconView?.alpha = 1
+                } completion: { _ in
+                    if self?.sidebarOverlays[key] === overlay { self?.sidebarOverlays[key] = nil }
+                }
+            }
+            overlay.hideWork = hide
+            DispatchQueue.main.asyncAfter(deadline: .now() + Mascot.pulseDuration, execute: hide)
+            return
+        }
+
+        // Tab bar / floating bar fallback: frame-based pulse on tab.image.
+        guard let normal = tabIcons[key] ?? tab.image else { return }
         tabPulses[key]?.cancel()
         tabIcons[key] = normal
         tabPulses[key] = MascotPulse(name, side: 28, normal: normal, show: { [weak tab] in tab?.image = $0 }, finished: { [weak self] in
@@ -403,7 +701,10 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
 
     /// 浏览 tapped twice in a row reshuffles it.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-        pulse(tab)
+        DispatchQueue.main.async { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            self.pulse(tab)
+        }
         if selectedTab !== tab { UISelectionFeedbackGenerator().selectionChanged() }
         guard tab.identifier == LibraryPlace.browse.id else { lastBrowseTap = nil; return true }
         let now = Date()

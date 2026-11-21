@@ -211,15 +211,17 @@ build_web() {
 }
 
 # on-device GGUF inference (llama.cpp + tl_llama) for the Linux desktop app
-build_llama_linux() {
+build_llama_linux() {   # build_llama_linux <output directory>
   need_tool cmake CMake cmake cmake cmake cmake
   need_tool ninja Ninja ninja ninja-build ninja-build ninja
-  local build="$CACHE/llama-linux" out="$CACHE/llama-linux-out"
+  local build="$CACHE/llama-linux" out=$1
   local extra=()
   [[ -n "${TL_LLAMA_SOURCE:-}" ]] && extra+=("-DTL_LLAMA_SOURCE=$TL_LLAMA_SOURCE")
   local vk=OFF; have glslc && vk=ON
+  # The packaged libraries sit together, so resolve them relative to each other.
   cmake -S "$ROOT/flutter/tl_llama/src" -B "$build" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release -DTL_LLAMA_VULKAN=$vk "${extra[@]}"
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN' \
+    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$build/lib" -DTL_LLAMA_VULKAN=$vk "${extra[@]}"
   cmake --build "$build" --target tl_llama
   rm -rf "$out" && mkdir -p "$out"
   find "$build" -maxdepth 4 -type f -name 'lib*.so*' \
@@ -228,7 +230,6 @@ build_llama_linux() {
   find "$build" -maxdepth 4 -type l -name 'lib*.so*' \
     \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
     -exec cp -P {} "$out/" \;
-  echo "$out"
 }
 
 # the desktop app: React + the server binary in Electron
@@ -239,13 +240,14 @@ build_electron() {   # build_electron <linux|mac>
   cargo build --manifest-path "$ROOT/Cargo.toml" -p tl-server --release --locked --target-dir "$CACHE/cargo-target"
   local llama_dir=""
   if [[ "$1" == "linux" ]]; then
-    llama_dir=$(build_llama_linux)
+    llama_dir="$CACHE/llama-linux-out"
+    build_llama_linux "$llama_dir"
   fi
   # name, id, version, build number and icon from config.yaml (product.json, icon.png)
   python3 "$ROOT/scripts/apply.py" desktop
   ELECTRON_OUT="$CACHE/electron-out"; local out=$ELECTRON_OUT; rm -rf "$out"
   (cd "$ROOT/web/electron" && TL_SERVER_BIN="$CACHE/cargo-target/release/twimshelf-server" TL_WEB_DIST="$ROOT/web/app/dist" \
-    ${llama_dir:+TL_LLAMA_DIR="$llama_dir"} \
+    TL_LLAMA_DIR="$llama_dir" \
     TL_ELECTRON_OUT="$out" npx electron-builder --config builder.cjs --"$1" --publish never)
 }
 

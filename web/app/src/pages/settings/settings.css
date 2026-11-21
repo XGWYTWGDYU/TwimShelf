@@ -213,6 +213,12 @@
 .icon-tile.tile-orange, .icon-tile.tile-brown, .icon-tile.tile-yellow { color: var(--orange); background: color-mix(in srgb, var(--orange) 13%, transparent); }
 .icon-tile.tile-red, .icon-tile.tile-pink { color: var(--danger); background: var(--danger-soft); }
 .icon-tile.tile-gray, .icon-tile.tile-secondary { color: var(--fg-2); background: var(--bg-subtle); }
+.icon-tile-mascot {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--fg);
+}
 
 /* Pill (11px semibold, 8px 3px padding, capsule) */
 .s-pill {

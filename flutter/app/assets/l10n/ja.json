@@ -1,6 +1,8 @@
 {
   "a11y.notSelected": "未選択",
   "a11y.selected": "選択済み",
+  "about.acknowledgments": "謝辞",
+  "about.acknowledgments.ai": "本プロジェクトの開発を支援してくれた Claude、ChatGPT、Gemini に感謝します。",
   "about.build": "ビルド %@",
   "about.logs": "ログ",
   "about.logs.empty": "ログはまだありません",

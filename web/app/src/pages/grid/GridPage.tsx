@@ -217,7 +217,7 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
     toast(L('export.running', ids.length));
     try {
       const safe = folder.replace(/[\\/:*?"<>|]/g, '_');
-      const report = await exportFile<ExportReport>(
+      const { report, status } = await exportFile<ExportReport>(
         `${safe}.zip`,
         (out) => core.readJson<ExportReport>('tl_export_media', {
           media_ids: ids,
@@ -225,7 +225,7 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
           out,
         }),
       );
-      if (!report) return;
+      if (status === 'cancelled') return;
       toast(`${L('export.done')} · ${L('export.summaryMedia', report.media, size(report.bytes))}`);
     } catch (e) {
       await alertMessage(L('export.failed'), e instanceof Error ? L(e.message) : L('common.notDone'));

@@ -672,6 +672,12 @@ struct AboutPageView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 32)
+            VStack(alignment: .leading, spacing: 10) {
+                SectionHeading(L("about.acknowledgments"))
+                Card {
+                    CardRow(symbol: "sparkles", color: .purple, title: "Claude · ChatGPT · Gemini", detail: L("about.acknowledgments.ai")) { EmptyView() }
+                }
+            }
             if extras {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionHeading(L("settings.section.maintenance"), note: L("settings.maintenance.footer"))

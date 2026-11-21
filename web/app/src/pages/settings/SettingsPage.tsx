@@ -9,7 +9,7 @@ import {
   RefreshCw, Search, Sparkles, Tags, Trash2, Columns3,
 } from 'lucide-react';
 import { Button, Page } from '../../components/ui';
-import { ClawdIcon, mascotEnabled, setMascotEnabled } from '../../components/Mascot';
+import { mascotEnabled, setMascotEnabled } from '../../components/Mascot';
 import { clawdLicense } from '../../components/clawdIcons.generated';
 import { alertMessage } from '../../components/pickers';
 import { Select, useTask } from '../../components/libraryControls';
@@ -259,8 +259,9 @@ function SettingsOverview() {
               id="nav-download"
               title={L('common.downloadPosts')}
               detail={dlDetail}
-              icon={mascot && dl?.running ? <ClawdIcon name="bag" size={24} /> : <Download size={19} strokeWidth={2} />}
+              icon={<Download size={19} strokeWidth={2} />}
               color="blue"
+              mascot={dl?.running ? 'bag' : undefined}
               progress={dlProgress}
               onClick={() => settings('downloads')}
             />
@@ -282,8 +283,9 @@ function SettingsOverview() {
               id="nav-models"
               title={L('common.aiModels')}
               detail={aiDetail}
-              icon={mascot && tagActivity.running ? <ClawdIcon name="camera" size={24} /> : <Sparkles size={19} strokeWidth={2} />}
+              icon={<Sparkles size={19} strokeWidth={2} />}
               color="purple"
+              mascot={tagActivity.running ? 'camera' : undefined}
               progress={aiProgress}
               onClick={() => settings('ai')}
             />
@@ -391,7 +393,7 @@ function SettingsOverview() {
 
         <SectionGroup title={L('mascot.title')} footer={L('mascot.footer')}>
           <Card spacing={12}>
-            <ToggleRow icon={<ClawdIcon name="settings" size={22} />} color="orange"
+            <ToggleRow mascot="settings" alwaysMascot color="orange"
               title={L('mascot.toggle')} checked={mascot} onChange={setMascotEnabled} />
             <RowDivider inset={42} />
             <NavRow icon={<Scale size={15} />} color="gray" title={L('mascot.licenses')}

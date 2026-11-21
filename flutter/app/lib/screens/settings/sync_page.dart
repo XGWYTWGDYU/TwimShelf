@@ -35,10 +35,11 @@ class SyncPage extends StatefulWidget {
       _ => (Icons.devices_other, null),
     };
 
-/// A device's icon; in the mascot mode the crab with a phone or a computer.
+/// A device's icon; in the mascot mode the crab with a phone, tablet or computer.
 Widget deviceIcon(String? kind, {Color? color}) => MascotIcon(
       switch (kind) {
         'iphone' || 'android-phone' => 'mobile',
+        'ipad' || 'android-tablet' => 'tablet',
         'mac' || 'windows' || 'linux' => 'laptop',
         _ => null,
       },
@@ -215,7 +216,7 @@ class _SyncPageState extends State<SyncPage> {
             children.addAll([
               SettingsSection(title: L('sync.status'), footer: L('sync.joined.message'), children: [
                 ListTile(
-                  leading: Icon(s.syncing > 0 ? Icons.sync : Icons.cloud_done_outlined),
+                  leading: s.syncing > 0 ? const Icon(Icons.sync) : deviceIcon(SyncModel.deviceKind),
                   title: Text(s.syncing > 0 ? L('sync.syncingEllipsis') : L('sync.state.on')),
                   subtitle: Text([L('sync.thisDevice'), ?deviceType(SyncModel.deviceKind).$2, s.device_name].join(' · ')),
                 ),

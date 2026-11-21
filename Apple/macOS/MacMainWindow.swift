@@ -59,6 +59,7 @@ final class MacRootViewController: NSViewController {
     private var autoCollapsed = false
     override func viewDidLayout() {
         super.viewDidLayout()
+        guard content.place != .browse else { return }
         guard let side = split.splitViewItems.first, view.window?.inLiveResize == true || !side.isCollapsed || autoCollapsed else { return }
         let w = view.bounds.width
         if w < 900, !side.isCollapsed {

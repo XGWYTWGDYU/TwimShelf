@@ -97,6 +97,7 @@ enum Mascot {
     static func name(forDevice symbol: String) -> String? {
         switch symbol {
         case "iphone": "mobile"
+        case "ipad": "tablet"
         case "laptopcomputer", "desktopcomputer": "laptop"
         default: nil
         }

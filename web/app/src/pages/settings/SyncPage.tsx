@@ -6,6 +6,7 @@ import {
   UserCircle, UserPlus, Users, WifiOff,
 } from 'lucide-react';
 import { Button, Spinner } from '../../components/ui';
+import type { MascotName } from '../../components/Mascot';
 import { change, LoadState, useTask } from '../../components/libraryControls';
 import { alertMessage, choose, prompt } from '../../components/pickers';
 import { core } from '../../lib/core';
@@ -39,6 +40,23 @@ function deviceTypeName(kind?: string | null): string | null {
     case 'windows': return 'Windows';
     case 'linux': return 'Linux';
     default: return null;
+  }
+}
+
+function deviceMascot(kind?: string | null): MascotName | undefined {
+  switch (kind) {
+    case 'iphone':
+    case 'android-phone':
+      return 'mobile';
+    case 'ipad':
+    case 'android-tablet':
+      return 'tablet';
+    case 'mac':
+    case 'windows':
+    case 'linux':
+      return 'laptop';
+    default:
+      return undefined;
   }
 }
 
@@ -237,7 +255,7 @@ export default function SyncPage() {
             <>
               <div className="s-hero hero-green">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-                  <IconTile icon={<Laptop size={24} strokeWidth={2} />} color="green" size={52} />
+                  <IconTile icon={<Laptop size={24} strokeWidth={2} />} color="green" size={52} mascot="laptop" />
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)' }}>
                       {status?.device_name || L('sync.thisMac')}
@@ -305,7 +323,7 @@ export default function SyncPage() {
                       return (
                         <Card key={p.device} spacing={10}>
                           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                            <IconTile icon={deviceIcon(p.kind, 18)} color={online ? 'green' : 'gray'} size={40} />
+                            <IconTile icon={deviceIcon(p.kind, 18)} color={online ? 'green' : 'gray'} size={40} mascot={deviceMascot(p.kind)} />
                             <div className="card-row-texts" style={{ gap: 4 }}>
                               <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>{p.name}</div>
                               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 500, color: 'var(--fg-2)' }}>
@@ -464,6 +482,7 @@ export default function SyncPage() {
                             key={p.device}
                             icon={deviceIcon(p.kind, 15)}
                             color="indigo"
+                            mascot={deviceMascot(p.kind)}
                             title={p.name}
                             detail={deviceTypeName(p.kind) ?? L('sync.accountDevices')}
                             trailing={

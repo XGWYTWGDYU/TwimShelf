@@ -101,7 +101,8 @@ public sealed partial class SyncSettings : SettingsSubpage
         // only when there is someone to sync with (with no discovery or no device it did nothing)
         var now = new Button { Content = L("sync.now"), IsEnabled = Sync.Note == null && Sync.Discovery?.Running == true && Sync.AccountPeers.Count > 0 };
         now.Click += (_, _) => Sync.SyncNow();
-        Card(s.Syncing > 0 ? L("sync.syncingEllipsis") : L("sync.state.on"), string.Join(" · ", new[] { L("sync.thisDevice"), "Windows", s.DeviceName }), s.Syncing > 0 ? "" : "", now);
+        var thisCard = Card(s.Syncing > 0 ? L("sync.syncingEllipsis") : L("sync.state.on"), string.Join(" · ", new[] { L("sync.thisDevice"), "Windows", s.DeviceName }), s.Syncing > 0 ? "" : "", now);
+        if (Clawd.On && s.Syncing == 0) thisCard.HeaderIcon = Clawd.Icon("laptop", 24);
         NetworkProblem();
         Footer(L("sync.joined.message"));
 

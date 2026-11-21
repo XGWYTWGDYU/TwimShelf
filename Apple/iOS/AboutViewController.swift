@@ -8,7 +8,7 @@ final class AboutViewController: FormViewController {
     private var taps = 0
     private var extras = LibraryPrefs.aboutExtras
     private let header = UIStackView()
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     init(settings: SettingsViewController) {
         self.settings = settings
@@ -70,13 +70,15 @@ final class AboutViewController: FormViewController {
             image.topAnchor.constraint(equalTo: icon.topAnchor), image.bottomAnchor.constraint(equalTo: icon.bottomAnchor),
             image.leadingAnchor.constraint(equalTo: icon.leadingAnchor), image.trailingAnchor.constraint(equalTo: icon.trailingAnchor),
         ])
-        observer = NotificationCenter.default.addObserver(forName: ActivityCenter.changed, object: nil, queue: .main) { [weak self] _ in
-            if self?.extras == true { self?.build() }
+        observers = [ActivityCenter.changed, Mascot.changed].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                if self?.extras == true { self?.build() }
+            }
         }
         build()
     }
 
-    deinit { observer.map(NotificationCenter.default.removeObserver) }
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
     /// The icon the system shows for this app.
     private static var appIcon: UIImage? {
@@ -100,7 +102,12 @@ final class AboutViewController: FormViewController {
     }
 
     private func build() {
-        var s = [Section(id: "app", rows: [.banner("header", header)])]
+        var s = [
+            Section(id: "app", rows: [.banner("header", header)]),
+            Section(id: "acknowledgments", header: L("about.acknowledgments"), footer: L("about.acknowledgments.ai"), rows: [
+                .value("Claude · ChatGPT · Gemini", nil, icon: .init("sparkles", .systemPurple), id: "ack:ai"),
+            ]),
+        ]
         if extras {
             s.append(Section(id: "problems", header: L("settings.section.maintenance"), footer: L("settings.maintenance.footer"), rows: [
                 Core.verifyStatus()?.running == true

@@ -37,7 +37,7 @@ interface Snap {
 
 const isVideoPath = (p?: string | null) => !!p && /\.(mp4|mov|m4v|webm)$/i.test(p);
 
-function outcomeTitle(outcome: string | null | undefined, base: string): { prefix: string; ok: boolean } {
+function outcomeTitle(outcome: string | null | undefined): { prefix: string; ok: boolean } {
   switch (outcome) {
     case 'failed': return { prefix: L('activity.failed'), ok: false };
     case 'paused': return { prefix: L('activity.paused'), ok: false };
@@ -133,7 +133,7 @@ function completedCard(kind: ActivityKind, last: Activity, snap: Snap, tag: Tagg
   if (kind === 'download' && snap.dl) {
     const dl = snap.dl;
     const outcome = dl.paused > 0 ? 'paused' : dl.failed > 0 ? (dl.done > 0 ? 'partial' : 'failed') : 'succeeded';
-    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    const { prefix, ok } = outcomeTitle(outcome);
     return {
       ...last,
       title: `${prefix} · ${last.title}`,
@@ -144,7 +144,7 @@ function completedCard(kind: ActivityKind, last: Activity, snap: Snap, tag: Tagg
   if (kind === 'model' && snap.modelDl) {
     const m = snap.modelDl;
     const outcome = m.error ? 'failed' : m.finished ? 'succeeded' : 'stopped';
-    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    const { prefix, ok } = outcomeTitle(outcome);
     return {
       ...last,
       title: `${prefix} · ${last.title}`,
@@ -154,7 +154,7 @@ function completedCard(kind: ActivityKind, last: Activity, snap: Snap, tag: Tagg
   }
   if (kind === 'tagging') {
     const outcome = tag.error ? 'failed' : 'succeeded';
-    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    const { prefix, ok } = outcomeTitle(outcome);
     return {
       ...last,
       title: `${prefix} · ${last.title}`,
@@ -165,7 +165,7 @@ function completedCard(kind: ActivityKind, last: Activity, snap: Snap, tag: Tagg
   if (kind === 'importing' && snap.imp) {
     const imp = snap.imp;
     const outcome = imp.issues > 0 ? 'partial' : 'succeeded';
-    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    const { prefix, ok } = outcomeTitle(outcome);
     return {
       ...last,
       title: `${prefix} · ${last.title}`,
@@ -176,7 +176,7 @@ function completedCard(kind: ActivityKind, last: Activity, snap: Snap, tag: Tagg
   if (kind === 'verify' && snap.verify) {
     const v = snap.verify;
     const outcome = v.bad > 0 ? 'partial' : 'succeeded';
-    const { prefix, ok } = outcomeTitle(outcome, last.title);
+    const { prefix, ok } = outcomeTitle(outcome);
     return {
       ...last,
       title: `${prefix} · ${last.title}`,

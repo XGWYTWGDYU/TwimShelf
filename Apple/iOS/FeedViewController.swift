@@ -32,6 +32,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private let browseRow = UIStackView()
     private let browseActions = UIStackView()
     private weak var landscapeActionsHost: UIView?
+    private var landscapeActionConstraints: [NSLayoutConstraint] = []
     private let browseTitle = UILabel()
     private let browsePill = UIView()
     private let browseDownloadButton = UIButton(type: .system)
@@ -194,7 +195,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.setNavigationBarHidden(true, animated: animated)
+        if !usesSharedNavigationBar {
+            navigationController?.setNavigationBarHidden(true, animated: animated)
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -205,9 +208,44 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        hostLandscapeActions(in: nil)
-        restoreSearchToContent(showsTitle: false)
+        // Presenting a full-screen media viewer over Browse must not tear down the hosted top-right
+        // actions or the folded navigation bar items; only clean up when actually leaving Browse.
+        if !showingMediaViewer && presentedViewController == nil {
+            hostLandscapeActions(in: nil)
+            restoreSearchToContent(showsTitle: false)
+        }
         detachInline()   // (not just paused: a paused video layer can go black)
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        guard isViewLoaded, let cv = collectionView else { return }
+        let topY = cv.contentOffset.y + cv.adjustedContentInset.top
+        // Keep the topmost visible card anchored at the same relative vertical position so rotating
+        // smoothly glides the existing cards into their new columns instead of jumping and recycling.
+        let anchor: (ip: IndexPath, ratio: CGFloat)? = cv.visibleCells
+            .compactMap { cell -> (IndexPath, CGRect)? in
+                guard let ip = cv.indexPath(for: cell), cell.frame.maxY > topY else { return nil }
+                return (ip, cell.frame)
+            }
+            .min { $0.1.minY < $1.1.minY }
+            .map { ip, frame in
+                (ip, max(0, min(1, (topY - frame.minY) / max(1, frame.height))))
+            }
+        coordinator.animate(alongsideTransition: { [weak self] _ in
+            guard let self, let cv = self.collectionView else { return }
+            self.masonry.invalidateLayout()
+            cv.layoutIfNeeded()
+            if let anchor, let attr = self.masonry.layoutAttributesForItem(at: anchor.ip) {
+                let targetY = attr.frame.minY + anchor.ratio * attr.frame.height - cv.adjustedContentInset.top
+                let minY = -cv.adjustedContentInset.top
+                let maxY = max(minY, cv.contentSize.height - cv.bounds.height + cv.adjustedContentInset.bottom)
+                cv.contentOffset.y = max(minY, min(maxY, targetY))
+                cv.layoutIfNeeded()
+            }
+        }) { [weak self] _ in
+            self?.scheduleInlineUpdate()
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -220,8 +258,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         let defaultContentBottom = safe.top + 54
         let bottom: CGFloat
         let landscapeRowBottom = landscapeActionsHost.flatMap { host -> CGFloat? in
-            guard let window = host.window else { return nil }
-            return window.convert(window.safeAreaLayoutGuide.layoutFrame, to: view).minY + Self.landscapeActionTop + Self.browseActionHeight
+            guard host.window != nil else { return nil }
+            return host.convert(host.safeAreaLayoutGuide.layoutFrame, to: view).minY + Self.landscapeActionTop + Self.browseActionHeight
         }
         if let landscapeRowBottom {
             bottom = landscapeRowBottom
@@ -390,6 +428,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         searchChrome.isUserInteractionEnabled = showSearch
         searchChrome.accessibilityElementsHidden = !showSearch
         browseActions.isHidden = !searchFolded
+        browseActions.alpha = (!chromeHiddenForTransition && searchFolded) ? 1 : 0
         browseChrome.alpha = showBrowse ? 1 : 0
         browseChrome.isUserInteractionEnabled = showBrowse
         browseChrome.accessibilityElementsHidden = !showBrowse
@@ -433,18 +472,75 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     #if DEBUG
     func debugFocusSearch() { if searchFolded { unfoldSearch() } else { searchField.becomeFirstResponder() } }
+
+    func debugOpenMedia(video: Bool) -> Bool {
+        guard presentedViewController == nil, !showingMediaViewer else { return false }
+        for cell in collectionView.visibleCells.compactMap({ $0 as? FeedCell }) {
+            if let item = cell.currentItem, (item.kind == .video) == video {
+                feedCell(cell, didTapPage: 0)
+                return true
+            }
+        }
+        // Fallback: open first entry matching kind via cell 0 if available
+        if let cell = collectionView.visibleCells.first as? FeedCell {
+            feedCell(cell, didTapPage: 0)
+            return true
+        }
+        return false
+    }
+
+    struct DebugChromeSnapshot {
+        let isLandscape: Bool
+        let modalOpen: Bool
+        let browseActionsInWindow: CGRect
+        let browseActionsHidden: Bool
+        let browseActionsAlpha: CGFloat
+        let browseChromeAlpha: CGFloat
+        let navBarHidden: Bool
+        let navBarFrameInWindow: CGRect
+        let rightBarItemCount: Int
+        let safeAreaInWindow: CGRect
+        let windowSize: CGSize
+        let contentInsetTop: CGFloat
+        let visibleCellCount: Int
+    }
+
+    func debugChromeSnapshot() -> DebugChromeSnapshot {
+        let win = view.window
+        let nav = (parent as? FeedHost)?.navigationController
+        let navBar = nav?.navigationBar
+        let actionsRect = browseActions.superview?.convert(browseActions.frame, to: win) ?? .zero
+        let navRect = navBar?.superview?.convert(navBar?.frame ?? .zero, to: win) ?? .zero
+        let safeRect = win?.safeAreaLayoutGuide.layoutFrame ?? .zero
+        let winSize = win?.bounds.size ?? view.bounds.size
+        return DebugChromeSnapshot(
+            isLandscape: winSize.width > winSize.height,
+            modalOpen: showingMediaViewer || presentedViewController != nil,
+            browseActionsInWindow: actionsRect,
+            browseActionsHidden: browseActions.isHidden,
+            browseActionsAlpha: browseActions.alpha,
+            browseChromeAlpha: browseChrome.alpha,
+            navBarHidden: nav?.isNavigationBarHidden ?? true,
+            navBarFrameInWindow: navRect,
+            rightBarItemCount: foldItem?.rightBarButtonItems?.count ?? 0,
+            safeAreaInWindow: safeRect,
+            windowSize: winSize,
+            contentInsetTop: collectionView?.contentInset.top ?? 0,
+            visibleCellCount: collectionView?.visibleCells.count ?? 0
+        )
+    }
     #endif
 
     private func layoutSearchChrome() {
         let safe = cornerGuide.layoutFrame
         browseChrome.frame = CGRect(x: safe.minX + 10, y: view.safeAreaInsets.top + 6,
                                     width: max(0, safe.width - 20), height: 56)
-        guard let host = landscapeActionsHost, let window = host.window else {
+        guard let host = landscapeActionsHost else {
             searchChrome.frame = browseChrome.frame
             suggestions.frame = view.bounds
             return
         }
-        let area = window.convert(window.safeAreaLayoutGuide.layoutFrame, to: host)
+        let area = host.safeAreaLayoutGuide.layoutFrame
         let right = area.maxX - 16
         let tabRight = tabBarController?.tabBar.items?.compactMap { $0.frame(in: host) }
             .filter { !$0.isEmpty && $0.intersects(area) }.map(\.maxX).max()
@@ -740,7 +836,23 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     func hostLandscapeActions(in host: UIView?) {
-        guard landscapeActionsHost !== host else { return }
+        if landscapeActionsHost === host {
+            // Re-verify constraints if already hosted (e.g. after a transition or reparenting).
+            if let host, browseActions.superview !== host || landscapeActionConstraints.contains(where: { !$0.isActive }) {
+                NSLayoutConstraint.deactivate(landscapeActionConstraints)
+                browseActions.removeFromSuperview()
+                host.addSubview(browseActions)
+                browseActions.translatesAutoresizingMaskIntoConstraints = false
+                landscapeActionConstraints = [
+                    browseActions.trailingAnchor.constraint(equalTo: host.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+                    browseActions.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor, constant: Self.landscapeActionTop),
+                ]
+                NSLayoutConstraint.activate(landscapeActionConstraints)
+            }
+            return
+        }
+        NSLayoutConstraint.deactivate(landscapeActionConstraints)
+        landscapeActionConstraints = []
         browseActions.removeFromSuperview()
         let focused = searchField.isFirstResponder
         landscapeActionsHost = host
@@ -751,13 +863,17 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         suggestions.layer.cornerRadius = host == nil ? 0 : 18
         suggestions.clipsToBounds = host != nil
         if focused { searchField.becomeFirstResponder() }
-        if let host, let window = host.window {
+        if let host {
             host.addSubview(browseActions)
             browseActions.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                browseActions.trailingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-                browseActions.topAnchor.constraint(equalTo: window.safeAreaLayoutGuide.topAnchor, constant: Self.landscapeActionTop),
-            ])
+            // Pin to host.safeAreaLayoutGuide (never window.safeAreaLayoutGuide): UIKit detaches
+            // host from UIWindow during full-screen modal presentation, which would permanently
+            // deactivate any cross-hierarchy constraint to UIWindow.
+            landscapeActionConstraints = [
+                browseActions.trailingAnchor.constraint(equalTo: host.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+                browseActions.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor, constant: Self.landscapeActionTop),
+            ]
+            NSLayoutConstraint.activate(landscapeActionConstraints)
         } else {
             browseRow.addArrangedSubview(browseActions)
         }

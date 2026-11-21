@@ -1284,8 +1284,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         else if c.place == .settings { mode = main.panel.backTitle == nil ? .settings : .settingsSub }
         else { mode = c.place == .browse ? .browse : c.place == .allFolders ? .folders : .plain }      // .plain: 整理 has no toolbar items of its own
         main.embeddedOpen = c.place == .settings
-        // One toolbar for the life of the window: each page only shows or hides items. Putting in
-        // a new toolbar per page rebuilt the title bar and its glass, and every switch flashed.
+        toolbarMode = mode
+        fitSearchWidth()
+        // One toolbar for the life of the window: putting in a new toolbar per page rebuilt the
+        // title bar and its glass, while toggling item.isHidden runs AppKit's implicit fade/scale
+        // animation. Diffing items with removeItem/insertItem switches pages instantaneously.
         if window.toolbar?.identifier != "main" {
             let tb = NSToolbar(identifier: "main")
             tb.delegate = self
@@ -1293,17 +1296,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             tb.allowsUserCustomization = false
             window.toolbar = tb
         }
-        toolbarMode = mode
-        let shown = Set(visibleItems(mode))
         // a grid page shows its title as an item; the window's own title only elsewhere
-        // The title item is never hidden or shown (the toolbar animates that): it stays in place
-        // and the text inside it appears or goes at once.
+        // The title item stays in place and the text inside it appears or goes at once.
         let pill = c.page != nil
         titlePill.setShown(pill)
         if window.titleVisibility != (pill ? .hidden : .visible) { window.titleVisibility = pill ? .hidden : .visible }
-        for it in window.toolbar?.items ?? [] where Self.pageItems.contains(it.itemIdentifier) {
-            let hide = !shown.contains(it.itemIdentifier)
-            if it.isHidden != hide { it.isHidden = hide }
+        if let tb = window.toolbar {
+            let desired = desiredToolbarIdentifiers(mode)
+            if tb.items.map(\.itemIdentifier) != desired {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0
+                    ctx.allowsImplicitAnimation = false
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    let keep = Set(desired)
+                    for i in stride(from: tb.items.count - 1, through: 0, by: -1) {
+                        if !keep.contains(tb.items[i].itemIdentifier) { tb.removeItem(at: i) }
+                    }
+                    for (i, id) in desired.enumerated() {
+                        if i >= tb.items.count || tb.items[i].itemIdentifier != id {
+                            tb.insertItem(withItemIdentifier: id, at: i)
+                        }
+                    }
+                    window.contentView?.superview?.layoutSubtreeIfNeeded()
+                    CATransaction.commit()
+                }
+            }
+        }
+        if mode == .browse, let side = root.split.splitViewItems.first, side.isCollapsed {
+            side.isCollapsed = false
         }
         updateToolbarStates()
     }
@@ -1371,10 +1392,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
     }
 
+    private func desiredToolbarIdentifiers(_ mode: ToolbarMode) -> [NSToolbarItem.Identifier] {
+        let shown = visibleItems(mode)
+        var ids: [NSToolbarItem.Identifier] = []
+        if mode != .browse { ids.append(.toggleSidebar) }
+        ids.append(.sidebarTrackingSeparator)
+        if shown.contains(ID.back) { ids.append(ID.back) }
+        ids.append(ID.title)
+        ids.append(.flexibleSpace)
+        ids.append(contentsOf: shown.filter { $0 != ID.back && $0 != ID.title })
+        return ids
+    }
+
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        desiredToolbarIdentifiers(toolbarMode ?? .browse)
+    }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.toggleSidebar, .sidebarTrackingSeparator, ID.back, ID.title, .flexibleSpace] + Self.pageItems.filter { $0 != ID.back && $0 != ID.title }
     }
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         func button(_ symbol: String, _ label: String, _ action: Selector) -> NSToolbarItem {
@@ -1425,6 +1460,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             g.label = L("grid.zoom")
             g.controlRepresentation = .expanded      // − and + side by side, never folded into a menu
             g.toolTip = L("mac.toolbar.zoom.tip")
+            // Managed explicitly by updateToolbarStates; autovalidates would otherwise re-enable
+            // disabled subitems on the next validateVisibleItems() pass and make − flash.
+            g.autovalidates = false
+            for sub in g.subitems { sub.autovalidates = false }
+            g.subitems.first?.isEnabled = page?.canZoomOut ?? false
+            g.subitems.last?.isEnabled = page?.canZoomIn ?? false
             return g
         case ID.select: return text(L("common.select"), #selector(toggleSelecting))
         case ID.back:
@@ -1432,19 +1473,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             let item = button("chevron.backward", L("mac.toolbar.back"), #selector(goBack))
             item.isNavigational = true
             return item
-        case ID.more: return menu("ellipsis", L("grid.more"))
+        case ID.more:
+            let item = menu("ellipsis", L("grid.more"))
+            item.menu = page?.moreMenu() ?? NSMenu()
+            return item
         case ID.newFolder: return button("folder.badge.plus", L("common.newFolder"), #selector(newFolder))
-        case ID.selectAll: return text(L("grid.selectAll"), #selector(selectAllInGrid))
+        case ID.selectAll: return text(page?.allSelected == true ? L("grid.deselectAll") : L("grid.selectAll"), #selector(selectAllInGrid))
         case ID.share:
             let item = NSSharingServicePickerToolbarItem(itemIdentifier: id)
             item.delegate = self
             item.label = L("viewer.share")
+            item.autovalidates = false
+            item.isEnabled = page?.hasSelection ?? false
             return item
-        case ID.addTo: return menu("folder.badge.plus", L("common.addToFolder"))
-        case ID.takeOut: return button("folder.badge.minus", L("common.removeFromFolder"), #selector(takeOutOfFolder))
-        case ID.trash: return button("trash", L("grid.moveToTrash"), #selector(trashSelection))
-        case ID.restore: return button("arrow.uturn.backward", L("common.restore"), #selector(restoreSelection))
-        case ID.purge: return button("trash.slash", L("common.deletePermanently"), #selector(purgeSelection))
+        case ID.addTo:
+            let item = menu("folder.badge.plus", L("common.addToFolder"))
+            item.menu = page?.addToFolderMenu() ?? NSMenu()
+            item.autovalidates = false
+            item.isEnabled = page?.hasSelection ?? false
+            return item
+        case ID.takeOut:
+            let item = button("folder.badge.minus", L("common.removeFromFolder"), #selector(takeOutOfFolder))
+            item.autovalidates = false
+            item.isEnabled = page?.hasSelection ?? false
+            return item
+        case ID.trash:
+            let item = button("trash", L("grid.moveToTrash"), #selector(trashSelection))
+            item.autovalidates = false
+            item.isEnabled = page?.hasSelection ?? false
+            return item
+        case ID.restore:
+            let item = button("arrow.uturn.backward", L("common.restore"), #selector(restoreSelection))
+            item.autovalidates = false
+            item.isEnabled = page?.hasSelection ?? false
+            return item
+        case ID.purge:
+            let item = button("trash.slash", L("common.deletePermanently"), #selector(purgeSelection))
+            item.autovalidates = false
+            item.isEnabled = page?.hasSelection ?? false
+            return item
         case ID.done:
             let item = text(L("common.done"), #selector(toggleSelecting))
             if #available(macOS 26.0, *) { item.style = .prominent }

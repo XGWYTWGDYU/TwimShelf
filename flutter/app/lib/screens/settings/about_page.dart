@@ -149,6 +149,12 @@ class _AboutPageState extends State<AboutPage> {
             ),
           ),
           const SizedBox(height: 28),
+          SettingsSection(title: L('about.acknowledgments'), footer: L('about.acknowledgments.ai'), children: [
+            const ListTile(
+              leading: SettingsIcon(Icons.auto_awesome),
+              title: Text('Claude · ChatGPT · Gemini'),
+            ),
+          ]),
           if (Prefs.instance.aboutExtras)
             SettingsSection(title: L('settings.section.maintenance'), footer: L('settings.maintenance.footer'), children: [
               ListTile(

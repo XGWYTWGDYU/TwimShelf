@@ -2,11 +2,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Folder, FolderPlus, Plus, Sparkles, Tag, Undo2 } from 'lucide-react';
-import { L, type ActionReceipt, type FeedItem, type TagCount } from '@twimshelf/core';
+import { L, type FeedItem, type TagCount } from '@twimshelf/core';
 import { core } from '../lib/core';
 import { folders, libraryChanged, refreshLibrary } from '../lib/library';
 import { useStore } from '../lib/hooks';
-import { isUser } from '../lib/actions';
+import { action, isUser, undo, type Receipt } from '../lib/actions';
 import { Button, Dialog, TextField } from './ui';
 
 /** Shows a dialog outside the React tree and resolves with its answer. */
@@ -78,7 +78,7 @@ function RichTagPicker({ opts, done }: { opts: TagPickerOptions; done: () => voi
   const [scope, setScope] = useState<'media' | 'post'>(canSwitchScope && opts.initialScope === 'post' ? 'post' : 'media');
   const [text, setText] = useState('');
   const [tags, setTags] = useState<TagCount[]>([]);
-  const [added, setAdded] = useState<Array<{ label: string; receipt: ActionReceipt }>>([]);
+  const [added, setAdded] = useState<Array<{ label: string; receipt: Receipt }>>([]);
   const [error, setError] = useState('');
 
   useEffect(() => { core.read<TagCount[]>(core.b.tl_all_tags()).then(setTags, () => {}); }, []);
@@ -126,13 +126,7 @@ function RichTagPicker({ opts, done }: { opts: TagPickerOptions; done: () => voi
     if (!label || !targets.ids.length) return;
     setError('');
     try {
-      const receipt = await core.readJson<ActionReceipt>('tl_action', {
-        kind: 'tag',
-        media: targets.ids,
-        posts: [],
-        folder: null,
-        label,
-      });
+      const receipt = await action('tag', { media: targets.ids, label });
       setAdded((prev) => [...prev.filter((a) => a.label !== label), { label, receipt }]);
       setText('');
       libraryChanged();
@@ -142,9 +136,9 @@ function RichTagPicker({ opts, done }: { opts: TagPickerOptions; done: () => voi
     }
   };
 
-  const undoAdded = async (entry: { label: string; receipt: ActionReceipt }) => {
+  const undoAdded = async (entry: { label: string; receipt: Receipt }) => {
     try {
-      await core.read(core.b.tl_undo(JSON.stringify(entry.receipt)));
+      await undo(entry.receipt);
       setAdded((prev) => prev.filter((a) => a.label !== entry.label));
       libraryChanged();
     } catch { /* ignore */ }

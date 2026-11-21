@@ -208,16 +208,20 @@ public sealed partial class AboutSettings(LibraryModel library) : SettingsSubpag
         Add(new TextBlock { Text = L("about.tagline"), HorizontalAlignment = HorizontalAlignment.Center, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] });
         Add(new TextBlock { Text = L("about.version", Updates.Display) + $" · {RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()}", HorizontalAlignment = HorizontalAlignment.Center, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"], Margin = new Thickness(0, 4, 0, 12) });
         Action("GitHub", null, "", () => _ = Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/" + (Updates.Enabled ? Updates.Repo : "XGWYTWGDYU/TwimShelf"))));
+        Header(L("about.acknowledgments"));
+        Card("Claude · ChatGPT · Gemini", L("about.acknowledgments.ai"), "\uE734");
         if (!Prefs.Instance.AboutExtras) return;
 
         Header(L("settings.section.maintenance"));
         var verifying = _integrity?.Last?.Running ?? false;
-        Action(verifying ? L("settings.stopCheck") : L("settings.check"), null, verifying ? "" : "", () =>
+        var checkCard = Action(verifying ? L("settings.stopCheck") : L("settings.check"), null, verifying ? "" : "", () =>
         {
             if (verifying) TlCore.CancelVerify();
             else { try { TlCore.StartVerify(); } catch { Dialogs.Toast(W, L("settings.checkFailed")); } }
             _ = LoadIntegrity();
         });
+        if (Clawd.On && !verifying && _integrity?.Last != null && _integrity.Bad == 0 && _integrity.Unchecked == 0)
+            checkCard.HeaderIcon = Clawd.Icon("shield", 24);
         Card(L("settings.integrity"), _integrity == null ? L("settings.checkUnreadable") : IntegrityText(_integrity), "");
         Action(L("about.logs"), null, "", () => _ = ShowLog());
         Action(L("settings.exportDiagnostics"), null, "", () => _ = ExportDiagnostics());

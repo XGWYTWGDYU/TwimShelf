@@ -50,7 +50,7 @@ final class SyncViewController: FormViewController {
         super.viewDidLoad()
         title = L("common.lanSync")
         navigationItem.largeTitleDisplayMode = .never
-        observers = [SyncService.changed, ActivityCenter.changed].map {
+        observers = [SyncService.changed, ActivityCenter.changed, Mascot.changed].map {
             NotificationCenter.default.addObserver(forName: $0, object: nil, queue: .main) { [weak self] _ in self?.tick() }
         }
         countdown = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.updateCode() }
@@ -110,9 +110,10 @@ final class SyncViewController: FormViewController {
                 .value(L("sync.pendingRecords"), L("common.items", n), icon: .init("arrow.up.circle.fill", .systemOrange), id: "newerOps")]))
         }
         if svc.hasAccount, let acct = st?.accountId {
+            let meSymbol = UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone"
             s.append(Section(id: "me", header: L("sync.thisDevice"), rows: [
                 .custom("stats", stats),
-                .value(L("sync.device"), st?.deviceName, icon: .init("laptopcomputer.and.iphone", .systemBlue)),
+                .value(L("sync.device"), st?.deviceName, icon: .init(meSymbol, .systemBlue, mascot: Mascot.name(forDevice: meSymbol))),
                 .value(L("sync.account"), String(acct.prefix(8)).uppercased(), icon: .init("person.badge.key.fill", .systemIndigo)),
                 .value(L("sync.status"), (st?.syncing ?? 0) > 0 ? L("sync.syncingEllipsis") : L("sync.idle"), icon: .init("arrow.triangle.2.circlepath", .systemTeal), id: "status"),
                 .button(L("sync.now"), icon: .init("arrow.clockwise", .systemGreen)) { svc.syncNow() },
@@ -134,7 +135,10 @@ final class SyncViewController: FormViewController {
                 var detail = svc.connectionDetail(p) ?? (L("sync.onlinePrefix") + (info.map { $0.lastError == nil ? L("sync.syncedAt") + self.ago($0.lastSync) : L("sync.errored") } ?? L("sync.waiting")))
                 if let t = p.typeName { detail = t + " · " + detail }
                 if let skew = info?.skewText { detail += " · ⚠︎ " + skew }
-                return .value(p.name, detail, icon: .init(info?.skewText == nil ? "checkmark.icloud.fill" : "clock.badge.exclamationmark.fill", info?.skewText == nil ? .systemGreen : .systemOrange), id: "peer-\(p.device)")
+                let peerIcon = info?.skewText == nil
+                    ? Icon(p.typeSymbol, .systemGreen, mascot: Mascot.name(forDevice: p.typeSymbol))
+                    : Icon("clock.badge.exclamationmark.fill", .systemOrange)
+                return .value(p.name, detail, icon: peerIcon, id: "peer-\(p.device)")
             }
             for k in known where !mine.contains(where: { $0.device == k.device }) {
                 rows.append(.value(k.name, L("sync.offlineLast") + ago(k.lastSync), icon: .init("icloud.slash.fill", .systemGray), id: "peer-\(k.device)"))
