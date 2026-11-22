@@ -1,6 +1,7 @@
-// One card of 浏览: a post (or one media), its media to page through (arrows on hover, the wheel
-// sideways, the counter at the top right), the author, the whole text (selectable), the link, and
-// the tags in one row with the + at its end — the other apps' card, drawn with Fluent controls.
+// One card of 浏览: a post (or one media), its media to page through (arrows on hover, touchpad
+// horizontal swipe, the counter at the top right; mouse wheels always scroll the feed vertically),
+// the author, the whole text (selectable), the link, and the tags in one row with the + at its end
+// — the other apps' card, drawn with Fluent controls.
 // A video plays muted and looping while it is on screen; every video in view plays.
 using Microsoft.UI.Text;
 using Windows.UI.Text;
@@ -15,6 +16,7 @@ using TwimShelf.Core;
 using TwimShelf.Search;
 using TwimShelf.Services;
 using Windows.Foundation;
+using Windows.System;
 using static TwimShelf.Services.Strings;
 
 namespace TwimShelf.Controls;
@@ -39,7 +41,11 @@ public sealed partial class PostCard : UserControl
     readonly RichTextBlock _text = new() { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
     readonly HyperlinkButton _link = new() { Padding = new Thickness(0), Margin = new Thickness(0, 4, 0, 0) };
     readonly StackPanel _tags = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
+    readonly TranslateTransform _tagShift = new();
+    readonly Grid _tagClip;
     readonly Grid _tagRow;
+    readonly CardSwipeFilter _swipe = new();
+    bool _hovering;
     double _width;
     CancellationTokenSource? _loading;
     SearchMarks _marks = SearchMarks.None;
@@ -67,8 +73,8 @@ public sealed partial class PostCard : UserControl
             IsHitTestVisible = false,
         };
         _mediaArea.Children.Add(_counter);
-        _mediaArea.PointerEntered += (_, _) => ShowArrows(true);
-        _mediaArea.PointerExited += (_, _) => ShowArrows(false);
+        _mediaArea.PointerEntered += (_, _) => { _hovering = true; ShowArrows(true); };
+        _mediaArea.PointerExited += (_, _) => { _hovering = false; ShowArrows(false); };
         // a tap on the media opens the viewer; one on the page arrows only turns the page
         _mediaArea.Tapped += (_, e) => { if (!InsideButton(e.OriginalSource as DependencyObject)) Open?.Invoke(Media[Page]); };
         _mediaArea.PointerWheelChanged += OnWheel;
@@ -89,17 +95,25 @@ public sealed partial class PostCard : UserControl
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "addTag");
         add.Click += (_, _) => _ = TagPicker.Show(Media[Page], false);
         _tagRow = new Grid { Margin = new Thickness(0, 10, 0, 0), ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition { Width = GridLength.Auto } } };
-        var tagScroll = new ScrollViewer
+        // Clipped host instead of a nested horizontal ScrollViewer: a WinUI horizontal-only
+        // ScrollViewer traps vertical mouse wheel scrolling instead of letting the Browse feed scroll.
+        _tags.RenderTransform = _tagShift;
+        var tagHost = new Canvas { Height = 28 };
+        tagHost.Children.Add(_tags);
+        _tagClip = new Grid
         {
-            Content = _tags,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            HorizontalScrollMode = ScrollMode.Enabled,
-            VerticalScrollMode = ScrollMode.Disabled,
             Height = 28,
             Margin = new Thickness(0, 0, 6, 0),
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Children = { tagHost },
         };
-        _tagRow.Children.Add(tagScroll);
+        _tagClip.SizeChanged += (_, _) =>
+        {
+            _tagClip.Clip = new RectangleGeometry { Rect = new Rect(0, 0, _tagClip.ActualWidth, _tagClip.ActualHeight) };
+            ClampTagScroll();
+        };
+        _tagClip.PointerWheelChanged += OnTagWheel;
+        _tagRow.Children.Add(_tagClip);
         Grid.SetColumn(add, 1);
         _tagRow.Children.Add(add);
 
@@ -202,9 +216,45 @@ public sealed partial class PostCard : UserControl
     void OnWheel(object sender, PointerRoutedEventArgs e)
     {
         var p = e.GetCurrentPoint(_mediaArea).Properties;
-        if (!p.IsHorizontalMouseWheel || Media.Count < 2) return;
-        Turn(p.MouseWheelDelta > 0 ? 1 : -1);
+        var delta = p.MouseWheelDelta;
+        if (delta == 0) return;
+
+        var nowMs = Environment.TickCount64;
+        var shift = e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift);
+        var isTouchpad = TouchpadInputState.IsTouchpadHorizontalWheel(delta, shift, nowMs);
+        var action = _swipe.OnWheel(p.IsHorizontalMouseWheel, delta, isTouchpad, Media.Count >= 2, nowMs);
+        switch (action)
+        {
+            case CardWheelAction.TurnNext:
+                Turn(1);
+                e.Handled = true;
+                break;
+            case CardWheelAction.TurnPrev:
+                Turn(-1);
+                e.Handled = true;
+                break;
+            case CardWheelAction.Swallow:
+                e.Handled = true;
+                break;
+        }
+    }
+
+    void OnTagWheel(object sender, PointerRoutedEventArgs e)
+    {
+        var p = e.GetCurrentPoint(_tagClip).Properties;
+        if (!p.IsHorizontalMouseWheel || p.MouseWheelDelta == 0) return;
+        var shift = e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift);
+        if (!TouchpadInputState.IsTouchpadHorizontalWheel(p.MouseWheelDelta, shift, Environment.TickCount64)) return;
+        var maxShift = _tags.ActualWidth - _tagClip.ActualWidth;
+        if (maxShift <= 0.5) return;
+        _tagShift.X = Math.Clamp(_tagShift.X - p.MouseWheelDelta * 0.5, -maxShift, 0);
         e.Handled = true;
+    }
+
+    void ClampTagScroll()
+    {
+        var maxShift = Math.Max(0, _tags.ActualWidth - _tagClip.ActualWidth);
+        _tagShift.X = Math.Clamp(_tagShift.X, -maxShift, 0);
     }
 
     /// Height of the card's media for a width: the media's own shape (4:5 until known), kept within reason.
@@ -220,6 +270,8 @@ public sealed partial class PostCard : UserControl
 
     public void Bind(List<FeedItem> media, int page, SearchMarks marks, bool highlighted)
     {
+        if (Media.Count == 0 || media.Count == 0 || Media[0].MediaId != media[0].MediaId)
+            _swipe.Reset();
         Media = media;
         Page = Math.Clamp(page, 0, media.Count - 1);
         _marks = marks;
@@ -277,8 +329,9 @@ public sealed partial class PostCard : UserControl
         _counter.Visibility = Media.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         _counterText.Text = $"{Page + 1}/{Media.Count}";
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_counter, _counterText.Text);
-        ShowArrows(_prev.Visibility == Visibility.Visible || _next.Visibility == Visibility.Visible);
+        ShowArrows(_hovering);
         // tags of the page shown
+        _tagShift.X = 0;
         _tags.Children.Clear();
         foreach (var t in item.Tags) _tags.Children.Add(Chip(t));
         var loose = Media[0].IsLoose();
@@ -421,6 +474,10 @@ public sealed partial class PostCard : UserControl
     public void Recycle()
     {
         _loading?.Cancel();
+        _swipe.Reset();
+        _hovering = false;
+        ShowArrows(false);
+        _tagShift.X = 0;
         _image.Source = null;
         _video.Stop();
         _video.BindPath(null, false);

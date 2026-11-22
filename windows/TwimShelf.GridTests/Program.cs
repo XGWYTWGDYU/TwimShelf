@@ -6,6 +6,7 @@
 //     surrounding neighbor lattice geometry, sidebar resize lock, and 5,000-photo CPU performance.
 using System.Diagnostics;
 using System.Text.Json;
+using TwimShelf.Controls;
 using TwimShelf.Controls.ViewerEngine;
 using TwimShelf.Controls.ZoomGrid;
 using Windows.Foundation;
@@ -61,6 +62,12 @@ static class Program
         Run("Viewer.StripPagingSwipeSettleAndCaptionFade", ViewerTests.StripPagingSwipeSettleAndCaptionFade);
         Run("Viewer.PhotoCursorAnchoredZoomAndClamp", ViewerTests.PhotoCursorAnchoredZoomAndClamp);
         Run("Viewer.GridHiddenPhotoAndSourceFrameSync", ViewerTests.GridHiddenPhotoAndSourceFrameSync);
+
+        // 5. Browse card mouse vs touchpad wheel classification & horizontal swipe state machine
+        Run("CardSwipe.MouseAlwaysScrollsPageNeverTurns", CardSwipeTests.MouseAlwaysScrollsPageNeverTurns);
+        Run("CardSwipe.TouchpadHorizontalTurnsOnePageAndSwallowsMomentum", CardSwipeTests.TouchpadHorizontalTurnsOnePageAndSwallowsMomentum);
+        Run("CardSwipe.TouchpadVerticalAndDiagonalNeverTurnPage", CardSwipeTests.TouchpadVerticalAndDiagonalNeverTurnPage);
+        Run("ViewerWheel.MouseVerticalAndTouchpadHorizontalPaging", CardSwipeTests.ViewerMouseAndTouchpadPaging);
 
         Console.WriteLine();
         Console.WriteLine($"Result: {_passed} passed, {_failed} failed.");
@@ -856,7 +863,8 @@ static class ViewerTests
 
             // Grid square tile (cropSource = true, cornerRadius = 2.5)
             var gridTile = new Rect(420, 260, 148, 148);
-            var f0 = ViewerMath.EvaluateTransition(bounds, media, gridTile, cropSource: true, sourceCornerRadius: 2.5, raw: 0, closing: false, DismissState.None);
+            var open = ZoomFlight.StartOpen(bounds, media, gridTile, cropSource: true, sourceCornerRadius: 2.5);
+            var f0 = open.CurrentFrame();
             var landed0 = ScreenRectOfClip(f0);
             Assert.Close(landed0.X, gridTile.X, 1e-6, $"grid f0 X ({mw}x{mh})");
             Assert.Close(landed0.Y, gridTile.Y, 1e-6, $"grid f0 Y ({mw}x{mh})");
@@ -867,29 +875,55 @@ static class ViewerTests
             Assert.Close(f0.BackdropOpacity, 0, 1e-6, "grid f0 backdrop");
             Assert.Close(f0.ChromeOpacity, 0, 1e-6, "grid f0 chrome");
 
-            // At rest (raw = 1)
-            var f1 = ViewerMath.EvaluateTransition(bounds, media, gridTile, cropSource: true, sourceCornerRadius: 2.5, raw: 1, closing: false, DismissState.None);
-            Assert.Close(f1.Scale, 1.0, 1e-6, "grid f1 scale");
-            Assert.Close(f1.OffsetX, 0.0, 1e-6, "grid f1 offsetX");
-            Assert.Close(f1.OffsetY, 0.0, 1e-6, "grid f1 offsetY");
-            Assert.Close(f1.BackdropOpacity, 1.0, 1e-6, "grid f1 backdrop");
-            Assert.Close(f1.ChromeOpacity, 1.0, 1e-6, "grid f1 chrome");
+            // Step spring to completion: must launch briskly on first 50ms and settle cleanly at media rect.
+            var settled = false;
+            var movedAt50ms = false;
+            for (var step = 1; step <= 240 && !settled; step++)
+            {
+                settled = open.Step(1.0 / 120.0);
+                if (step == 6) // 50ms
+                {
+                    var mid = open.CurrentFrame();
+                    movedAt50ms = mid.Scale > f0.Scale + 0.05 && mid.BackdropOpacity > 0.1;
+                }
+            }
+            Assert.True(movedAt50ms, $"spring did not visibly zoom within 50ms ({mw}x{mh})");
+            Assert.True(settled, $"open spring did not settle ({mw}x{mh})");
+            var f1 = open.CurrentFrame();
+            var landed1 = ScreenRectOfClip(f1);
+            Assert.Close(landed1.X, media.X, 1.0, $"grid f1 X ({mw}x{mh})");
+            Assert.Close(landed1.Y, media.Y, 1.0, $"grid f1 Y ({mw}x{mh})");
+            Assert.Close(landed1.Width, media.Width, 1.5, $"grid f1 W ({mw}x{mh})");
+            Assert.Close(landed1.Height, media.Height, 1.5, $"grid f1 H ({mw}x{mh})");
+
+            // Mid-flight C1 reversal: opening -> reverse at 80ms preserves position & velocity and lands on gridTile!
+            var rev = ZoomFlight.StartOpen(bounds, media, gridTile, cropSource: true, sourceCornerRadius: 2.5);
+            for (var i = 0; i < 10; i++) rev.Step(1.0 / 120.0);
+            var beforeRev = rev.CurrentFrame();
+            rev.ReverseToClose(gridTile);
+            var afterRev = rev.CurrentFrame();
+            Assert.Close(afterRev.Scale, beforeRev.Scale, 1e-6, "C1 reverse scale jump");
+            Assert.Close(afterRev.OffsetX, beforeRev.OffsetX, 1e-6, "C1 reverse offsetX jump");
+            Assert.Close(afterRev.OffsetY, beforeRev.OffsetY, 1e-6, "C1 reverse offsetY jump");
+            var revSettled = false;
+            for (var i = 0; i < 240 && !revSettled; i++) revSettled = rev.Step(1.0 / 120.0);
+            Assert.True(revSettled, "reversed spring did not settle");
+            var revLanded = ScreenRectOfClip(rev.CurrentFrame());
+            Assert.Close(revLanded.X, gridTile.X, 1.0, "reversed landing X");
+            Assert.Close(revLanded.Y, gridTile.Y, 1.0, "reversed landing Y");
 
             // Browse card media (cropSource = false, cornerRadius = 8)
             var cardW = 360.0;
             var cardH = cardW / (mw / mh);
             var cardRect = new Rect(200, 140, cardW, Math.Clamp(cardH, cardW * 0.3, cardW * 1.8));
-            var c0 = ViewerMath.EvaluateTransition(bounds, media, cardRect, cropSource: false, sourceCornerRadius: 8.0, raw: 0, closing: false, DismissState.None);
+            var cardOpen = ZoomFlight.StartOpen(bounds, media, cardRect, cropSource: false, sourceCornerRadius: 8.0);
+            var c0 = cardOpen.CurrentFrame();
             var cardLanded0 = ScreenRectOfClip(c0);
             Assert.Close(cardLanded0.X, cardRect.X, 1e-6, $"card f0 X ({mw}x{mh})");
             Assert.Close(cardLanded0.Y, cardRect.Y, 1e-6, $"card f0 Y ({mw}x{mh})");
             Assert.Close(cardLanded0.Width, cardRect.Width, 1e-6, $"card f0 W ({mw}x{mh})");
             Assert.Close(cardLanded0.Height, cardRect.Height, 1e-6, $"card f0 H ({mw}x{mh})");
             Assert.Close(c0.ClipCornerRadius * c0.Scale, 8.0, 1e-6, "card f0 screen corner radius");
-
-            // Reverse dissolve tail
-            var tail = ViewerMath.EvaluateTransition(bounds, media, gridTile, cropSource: true, sourceCornerRadius: 2.5, raw: 0.05, closing: true, DismissState.None);
-            Assert.Close(tail.SurfaceOpacity, 0.5, 1e-6, "reverse dissolve tail at raw=0.05");
         }
     }
 
@@ -898,33 +932,47 @@ static class ViewerTests
         var bounds = new Rect(0, 0, 1280, 820);
         var media = ViewerMath.FitMedia(bounds, 1600, 1200);
         var src = new Rect(300, 200, 160, 160);
+        var grab = new Point(media.X + media.Width * 0.65, media.Y + media.Height * 0.35);
 
-        // Downward drag shrinks toward 0.66 and upward drag is damped 0.28x.
-        var up = ViewerMath.EvaluateDismiss(0, -100, 1280, 820, fromEdge: false, edgeDir: 1);
-        Assert.Close(up.OffsetY, -28.0, 1e-6, "upward damping 0.28x");
+        // Upward drag is damped 0.28x with progress = 0.
+        var up = ViewerMath.EvaluateDismiss(media, grab, 0, -100, 1280, 820, fromEdge: false, edgeDir: 1);
+        Assert.Close(up.CenterY, media.Y + media.Height * 0.5 - 28.0, 1e-6, "upward damping 0.28x");
         Assert.Close(up.Progress, 0.0, 1e-6, "upward progress 0");
 
-        var drag = ViewerMath.EvaluateDismiss(45, 160, 1280, 820, fromEdge: false, edgeDir: 1);
-        Assert.True(drag.Progress > 0.4 && drag.Progress < 0.6, "mid drag progress");
-        Assert.Close(drag.Scale, 1.0 - 0.34 * drag.Progress, 1e-6, "drag scale formula");
+        // Downward drag shrinks smoothly, rounds corners, keeps grab point locked under pointer,
+        // and strictly clips to `media` (so neighbor pages p0/p2 outside 0..W can NEVER appear!).
+        var drag = ViewerMath.EvaluateDismiss(media, grab, 45, 160, 1280, 820, fromEdge: false, edgeDir: 1);
+        Assert.True(drag.Progress > 0.45 && drag.Progress < 0.65, "mid drag progress");
+        Assert.True(drag.Scale < 0.72 && drag.Scale > 0.56, $"drag scale responsive ({drag.Scale})");
+        Assert.True(drag.CornerRadius > 12.0, $"drag corner radius grows ({drag.CornerRadius})");
+
+        var dragFrame = ViewerMath.EvaluateRestOrDismiss(bounds, media, drag);
+        Assert.True(dragFrame.UseClip, "dismiss drag must clip strictly to current media");
+        Assert.Close(dragFrame.ClipX, media.X, 1e-6, "dismiss clip X = media.X");
+        Assert.Close(dragFrame.ClipW, media.Width, 1e-6, "dismiss clip W = media.W");
+        Assert.Close(dragFrame.OffsetX + grab.X * dragFrame.Scale, grab.X + 45.0, 1e-6, "grab point X tracks cursor");
+        Assert.Close(dragFrame.OffsetY + grab.Y * dragFrame.Scale, grab.Y + 160.0, 1e-6, "grab point Y tracks cursor");
         Assert.True(ViewerMath.ShouldCommitDismiss(45, 160, 0, 20, 1280, 820, false, 1), "past threshold should commit");
         Assert.True(!ViewerMath.ShouldCommitDismiss(5, 20, 0, 10, 1280, 820, false, 1), "tiny drag should cancel");
 
-        // Continuity at release (raw = 1.0 closing) matches dragged center and scale with zero jump.
-        var startClose = ViewerMath.EvaluateTransition(bounds, media, src, cropSource: true, sourceCornerRadius: 2.5, raw: 1.0, closing: true, drag);
-        var mediaCx = media.X + media.Width * 0.5;
-        var mediaCy = media.Y + media.Height * 0.5;
-        Assert.Close(startClose.Scale, drag.Scale, 1e-6, "close start scale matches drag");
-        Assert.Close(startClose.OffsetX + mediaCx * startClose.Scale, mediaCx + drag.OffsetX, 1e-6, "close start centerX matches drag");
-        Assert.Close(startClose.OffsetY + mediaCy * startClose.Scale, mediaCy + drag.OffsetY, 1e-6, "close start centerY matches drag");
+        // Velocity-preserving close flight from dragged state starts with ZERO jump and lands on `src`!
+        var close = ZoomFlight.StartClose(bounds, media, src, cropSource: true, sourceCornerRadius: 2.5, fromDismiss: drag, velX: 120, velY: 900);
+        var startFrame = close.CurrentFrame();
+        Assert.Close(startFrame.Scale, dragFrame.Scale, 1e-6, "close start scale matches drag");
+        Assert.Close(startFrame.OffsetX, dragFrame.OffsetX, 1e-6, "close start offsetX matches drag");
+        Assert.Close(startFrame.OffsetY, dragFrame.OffsetY, 1e-6, "close start offsetY matches drag");
+        Assert.Close(startFrame.ClipCornerRadius * startFrame.Scale, drag.CornerRadius, 1e-6, "close start corner radius matches drag");
+        Assert.Close(startFrame.BackdropOpacity, dragFrame.BackdropOpacity, 1e-6, "close start backdrop has zero flash");
+        Assert.Close(startFrame.ChromeOpacity, dragFrame.ChromeOpacity, 1e-6, "close start chrome has zero flash");
 
-        // And lands pixel-exact on `src` at raw = 0.0.
-        var endClose = ViewerMath.EvaluateTransition(bounds, media, src, cropSource: true, sourceCornerRadius: 2.5, raw: 0.0, closing: true, drag);
-        var landed = ScreenRectOfClip(endClose);
-        Assert.Close(landed.X, src.X, 1e-6, "close end X");
-        Assert.Close(landed.Y, src.Y, 1e-6, "close end Y");
-        Assert.Close(landed.Width, src.Width, 1e-6, "close end W");
-        Assert.Close(landed.Height, src.Height, 1e-6, "close end H");
+        var settled = false;
+        for (var i = 0; i < 240 && !settled; i++) settled = close.Step(1.0 / 120.0);
+        Assert.True(settled, "drag-launched close spring did not settle");
+        var landed = ScreenRectOfClip(close.CurrentFrame());
+        Assert.Close(landed.X, src.X, 1.0, "close end X");
+        Assert.Close(landed.Y, src.Y, 1.0, "close end Y");
+        Assert.Close(landed.Width, src.Width, 1.5, "close end W");
+        Assert.Close(landed.Height, src.Height, 1.5, "close end H");
     }
 
     public static void StripPagingSwipeSettleAndCaptionFade()
@@ -1008,5 +1056,161 @@ static class ViewerTests
         scene.Engine.HiddenPhoto = null;
         scene.Frame(0, drawn);
         Assert.True(drawn.Any(t => t.Photo == k7), "unhidden tile should reappear");
+    }
+}
+
+// ---- Browse card mouse vs touchpad wheel & swipe tests ----
+
+static class CardSwipeTests
+{
+    public static void MouseAlwaysScrollsPageNeverTurns()
+    {
+        // Standard discrete mouse horizontal/tilt wheel (±120) without touchpad raw input.
+        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(120, false, 1000, 0, 0), "discrete +120 is mouse");
+        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(-120, false, 1000, 0, 0), "discrete -120 is mouse");
+        // Shift + wheel is never touchpad.
+        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(18, true, 1000, 995, 0), "Shift+wheel rejected");
+        // High-res free-spin mouse wheel (sub-120 delta) when physical mouse raw input just fired.
+        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(24, false, 1000, 0, 990), "high-res physical mouse rejected");
+        // Physical mouse takes precedence even if touchpad was touched earlier.
+        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(24, false, 1000, 500, 990), "newer physical mouse overrides stale touchpad");
+
+        var filter = new CardSwipeFilter();
+        // Mouse vertical & horizontal wheel events ALWAYS pass through.
+        Assert.True(filter.OnWheel(false, -120, isTouchpad: false, canPage: true, 1000) == CardWheelAction.PassThrough, "mouse vertical pass-through");
+        Assert.True(filter.OnWheel(true, 120, isTouchpad: false, canPage: true, 1020) == CardWheelAction.PassThrough, "mouse horizontal pass-through");
+        Assert.True(filter.OnWheel(true, -240, isTouchpad: false, canPage: true, 1040) == CardWheelAction.PassThrough, "mouse fast horizontal pass-through");
+    }
+
+    public static void TouchpadHorizontalTurnsOnePageAndSwallowsMomentum()
+    {
+        // Precision touchpad raw HID packet recent -> even a fast 120 frame is recognized as touchpad.
+        Assert.True(TouchpadInputState.ClassifyTouchpadHorizontalWheel(120, false, 2000, 1980, 0), "active PTP +120 accepted");
+        // Non-PTP fallback: fractional sub-120 delta with no physical mouse raw input -> accepted.
+        Assert.True(TouchpadInputState.ClassifyTouchpadHorizontalWheel(18, false, 2000, 0, 0), "fractional fallback accepted");
+
+        var filter = new CardSwipeFilter();
+        var turns = 0;
+        long t = 1000;
+        // One rightward swipe + decaying inertia tail: must flip NEXT exactly once!
+        int[] swipeRight = [10, 16, 22, 26, 20, 14, 9, 5, 3, 2, 1];
+        foreach (var d in swipeRight)
+        {
+            t += 12;
+            var a = filter.OnWheel(true, d, isTouchpad: true, canPage: true, t);
+            Assert.True(a != CardWheelAction.PassThrough, $"swipe right event {d} should not leak");
+            if (a == CardWheelAction.TurnNext) turns++;
+            Assert.True(a != CardWheelAction.TurnPrev, "wrong direction");
+        }
+        Assert.Equal(turns, 1, "one swipe must flip exactly one page");
+
+        // Immediate reverse swipe left -> fresh gesture flips PREV exactly once!
+        var prevTurns = 0;
+        int[] swipeLeft = [-12, -20, -24, -18, -10, -4];
+        foreach (var d in swipeLeft)
+        {
+            t += 12;
+            var a = filter.OnWheel(true, d, isTouchpad: true, canPage: true, t);
+            if (a == CardWheelAction.TurnPrev) prevTurns++;
+            Assert.True(a != CardWheelAction.TurnNext, "unexpected next on left swipe");
+        }
+        Assert.Equal(prevTurns, 1, "reverse swipe must flip prev once");
+
+        // After pause > 350ms, another swipe left flips PREV once more.
+        t += 400;
+        prevTurns = 0;
+        foreach (var d in new[] { -15, -25, -20, -8 })
+        {
+            t += 12;
+            if (filter.OnWheel(true, d, isTouchpad: true, canPage: true, t) == CardWheelAction.TurnPrev)
+                prevTurns++;
+        }
+        Assert.Equal(prevTurns, 1, "second swipe after pause must flip prev once");
+
+        // Single-media card never consumes events.
+        Assert.True(filter.OnWheel(true, 45, isTouchpad: true, canPage: false, t + 500) == CardWheelAction.PassThrough, "single-media card passes through");
+    }
+
+    public static void TouchpadVerticalAndDiagonalNeverTurnPage()
+    {
+        var filter = new CardSwipeFilter();
+        long t = 5000;
+        // Vertical scroll with slight horizontal drift: must ALWAYS pass through, never flip page.
+        (bool horiz, int delta)[] verticalWithDrift =
+        [
+            (false, -18), (true, 4), (false, -24), (true, 6), (false, -20), (true, 10), (false, -16), (true, 20),
+        ];
+        foreach (var (h, d) in verticalWithDrift)
+        {
+            t += 10;
+            var a = filter.OnWheel(h, d, isTouchpad: true, canPage: true, t);
+            Assert.True(a == CardWheelAction.PassThrough, $"vertical scroll with drift ({h},{d}) must pass through, got {a}");
+        }
+
+        // 45-degree diagonal swipe: horizontal does not dominate by 1.8x -> must NOT flip page.
+        t += 500;
+        (bool horiz, int delta)[] diagonal =
+        [
+            (true, 15), (false, -15), (true, 15), (false, -15), (true, 15), (false, -15),
+        ];
+        foreach (var (h, d) in diagonal)
+        {
+            t += 10;
+            var a = filter.OnWheel(h, d, isTouchpad: true, canPage: true, t);
+            Assert.True(a != CardWheelAction.TurnNext && a != CardWheelAction.TurnPrev, $"diagonal gesture must not flip page, got {a}");
+        }
+    }
+
+    public static void ViewerMouseAndTouchpadPaging()
+    {
+        var router = new ViewerWheelRouter();
+        long t = 1000;
+
+        // 1. Standard mouse vertical wheel: down (-120) = Next, up (+120) = Prev.
+        Assert.True(router.OnWheel(false, -120, isTouchpad: false, t).Kind == ViewerWheelKind.StepNext, "mouse down -> next");
+        t += 50;
+        Assert.True(router.OnWheel(false, 120, isTouchpad: false, t).Kind == ViewerWheelKind.StepPrev, "mouse up -> prev");
+
+        // 2. High-res mouse vertical wheel (4 x -30 = -120 -> exactly 1 StepNext).
+        var steps = 0;
+        for (var i = 0; i < 4; i++)
+        {
+            t += 15;
+            if (router.OnWheel(false, -30, isTouchpad: false, t).Kind == ViewerWheelKind.StepNext) steps++;
+        }
+        Assert.Equal(steps, 1, "high-res mouse 4x-30 should step once");
+
+        // 3. Mouse horizontal wheel: right (+120) = Next, left (-120) = Prev.
+        t += 300;
+        Assert.True(router.OnWheel(true, 120, isTouchpad: false, t).Kind == ViewerWheelKind.StepNext, "mouse hwheel right -> next");
+        t += 50;
+        Assert.True(router.OnWheel(true, -120, isTouchpad: false, t).Kind == ViewerWheelKind.StepPrev, "mouse hwheel left -> prev");
+
+        // 4. Touchpad vertical scroll while unzoomed: ignored (never blasts pages).
+        t += 400;
+        foreach (var d in new[] { -12, -20, -24, -18, -8 })
+        {
+            t += 12;
+            Assert.True(router.OnWheel(false, d, isTouchpad: true, t).Kind == ViewerWheelKind.Ignore, "touchpad vertical ignored in viewer");
+        }
+
+        // 5. Touchpad horizontal swipe: emits SwipeDelta, settles when momentum decays to <=3, and swallows rest of tail!
+        t += 400;
+        var deltas = 0;
+        var settles = 0;
+        foreach (var d in new[] { 12, 22, 28, 18, 10, 5, 2, 1, 1 })
+        {
+            t += 12;
+            var dec = router.OnWheel(true, d, isTouchpad: true, t);
+            if (dec.Kind == ViewerWheelKind.SwipeDelta) { deltas++; Assert.True(dec.SwipeDx < 0, "right swipe moves strip left"); }
+            else if (dec.Kind == ViewerWheelKind.SwipeSettle) settles++;
+        }
+        Assert.True(deltas >= 5, $"expected continuous swipe deltas, got {deltas}");
+        Assert.Equal(settles, 1, "expected exactly 1 settle when momentum decays");
+
+        // 6. Fresh reverse touchpad swipe immediately resumes SwipeDelta!
+        t += 12;
+        var rev = router.OnWheel(true, -18, isTouchpad: true, t);
+        Assert.True(rev.Kind == ViewerWheelKind.SwipeDelta && rev.SwipeDx > 0, "reverse swipe resumes strip immediately");
     }
 }

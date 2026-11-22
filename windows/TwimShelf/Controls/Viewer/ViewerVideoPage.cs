@@ -87,12 +87,14 @@ public sealed partial class ViewerVideoPage : Grid
         Item = item;
         _cropSquarePreview = cropSquarePreview && previewImage == null && !string.IsNullOrEmpty(squarePreviewPath);
 
-        Background = new SolidColorBrush(Colors.Transparent);
+        IsHitTestVisible = false;
         _hud = new Border
         {
             Child = _hudText,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xA6, 0, 0, 0)),
-            CornerRadius = new CornerRadius(12),
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB8, 0x1C, 0x1C, 0x1C)),
+            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
             Padding = new Thickness(14, 7, 14, 7),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,

@@ -1,11 +1,14 @@
-// Unified full-screen media viewer (matching Apple MacPhotoView/MacPlayerView, Web Viewer/Player,
-// and Flutter ViewerPage):
-//  * GPU-composited zoom open & close transitions (transform + rounded-rect clip morph + separate
-//    backdrop fade + hidden source tile/card sync with early unhide to eliminate 1-frame flash).
+// Unified full-screen media viewer (modeled after Apple WWDC24 10145 fluid zoom transitions,
+// MacPhotoView/MacPlayerView, Web Viewer/Player, and Flutter ViewerPage):
+//  * GPU-composited spring zoom transitions using WinUI 3 UIElement.Scale/Translation (layout-safe)
+//    + CompositionGeometricClip rounded-rect morph + separate backdrop fade + hidden source tile/card
+//    sync (early unhide at m <= 0.14 to eliminate 1-frame flash).
+//  * Interactive drag-to-dismiss (downward drag or touch side-edge swipe on photos & videos):
+//    hides neighbor pages so adjacent items NEVER move with P1, anchors P1 under the pointer while
+//    shrinking into a rounded floating card over the revealed Grid/Browse page, and launches a
+//    velocity-preserving 2D spring directly into the source tile/card on release (or springs back).
 //  * 3-page horizontal strip (current + preloaded neighbours, 40px gap) with vsync-driven ease-out
 //    sliding, edge bounce, 1:1 trackpad/touch swipe with velocity settle, and cross-post caption fade.
-//  * Interactive drag-to-dismiss (downward drag or touch side-edge swipe) that springs back or
-//    launches the zoom-close flight directly from where the pointer/finger released it.
 //  * Unified photo & video experience: cursor-anchored 1×–8× photo zoom, animated double-click
 //    1× <-> 2.5× zoom, seamless InlineVideo single-player handover, press-and-hold 2.5× video
 //    boost, scrubbable progress bar, persisted volume, fullscreen (F/F11), expandable post caption.
@@ -29,7 +32,6 @@ using TwimShelf.Models;
 using TwimShelf.Services;
 using Windows.Foundation;
 using Windows.Media.Playback;
-using Windows.UI.ViewManagement;
 using static TwimShelf.Services.Strings;
 using VirtualKey = Windows.System.VirtualKey;
 using VirtualKeyModifiers = Windows.System.VirtualKeyModifiers;
@@ -67,14 +69,23 @@ public sealed partial class Viewer : UserControl
     int _index;
     readonly int _startIndex;
 
-    // Visual tree (invariant depth so pages never remount across transitions)
+    // Two-node GPU composition hierarchy (invariant depth so pages never remount):
+    //   _backdrop  -> black scrim behind the flying media
+    //   _surface   -> UIElement.Scale & UIElement.Translation (never overwritten by XAML layout!)
+    //     _clipHost -> CompositionVisual.Clip (rounded-rect clip in strict local 0..W, 0..H coords)
+    //       _strip  -> 3-page Canvas (neighbors collapsed during transition & dismiss drag!)
+    //   _chromeLayer -> top counter, side arrows, bottom shade/caption/controls
     readonly Grid _rootGrid = new() { Background = new SolidColorBrush(Colors.Transparent) };
     readonly Border _backdrop = new() { Background = new SolidColorBrush(Colors.Black), Opacity = 0, IsHitTestVisible = false };
-    readonly Grid _surface = new() { Background = new SolidColorBrush(Colors.Transparent) };
+    readonly Grid _surface = new() { Background = new SolidColorBrush(Colors.Transparent), CenterPoint = Vector3.Zero };
+    readonly Grid _clipHost = new() { Background = new SolidColorBrush(Colors.Transparent) };
     readonly Canvas _strip = new()
     {
         Background = new SolidColorBrush(Colors.Transparent),
-        ManipulationMode = ManipulationModes.Scale | ManipulationModes.TranslateX | ManipulationModes.TranslateY,
+        // Scale only: keeps two-finger touch pinch in ManipulationDelta while letting ALL
+        // single-pointer drags (Mouse, Touch, Pen) flow directly through PointerPressed/Moved/Released
+        // without WinUI canceling mouse/touch pointer capture!
+        ManipulationMode = ManipulationModes.Scale,
     };
     readonly Grid _chromeLayer = new() { Opacity = 0 };
 
@@ -111,7 +122,7 @@ public sealed partial class Viewer : UserControl
     readonly StackPanel _photoActions = new()
     {
         Orientation = Orientation.Horizontal,
-        Spacing = 10,
+        Spacing = 4,
         HorizontalAlignment = HorizontalAlignment.Right,
         VerticalAlignment = VerticalAlignment.Center,
     };
@@ -130,55 +141,54 @@ public sealed partial class Viewer : UserControl
     }
     StripMotion? _stripMotion;
 
-    // GPU composition transition state
-    enum TransitionPhase { None, Opening, Closing }
-    TransitionPhase _transPhase;
-    double _transStart;
-    double _transDuration;
-    double _transRaw;
-    double _transFromRaw;
-    Rect? _transSource;
-    Rect _transMedia;
-    bool _reducedMotion;
+    // Fluid spring zoom flight state
+    ZoomFlight? _flight;
+    double _lastTickTime;
+    double _flightCreateTime;
+    bool _flightPrimed; // Waits up to 80ms for Frame-0 preview pixels before launching spring
     bool _sourceHidden;
     bool _unhiddenForClose;
     bool _closing;
     bool _enteredFullScreen;
 
-    Visual? _surfaceVisual;
+    Visual? _clipVisual;
     CompositionRoundedRectangleGeometry? _clipGeo;
     CompositionGeometricClip? _clip;
 
-    // Interactive dismiss drag state
+    // Interactive dismiss drag & velocity-preserving spring-back state
     DismissState _dismiss = DismissState.None;
-    bool _dismissing;
     bool _dismissFromEdge;
     int _dismissEdgeDir = 1;
+    Point _dismissGrabPt;
+    Rect _dismissMedia;
     double _dismissRawX, _dismissRawY;
     readonly List<(double T, double Dx, double Dy)> _dismissSamples = [];
-    bool _springingBack;
-    double _springStart, _springFromX, _springFromY;
 
-    // Trackpad horizontal wheel swipe state
+    sealed class SpringBackState
+    {
+        public Spring1D CenterX, CenterY, Scale, CornerRadius, Progress;
+    }
+    SpringBackState? _springBack;
+
+    // Wheel & trackpad horizontal swipe state
+    readonly ViewerWheelRouter _wheelRouter = new();
     bool _wheelSwiping;
     double _wheelPendingX;
     readonly List<(double T, double Dx)> _wheelSamples = [];
     DispatcherQueueTimer? _wheelEndTimer;
 
-    // Pointer interaction on _strip (mouse photo pan / dismiss / single-click chrome toggle / video hold)
-    uint? _activePointerId;
-    PointerDeviceType _activePointerType;
-    Point _pointerDownPt;
-    Point _pointerLastPt;
-    bool _pointerDraggingPan;
-    bool _pointerMoved;
+    // Single-pointer drag (Mouse, Touch, Pen) + two-finger pinch state on _strip
+    uint? _dragPointerId;
+    PointerDeviceType _dragPointerType;
+    Point _dragDownPt;
+    Point _dragLastPt;
+    bool _dragMoved;
     bool _pointerHeldVideo;
+    bool _pinchingPhoto;
     DispatcherQueueTimer? _singleClickTimer;
 
-    // Touch manipulation tracking
-    enum TouchGesture { None, Pinch, Pan, Swipe, Dismiss }
-    TouchGesture _touchGesture;
-    double _touchLastScale = 1.0;
+    enum GestureMode { None, Pan, Swipe, Dismiss }
+    GestureMode _dragGesture;
 
     // Chrome visibility & video auto-hide
     bool _chromeHidden;
@@ -231,7 +241,7 @@ public sealed partial class Viewer : UserControl
         _options = options;
         _lent = lent;
         _lentPath = lentPath;
-        _reducedMotion = !AnimationsEnabled();
+        RequestedTheme = ElementTheme.Dark;
 
         IsTabStop = true;
         UseSystemFocusVisuals = false;
@@ -241,13 +251,13 @@ public sealed partial class Viewer : UserControl
         _top.Children.Add(_drag);
         _top.Children.Add(_counter);
 
-        // Prev / Next circular buttons
-        _prev = RoundButton("\uE76B", L("viewer.previous"), 44, 16, () => Step(-1), "viewerPrev");
+        // Prev / Next Fluent 2 vertical rounded-rectangle navigation buttons (Windows 11 Photos style)
+        _prev = NavButton("\uE76B", L("viewer.previous"), () => Step(-1), "viewerPrev");
         _prev.HorizontalAlignment = HorizontalAlignment.Left;
         _prev.VerticalAlignment = VerticalAlignment.Center;
         _prev.Margin = new Thickness(16);
 
-        _next = RoundButton("\uE76C", L("viewer.next"), 44, 16, () => Step(1), "viewerNext");
+        _next = NavButton("\uE76C", L("viewer.next"), () => Step(1), "viewerNext");
         _next.HorizontalAlignment = HorizontalAlignment.Right;
         _next.VerticalAlignment = VerticalAlignment.Center;
         _next.Margin = new Thickness(16);
@@ -267,8 +277,10 @@ public sealed partial class Viewer : UserControl
             BorderThickness = new Thickness(0),
             MinWidth = 44,
             Height = 36,
-            Padding = new Thickness(6, 0, 6, 0),
+            Padding = new Thickness(8, 0, 8, 0),
+            CornerRadius = new CornerRadius(6),
         };
+        ApplySubtleResources(_speed);
         ToolTipService.SetToolTip(_speed, L("player.speed"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_speed, L("player.speed"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_speed, "videoSpeed");
@@ -304,11 +316,11 @@ public sealed partial class Viewer : UserControl
             _videoRow.Children.Add(row[i]);
         }
 
-        // Photo action buttons (bottom-right round translucent pills, matching macOS & Web)
-        _photoShare = RoundButton("\uE72D", L("viewer.share"), 36, 14, () => { }, "photoShare");
+        // Photo action buttons: unified Fluent 2 Subtle icon buttons (matching video controls)
+        _photoShare = IconButton("\uE72D", L("viewer.share"), () => { }, "photoShare");
         _photoShare.Flyout = ShareMenu.For(() => Current);
-        _photoFull = RoundButton("\uE740", "F", 36, 14, ToggleFullscreen, "photoFullscreen");
-        _photoClose = RoundButton("\uE711", L("viewer.close"), 36, 14, () => Close(), "photoClose");
+        _photoFull = IconButton("\uE740", "F", ToggleFullscreen, "photoFullscreen");
+        _photoClose = IconButton("\uE711", L("viewer.close"), () => Close(), "photoClose");
         _photoActions.Children.Add(_photoShare);
         _photoActions.Children.Add(_photoFull);
         _photoActions.Children.Add(_photoClose);
@@ -336,7 +348,8 @@ public sealed partial class Viewer : UserControl
         _chromeLayer.Children.Add(_next);
         _chromeLayer.Children.Add(_bottom);
 
-        _surface.Children.Add(_strip);
+        _clipHost.Children.Add(_strip);
+        _surface.Children.Add(_clipHost);
         _surface.Opacity = 0; // Revealed on Frame 0 once composition transform/clip is applied.
 
         _rootGrid.Children.Add(_backdrop);
@@ -350,9 +363,9 @@ public sealed partial class Viewer : UserControl
         _strip.PointerReleased += OnStripPointerReleased;
         _strip.PointerCanceled += OnStripPointerCanceled;
         _strip.DoubleTapped += OnStripDoubleTapped;
-        _strip.ManipulationStarted += OnTouchManipulationStarted;
-        _strip.ManipulationDelta += OnTouchManipulationDelta;
-        _strip.ManipulationCompleted += OnTouchManipulationCompleted;
+        _strip.ManipulationStarted += OnStripManipulationStarted;
+        _strip.ManipulationDelta += OnStripManipulationDelta;
+        _strip.ManipulationCompleted += OnStripManipulationCompleted;
 
         PointerWheelChanged += OnWheel;
         PointerMoved += (_, _) => { if (Current.IsVideo) WakeVideoChrome(); };
@@ -377,14 +390,9 @@ public sealed partial class Viewer : UserControl
     FeedItem Current => _items[_index];
     ViewerPhotoPage? ActivePhoto => _pages.TryGetValue(_index, out var el) ? el as ViewerPhotoPage : null;
     ViewerVideoPage? ActiveVideo => _pages.TryGetValue(_index, out var el) ? el as ViewerVideoPage : null;
+    bool IsolatingCurrentPage => _flight != null || _dismiss.IsActive || _springBack != null;
 
     static double Now() => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
-
-    static bool AnimationsEnabled()
-    {
-        try { return new UISettings().AnimationsEnabled; }
-        catch { return true; }
-    }
 
     // ---- Lifecycle & GPU Composition Setup ----
 
@@ -402,6 +410,7 @@ public sealed partial class Viewer : UserControl
 
         if (!_renderingHooked)
         {
+            _lastTickTime = Now();
             CompositionTarget.Rendering += OnRendering;
             _renderingHooked = true;
         }
@@ -422,12 +431,12 @@ public sealed partial class Viewer : UserControl
 
     void InitComposition()
     {
-        if (_surfaceVisual != null) return;
-        _surfaceVisual = ElementCompositionPreview.GetElementVisual(_surface);
-        _surfaceVisual.CenterPoint = Vector3.Zero;
-        var comp = _surfaceVisual.Compositor;
+        if (_clipVisual != null) return;
+        _clipVisual = ElementCompositionPreview.GetElementVisual(_clipHost);
+        var comp = _clipVisual.Compositor;
         _clipGeo = comp.CreateRoundedRectangleGeometry();
         _clip = comp.CreateGeometricClip(_clipGeo);
+        _clipVisual.Clip = _clip;
     }
 
     void OnViewerSizeChanged(object sender, SizeChangedEventArgs e)
@@ -437,11 +446,11 @@ public sealed partial class Viewer : UserControl
         _viewH = e.NewSize.Height;
         _caption.SetMaxExpandedHeight(_viewH * 0.45);
         LayoutStrip();
-        if (_transPhase == TransitionPhase.None)
+        if (_flight == null)
             ApplyTransitionVisual(CurrentRestFrame());
     }
 
-    // ---- Open / Close GPU Zoom Transitions ----
+    // ---- Open / Close Fluid Spring Zoom Transitions ----
 
     Rect ViewportRect => new(0, 0, Math.Max(1, _viewW), Math.Max(1, _viewH));
 
@@ -457,26 +466,39 @@ public sealed partial class Viewer : UserControl
     }
 
     TransitionFrame CurrentRestFrame() =>
-        ViewerMath.EvaluateTransition(ViewportRect, CurrentMediaFrame(), null, _options.CropSource, _options.SourceCornerRadius, 1.0, false, _dismiss);
+        ViewerMath.EvaluateRestOrDismiss(ViewportRect, _dismiss.IsActive || _springBack != null ? _dismissMedia : CurrentMediaFrame(), _dismiss);
+
+    void SyncNeighborVisibility()
+    {
+        var isolate = IsolatingCurrentPage;
+        foreach (var (i, el) in _pages)
+        {
+            var want = (!isolate || i == _index) ? Visibility.Visible : Visibility.Collapsed;
+            if (el.Visibility != want) el.Visibility = want;
+        }
+    }
 
     void BeginOpenTransition()
     {
-        _transSource = _reducedMotion ? null : _options.SourceRect?.Invoke(Current);
-        _transMedia = CurrentMediaFrame();
-        _transPhase = TransitionPhase.Opening;
-        _transFromRaw = 0.0;
-        _transRaw = 0.0;
-        _transDuration = _transSource != null ? ViewerMath.OpenDuration : ViewerMath.FadeFallbackDuration;
-        _transStart = Now();
+        var source = _options.SourceRect?.Invoke(Current);
+        var media = CurrentMediaFrame();
+        _flight = ZoomFlight.StartOpen(ViewportRect, media, source, _options.CropSource, _options.SourceCornerRadius);
+        _flightCreateTime = Now();
+        _flightPrimed = false;
         _sourceHidden = false;
         _unhiddenForClose = false;
 
-        // Paint Frame 0 at exact source rect BEFORE making _surface visible -> zero full-screen flash.
-        var f0 = ViewerMath.EvaluateTransition(ViewportRect, _transMedia, _transSource, _options.CropSource, _options.SourceCornerRadius, 0.0, false, DismissState.None);
+        SyncNeighborVisibility();
+        var f0 = _flight.CurrentFrame();
         ApplyTransitionVisual(f0);
+        // If Frame-0 preview image is still decoding asynchronously (e.g. Grid thumbnail), keep
+        // _surface transparent until ready so the real Grid tile stays visible with zero blank flash.
+        if (ActivePhoto is { IsPreviewReady: false }) _surface.Opacity = 0;
     }
 
-    public void Close(bool immediate = false)
+    public void Close(bool immediate = false) => CloseWithVelocity(immediate, fromDismiss: null, velX: 0, velY: 0);
+
+    void CloseWithVelocity(bool immediate, DismissState? fromDismiss, double velX, double velY)
     {
         if (_host == null) return;
         if (immediate)
@@ -487,34 +509,39 @@ public sealed partial class Viewer : UserControl
         }
         if (_closing) return;
         _closing = true;
-        _springingBack = false;
+        _springBack = null;
         _singleClickTimer?.Stop();
         _wheelEndTimer?.Stop();
         _hideTimer?.Stop();
         FinishStripMotion();
 
-        // Interrupting open mid-flight starts close smoothly from the current progress `raw`.
-        var startRaw = _transPhase == TransitionPhase.Opening ? _transRaw : 1.0;
-
-        // Keep video playing live (muted, 1×) inside the shrinking zoom rect during close!
+        // Keep video playing live (muted, 1×) inside the shrinking zoom card during close!
         ActiveVideo?.PrepareClose();
 
-        // Allow Browse to sync a visible multi-media card's page before querying SourceRect.
+        // Sync a visible multi-media Browse card's page before measuring SourceRect.
         try { _options.SyncBeforeClose?.Invoke(Current); } catch { }
 
-        _transSource = _reducedMotion ? null : _options.SourceRect?.Invoke(Current);
-        _transMedia = CurrentMediaFrame();
-        _transPhase = TransitionPhase.Closing;
-        _transFromRaw = Math.Clamp(startRaw, 0.01, 1.0);
-        _transRaw = _transFromRaw;
-        var baseDur = _transSource != null ? ViewerMath.CloseDuration : ViewerMath.FadeFallbackDuration;
-        _transDuration = Math.Max(0.08, baseDur * _transFromRaw);
-        _transStart = Now();
-        _unhiddenForClose = false;
+        var targetSource = _options.SourceRect?.Invoke(Current);
 
-        // Make sure chrome immediately stops taking hits while closing.
+        if (_flight is { Closing: false } activeOpen)
+        {
+            // Seamless C1 mid-flight reversal: keeps current position & velocity!
+            activeOpen.ReverseToClose(targetSource);
+        }
+        else
+        {
+            var media = fromDismiss is { IsActive: true } ? _dismissMedia : CurrentMediaFrame();
+            _flight = ZoomFlight.StartClose(
+                ViewportRect, media, targetSource, _options.CropSource, _options.SourceCornerRadius,
+                fromDismiss: fromDismiss, velX: velX, velY: velY);
+            _flightPrimed = true; // Close starts moving immediately on the next tick.
+            _lastTickTime = Now();
+        }
+        _unhiddenForClose = false;
         _chromeLayer.IsHitTestVisible = false;
         _strip.IsHitTestVisible = false;
+        SyncNeighborVisibility();
+        ApplyTransitionVisual(_flight.CurrentFrame());
     }
 
     void ApplyTransitionVisual(TransitionFrame f)
@@ -525,35 +552,26 @@ public sealed partial class Viewer : UserControl
         var chromeVisible = !_chromeHidden && !(Current.IsVideo && _videoIdle);
         _chromeLayer.Opacity = chromeVisible ? Math.Clamp(f.ChromeOpacity, 0, 1) : 0;
 
-        if (_surfaceVisual == null) return;
+        // UIElement.Scale & UIElement.Translation are native WinUI 3 GPU Composition properties
+        // that are NEVER overwritten by XAML layout passes!
+        _surface.CenterPoint = Vector3.Zero;
+        _surface.Scale = new Vector3((float)f.Scale, (float)f.Scale, 1f);
+        _surface.Translation = new Vector3((float)f.OffsetX, (float)f.OffsetY, 0f);
 
-        var atIdentity = Math.Abs(f.Scale - 1.0) < 1e-4 &&
-                         Math.Abs(f.OffsetX) < 0.05 &&
-                         Math.Abs(f.OffsetY) < 0.05 &&
-                         _transPhase == TransitionPhase.None &&
-                         !_dismiss.IsActive;
-        if (atIdentity)
+        if (_clipGeo != null && _clip != null && _clipVisual != null)
         {
-            _surfaceVisual.Scale = Vector3.One;
-            _surfaceVisual.Offset = Vector3.Zero;
-            _surfaceVisual.Clip = null;
-            return;
-        }
-
-        _surfaceVisual.Scale = new Vector3((float)f.Scale, (float)f.Scale, 1f);
-        _surfaceVisual.Offset = new Vector3((float)f.OffsetX, (float)f.OffsetY, 0f);
-
-        if (_transPhase != TransitionPhase.None && _transSource != null && _clipGeo != null && _clip != null)
-        {
-            _clipGeo.Offset = new Vector2((float)f.ClipX, (float)f.ClipY);
-            _clipGeo.Size = new Vector2((float)Math.Max(0, f.ClipW), (float)Math.Max(0, f.ClipH));
-            var r = (float)Math.Max(0, f.ClipCornerRadius);
-            _clipGeo.CornerRadius = new Vector2(r, r);
-            if (_surfaceVisual.Clip != _clip) _surfaceVisual.Clip = _clip;
-        }
-        else
-        {
-            _surfaceVisual.Clip = null;
+            if (f.UseClip)
+            {
+                _clipGeo.Offset = new Vector2((float)f.ClipX, (float)f.ClipY);
+                _clipGeo.Size = new Vector2((float)Math.Max(0, f.ClipW), (float)Math.Max(0, f.ClipH));
+                var r = (float)Math.Max(0, f.ClipCornerRadius);
+                _clipGeo.CornerRadius = new Vector2(r, r);
+                if (_clipVisual.Clip != _clip) _clipVisual.Clip = _clip;
+            }
+            else
+            {
+                _clipVisual.Clip = null;
+            }
         }
     }
 
@@ -580,15 +598,13 @@ public sealed partial class Viewer : UserControl
             _enteredFullScreen = false;
         }
 
-        // Unhide underlying source tile/card if not already unhidden during the close tail.
         if (_sourceHidden)
         {
             _sourceHidden = false;
             _options.ActiveMediaChanged?.Invoke(null);
         }
 
-        // Remove from visual tree BEFORE returning the MediaPlayer to its Browse card (so card layout
-        // triggered by our removal sees Viewer.IsOpen == false and adopts the live player cleanly).
+        // Remove from visual tree BEFORE returning the MediaPlayer to its Browse card.
         var host = _host;
         _host = null;
         _open = null;
@@ -602,7 +618,6 @@ public sealed partial class Viewer : UserControl
         _pages.Clear();
         _strip.Children.Clear();
 
-        // Dispose unconsumed lent player if it was never attached (edge case).
         if (_lent != null && !string.IsNullOrEmpty(_lentPath))
         {
             var l = _lent;
@@ -625,62 +640,98 @@ public sealed partial class Viewer : UserControl
     {
         if (_host == null) return;
         var now = Now();
+        var dt = Math.Clamp(now - _lastTickTime, 0.0, 1.0 / 30.0);
+        _lastTickTime = now;
 
-        // 1. Open / Close GPU transition
-        if (_transPhase == TransitionPhase.Opening)
+        // 1. Fluid Spring Zoom Open / Close Flight
+        if (_flight is { } fl)
         {
-            var elapsed = (now - _transStart) / Math.Max(0.01, _transDuration);
-            _transRaw = Math.Clamp(elapsed, 0.0, 1.0);
-            if (!_sourceHidden && _transRaw > 0.0)
+            if (!_flightPrimed)
             {
-                _sourceHidden = true;
-                _options.ActiveMediaChanged?.Invoke(Current.MediaId);
-            }
-            var frame = ViewerMath.EvaluateTransition(ViewportRect, _transMedia, _transSource, _options.CropSource, _options.SourceCornerRadius, _transRaw, false, DismissState.None);
-            ApplyTransitionVisual(frame);
-            if (_transRaw >= 1.0)
-            {
-                _transPhase = TransitionPhase.None;
-                _transSource = null;
-                ApplyTransitionVisual(CurrentRestFrame());
-            }
-        }
-        else if (_transPhase == TransitionPhase.Closing)
-        {
-            var elapsed = (now - _transStart) / Math.Max(0.01, _transDuration);
-            _transRaw = Math.Clamp(_transFromRaw * (1.0 - elapsed), 0.0, 1.0);
-            // Unhide underlying source tile/card slightly BEFORE the flying layer dissolves so
-            // there is zero 1-frame blank flash on landing (matching Flutter ViewerPage).
-            if (!_unhiddenForClose && _transRaw <= ViewerMath.UnhideThreshold)
-            {
-                _unhiddenForClose = true;
-                if (_sourceHidden)
+                var ready = fl.Closing || ActivePhoto is not { IsPreviewReady: false } || (now - _flightCreateTime) >= 0.08;
+                if (!ready)
                 {
-                    _sourceHidden = false;
-                    _options.ActiveMediaChanged?.Invoke(null);
+                    // Keep exact Frame-0 alignment while preview decodes (source tile still visible underneath).
+                    var waitFrame = fl.CurrentFrame();
+                    ApplyTransitionVisual(waitFrame);
+                    _surface.Opacity = 0;
+                }
+                else
+                {
+                    _flightPrimed = true;
+                    // Refresh MediaFrame now that preview/natural size may have resolved.
+                    if (!fl.Closing)
+                    {
+                        var freshMedia = CurrentMediaFrame();
+                        if (Math.Abs(freshMedia.Width - fl.Media.Width) > 1 || Math.Abs(freshMedia.Height - fl.Media.Height) > 1)
+                            _flight = fl = ZoomFlight.StartOpen(ViewportRect, freshMedia, fl.Source, fl.CropSource, fl.SourceCornerRadius);
+                    }
+                    if (!_sourceHidden && !fl.Closing)
+                    {
+                        _sourceHidden = true;
+                        _options.ActiveMediaChanged?.Invoke(Current.MediaId);
+                    }
+                    ApplyTransitionVisual(fl.CurrentFrame());
                 }
             }
-            var frame = ViewerMath.EvaluateTransition(ViewportRect, _transMedia, _transSource, _options.CropSource, _options.SourceCornerRadius, _transRaw, true, _dismiss);
-            ApplyTransitionVisual(frame);
-            if (_transRaw <= 0.0)
+            else
             {
-                _transPhase = TransitionPhase.None;
-                FinishClose();
-                return;
+                var settled = fl.Step(dt);
+                if (fl.Closing && !_unhiddenForClose && fl.NormalizedMorph <= ViewerMath.UnhideThreshold)
+                {
+                    _unhiddenForClose = true;
+                    if (_sourceHidden)
+                    {
+                        _sourceHidden = false;
+                        _options.ActiveMediaChanged?.Invoke(null);
+                    }
+                }
+                ApplyTransitionVisual(fl.CurrentFrame());
+                if (settled)
+                {
+                    var wasClosing = fl.Closing;
+                    _flight = null;
+                    if (wasClosing)
+                    {
+                        FinishClose();
+                        return;
+                    }
+                    _dismiss = DismissState.None;
+                    SyncNeighborVisibility();
+                    ApplyTransitionVisual(CurrentRestFrame());
+                }
             }
         }
 
-        // 2. Interactive dismiss spring-back
-        if (_springingBack && _transPhase == TransitionPhase.None)
+        // 2. Interactive Dismiss Velocity-Preserving Spring-Back
+        if (_springBack is { } sb && _flight == null)
         {
-            var t = Math.Clamp((now - _springStart) / ViewerMath.SpringBackDuration, 0.0, 1.0);
-            var ease = ViewerMath.EaseOutCubic(t);
-            _dismissRawX = ViewerMath.Lerp(_springFromX, 0.0, ease);
-            _dismissRawY = ViewerMath.Lerp(_springFromY, 0.0, ease);
-            _dismiss = t >= 1.0
-                ? DismissState.None
-                : ViewerMath.EvaluateDismiss(_dismissRawX, _dismissRawY, _viewW, _viewH, _dismissFromEdge, _dismissEdgeDir);
-            if (t >= 1.0) _springingBack = false;
+            const double omega = 18.0, damp = 0.92;
+            sb.CenterX.Step(dt, omega, damp);
+            sb.CenterY.Step(dt, omega, damp);
+            sb.Scale.Step(dt, omega, damp);
+            sb.CornerRadius.Step(dt, omega, damp);
+            sb.Progress.Step(dt, omega, damp);
+
+            var done = sb.CenterX.IsSettled(0.5, 4.0)
+                    && sb.CenterY.IsSettled(0.5, 4.0)
+                    && sb.Scale.IsSettled(0.002, 0.02)
+                    && sb.Progress.IsSettled(0.004, 0.03);
+            if (done)
+            {
+                _springBack = null;
+                _dismiss = DismissState.None;
+                SyncNeighborVisibility();
+            }
+            else
+            {
+                _dismiss = new DismissState(
+                    sb.CenterX.Value,
+                    sb.CenterY.Value,
+                    Math.Clamp(sb.Scale.Value, 0.3, 1.05),
+                    Math.Max(0, sb.CornerRadius.Value),
+                    Math.Clamp(sb.Progress.Value, 0.0, 1.0));
+            }
             ApplyTransitionVisual(CurrentRestFrame());
         }
 
@@ -743,6 +794,7 @@ public sealed partial class Viewer : UserControl
             _strip.Children.Add(page);
         }
         LayoutStrip();
+        SyncNeighborVisibility();
     }
 
     void ActivateCurrentPage()
@@ -793,7 +845,6 @@ public sealed partial class Viewer : UserControl
             LayoutStrip();
             return;
         }
-        // Deactivate outgoing page
         ActivePhoto?.ResetZoom();
         ActiveVideo?.Deactivate(closing: false);
 
@@ -831,12 +882,11 @@ public sealed partial class Viewer : UserControl
     void Step(int delta)
     {
         if (_closing || _items.Count == 0) return;
-        if (_transPhase == TransitionPhase.Opening)
+        if (_flight is { Closing: false })
         {
-            // Let rapid keyboard navigation finish the open transition cleanly.
-            _transPhase = TransitionPhase.None;
-            _transSource = null;
+            _flight = null;
             if (!_sourceHidden) { _sourceHidden = true; _options.ActiveMediaChanged?.Invoke(Current.MediaId); }
+            SyncNeighborVisibility();
             ApplyTransitionVisual(CurrentRestFrame());
         }
         FinishStripMotion();
@@ -848,10 +898,8 @@ public sealed partial class Viewer : UserControl
         AnimateStrip(-delta * Stride, 0.28, () => CommitStrip(delta));
     }
 
-    void BounceStrip(int delta)
-    {
+    void BounceStrip(int delta) =>
         AnimateStrip(-delta * 30.0, 0.12, () => AnimateStrip(0, 0.22, null));
-    }
 
     void SettleStripSwipe(double velocityPxPerSec)
     {
@@ -875,7 +923,7 @@ public sealed partial class Viewer : UserControl
 
         if (item.IsVideo) SyncVideoControls();
         UpdateFullscreenGlyph();
-        if (_transPhase == TransitionPhase.None)
+        if (_flight == null)
             ApplyTransitionVisual(CurrentRestFrame());
     }
 
@@ -912,7 +960,7 @@ public sealed partial class Viewer : UserControl
         if (_videoIdle)
         {
             _videoIdle = false;
-            if (_transPhase == TransitionPhase.None) ApplyTransitionVisual(CurrentRestFrame());
+            if (_flight == null) ApplyTransitionVisual(CurrentRestFrame());
         }
         _hideTimer ??= MakeHideTimer();
         _hideTimer.Stop();
@@ -929,7 +977,7 @@ public sealed partial class Viewer : UserControl
             if (_closing || !Current.IsVideo || _pointerOverControls || _caption.IsExpanded) return;
             if (ActiveVideo?.IsPlaying != true) return;
             _videoIdle = true;
-            if (_transPhase == TransitionPhase.None) ApplyTransitionVisual(CurrentRestFrame());
+            if (_flight == null) ApplyTransitionVisual(CurrentRestFrame());
         };
         return t;
     }
@@ -959,7 +1007,7 @@ public sealed partial class Viewer : UserControl
 
     void OnWheel(object sender, PointerRoutedEventArgs e)
     {
-        if (_closing || _transPhase != TransitionPhase.None) return;
+        if (_closing || _flight != null || _dismiss.IsActive) return;
         var cp = e.GetCurrentPoint(this);
         var props = cp.Properties;
         var delta = props.MouseWheelDelta;
@@ -986,47 +1034,54 @@ public sealed partial class Viewer : UserControl
             return;
         }
 
-        // 3. Horizontal wheel / touchpad sideways swipe drives the 3-page strip.
-        if (props.IsHorizontalMouseWheel)
+        // 3. Unzoomed photo or video: mouse scroll wheel steps prev/next; touchpad horizontal swipe
+        //    drives the 3-page strip continuously (touchpad vertical scroll does not skip pages).
+        if (_caption.IsExpanded || ctrl) return;
+
+        e.Handled = true;
+        if (_items.Count <= 1) return;
+
+        var nowMs = Environment.TickCount64;
+        var shift = e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift);
+        var isTouchpad = TouchpadInputState.IsTouchpadWheel(delta, shift, nowMs);
+        var decision = _wheelRouter.OnWheel(props.IsHorizontalMouseWheel, delta, isTouchpad, nowMs);
+
+        switch (decision.Kind)
         {
-            e.Handled = true;
-            if (_items.Count <= 1) return;
-
-            // Discrete mouse tilt wheel notches (±120) step smoothly one page.
-            if (!_wheelSwiping && Math.Abs(delta) >= 120 && delta % 120 == 0)
+            case ViewerWheelKind.StepNext:
+                if (_wheelSwiping) FinishWheelSwipe();
+                Step(1);
+                break;
+            case ViewerWheelKind.StepPrev:
+                if (_wheelSwiping) FinishWheelSwipe();
+                Step(-1);
+                break;
+            case ViewerWheelKind.SwipeSettle:
+                if (_wheelSwiping) FinishWheelSwipe();
+                break;
+            case ViewerWheelKind.SwipeDelta:
             {
-                Step(delta > 0 ? 1 : -1);
-                return;
+                var now = Now();
+                var dx = decision.SwipeDx;
+                if (!_wheelSwiping)
+                {
+                    _wheelPendingX += dx;
+                    if (Math.Abs(_wheelPendingX) < 4) return;
+                    _stripMotion = null;
+                    _wheelSwiping = true;
+                    _wheelSamples.Clear();
+                    ApplyWheelSwipeDelta(_wheelPendingX, now);
+                    _wheelPendingX = 0;
+                }
+                else
+                {
+                    ApplyWheelSwipeDelta(dx, now);
+                }
+                _wheelEndTimer ??= MakeWheelEndTimer();
+                _wheelEndTimer.Stop();
+                _wheelEndTimer.Start();
+                break;
             }
-
-            // Continuous touchpad horizontal swipe: 1:1 finger-following strip movement.
-            var now = Now();
-            var dx = -delta * 0.85;
-            if (!_wheelSwiping)
-            {
-                _wheelPendingX += dx;
-                if (Math.Abs(_wheelPendingX) < 4) return;
-                _stripMotion = null;
-                _wheelSwiping = true;
-                _wheelSamples.Clear();
-                ApplyWheelSwipeDelta(_wheelPendingX, now);
-                _wheelPendingX = 0;
-            }
-            else
-            {
-                ApplyWheelSwipeDelta(dx, now);
-            }
-            _wheelEndTimer ??= MakeWheelEndTimer();
-            _wheelEndTimer.Stop();
-            _wheelEndTimer.Start();
-            return;
-        }
-
-        // 4. Plain vertical mouse wheel over an unzoomed photo steps prev/next (when caption not expanded).
-        if (photo != null && !_caption.IsExpanded && !ctrl)
-        {
-            e.Handled = true;
-            Step(delta < 0 ? 1 : -1);
         }
     }
 
@@ -1039,6 +1094,22 @@ public sealed partial class Viewer : UserControl
         LayoutStrip();
     }
 
+    void FinishWheelSwipe()
+    {
+        _wheelEndTimer?.Stop();
+        if (!_wheelSwiping) return;
+        _wheelSwiping = false;
+        _wheelPendingX = 0;
+        var v = 0.0;
+        if (_wheelSamples.Count > 1)
+        {
+            var span = Math.Max(1.0 / 60.0, _wheelSamples[^1].T - _wheelSamples[0].T);
+            v = _wheelSamples.Sum(s => s.Dx) / span;
+        }
+        _wheelSamples.Clear();
+        SettleStripSwipe(Math.Abs(v) < 50 ? 0 : v);
+    }
+
     DispatcherQueueTimer MakeWheelEndTimer()
     {
         var t = DispatcherQueue.CreateTimer();
@@ -1046,9 +1117,147 @@ public sealed partial class Viewer : UserControl
         t.IsRepeating = false;
         t.Tick += (_, _) =>
         {
-            if (!_wheelSwiping) return;
-            _wheelSwiping = false;
-            _wheelPendingX = 0;
+            _wheelRouter.NotifyTimerSettled();
+            FinishWheelSwipe();
+        };
+        return t;
+    }
+
+    // ---- Unified Single-Pointer Drag (Mouse + Touch + Pen) + Two-Finger Pinch ----
+
+    void OnStripPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_closing || _flight != null) return;
+        var cp = e.GetCurrentPoint(this);
+        var props = cp.Properties;
+
+        if (props.IsXButton1Pressed) { e.Handled = true; Step(-1); return; }
+        if (props.IsXButton2Pressed) { e.Handled = true; Step(1); return; }
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Mouse && !props.IsLeftButtonPressed) return;
+
+        // Second finger down while already tracking a touch pointer -> yield cleanly to two-finger pinch.
+        if (_dragPointerId != null && _dragPointerId != e.Pointer.PointerId)
+        {
+            AbortActivePointerDrag();
+            return;
+        }
+
+        _dragPointerId = e.Pointer.PointerId;
+        _dragPointerType = e.Pointer.PointerDeviceType;
+        _dragDownPt = cp.Position;
+        _dragLastPt = cp.Position;
+        _dragMoved = false;
+        _dragGesture = GestureMode.None;
+        _pointerHeldVideo = false;
+        _pinchingPhoto = false;
+        _springBack = null;
+        _singleClickTimer?.Stop();
+
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Touch)
+            _strip.CapturePointer(e.Pointer);
+
+        if (ActiveVideo is { } vp && e.Pointer.PointerDeviceType != PointerDeviceType.Touch)
+        {
+            _pointerHeldVideo = true;
+            vp.BeginPointerHold();
+            return;
+        }
+        if (ActivePhoto is { IsZoomed: true })
+            _dragGesture = GestureMode.Pan;
+    }
+
+    void OnStripPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragPointerId != e.Pointer.PointerId || _pinchingPhoto || _closing || _flight != null) return;
+        var pt = e.GetCurrentPoint(this).Position;
+        var dx = pt.X - _dragLastPt.X;
+        var dy = pt.Y - _dragLastPt.Y;
+        var totalDx = pt.X - _dragDownPt.X;
+        var totalDy = pt.Y - _dragDownPt.Y;
+        _dragLastPt = pt;
+        var now = Now();
+
+        if (!_dragMoved && Math.Sqrt(totalDx * totalDx + totalDy * totalDy) > 6)
+        {
+            _dragMoved = true;
+            if (_pointerHeldVideo) { _pointerHeldVideo = false; ActiveVideo?.CancelHold(); }
+        }
+
+        if (_dragGesture == GestureMode.Pan && ActivePhoto is { } photo)
+        {
+            photo.PanBy(dx, dy);
+            return;
+        }
+
+        if (_dragGesture == GestureMode.None)
+        {
+            // Side-edge inward swipe dismiss (touch)
+            if (_dragPointerType == PointerDeviceType.Touch && !_caption.IsExpanded)
+            {
+                var edgeW = ViewerMath.EdgeZoneWidth(_viewW);
+                var nearLeft = _dragDownPt.X <= edgeW;
+                var nearRight = _dragDownPt.X >= _viewW - edgeW;
+                if (nearLeft || nearRight)
+                {
+                    var dir = nearLeft ? 1 : -1;
+                    if (totalDx * dir > 6 && Math.Abs(totalDx) > Math.Abs(totalDy) * 0.9)
+                    {
+                        _dragGesture = GestureMode.Dismiss;
+                        BeginDismissDrag(fromEdge: true, edgeDir: dir, _dragDownPt, totalDx, totalDy, now);
+                        return;
+                    }
+                }
+            }
+
+            // Downward drag-to-dismiss on unzoomed photo or video (Mouse, Touch, Pen)
+            if ((ActivePhoto is { IsZoomed: false } || ActiveVideo != null) && !_caption.IsExpanded &&
+                totalDy > 8 && totalDy > Math.Abs(totalDx) * 1.15)
+            {
+                _dragGesture = GestureMode.Dismiss;
+                BeginDismissDrag(fromEdge: false, edgeDir: 1, _dragDownPt, totalDx, totalDy, now);
+                return;
+            }
+
+            // Horizontal 1:1 strip drag on unzoomed photo or video (Mouse, Touch, Pen)
+            if (_items.Count > 1 && !_caption.IsExpanded &&
+                Math.Abs(totalDx) > 8 && Math.Abs(totalDx) > Math.Abs(totalDy) * 1.2)
+            {
+                _stripMotion = null;
+                _dragGesture = GestureMode.Swipe;
+                _wheelSamples.Clear();
+                ApplyWheelSwipeDelta(totalDx, now);
+                return;
+            }
+            return;
+        }
+
+        if (_dragGesture == GestureMode.Dismiss)
+        {
+            _dismissRawX += dx;
+            _dismissRawY += dy;
+            UpdateDismissDrag(now, dx, dy);
+        }
+        else if (_dragGesture == GestureMode.Swipe)
+        {
+            ApplyWheelSwipeDelta(dx, now);
+        }
+    }
+
+    void OnStripPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_dragPointerId != e.Pointer.PointerId) return;
+        _dragPointerId = null;
+        try { _strip.ReleasePointerCapture(e.Pointer); } catch { }
+        var mode = _dragGesture;
+        _dragGesture = GestureMode.None;
+
+        if (mode == GestureMode.Dismiss)
+        {
+            FinishDismissDrag();
+            return;
+        }
+        if (mode == GestureMode.Swipe)
+        {
             var v = 0.0;
             if (_wheelSamples.Count > 1)
             {
@@ -1056,138 +1265,43 @@ public sealed partial class Viewer : UserControl
                 v = _wheelSamples.Sum(s => s.Dx) / span;
             }
             _wheelSamples.Clear();
-            SettleStripSwipe(Math.Abs(v) < 50 ? 0 : v);
-        };
-        return t;
-    }
-
-    // ---- Pointer Interaction (Mouse Pan, Drag-to-Dismiss, Single/Double Click, Video Hold) ----
-
-    void OnStripPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (_closing || _transPhase != TransitionPhase.None) return;
-        var cp = e.GetCurrentPoint(this);
-        var props = cp.Properties;
-
-        // Mouse Back / Forward side buttons turn pages (matching Flutter ViewerPage).
-        if (props.IsXButton1Pressed) { e.Handled = true; Step(-1); return; }
-        if (props.IsXButton2Pressed) { e.Handled = true; Step(1); return; }
-
-        if (!props.IsLeftButtonPressed) return;
-        if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch) return; // Handled by Manipulation events.
-
-        _activePointerId = e.Pointer.PointerId;
-        _activePointerType = e.Pointer.PointerDeviceType;
-        _pointerDownPt = cp.Position;
-        _pointerLastPt = cp.Position;
-        _pointerMoved = false;
-        _pointerDraggingPan = false;
-        _dismissing = false;
-        _pointerHeldVideo = false;
-
-        if (ActiveVideo is { } vp)
-        {
-            _pointerHeldVideo = true;
-            vp.BeginPointerHold();
-            _strip.CapturePointer(e.Pointer);
+            SettleStripSwipe(v);
             return;
         }
-
-        if (ActivePhoto is { } photo)
-        {
-            _strip.CapturePointer(e.Pointer);
-            if (photo.IsZoomed) _pointerDraggingPan = true;
-        }
-    }
-
-    void OnStripPointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (_activePointerId != e.Pointer.PointerId || _closing) return;
-        var pt = e.GetCurrentPoint(this).Position;
-        var dx = pt.X - _pointerLastPt.X;
-        var dy = pt.Y - _pointerLastPt.Y;
-        var totalDx = pt.X - _pointerDownPt.X;
-        var totalDy = pt.Y - _pointerDownPt.Y;
-        _pointerLastPt = pt;
-
-        if (!_pointerMoved && Math.Sqrt(totalDx * totalDx + totalDy * totalDy) > 6)
-        {
-            _pointerMoved = true;
-            if (_pointerHeldVideo) ActiveVideo?.CancelHold();
-        }
-
-        if (_pointerDraggingPan && ActivePhoto is { } photo)
-        {
-            photo.PanBy(dx, dy);
-            return;
-        }
-
-        // Unzoomed photo downward drag -> interactive drag-to-dismiss!
-        if (ActivePhoto is { IsZoomed: false } && !_caption.IsExpanded)
-        {
-            if (!_dismissing && totalDy > 8 && totalDy > Math.Abs(totalDx) * 1.15)
-            {
-                _springingBack = false;
-                _dismissing = true;
-                _dismissFromEdge = false;
-                _dismissRawX = totalDx;
-                _dismissRawY = totalDy;
-                _dismissSamples.Clear();
-                UpdateDismissDrag(Now(), totalDx, totalDy);
-            }
-            else if (_dismissing)
-            {
-                _dismissRawX += dx;
-                _dismissRawY += dy;
-                UpdateDismissDrag(Now(), dx, dy);
-            }
-        }
-    }
-
-    void OnStripPointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (_activePointerId != e.Pointer.PointerId) return;
-        _activePointerId = null;
-        _strip.ReleasePointerCapture(e.Pointer);
-
         if (_pointerHeldVideo)
         {
             _pointerHeldVideo = false;
-            var wasBoost = ActiveVideo?.EndPointerHold() == true;
-            if (wasBoost) return;
+            ActiveVideo?.EndPointerHold();
             return;
         }
-
-        if (_dismissing)
+        if (!_dragMoved && mode == GestureMode.None && ActivePhoto != null && _flight == null && !_closing)
         {
-            _dismissing = false;
-            FinishDismissDrag();
-            return;
-        }
-
-        if (!_pointerMoved && !_pointerDraggingPan && ActivePhoto != null && _transPhase == TransitionPhase.None)
-        {
-            // Delayed single-click chrome toggle so double-click can cancel it cleanly.
             _singleClickTimer ??= MakeSingleClickTimer();
             _singleClickTimer.Stop();
             _singleClickTimer.Start();
         }
-        _pointerDraggingPan = false;
     }
 
     void OnStripPointerCanceled(object sender, PointerRoutedEventArgs e)
     {
-        if (_activePointerId != e.Pointer.PointerId) return;
-        _activePointerId = null;
-        _strip.ReleasePointerCapture(e.Pointer);
+        if (_dragPointerId != e.Pointer.PointerId) return;
+        try { _strip.ReleasePointerCapture(e.Pointer); } catch { }
+        AbortActivePointerDrag();
+    }
+
+    void AbortActivePointerDrag()
+    {
+        _dragPointerId = null;
+        var mode = _dragGesture;
+        _dragGesture = GestureMode.None;
         if (_pointerHeldVideo) { _pointerHeldVideo = false; ActiveVideo?.CancelHold(); }
-        if (_dismissing) { _dismissing = false; CancelDismissDrag(); }
-        _pointerDraggingPan = false;
+        if (mode == GestureMode.Dismiss) CancelDismissDrag(0, 0);
+        else if (mode == GestureMode.Swipe) SettleStripSwipe(0);
     }
 
     void OnStripDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (_closing || _transPhase != TransitionPhase.None) return;
+        if (_closing || _flight != null) return;
         _singleClickTimer?.Stop();
         e.Handled = true;
 
@@ -1198,9 +1312,7 @@ public sealed partial class Viewer : UserControl
             return;
         }
         if (ActivePhoto is { } photo)
-        {
             photo.ToggleDoubleTapZoom(e.GetPosition(this), Now());
-        }
     }
 
     DispatcherQueueTimer MakeSingleClickTimer()
@@ -1210,153 +1322,76 @@ public sealed partial class Viewer : UserControl
         t.IsRepeating = false;
         t.Tick += (_, _) =>
         {
-            if (_closing || ActivePhoto == null) return;
+            if (_closing || ActivePhoto == null || _dragMoved || _dismiss.IsActive) return;
             _chromeHidden = !_chromeHidden;
             ApplyTransitionVisual(CurrentRestFrame());
         };
         return t;
     }
 
-    // ---- Touch Manipulations (Pinch Zoom, Pan, Horizontal Swipe, Down/Edge Dismiss) ----
-
-    void OnTouchManipulationStarted(object sender, ManipulationStartedRoutedEventArgs e)
+    void OnStripManipulationStarted(object sender, ManipulationStartedRoutedEventArgs e)
     {
-        if (e.PointerDeviceType != PointerDeviceType.Touch || _closing || _transPhase != TransitionPhase.None) return;
-        _touchGesture = TouchGesture.None;
-        _touchLastScale = 1.0;
-        _dismissSamples.Clear();
-        _wheelSamples.Clear();
+        if (e.PointerDeviceType != PointerDeviceType.Touch || _closing || _flight != null) return;
+        _pinchingPhoto = false;
     }
 
-    void OnTouchManipulationDelta(object sender, ManipulationDeltaRoutedEventArgs e)
+    void OnStripManipulationDelta(object sender, ManipulationDeltaRoutedEventArgs e)
     {
-        if (e.PointerDeviceType != PointerDeviceType.Touch || _closing || _transPhase != TransitionPhase.None) return;
-        var photo = ActivePhoto;
-        var now = Now();
-
-        // 1. Pinch zoom on a photo
-        if (photo != null && Math.Abs(e.Delta.Scale - 1.0) > 0.001)
+        if (e.PointerDeviceType != PointerDeviceType.Touch || _closing || _flight != null) return;
+        if (ActivePhoto is { } photo && Math.Abs(e.Delta.Scale - 1.0) > 0.001)
         {
-            _touchGesture = TouchGesture.Pinch;
-            var factor = e.Delta.Scale;
-            var pt = _strip.TransformToVisual(this).TransformPoint(e.Position);
-            photo.ZoomByFactor(factor, pt);
-            _touchLastScale = e.Cumulative.Scale;
-            e.Handled = true;
-            return;
-        }
-
-        // 2. Pan while photo is zoomed
-        if (photo != null && photo.IsZoomed && _touchGesture != TouchGesture.Dismiss)
-        {
-            _touchGesture = TouchGesture.Pan;
-            photo.PanBy(e.Delta.Translation.X, e.Delta.Translation.Y);
-            e.Handled = true;
-            return;
-        }
-
-        var cx = e.Cumulative.Translation.X;
-        var cy = e.Cumulative.Translation.Y;
-        var dx = e.Delta.Translation.X;
-        var dy = e.Delta.Translation.Y;
-
-        if (_touchGesture == TouchGesture.None)
-        {
-            var startX = e.Position.X - cx;
-            var edgeW = ViewerMath.EdgeZoneWidth(_viewW);
-            var nearLeft = startX <= edgeW;
-            var nearRight = startX >= _viewW - edgeW;
-            if ((nearLeft || nearRight) && !_caption.IsExpanded)
+            if (!_pinchingPhoto)
             {
-                var dir = nearLeft ? 1 : -1;
-                if (cx * dir > 6 && Math.Abs(cx) > Math.Abs(cy) * 0.9)
-                {
-                    _springingBack = false;
-                    _touchGesture = TouchGesture.Dismiss;
-                    _dismissFromEdge = true;
-                    _dismissEdgeDir = dir;
-                    _dismissRawX = cx;
-                    _dismissRawY = cy;
-                    UpdateDismissDrag(now, cx, cy);
-                    e.Handled = true;
-                    return;
-                }
+                _pinchingPhoto = true;
+                AbortActivePointerDrag();
             }
-            if (photo != null && !_caption.IsExpanded && cy > 7 && cy > Math.Abs(cx) * 1.15)
-            {
-                _springingBack = false;
-                _touchGesture = TouchGesture.Dismiss;
-                _dismissFromEdge = false;
-                _dismissRawX = cx;
-                _dismissRawY = cy;
-                UpdateDismissDrag(now, cx, cy);
-                e.Handled = true;
-                return;
-            }
-            if (_items.Count > 1 && Math.Abs(cx) > 5 && Math.Abs(cx) > Math.Abs(cy) * 1.2)
-            {
-                _stripMotion = null;
-                _touchGesture = TouchGesture.Swipe;
-                ApplyWheelSwipeDelta(cx, now);
-                e.Handled = true;
-                return;
-            }
-            return;
-        }
-
-        if (_touchGesture == TouchGesture.Dismiss)
-        {
-            _dismissRawX += dx;
-            _dismissRawY += dy;
-            UpdateDismissDrag(now, dx, dy);
-            e.Handled = true;
-        }
-        else if (_touchGesture == TouchGesture.Swipe)
-        {
-            ApplyWheelSwipeDelta(dx, now);
+            Point pt;
+            try { pt = _strip.TransformToVisual(this).TransformPoint(e.Position); } catch { pt = e.Position; }
+            photo.ZoomByFactor(e.Delta.Scale, pt);
             e.Handled = true;
         }
     }
 
-    void OnTouchManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e)
+    void OnStripManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e)
     {
-        if (_touchGesture == TouchGesture.Dismiss)
-        {
-            _touchGesture = TouchGesture.None;
-            FinishDismissDrag();
-        }
-        else if (_touchGesture == TouchGesture.Swipe)
-        {
-            _touchGesture = TouchGesture.None;
-            var v = 0.0;
-            if (_wheelSamples.Count > 1)
-            {
-                var span = Math.Max(1.0 / 60.0, _wheelSamples[^1].T - _wheelSamples[0].T);
-                v = _wheelSamples.Sum(s => s.Dx) / span;
-            }
-            _wheelSamples.Clear();
-            SettleStripSwipe(v);
-        }
-        else
-        {
-            _touchGesture = TouchGesture.None;
-        }
+        if (e.PointerDeviceType != PointerDeviceType.Touch) return;
+        _pinchingPhoto = false;
     }
 
     // ---- Interactive Dismiss Drag Helpers ----
+
+    void BeginDismissDrag(bool fromEdge, int edgeDir, Point grabPoint, double initialDx, double initialDy, double now)
+    {
+        _springBack = null;
+        _stripMotion = null;
+        _stripOffset = 0;
+        LayoutStrip();
+
+        _dismissFromEdge = fromEdge;
+        _dismissEdgeDir = edgeDir;
+        _dismissGrabPt = grabPoint;
+        _dismissMedia = CurrentMediaFrame();
+        _dismissRawX = initialDx;
+        _dismissRawY = initialDy;
+        _dismissSamples.Clear();
+        UpdateDismissDrag(now, initialDx, initialDy);
+        SyncNeighborVisibility();
+    }
 
     void UpdateDismissDrag(double now, double dx, double dy)
     {
         _dismissSamples.Add((now, dx, dy));
         while (_dismissSamples.Count > 1 && now - _dismissSamples[0].T > 0.1)
             _dismissSamples.RemoveAt(0);
-        _dismiss = ViewerMath.EvaluateDismiss(_dismissRawX, _dismissRawY, _viewW, _viewH, _dismissFromEdge, _dismissEdgeDir);
+        _dismiss = ViewerMath.EvaluateDismiss(
+            _dismissMedia, _dismissGrabPt, _dismissRawX, _dismissRawY, _viewW, _viewH, _dismissFromEdge, _dismissEdgeDir);
+        SyncNeighborVisibility();
         ApplyTransitionVisual(CurrentRestFrame());
     }
 
-    void FinishDismissDrag()
+    void FinishDismissDrag(double fallbackVx = 0, double fallbackVy = 0)
     {
-        double vx = 0, vy = 0;
+        double vx = fallbackVx, vy = fallbackVy;
         if (_dismissSamples.Count > 1)
         {
             var span = Math.Max(1.0 / 60.0, _dismissSamples[^1].T - _dismissSamples[0].T);
@@ -1366,18 +1401,25 @@ public sealed partial class Viewer : UserControl
         _dismissSamples.Clear();
 
         if (ViewerMath.ShouldCommitDismiss(_dismissRawX, _dismissRawY, vx, vy, _viewW, _viewH, _dismissFromEdge, _dismissEdgeDir))
-            Close();
+            CloseWithVelocity(immediate: false, fromDismiss: _dismiss, velX: vx, velY: vy);
         else
-            CancelDismissDrag();
+            CancelDismissDrag(vx, vy);
     }
 
-    void CancelDismissDrag()
+    void CancelDismissDrag(double vx, double vy)
     {
         if (!_dismiss.IsActive) return;
-        _springFromX = _dismissRawX;
-        _springFromY = _dismissRawY;
-        _springStart = Now();
-        _springingBack = true;
+        var mediaCx = _dismissMedia.X + _dismissMedia.Width * 0.5;
+        var mediaCy = _dismissMedia.Y + _dismissMedia.Height * 0.5;
+        _springBack = new SpringBackState
+        {
+            CenterX = new Spring1D(_dismiss.CenterX, mediaCx, Math.Clamp(vx, -1800, 1800)),
+            CenterY = new Spring1D(_dismiss.CenterY, mediaCy, Math.Clamp(vy, -1800, 1800)),
+            Scale = new Spring1D(_dismiss.Scale, 1.0),
+            CornerRadius = new Spring1D(_dismiss.CornerRadius, 0.0),
+            Progress = new Spring1D(_dismiss.Progress, 0.0),
+        };
+        _lastTickTime = Now();
     }
 
     // ---- Keyboard Shortcuts ----
@@ -1458,7 +1500,6 @@ public sealed partial class Viewer : UserControl
         var at = _items.FindIndex(m => m.MediaId == item.MediaId);
         if (at < 0) return;
 
-        // Tear down all pages and rebuild cleanly around the updated list.
         foreach (var el in _pages.Values)
         {
             if (el is ViewerVideoPage vp) vp.Teardown(closing: false);
@@ -1494,18 +1535,31 @@ public sealed partial class Viewer : UserControl
         },
     };
 
+    static void ApplySubtleResources(Button b)
+    {
+        var hover = new SolidColorBrush(Windows.UI.Color.FromArgb(0x18, 255, 255, 255));
+        var press = new SolidColorBrush(Windows.UI.Color.FromArgb(0x0E, 255, 255, 255));
+        var none = new SolidColorBrush(Colors.Transparent);
+        b.Resources["ButtonBackgroundPointerOver"] = hover;
+        b.Resources["ButtonBackgroundPressed"] = press;
+        b.Resources["ButtonBorderBrushPointerOver"] = none;
+        b.Resources["ButtonBorderBrushPressed"] = none;
+    }
+
     static Button IconButton(string glyph, string tip, Action click, string automationId)
     {
         var b = new Button
         {
             Content = new FontIcon { Glyph = glyph, FontSize = 15, Foreground = new SolidColorBrush(Colors.White) },
             Background = new SolidColorBrush(Colors.Transparent),
+            BorderBrush = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
             Width = 36,
             Height = 36,
             Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(18),
+            CornerRadius = new CornerRadius(6),
         };
+        ApplySubtleResources(b);
         ToolTipService.SetToolTip(b, tip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(b, automationId);
@@ -1513,19 +1567,23 @@ public sealed partial class Viewer : UserControl
         return b;
     }
 
-    static Button RoundButton(string glyph, string tip, double diameter, double iconSize, Action click, string automationId)
+    static Button NavButton(string glyph, string tip, Action click, string automationId)
     {
         var b = new Button
         {
-            Content = new FontIcon { Glyph = glyph, FontSize = iconSize, Foreground = new SolidColorBrush(Colors.White) },
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, 0, 0, 0)),
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x2E, 255, 255, 255)),
+            Content = new FontIcon { Glyph = glyph, FontSize = 15, Foreground = new SolidColorBrush(Colors.White) },
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x66, 0x1C, 0x1C, 0x1C)),
+            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255)),
             BorderThickness = new Thickness(1),
-            Width = diameter,
-            Height = diameter,
+            Width = 36,
+            Height = 52,
             Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(diameter * 0.5),
+            CornerRadius = new CornerRadius(8),
         };
+        b.Resources["ButtonBackgroundPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0x26, 0x26, 0x26));
+        b.Resources["ButtonBackgroundPressed"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x7A, 0x18, 0x18, 0x18));
+        b.Resources["ButtonBorderBrushPointerOver"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x24, 255, 255, 255));
+        b.Resources["ButtonBorderBrushPressed"] = new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255));
         ToolTipService.SetToolTip(b, tip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(b, automationId);

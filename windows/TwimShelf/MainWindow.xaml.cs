@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
         // comes back as the base AppWindowPresenter, and a plain cast to OverlappedPresenter fails
         _presenter = WinRT.CastExtensions.As<OverlappedPresenter>(AppWindow.Presenter);
         Theming.Apply(this);
+        InputSourceTracker.Attach(this);
         RestoreSize();
 
         _browse = new BrowsePage(library);

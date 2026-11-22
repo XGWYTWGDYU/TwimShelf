@@ -12,5 +12,6 @@
     <Compile Include="..\TwimShelf\Controls\Grid\ZoomEngine.cs" Link="Engine\ZoomEngine.cs" />
     <Compile Include="..\TwimShelf\Controls\Grid\GridScene.cs" Link="Engine\GridScene.cs" />
     <Compile Include="..\TwimShelf\Controls\Viewer\ViewerMath.cs" Link="Engine\ViewerMath.cs" />
+    <Compile Include="..\TwimShelf\Controls\CardSwipeFilter.cs" Link="Engine\CardSwipeFilter.cs" />
   </ItemGroup>
 </Project>

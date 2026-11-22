@@ -7,6 +7,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using TwimShelf.Controls;
@@ -92,13 +93,15 @@ public sealed partial class BrowsePage : UserControl, IShellPage
             HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(16, 8, 16, 0),
         };
-        // the wheel over the bar still scrolls the cards beneath it
-        floating.PointerWheelChanged += (_, e) =>
+        // the vertical wheel over the bar (even over search chips) still scrolls the cards beneath it
+        floating.AddHandler(PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
         {
-            var d = e.GetCurrentPoint(floating).Properties.MouseWheelDelta;
-            _masonry.Scroll.ChangeView(null, _masonry.Scroll.VerticalOffset - d, null, true);
+            var p = e.GetCurrentPoint(floating).Properties;
+            if (p.IsHorizontalMouseWheel || p.MouseWheelDelta == 0) return;
+            var target = Math.Clamp(_masonry.Scroll.VerticalOffset - p.MouseWheelDelta, 0, _masonry.Scroll.ScrollableHeight);
+            _masonry.Scroll.ChangeView(null, target, null, true);
             e.Handled = true;
-        };
+        }), handledEventsToo: true);
         Content = new Grid { Children = { _masonry, _empty, _loading, floating } };
         WatchScrolling(floating);
         SizeChanged += (_, _) => UpdateColumns();

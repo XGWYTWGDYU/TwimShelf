@@ -20,6 +20,8 @@ public sealed partial class ViewerPhotoPage : Grid
 {
     public FeedItem Item { get; }
     public event Action<bool>? ZoomChanged;
+    public event Action? PreviewReady;
+    public bool IsPreviewReady { get; private set; }
 
     readonly Grid _frame = new()
     {
@@ -69,7 +71,7 @@ public sealed partial class ViewerPhotoPage : Grid
         _natW = item.Width > 0 ? item.Width : 0;
         _natH = item.Height > 0 ? item.Height : 0;
 
-        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        IsHitTestVisible = false;
         _frame.RenderTransform = _transform;
         _frame.Children.Add(_preview);
         _frame.Children.Add(_full);
@@ -79,6 +81,7 @@ public sealed partial class ViewerPhotoPage : Grid
         {
             _preview.Stretch = Stretch.Uniform;
             _preview.Source = previewImage;
+            IsPreviewReady = true;
             if (previewImage is BitmapImage bi && bi.PixelWidth > 0 && bi.PixelHeight > 0 && (_natW <= 0 || _natH <= 0))
             {
                 _natW = bi.PixelWidth;
@@ -88,7 +91,15 @@ public sealed partial class ViewerPhotoPage : Grid
         else if (!string.IsNullOrEmpty(squarePreviewPath) && File.Exists(squarePreviewPath))
         {
             _preview.Stretch = _cropSquarePreview ? Stretch.Fill : Stretch.Uniform;
-            try { _preview.Source = new BitmapImage(new Uri(squarePreviewPath)); } catch { }
+            try
+            {
+                var pBmp = new BitmapImage();
+                pBmp.ImageOpened += (_, _) => MarkPreviewReady();
+                pBmp.ImageFailed += (_, _) => MarkPreviewReady();
+                pBmp.UriSource = new Uri(squarePreviewPath);
+                _preview.Source = pBmp;
+            }
+            catch { MarkPreviewReady(); }
         }
 
         SizeChanged += (_, e) => UpdateLayoutSize(e.NewSize.Width, e.NewSize.Height);
@@ -118,13 +129,22 @@ public sealed partial class ViewerPhotoPage : Grid
             _fullLoaded = true;
             _full.Opacity = 1;
             _preview.Visibility = Visibility.Collapsed;
+            MarkPreviewReady();
         };
+        bmp.ImageFailed += (_, _) => MarkPreviewReady();
         try
         {
             bmp.UriSource = new Uri(path);
             _full.Source = bmp;
         }
-        catch { }
+        catch { MarkPreviewReady(); }
+    }
+
+    void MarkPreviewReady()
+    {
+        if (IsPreviewReady) return;
+        IsPreviewReady = true;
+        PreviewReady?.Invoke();
     }
 
     public void UpdateLayoutSize(double w, double h)
