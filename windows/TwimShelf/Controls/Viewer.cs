@@ -170,10 +170,9 @@ public sealed partial class Viewer : UserControl
     }
     SpringBackState? _springBack;
 
-    // Wheel & trackpad horizontal swipe state
+    // Wheel & trackpad horizontal swipe state (exact Electron Viewer.tsx + WheelStream parity)
     readonly ViewerWheelRouter _wheelRouter = new();
     bool _wheelSwiping;
-    double _wheelPendingX;
     readonly List<(double T, double Dx)> _wheelSamples = [];
     DispatcherQueueTimer? _wheelEndTimer;
 
@@ -1034,55 +1033,56 @@ public sealed partial class Viewer : UserControl
             return;
         }
 
-        // 3. Unzoomed photo or video: mouse scroll wheel steps prev/next; touchpad horizontal swipe
-        //    drives the 3-page strip continuously (touchpad vertical scroll does not skip pages).
+        // 3. Unzoomed photo or video: Electron-parity touchpad horizontal swipe + safe discrete
+        //    mouse vertical wheel paging (never blasts multiple items on trackpad/RDP bursts).
         if (_caption.IsExpanded || ctrl) return;
 
         e.Handled = true;
         if (_items.Count <= 1) return;
 
         var nowMs = Environment.TickCount64;
-        var shift = e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift);
-        var isTouchpad = TouchpadInputState.IsTouchpadWheel(delta, shift, nowMs);
-        var decision = _wheelRouter.OnWheel(props.IsHorizontalMouseWheel, delta, isTouchpad, nowMs);
+        var isLocalPtp = TouchpadInputState.IsLocalPrecisionTouchpadActive(nowMs);
+        var decision = _wheelRouter.OnWheel(props.IsHorizontalMouseWheel, delta, isLocalPtp, _stripMotion != null, nowMs);
+
+        if (decision.EndPreviousSwipeFirst)
+            EndWheelSwipe(velocityScale: 0.3);
 
         switch (decision.Kind)
         {
             case ViewerWheelKind.StepNext:
-                if (_wheelSwiping) FinishWheelSwipe();
+                if (_wheelSwiping) EndWheelSwipe(velocityScale: 0.3);
                 Step(1);
                 break;
             case ViewerWheelKind.StepPrev:
-                if (_wheelSwiping) FinishWheelSwipe();
+                if (_wheelSwiping) EndWheelSwipe(velocityScale: 0.3);
                 Step(-1);
                 break;
-            case ViewerWheelKind.SwipeSettle:
-                if (_wheelSwiping) FinishWheelSwipe();
+            case ViewerWheelKind.SwipeResetTimerOnly:
+                RestartWheelEndTimer();
                 break;
-            case ViewerWheelKind.SwipeDelta:
-            {
-                var now = Now();
-                var dx = decision.SwipeDx;
-                if (!_wheelSwiping)
-                {
-                    _wheelPendingX += dx;
-                    if (Math.Abs(_wheelPendingX) < 4) return;
-                    _stripMotion = null;
-                    _wheelSwiping = true;
-                    _wheelSamples.Clear();
-                    ApplyWheelSwipeDelta(_wheelPendingX, now);
-                    _wheelPendingX = 0;
-                }
-                else
-                {
-                    ApplyWheelSwipeDelta(dx, now);
-                }
-                _wheelEndTimer ??= MakeWheelEndTimer();
-                _wheelEndTimer.Stop();
-                _wheelEndTimer.Start();
+            case ViewerWheelKind.SwipeMomentumSettle:
+                RestartWheelEndTimer();
+                SettleWheelSwipeOnMomentum();
                 break;
-            }
+            case ViewerWheelKind.SwipeBeginAndMove:
+                RestartWheelEndTimer();
+                _stripMotion = null;
+                _wheelSwiping = true;
+                _wheelSamples.Clear();
+                ApplyWheelSwipeDelta(decision.SwipeDx, Now());
+                break;
+            case ViewerWheelKind.SwipeMove:
+                RestartWheelEndTimer();
+                if (_wheelSwiping) ApplyWheelSwipeDelta(decision.SwipeDx, Now());
+                break;
         }
+    }
+
+    void RestartWheelEndTimer()
+    {
+        _wheelEndTimer ??= MakeWheelEndTimer();
+        _wheelEndTimer.Stop();
+        _wheelEndTimer.Start();
     }
 
     void ApplyWheelSwipeDelta(double dx, double now)
@@ -1092,22 +1092,44 @@ public sealed partial class Viewer : UserControl
             _wheelSamples.RemoveAt(0);
         _stripOffset = ViewerMath.ApplyStripDelta(_stripOffset, dx, _index, _items.Count, Stride);
         LayoutStrip();
+
+        // Exact Electron Viewer.tsx line 242: once a full page moved under the fingers, commit it
+        // immediately and mark the gesture done so trailing swipe/momentum never flips a second page.
+        var atEnd = (_stripOffset > 0 && _index == 0) || (_stripOffset < 0 && _index == _items.Count - 1);
+        if (Math.Abs(_stripOffset) >= Stride - 0.5 && !atEnd)
+        {
+            _wheelRouter.MarkSwipeDone();
+            _wheelSwiping = false;
+            _wheelSamples.Clear();
+            CommitStrip(_stripOffset < 0 ? 1 : -1);
+        }
     }
 
-    void FinishWheelSwipe()
+    double ComputeWheelVelocity()
+    {
+        if (_wheelSamples.Count <= 1) return 0;
+        var span = Math.Max(1.0 / 60.0, _wheelSamples[^1].T - _wheelSamples[0].T);
+        return _wheelSamples.Sum(s => s.Dx) / span;
+    }
+
+    void SettleWheelSwipeOnMomentum()
+    {
+        if (!_wheelSwiping) return;
+        var v = ComputeWheelVelocity();
+        _wheelSwiping = false;
+        _wheelSamples.Clear();
+        SettleStripSwipe(v);
+    }
+
+    void EndWheelSwipe(double velocityScale)
     {
         _wheelEndTimer?.Stop();
+        _wheelRouter.EndSwipe();
         if (!_wheelSwiping) return;
+        var v = ComputeWheelVelocity();
         _wheelSwiping = false;
-        _wheelPendingX = 0;
-        var v = 0.0;
-        if (_wheelSamples.Count > 1)
-        {
-            var span = Math.Max(1.0 / 60.0, _wheelSamples[^1].T - _wheelSamples[0].T);
-            v = _wheelSamples.Sum(s => s.Dx) / span;
-        }
         _wheelSamples.Clear();
-        SettleStripSwipe(Math.Abs(v) < 50 ? 0 : v);
+        SettleStripSwipe(Math.Abs(v) < 50 ? 0 : v * velocityScale);
     }
 
     DispatcherQueueTimer MakeWheelEndTimer()
@@ -1115,11 +1137,7 @@ public sealed partial class Viewer : UserControl
         var t = DispatcherQueue.CreateTimer();
         t.Interval = TimeSpan.FromMilliseconds(90);
         t.IsRepeating = false;
-        t.Tick += (_, _) =>
-        {
-            _wheelRouter.NotifyTimerSettled();
-            FinishWheelSwipe();
-        };
+        t.Tick += (_, _) => EndWheelSwipe(velocityScale: 0.3);
         return t;
     }
 

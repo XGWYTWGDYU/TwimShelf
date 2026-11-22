@@ -1,14 +1,19 @@
-// Pure, UI-free input classification and touchpad horizontal-swipe gesture state machine for
-// Browse PostCard media paging:
-//  * Physical mouse wheels (vertical, horizontal tilt/thumb wheel, high-res free-spin, Shift+wheel)
-//    NEVER turn card pages — they always pass through so the Browse feed scrolls vertically.
-//  * Precision Touchpad two-finger horizontal swipes flip exactly one page per deliberate sideways
-//    gesture (axis-locked against vertical/diagonal scrolls, swallowing trailing inertia/momentum).
+// Pure, UI-free wheel & trackpad gesture engine replicating Electron/Web's proven WheelStream,
+// PostCard, and Viewer parameters verbatim (with split-axis tracking for WinUI 3's separate
+// WM_MOUSEWHEEL / WM_MOUSEHWHEEL messages and RDP-safe mouse vs touchpad handling):
+//  * Browse PostCard: exact Electron PostCard.tsx + WheelStream parameters (100/120 px scale,
+//    hypot >= 10px, |sx| > |sy| * 2, single-page turn + momentum swallowing). Mouse vertical wheel
+//    always scrolls the Browse page vertically; local physical mouse tilt-wheel and Shift+wheel
+//    never flip cards.
+//  * Viewer (photo & video): exact Electron Viewer.tsx + WheelStream parameters for horizontal
+//    two-finger swipes (1:1 strip follow, immediate momentum settle, full-stride single-page lock,
+//    90ms end timer with v*0.3) plus safe discrete vertical mouse-wheel stepping that never blasts
+//    through multiple items on trackpad or RDP scroll bursts.
 using System.Threading;
 
 namespace TwimShelf.Controls;
 
-/// Hardware-backed Mouse vs Precision Touchpad input tracker (fed by InputSourceTracker on Windows).
+/// Hardware-backed local Mouse vs Precision Touchpad input tracker (fed by InputSourceTracker).
 public static class TouchpadInputState
 {
     static long _lastTouchpadTick;
@@ -20,41 +25,124 @@ public static class TouchpadInputState
     public static long LastTouchpadTick => Volatile.Read(ref _lastTouchpadTick);
     public static long LastPhysicalMouseWheelTick => Volatile.Read(ref _lastPhysicalMouseWheelTick);
 
-    /// Returns true only when an incoming wheel event originated from a touchpad two-finger
-    /// gesture rather than a physical mouse wheel (vertical, tilt/thumb wheel, or Shift+wheel).
-    public static bool IsTouchpadWheel(int delta, bool shiftDown, long nowMs) =>
-        ClassifyTouchpadHorizontalWheel(delta, shiftDown, nowMs, LastTouchpadTick, LastPhysicalMouseWheelTick);
-
-    /// Alias kept for horizontal-wheel call sites.
-    public static bool IsTouchpadHorizontalWheel(int delta, bool shiftDown, long nowMs) =>
-        IsTouchpadWheel(delta, shiftDown, nowMs);
-
-    /// Pure classification helper (directly unit-testable without Win32 hooks).
-    public static bool ClassifyTouchpadHorizontalWheel(
-        int delta,
-        bool shiftDown,
-        long nowMs,
-        long lastTouchpadTick,
-        long lastPhysicalMouseWheelTick)
+    /// True only when a local hardware Precision Touchpad (HID 0x0D/0x05) is active or in inertia
+    /// and no newer physical mouse wheel fired.
+    public static bool IsLocalPrecisionTouchpadActive(long nowMs, long lastTouchpadTick, long lastPhysicalMouseWheelTick)
     {
-        if (delta == 0 || shiftDown) return false;
-
-        var mouseRecent = lastPhysicalMouseWheelTick > 0 && (nowMs - lastPhysicalMouseWheelTick) is >= 0 and <= 150;
         var padRecent = lastTouchpadTick > 0 && (nowMs - lastTouchpadTick) is >= 0 and <= 1500;
+        if (!padRecent) return false;
+        var mouseRecent = lastPhysicalMouseWheelTick > 0 && (nowMs - lastPhysicalMouseWheelTick) is >= 0 and <= 150;
+        return !mouseRecent || lastTouchpadTick > lastPhysicalMouseWheelTick;
+    }
 
-        // A real physical mouse wheel (including high-res free-spin mice that emit sub-120 deltas)
-        // always takes precedence over stale touchpad activity.
-        if (mouseRecent && (!padRecent || lastPhysicalMouseWheelTick >= lastTouchpadTick))
-            return false;
+    public static bool IsLocalPrecisionTouchpadActive(long nowMs) =>
+        IsLocalPrecisionTouchpadActive(nowMs, LastTouchpadTick, LastPhysicalMouseWheelTick);
 
-        // Active Precision Touchpad contact or its immediate momentum tail.
-        if (padRecent)
-            return true;
+    /// True only on a LOCAL (non-RDP) session when a real physical mouse hardware wheel just fired
+    /// without an active Precision Touchpad. Over RDP, trackpads arrive via the virtual mouse
+    /// driver so this always returns false.
+    public static bool IsLocalPhysicalMouseWheel(bool isRemoteSession, long nowMs, long lastTouchpadTick, long lastPhysicalMouseWheelTick)
+    {
+        if (isRemoteSession) return false;
+        var mouseRecent = lastPhysicalMouseWheelTick > 0 && (nowMs - lastPhysicalMouseWheelTick) is >= 0 and <= 150;
+        if (!mouseRecent) return false;
+        var padRecent = lastTouchpadTick > 0 && (nowMs - lastTouchpadTick) is >= 0 and <= 1500;
+        return !padRecent || lastPhysicalMouseWheelTick >= lastTouchpadTick;
+    }
 
-        // Fallback when Raw Input hasn't seen either device (e.g. non-PTP legacy touchpad or
-        // forwarded trackpad in a VM/remote session): discrete WHEEL_DELTA (120) steps are mouse
-        // wheel notches; fractional deltas are precision trackpad events.
-        return Math.Abs(delta) % 120 != 0;
+    public static bool IsLocalPhysicalMouseWheel(bool isRemoteSession, long nowMs) =>
+        IsLocalPhysicalMouseWheel(isRemoteSession, nowMs, LastTouchpadTick, LastPhysicalMouseWheelTick);
+}
+
+/// Direct C# port of web/app/src/lib/wheelGesture.ts (`WheelStream`) with exact constants
+/// (gap > 400, gap > 90 && mag > lastMag + 1, decaying && mag > lastMag * 1.6 + 4,
+/// mag < lastMag - 0.5), extended to track horizontal and vertical axis magnitudes independently
+/// so WinUI 3's split WM_MOUSEWHEEL / WM_MOUSEHWHEEL messages never falsely trigger decay.
+public sealed class ElectronWheelStream
+{
+    /// Chromium/Electron on Windows converts 120 wheel units to 100 CSS pixels (3 lines).
+    public const double PxPerWheelDelta = 100.0 / 120.0;
+
+    long _lastMs;
+    double _lastMagX;
+    double _lastMagY;
+    bool _decayingX;
+    bool _decayingY;
+    int _dirX;
+    int _dirY;
+
+    /// Momentum after fingers lifted on the active axis.
+    public bool Momentum { get; private set; }
+
+    public void Reset()
+    {
+        _lastMs = 0;
+        _lastMagX = 0;
+        _lastMagY = 0;
+        _decayingX = false;
+        _decayingY = false;
+        _dirX = 0;
+        _dirY = 0;
+        Momentum = false;
+    }
+
+    /// Feeds one wheel event (in CSS pixel units: deltaX > 0 = scroll right, deltaY > 0 = scroll down).
+    /// Returns true when this event begins a fresh gesture.
+    public bool Next(double deltaX, double deltaY, long nowMs)
+    {
+        var ax = Math.Abs(deltaX);
+        var ay = Math.Abs(deltaY);
+        var horizontal = ax >= ay;
+        var mag = horizontal ? ax : ay;
+        var lastMag = horizontal ? _lastMagX : _lastMagY;
+        var decaying = horizontal ? _decayingX : _decayingY;
+        var dx = Math.Sign(deltaX);
+        var dy = Math.Sign(deltaY);
+        var gap = _lastMs == 0 ? long.MaxValue : nowMs - _lastMs;
+
+        // Exact Electron WheelStream gesture boundary rules:
+        var fresh = gap > 400 || (gap > 90 && mag > lastMag + 1.0);
+        if (!fresh && mag > 2.0)
+        {
+            if (horizontal && dx != 0 && _dirX != 0 && dx != _dirX) fresh = true;
+            else if (!horizontal && dy != 0 && _dirY != 0 && dy != _dirY) fresh = true;
+            else if (decaying && mag > lastMag * 1.6 + 4.0) fresh = true;
+        }
+
+        if (fresh)
+        {
+            _decayingX = false;
+            _decayingY = false;
+            _lastMagX = 0;
+            _lastMagY = 0;
+            Momentum = false;
+            _dirX = 0;
+            _dirY = 0;
+            decaying = false;
+            lastMag = 0;
+        }
+        else if (lastMag > 0 && mag < lastMag - 0.5)
+        {
+            decaying = true;
+        }
+
+        var axisMomentum = decaying && mag <= lastMag;
+        if (horizontal)
+        {
+            _decayingX = decaying;
+            _lastMagX = mag;
+            if (dx != 0 && ax > 1.0) _dirX = dx;
+        }
+        else
+        {
+            _decayingY = decaying;
+            _lastMagY = mag;
+            if (dy != 0 && ay > 1.0) _dirY = dy;
+        }
+
+        Momentum = axisMomentum;
+        _lastMs = nowMs;
+        return fresh;
     }
 }
 
@@ -66,144 +154,92 @@ public enum CardWheelAction
     TurnPrev,
 }
 
-/// Axis-locked, one-page-per-swipe touchpad gesture recognizer for a Browse PostCard's media area
-/// (matching Apple SwipeMediaView and Web PostCard + WheelStream).
+/// Direct C# port of web/app/src/pages/browse/PostCard.tsx wheel paging (with Electron's exact
+/// thresholds: hypot >= 10px, |sx| > |sy| * 2, vertical release |dy| > |dx| && |dy| > 2).
+/// Works identically for local Precision Touchpads and Remote Desktop (RDP) forwarded trackpads,
+/// while mouse vertical wheels (and local physical mouse horizontal tilt-wheels / Shift+wheel)
+/// always pass through so the Browse feed scrolls vertically.
 public sealed class CardSwipeFilter
 {
     enum Mode { Undecided, Page, Scroll }
 
-    const long NewGestureGapMs = 350;
-    const long PauseGrowGapMs = 100;
-    const double HorizontalThreshold = 36.0;
-    const double VerticalCommitThreshold = 12.0;
-    const double HorizontalDominanceRatio = 1.8;
-
+    readonly ElectronWheelStream _stream = new();
     Mode _mode = Mode.Undecided;
-    long _lastEventMs;
-    int _lastMag;
-    bool _decaying;
-    bool _inMomentum;
-    int _dirX;
-    int _dirY;
-    double _sumX;
-    double _sumY;
+    double _sx;
+    double _sy;
+    int _eventsInGesture;
 
     public void Reset()
     {
+        _stream.Reset();
         _mode = Mode.Undecided;
-        _lastEventMs = 0;
-        _lastMag = 0;
-        _decaying = false;
-        _inMomentum = false;
-        _dirX = 0;
-        _dirY = 0;
-        _sumX = 0;
-        _sumY = 0;
+        _sx = 0;
+        _sy = 0;
+        _eventsInGesture = 0;
     }
 
-    /// Evaluates one wheel event over the card's media area.
-    /// `isHorizontal`: PointerPointProperties.IsHorizontalMouseWheel.
-    /// `delta`: PointerPointProperties.MouseWheelDelta (positive horizontal = right / next page).
-    /// `isTouchpad`: true only when the event originated from a touchpad (never a physical mouse).
-    /// `canPage`: true when the card has 2+ media items.
-    public CardWheelAction OnWheel(bool isHorizontal, int delta, bool isTouchpad, bool canPage, long nowMs)
+    public CardWheelAction OnWheel(
+        bool isHorizontal,
+        int delta,
+        bool ctrlDown,
+        bool shiftDown,
+        bool isLocalPhysicalMouseHWheel,
+        bool canPage,
+        long nowMs)
     {
-        if (delta == 0) return CardWheelAction.PassThrough;
+        if (delta == 0 || ctrlDown || shiftDown)
+            return CardWheelAction.PassThrough;
 
-        // Physical mouse wheel (vertical, horizontal tilt/thumb wheel, or Shift+wheel) NEVER turns
-        // card pages — always pass through so the Browse feed scrolls vertically.
-        if (!isTouchpad)
+        // On a local (non-RDP) session, a physical mouse's tilt/thumb horizontal wheel never turns
+        // Browse cards. Vertical mouse wheels always flow to Mode.Scroll -> PassThrough below.
+        if (isHorizontal && isLocalPhysicalMouseHWheel)
         {
             Reset();
             return CardWheelAction.PassThrough;
         }
 
-        if (!canPage)
-            return CardWheelAction.PassThrough;
+        // Convert WinUI MouseWheelDelta to Electron CSS pixel units:
+        // WM_MOUSEHWHEEL (+ = right -> +deltaX); WM_MOUSEWHEEL (+ = up -> -deltaY).
+        var deltaX = isHorizontal ? delta * ElectronWheelStream.PxPerWheelDelta : 0.0;
+        var deltaY = isHorizontal ? 0.0 : -delta * ElectronWheelStream.PxPerWheelDelta;
 
-        var mag = Math.Abs(delta);
-        var sign = Math.Sign(delta);
-        var gap = _lastEventMs == 0 ? long.MaxValue : nowMs - _lastEventMs;
-
-        // Detect a fresh two-finger gesture: pause, direction reversal on the same axis, or
-        // magnitude rising sharply again after decaying (fingers placed back on the touchpad).
-        var fresh = gap > NewGestureGapMs || (gap > PauseGrowGapMs && mag > _lastMag + 2);
-        if (!fresh && mag > 2)
+        if (_stream.Next(deltaX, deltaY, nowMs))
         {
-            if (isHorizontal && _dirX != 0 && sign != _dirX) fresh = true;
-            else if (!isHorizontal && _dirY != 0 && sign != _dirY) fresh = true;
-            else if (_decaying && mag > _lastMag * 1.6 + 6) fresh = true;
+            _mode = _stream.Momentum ? Mode.Scroll : Mode.Undecided;
+            _sx = 0;
+            _sy = 0;
+            _eventsInGesture = 0;
         }
-
-        if (fresh)
-        {
-            _decaying = false;
-            _inMomentum = false;
-            _mode = Mode.Undecided;
-            _sumX = 0;
-            _sumY = 0;
-            _dirX = 0;
-            _dirY = 0;
-        }
-        else if (mag < _lastMag - 1)
-        {
-            _decaying = true;
-        }
-
-        if (_decaying && mag <= _lastMag)
-            _inMomentum = true;
-
-        if (isHorizontal && mag > 1) _dirX = sign;
-        if (!isHorizontal && mag > 1) _dirY = sign;
-        _lastEventMs = nowMs;
-        _lastMag = mag;
 
         if (_mode == Mode.Scroll)
             return CardWheelAction.PassThrough;
 
         if (_mode == Mode.Page)
         {
-            // Once a page flip fired, swallow trailing horizontal swipe + inertia; if fingers
-            // explicitly start scrolling vertically, release immediately back to the feed.
-            if (!isHorizontal && mag > 4)
+            // A vertical movement now is a scroll the fingers started: let it through immediately.
+            if (Math.Abs(deltaY) > Math.Abs(deltaX) && Math.Abs(deltaY) > 2.0)
             {
                 _mode = Mode.Scroll;
                 return CardWheelAction.PassThrough;
             }
-            return isHorizontal ? CardWheelAction.Swallow : CardWheelAction.PassThrough;
-        }
-
-        // Mode.Undecided
-        if (_inMomentum)
-        {
-            _mode = Mode.Scroll;
-            return CardWheelAction.PassThrough;
-        }
-
-        if (isHorizontal) _sumX += delta;
-        else _sumY += delta;
-
-        if (!isHorizontal)
-        {
-            if (Math.Abs(_sumY) >= VerticalCommitThreshold && Math.Abs(_sumY) >= Math.Abs(_sumX) * 0.6)
-                _mode = Mode.Scroll;
-            return CardWheelAction.PassThrough;
-        }
-
-        // Horizontal touchpad event while still deciding axis:
-        if (Math.Abs(_sumY) > Math.Abs(_sumX))
-        {
-            _mode = Mode.Scroll;
-            return CardWheelAction.PassThrough;
-        }
-
-        if (Math.Abs(_sumX) < HorizontalThreshold)
             return CardWheelAction.Swallow;
+        }
 
-        if (Math.Abs(_sumX) > Math.Abs(_sumY) * HorizontalDominanceRatio)
+        _sx += deltaX;
+        _sy += deltaY;
+        _eventsInGesture++;
+
+        // WinUI 3 delivers horizontal and vertical components of a diagonal gesture as separate
+        // WM_MOUSEHWHEEL / WM_MOUSEWHEEL messages; wait one extra event for small horizontal deltas
+        // so a paired vertical event can arrive before committing to horizontal paging.
+        if (Math.Sqrt(_sx * _sx + _sy * _sy) < 10.0 ||
+            (_eventsInGesture == 1 && isHorizontal && Math.Abs(_sx) < 28.0))
+            return Math.Abs(deltaX) > Math.Abs(deltaY) ? CardWheelAction.Swallow : CardWheelAction.PassThrough;
+
+        if (Math.Abs(_sx) > Math.Abs(_sy) * 2.0 && canPage)
         {
             _mode = Mode.Page;
-            return _sumX > 0 ? CardWheelAction.TurnNext : CardWheelAction.TurnPrev;
+            return _sx > 0 ? CardWheelAction.TurnNext : CardWheelAction.TurnPrev;
         }
 
         _mode = Mode.Scroll;
@@ -216,114 +252,171 @@ public enum ViewerWheelKind
     Ignore,
     StepNext,
     StepPrev,
-    SwipeDelta,
-    SwipeSettle,
+    SwipeBeginAndMove, // Cancel any running strip animation and move strip by SwipeDx
+    SwipeMove,         // Continue moving strip by SwipeDx
+    SwipeMomentumSettle, // Momentum started after finger lift: settle immediately with full velocity
+    SwipeResetTimerOnly, // Gesture active (not yet committed to horizontal), keep 90ms idle timer alive
 }
 
-public readonly record struct ViewerWheelDecision(ViewerWheelKind Kind, double SwipeDx = 0);
+public readonly record struct ViewerWheelDecision(
+    ViewerWheelKind Kind,
+    double SwipeDx = 0,
+    bool EndPreviousSwipeFirst = false);
 
-/// Routes wheel & touchpad input inside the unified Viewer (both photos and videos):
-///  * Mouse scroll wheel (vertical or horizontal, standard 120-notch or high-res free-spin) steps
-///    one item per 120-unit detent.
-///  * Touchpad two-finger horizontal swipe drives the 3-page strip continuously and swallows
-///    trailing decaying momentum once the swipe settles.
-///  * Touchpad vertical scroll is ignored when unzoomed so it never blasts through multiple items.
+/// Direct C# port of web/app/src/viewer/Viewer.tsx wheel paging + safe discrete mouse vertical
+/// wheel stepping:
+///  * Horizontal two-finger swipes (local Precision Touchpad OR Remote Desktop forwarded trackpad)
+///    replicate Electron Viewer.tsx verbatim: |dx| > 4 && |dx| > |dy| * 1.2, immediate momentum
+///    settle, full-stride single-page lock (`MarkSwipeDone`), 90ms idle timer with v*0.3.
+///  * Discrete physical mouse vertical wheel clicks (±120) step 1 page cleanly on photos & videos,
+///    while guarding against trackpad / RDP vertical scroll bursts (ignores fractional deltas,
+///    ignores active Precision Touchpad vertical scroll, ignores during in-flight slide animation,
+///    ignores decaying momentum, and enforces a 180ms same-direction cooldown).
 public sealed class ViewerWheelRouter
 {
-    const long MouseIdleResetMs = 250;
-    const long PadNewGestureGapMs = 320;
-    const long PadPauseGrowGapMs = 90;
+    const long VerticalCooldownMs = 180;
 
-    int _mouseAccum;
-    long _mouseLastMs;
+    readonly ElectronWheelStream _stream = new();
+    bool _hasSwipe;
+    bool _swipeOn;
+    bool _swipeDone;
+    double _accDx;
+    double _accDy;
 
-    long _padLastMs;
-    int _padLastMag;
-    int _padDir;
-    bool _padDecaying;
-    bool _padActive;
-    bool _padSwallowMomentum;
+    bool _seenFractionalVerticalInGesture;
+    long _lastVerticalStepMs;
+    int _lastVerticalStepDir;
+
+    public bool IsSwipeActive => _hasSwipe && _swipeOn && !_swipeDone;
 
     public void Reset()
     {
-        _mouseAccum = 0;
-        _mouseLastMs = 0;
-        _padLastMs = 0;
-        _padLastMag = 0;
-        _padDir = 0;
-        _padDecaying = false;
-        _padActive = false;
-        _padSwallowMomentum = false;
+        _stream.Reset();
+        _hasSwipe = false;
+        _swipeOn = false;
+        _swipeDone = false;
+        _accDx = 0;
+        _accDy = 0;
+        _seenFractionalVerticalInGesture = false;
+        _lastVerticalStepMs = 0;
+        _lastVerticalStepDir = 0;
     }
 
-    public void NotifyTimerSettled()
+    /// Called when the strip reaches a full stride during a swipe (Electron line 242) so the
+    /// remainder of the gesture and its momentum cannot flip a second page.
+    public void MarkSwipeDone()
     {
-        _padActive = false;
-        if (_padDecaying) _padSwallowMomentum = true;
+        if (_hasSwipe) _swipeDone = true;
     }
 
-    public ViewerWheelDecision OnWheel(bool isHorizontal, int delta, bool isTouchpad, long nowMs)
+    /// Called when the 90ms idle timer fires (Electron `endSwipe`).
+    public void EndSwipe()
+    {
+        _hasSwipe = false;
+        _swipeOn = false;
+        _swipeDone = false;
+        _accDx = 0;
+        _accDy = 0;
+    }
+
+    public ViewerWheelDecision OnWheel(
+        bool isHorizontal,
+        int delta,
+        bool isLocalPrecisionTouchpad,
+        bool stripAnimating,
+        long nowMs)
     {
         if (delta == 0) return new ViewerWheelDecision(ViewerWheelKind.Ignore);
 
-        if (!isTouchpad)
-        {
-            _padActive = false;
-            _padSwallowMomentum = false;
-            // Vertical mouse wheel down (<0) -> next; horizontal mouse wheel right (>0) -> next.
-            var signed = isHorizontal ? delta : -delta;
-            if (_mouseLastMs == 0 || nowMs - _mouseLastMs > MouseIdleResetMs ||
-                (_mouseAccum != 0 && Math.Sign(signed) != Math.Sign(_mouseAccum)))
-                _mouseAccum = 0;
-            _mouseLastMs = nowMs;
-            _mouseAccum += signed;
+        // Exact Electron pixel scaling: WM_MOUSEHWHEEL (+ = right -> +deltaX),
+        // WM_MOUSEWHEEL (+ = up -> -deltaY).
+        var deltaX = isHorizontal ? delta * ElectronWheelStream.PxPerWheelDelta : 0.0;
+        var deltaY = isHorizontal ? 0.0 : -delta * ElectronWheelStream.PxPerWheelDelta;
 
-            if (Math.Abs(_mouseAccum) >= 120)
-            {
-                var next = _mouseAccum > 0;
-                _mouseAccum -= Math.Sign(_mouseAccum) * 120;
-                return new ViewerWheelDecision(next ? ViewerWheelKind.StepNext : ViewerWheelKind.StepPrev);
-            }
-            return new ViewerWheelDecision(ViewerWheelKind.Ignore);
-        }
-
-        // Touchpad vertical scroll while unzoomed: do not accidentally flip pages.
-        if (!isHorizontal)
-            return new ViewerWheelDecision(ViewerWheelKind.Ignore);
-
-        var mag = Math.Abs(delta);
-        var sign = Math.Sign(delta);
-        var gap = _padLastMs == 0 ? long.MaxValue : nowMs - _padLastMs;
-        var fresh = gap > PadNewGestureGapMs ||
-                    (gap > PadPauseGrowGapMs && mag > _padLastMag + 2) ||
-                    (_padDir != 0 && sign != _padDir && mag > 2) ||
-                    (_padDecaying && mag > _padLastMag * 1.6 + 6);
-
+        var fresh = _stream.Next(deltaX, deltaY, nowMs);
+        var endPrev = false;
         if (fresh)
         {
-            _padDecaying = false;
-            _padSwallowMomentum = false;
+            if (_hasSwipe && _swipeOn && !_swipeDone) endPrev = true;
+            EndSwipe();
+            _seenFractionalVerticalInGesture = false;
+            // Momentum of a gesture that already finished moves nothing.
+            if (_stream.Momentum)
+                return new ViewerWheelDecision(ViewerWheelKind.Ignore, 0, endPrev);
         }
-        else if (mag < _padLastMag - 1)
+
+        // ---- Vertical wheel (mouse vertical wheel steps prev/next; trackpad vertical ignored) ----
+        if (!isHorizontal)
         {
-            _padDecaying = true;
+            if (Math.Abs(delta) % 120 != 0)
+            {
+                _seenFractionalVerticalInGesture = true;
+                // Keep vertical accumulator updated for horizontal-vs-vertical axis lock in Viewer.
+                if (_hasSwipe && !_swipeOn && !_swipeDone) _accDy += -deltaY;
+                return new ViewerWheelDecision(ViewerWheelKind.Ignore, 0, endPrev);
+            }
+
+            // If a horizontal swipe is already active, ignore incidental vertical ticks.
+            if (_hasSwipe && _swipeOn && !_swipeDone)
+                return new ViewerWheelDecision(ViewerWheelKind.Ignore, 0, endPrev);
+
+            // Trackpad vertical scroll (local Precision Touchpad or fractional RDP stream) never flips.
+            if (isLocalPrecisionTouchpad || _seenFractionalVerticalInGesture || _stream.Momentum)
+                return new ViewerWheelDecision(ViewerWheelKind.Ignore, 0, endPrev);
+
+            // Guard against quantized RDP bursts / free-spin wheels: never stack steps while a
+            // page slide animation is already running, and enforce a 180ms same-direction cooldown.
+            var dir = delta < 0 ? 1 : -1;
+            if (stripAnimating)
+                return new ViewerWheelDecision(ViewerWheelKind.Ignore, 0, endPrev);
+            if (_lastVerticalStepMs > 0 && dir == _lastVerticalStepDir && nowMs - _lastVerticalStepMs < VerticalCooldownMs)
+                return new ViewerWheelDecision(ViewerWheelKind.Ignore, 0, endPrev);
+
+            _lastVerticalStepMs = nowMs;
+            _lastVerticalStepDir = dir;
+            return new ViewerWheelDecision(dir > 0 ? ViewerWheelKind.StepNext : ViewerWheelKind.StepPrev, 0, endPrev);
         }
 
-        _padLastMs = nowMs;
-        _padLastMag = mag;
-        if (mag > 1) _padDir = sign;
+        // ---- Horizontal wheel / touchpad sideways swipe (100% Electron Viewer.tsx parity) ----
+        // Never start a fresh swipe from a late decaying momentum packet after the 90ms idle timer.
+        if (!_hasSwipe && _stream.Momentum)
+            return new ViewerWheelDecision(ViewerWheelKind.Ignore, 0, endPrev);
 
-        if (_padSwallowMomentum)
-            return new ViewerWheelDecision(ViewerWheelKind.Ignore);
-
-        if (_padActive && _padDecaying && mag <= 3)
+        if (!_hasSwipe)
         {
-            _padActive = false;
-            _padSwallowMomentum = true;
-            return new ViewerWheelDecision(ViewerWheelKind.SwipeSettle);
+            _hasSwipe = true;
+            _swipeOn = false;
+            _swipeDone = false;
+            _accDx = 0;
+            _accDy = 0;
         }
 
-        _padActive = true;
-        return new ViewerWheelDecision(ViewerWheelKind.SwipeDelta, -delta * 0.85);
+        if (_swipeDone)
+            return new ViewerWheelDecision(ViewerWheelKind.SwipeResetTimerOnly, 0, endPrev);
+
+        // Events started shrinking: fingers lifted and this is the trackpad's momentum.
+        // Settle immediately with the fingers' velocity and swallow all remaining momentum.
+        if (_swipeOn && _stream.Momentum)
+        {
+            _swipeDone = true;
+            return new ViewerWheelDecision(ViewerWheelKind.SwipeMomentumSettle, 0, endPrev);
+        }
+
+        var dx = -deltaX;
+        var dy = -deltaY;
+        if (!_swipeOn)
+        {
+            _accDx += dx;
+            _accDy += dy;
+            if (!(Math.Abs(_accDx) > 4.0 && Math.Abs(_accDx) > Math.Abs(_accDy) * 1.2))
+                return new ViewerWheelDecision(ViewerWheelKind.SwipeResetTimerOnly, 0, endPrev);
+
+            _swipeOn = true;
+            return new ViewerWheelDecision(ViewerWheelKind.SwipeBeginAndMove, _accDx, endPrev);
+        }
+
+        return dx != 0
+            ? new ViewerWheelDecision(ViewerWheelKind.SwipeMove, dx, endPrev)
+            : new ViewerWheelDecision(ViewerWheelKind.SwipeResetTimerOnly, 0, endPrev);
     }
 }

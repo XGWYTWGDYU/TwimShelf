@@ -220,9 +220,11 @@ public sealed partial class PostCard : UserControl
         if (delta == 0) return;
 
         var nowMs = Environment.TickCount64;
+        var ctrl = e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control);
         var shift = e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift);
-        var isTouchpad = TouchpadInputState.IsTouchpadHorizontalWheel(delta, shift, nowMs);
-        var action = _swipe.OnWheel(p.IsHorizontalMouseWheel, delta, isTouchpad, Media.Count >= 2, nowMs);
+        var localMouseHWheel = p.IsHorizontalMouseWheel &&
+                               TouchpadInputState.IsLocalPhysicalMouseWheel(InputSourceTracker.IsRemoteSession(), nowMs);
+        var action = _swipe.OnWheel(p.IsHorizontalMouseWheel, delta, ctrl, shift, localMouseHWheel, Media.Count >= 2, nowMs);
         switch (action)
         {
             case CardWheelAction.TurnNext:
@@ -243,11 +245,11 @@ public sealed partial class PostCard : UserControl
     {
         var p = e.GetCurrentPoint(_tagClip).Properties;
         if (!p.IsHorizontalMouseWheel || p.MouseWheelDelta == 0) return;
-        var shift = e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift);
-        if (!TouchpadInputState.IsTouchpadHorizontalWheel(p.MouseWheelDelta, shift, Environment.TickCount64)) return;
+        if (e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control) || e.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift)) return;
+        if (TouchpadInputState.IsLocalPhysicalMouseWheel(InputSourceTracker.IsRemoteSession(), Environment.TickCount64)) return;
         var maxShift = _tags.ActualWidth - _tagClip.ActualWidth;
         if (maxShift <= 0.5) return;
-        _tagShift.X = Math.Clamp(_tagShift.X - p.MouseWheelDelta * 0.5, -maxShift, 0);
+        _tagShift.X = Math.Clamp(_tagShift.X - p.MouseWheelDelta * ElectronWheelStream.PxPerWheelDelta, -maxShift, 0);
         e.Handled = true;
     }
 

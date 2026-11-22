@@ -1059,76 +1059,82 @@ static class ViewerTests
     }
 }
 
-// ---- Browse card mouse vs touchpad wheel & swipe tests ----
+// ---- Browse card & Viewer wheel / touchpad / RDP parity tests (Electron WheelStream) ----
 
 static class CardSwipeTests
 {
     public static void MouseAlwaysScrollsPageNeverTurns()
     {
-        // Standard discrete mouse horizontal/tilt wheel (±120) without touchpad raw input.
-        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(120, false, 1000, 0, 0), "discrete +120 is mouse");
-        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(-120, false, 1000, 0, 0), "discrete -120 is mouse");
-        // Shift + wheel is never touchpad.
-        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(18, true, 1000, 995, 0), "Shift+wheel rejected");
-        // High-res free-spin mouse wheel (sub-120 delta) when physical mouse raw input just fired.
-        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(24, false, 1000, 0, 990), "high-res physical mouse rejected");
-        // Physical mouse takes precedence even if touchpad was touched earlier.
-        Assert.True(!TouchpadInputState.ClassifyTouchpadHorizontalWheel(24, false, 1000, 500, 990), "newer physical mouse overrides stale touchpad");
+        // Local session: physical mouse horizontal wheel detected and rejected; RDP never blocks trackpad.
+        Assert.True(TouchpadInputState.IsLocalPhysicalMouseWheel(isRemoteSession: false, 1000, 0, 990), "local physical mouse detected");
+        Assert.True(!TouchpadInputState.IsLocalPhysicalMouseWheel(isRemoteSession: true, 1000, 0, 990), "RDP never blocks forwarded trackpad");
+        Assert.True(TouchpadInputState.IsLocalPrecisionTouchpadActive(1000, 950, 0), "local PTP active");
+        Assert.True(!TouchpadInputState.IsLocalPrecisionTouchpadActive(1000, 500, 990), "newer physical mouse overrides stale PTP");
 
         var filter = new CardSwipeFilter();
-        // Mouse vertical & horizontal wheel events ALWAYS pass through.
-        Assert.True(filter.OnWheel(false, -120, isTouchpad: false, canPage: true, 1000) == CardWheelAction.PassThrough, "mouse vertical pass-through");
-        Assert.True(filter.OnWheel(true, 120, isTouchpad: false, canPage: true, 1020) == CardWheelAction.PassThrough, "mouse horizontal pass-through");
-        Assert.True(filter.OnWheel(true, -240, isTouchpad: false, canPage: true, 1040) == CardWheelAction.PassThrough, "mouse fast horizontal pass-through");
+        // Mouse vertical wheel ALWAYS passes through (scrolls Browse page vertically).
+        Assert.True(filter.OnWheel(false, -120, false, false, false, canPage: true, 1000) == CardWheelAction.PassThrough, "mouse vertical pass-through");
+        Assert.True(filter.OnWheel(false, 120, false, false, false, canPage: true, 1100) == CardWheelAction.PassThrough, "mouse vertical up pass-through");
+        // Shift + wheel and Ctrl + wheel ALWAYS pass through.
+        Assert.True(filter.OnWheel(true, 120, false, shiftDown: true, false, canPage: true, 1200) == CardWheelAction.PassThrough, "Shift+wheel pass-through");
+        Assert.True(filter.OnWheel(true, 120, ctrlDown: true, false, false, canPage: true, 1300) == CardWheelAction.PassThrough, "Ctrl+wheel pass-through");
+        // Local physical mouse horizontal tilt-wheel ALWAYS passes through.
+        Assert.True(filter.OnWheel(true, 120, false, false, isLocalPhysicalMouseHWheel: true, canPage: true, 1400) == CardWheelAction.PassThrough, "local mouse hwheel pass-through");
     }
 
     public static void TouchpadHorizontalTurnsOnePageAndSwallowsMomentum()
     {
-        // Precision touchpad raw HID packet recent -> even a fast 120 frame is recognized as touchpad.
-        Assert.True(TouchpadInputState.ClassifyTouchpadHorizontalWheel(120, false, 2000, 1980, 0), "active PTP +120 accepted");
-        // Non-PTP fallback: fractional sub-120 delta with no physical mouse raw input -> accepted.
-        Assert.True(TouchpadInputState.ClassifyTouchpadHorizontalWheel(18, false, 2000, 0, 0), "fractional fallback accepted");
-
         var filter = new CardSwipeFilter();
         var turns = 0;
         long t = 1000;
-        // One rightward swipe + decaying inertia tail: must flip NEXT exactly once!
+        // 1. Precision Touchpad horizontal swipe (fractional deltas + decaying momentum tail): flips NEXT once!
         int[] swipeRight = [10, 16, 22, 26, 20, 14, 9, 5, 3, 2, 1];
         foreach (var d in swipeRight)
         {
             t += 12;
-            var a = filter.OnWheel(true, d, isTouchpad: true, canPage: true, t);
+            var a = filter.OnWheel(true, d, false, false, false, canPage: true, t);
             Assert.True(a != CardWheelAction.PassThrough, $"swipe right event {d} should not leak");
             if (a == CardWheelAction.TurnNext) turns++;
             Assert.True(a != CardWheelAction.TurnPrev, "wrong direction");
         }
-        Assert.Equal(turns, 1, "one swipe must flip exactly one page");
+        Assert.Equal(turns, 1, "one PTP swipe must flip exactly one page");
 
-        // Immediate reverse swipe left -> fresh gesture flips PREV exactly once!
+        // 2. RDP-forwarded Mac trackpad horizontal swipe (quantized +120 burst + decay): ALSO flips NEXT once!
+        t += 500;
+        turns = 0;
+        foreach (var d in new[] { 120, 120, 120, 80, 40, 20 })
+        {
+            t += 16;
+            var a = filter.OnWheel(true, d, false, false, isLocalPhysicalMouseHWheel: false, canPage: true, t);
+            if (a == CardWheelAction.TurnNext) turns++;
+        }
+        Assert.Equal(turns, 1, "one RDP quantized horizontal swipe must flip exactly one page");
+
+        // 3. Immediate reverse swipe left -> fresh gesture flips PREV exactly once!
         var prevTurns = 0;
         int[] swipeLeft = [-12, -20, -24, -18, -10, -4];
         foreach (var d in swipeLeft)
         {
             t += 12;
-            var a = filter.OnWheel(true, d, isTouchpad: true, canPage: true, t);
+            var a = filter.OnWheel(true, d, false, false, false, canPage: true, t);
             if (a == CardWheelAction.TurnPrev) prevTurns++;
             Assert.True(a != CardWheelAction.TurnNext, "unexpected next on left swipe");
         }
         Assert.Equal(prevTurns, 1, "reverse swipe must flip prev once");
 
-        // After pause > 350ms, another swipe left flips PREV once more.
-        t += 400;
+        // 4. After pause > 400ms, another swipe left flips PREV once more.
+        t += 450;
         prevTurns = 0;
         foreach (var d in new[] { -15, -25, -20, -8 })
         {
             t += 12;
-            if (filter.OnWheel(true, d, isTouchpad: true, canPage: true, t) == CardWheelAction.TurnPrev)
+            if (filter.OnWheel(true, d, false, false, false, canPage: true, t) == CardWheelAction.TurnPrev)
                 prevTurns++;
         }
         Assert.Equal(prevTurns, 1, "second swipe after pause must flip prev once");
 
-        // Single-media card never consumes events.
-        Assert.True(filter.OnWheel(true, 45, isTouchpad: true, canPage: false, t + 500) == CardWheelAction.PassThrough, "single-media card passes through");
+        // 5. Single-media card never turns.
+        Assert.True(filter.OnWheel(true, 45, false, false, false, canPage: false, t + 500) == CardWheelAction.PassThrough, "single-media card passes through");
     }
 
     public static void TouchpadVerticalAndDiagonalNeverTurnPage()
@@ -1143,11 +1149,11 @@ static class CardSwipeTests
         foreach (var (h, d) in verticalWithDrift)
         {
             t += 10;
-            var a = filter.OnWheel(h, d, isTouchpad: true, canPage: true, t);
+            var a = filter.OnWheel(h, d, false, false, false, canPage: true, t);
             Assert.True(a == CardWheelAction.PassThrough, $"vertical scroll with drift ({h},{d}) must pass through, got {a}");
         }
 
-        // 45-degree diagonal swipe: horizontal does not dominate by 1.8x -> must NOT flip page.
+        // 45-degree diagonal swipe: horizontal does not dominate by 2x -> must NOT flip page.
         t += 500;
         (bool horiz, int delta)[] diagonal =
         [
@@ -1156,7 +1162,7 @@ static class CardSwipeTests
         foreach (var (h, d) in diagonal)
         {
             t += 10;
-            var a = filter.OnWheel(h, d, isTouchpad: true, canPage: true, t);
+            var a = filter.OnWheel(h, d, false, false, false, canPage: true, t);
             Assert.True(a != CardWheelAction.TurnNext && a != CardWheelAction.TurnPrev, $"diagonal gesture must not flip page, got {a}");
         }
     }
@@ -1166,51 +1172,60 @@ static class CardSwipeTests
         var router = new ViewerWheelRouter();
         long t = 1000;
 
-        // 1. Standard mouse vertical wheel: down (-120) = Next, up (+120) = Prev.
-        Assert.True(router.OnWheel(false, -120, isTouchpad: false, t).Kind == ViewerWheelKind.StepNext, "mouse down -> next");
-        t += 50;
-        Assert.True(router.OnWheel(false, 120, isTouchpad: false, t).Kind == ViewerWheelKind.StepPrev, "mouse up -> prev");
+        // 1. Standard mouse vertical wheel: down (-120) = Next, up (+120) = Prev (even immediately on reversal!).
+        Assert.True(router.OnWheel(false, -120, false, stripAnimating: false, t).Kind == ViewerWheelKind.StepNext, "mouse down -> next");
+        t += 220;
+        Assert.True(router.OnWheel(false, 120, false, stripAnimating: false, t).Kind == ViewerWheelKind.StepPrev, "mouse up -> prev");
 
-        // 2. High-res mouse vertical wheel (4 x -30 = -120 -> exactly 1 StepNext).
-        var steps = 0;
-        for (var i = 0; i < 4; i++)
+        // 2. Rapid RDP quantized vertical scroll burst (15 x -120 in 150ms): NEVER flips a dozen pages!
+        t += 500;
+        var burstSteps = 0;
+        for (var i = 0; i < 15; i++)
         {
-            t += 15;
-            if (router.OnWheel(false, -30, isTouchpad: false, t).Kind == ViewerWheelKind.StepNext) steps++;
+            t += 10;
+            var dec = router.OnWheel(false, -120, false, stripAnimating: burstSteps > 0, t);
+            if (dec.Kind == ViewerWheelKind.StepNext) burstSteps++;
         }
-        Assert.Equal(steps, 1, "high-res mouse 4x-30 should step once");
+        Assert.Equal(burstSteps, 1, $"RDP vertical burst must flip at most 1 page, got {burstSteps}");
 
-        // 3. Mouse horizontal wheel: right (+120) = Next, left (-120) = Prev.
-        t += 300;
-        Assert.True(router.OnWheel(true, 120, isTouchpad: false, t).Kind == ViewerWheelKind.StepNext, "mouse hwheel right -> next");
-        t += 50;
-        Assert.True(router.OnWheel(true, -120, isTouchpad: false, t).Kind == ViewerWheelKind.StepPrev, "mouse hwheel left -> prev");
-
-        // 4. Touchpad vertical scroll while unzoomed: ignored (never blasts pages).
-        t += 400;
-        foreach (var d in new[] { -12, -20, -24, -18, -8 })
+        // 3. Fractional trackpad vertical scroll (local or RDP): 0 pages flipped!
+        t += 500;
+        foreach (var d in new[] { -12, -24, -40, -120, -28, -14, -6 })
         {
             t += 12;
-            Assert.True(router.OnWheel(false, d, isTouchpad: true, t).Kind == ViewerWheelKind.Ignore, "touchpad vertical ignored in viewer");
+            Assert.True(router.OnWheel(false, d, false, false, t).Kind == ViewerWheelKind.Ignore, $"fractional vertical {d} ignored");
         }
 
-        // 5. Touchpad horizontal swipe: emits SwipeDelta, settles when momentum decays to <=3, and swallows rest of tail!
-        t += 400;
-        var deltas = 0;
+        // 4. Local Precision Touchpad vertical scroll (even if delta hits 120): ignored!
+        t += 500;
+        Assert.True(router.OnWheel(false, -120, isLocalPrecisionTouchpad: true, false, t).Kind == ViewerWheelKind.Ignore, "local PTP vertical ignored");
+
+        // 5. Touchpad / RDP horizontal swipe (exact Electron Viewer.tsx behavior):
+        //    Moves strip while fingers move, settles immediately on momentum onset, swallows tail!
+        t += 500;
+        var begins = 0;
+        var moves = 0;
         var settles = 0;
-        foreach (var d in new[] { 12, 22, 28, 18, 10, 5, 2, 1, 1 })
+        foreach (var d in new[] { 12, 22, 28, 18, 10, 5, 2, 1 })
         {
             t += 12;
-            var dec = router.OnWheel(true, d, isTouchpad: true, t);
-            if (dec.Kind == ViewerWheelKind.SwipeDelta) { deltas++; Assert.True(dec.SwipeDx < 0, "right swipe moves strip left"); }
-            else if (dec.Kind == ViewerWheelKind.SwipeSettle) settles++;
+            var dec = router.OnWheel(true, d, false, false, t);
+            if (dec.Kind == ViewerWheelKind.SwipeBeginAndMove) { begins++; Assert.True(dec.SwipeDx < 0, "right swipe moves strip left"); }
+            else if (dec.Kind == ViewerWheelKind.SwipeMove) { moves++; Assert.True(dec.SwipeDx < 0, "right swipe move left"); }
+            else if (dec.Kind == ViewerWheelKind.SwipeMomentumSettle) settles++;
         }
-        Assert.True(deltas >= 5, $"expected continuous swipe deltas, got {deltas}");
-        Assert.Equal(settles, 1, "expected exactly 1 settle when momentum decays");
+        Assert.Equal(begins, 1, "expected 1 swipe begin");
+        Assert.Equal(moves, 2, "expected 2 active move frames before decay");
+        Assert.Equal(settles, 1, "expected exactly 1 momentum settle");
 
-        // 6. Fresh reverse touchpad swipe immediately resumes SwipeDelta!
+        // 6. Late decaying momentum packet after 90ms idle timer (gap=110ms, mag shrinking) MUST NOT restart swipe!
+        router.EndSwipe();
+        t += 110;
+        Assert.True(router.OnWheel(true, 1, false, false, t).Kind == ViewerWheelKind.Ignore, "late momentum after timer must not restart swipe");
+
+        // 7. Fresh reverse touchpad swipe immediately begins reverse strip drag!
         t += 12;
-        var rev = router.OnWheel(true, -18, isTouchpad: true, t);
-        Assert.True(rev.Kind == ViewerWheelKind.SwipeDelta && rev.SwipeDx > 0, "reverse swipe resumes strip immediately");
+        var rev = router.OnWheel(true, -18, false, false, t);
+        Assert.True(rev.Kind == ViewerWheelKind.SwipeBeginAndMove && rev.SwipeDx > 0, "reverse swipe resumes strip immediately");
     }
 }

@@ -87,6 +87,15 @@ public static unsafe partial class InputSourceTracker
     [LibraryImport("user32.dll")]
     private static partial uint GetRawInputData(nint hRawInput, uint uiCommand, void* pData, ref uint pcbSize, uint cbSizeHeader);
 
+    [LibraryImport("user32.dll")]
+    private static partial int GetSystemMetrics(int nIndex);
+
+    const int SM_REMOTESESSION = 0x1000;
+
+    /// True when Windows is currently running inside a Remote Desktop (RDP) session, where the
+    /// client's trackpad is forwarded through the RDP virtual mouse driver.
+    public static bool IsRemoteSession() => GetSystemMetrics(SM_REMOTESESSION) != 0;
+
     public static void Attach(Window window)
     {
         var hwnd = Win32Interop.GetWindowFromWindowId(window.AppWindow.Id);
