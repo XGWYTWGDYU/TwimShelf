@@ -121,7 +121,31 @@ docker compose -f docker/compose.yaml up -d
 
 ## GPU
 
-Docker 可以直通 GPU：NVIDIA 安装 nvidia-container-toolkit 后加 `--gpus all`，Intel 和 AMD 映射 `/dev/dri`。不过这个镜像本身不使用 GPU，因为网页版的 AI 打标签用的是外部模型。想用这台机器的 GPU，推荐另外运行一个带 GPU 的 Ollama 容器，再在「设置 → 打标签 → 添加外部模型」里填 `http://<服务器地址>:11434`。
+本机模型（「设置 → 打标签」里下载的模型）打标签时，给容器一块 GPU 就会用它，否则用处理器。
+
+**AMD 和 Intel**：用默认镜像，映射 `/dev/dri`。镜像里是 Mesa 的 Vulkan 驱动，支持近几年的显卡和核显。
+
+```bash
+docker run -d --name twimshelf --device /dev/dri -p 2778:2778 -v /path/to/data:/data ghcr.io/xgwytwgdyu/twimshelf:latest
+```
+
+compose 里取消 `devices:` 那两行的注释。容器以 `PUID` 的身份运行时，会自动加入 `/dev/dri` 设备所属的用户组（render、video），不用另外设置权限。
+
+**NVIDIA**：用 CUDA 镜像，主机先安装 NVIDIA 驱动和 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)。只支持 amd64，面向 RTX 20 系及以后的显卡。CUDA 镜像目前还没有发布，需要自己构建：
+
+```bash
+./build.sh docker-cuda
+```
+
+```bash
+docker run -d --name twimshelf --gpus all -p 2778:2778 -v /path/to/data:/data twimshelf:latest-cuda
+```
+
+compose 里把 `image:` 换成自己构建的 CUDA 镜像，并取消 `deploy:` 那一段的注释。
+
+**确认用上了 GPU**：`docker logs twimshelf` 里有一行 `local ai: loaded …`，括号里列出找到的设备，例如 `Vulkan0 (AMD Radeon RX 7800 XT (RADV NAVI32)), CPU` 或 `CUDA0 (NVIDIA GeForce RTX 4070), CPU`；只有 `CPU` 就是没拿到 GPU。
+
+也可以不用本机模型：在「设置 → 打标签 → 添加外部模型」里填一个外部服务（例如另一个带 GPU 的 Ollama 容器 `http://<服务器地址>:11434`）。
 
 ## 备份
 

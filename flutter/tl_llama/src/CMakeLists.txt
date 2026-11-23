@@ -1,9 +1,10 @@
-# llama.cpp with a small C interface (tl_llama.cpp) for Dart's FFI. Used by the Flutter Android app and
-# the native Windows app (build.ps1); the Apple builds run MLX instead (Apple/TLLocalAI).
+# llama.cpp with a small C interface (tl_llama.cpp) for Dart's FFI. Used by the Flutter Android app,
+# the native Windows app (build.ps1) and the Linux server and desktop app (dlopen from Rust); the
+# Apple builds run MLX instead (Apple/TLLocalAI).
 #
 # Backends are loaded at run time (GGML_BACKEND_DL): the CPU one in the variants for each
-# instruction set, and Vulkan where the build has its SDK. A device without a working Vulkan
-# driver simply runs on the CPU. The source is fetched once at configure time, pinned below
+# instruction set, and Vulkan where the build has its SDK, or CUDA instead (TL_LLAMA_CUDA, the Linux
+# server's NVIDIA image). A device without a working driver simply runs on the CPU. The source is fetched once at configure time, pinned below
 # (about 30 MB); point TL_LLAMA_SOURCE at a local checkout to build offline.
 cmake_minimum_required(VERSION 3.21)
 project(tl_llama LANGUAGES C CXX)
@@ -12,6 +13,8 @@ set(TL_LLAMA_TAG "v0.8.0" CACHE STRING "llama.cpp release tag")
 set(TL_LLAMA_SOURCE "" CACHE PATH "a local llama.cpp checkout (instead of downloading)")
 option(TL_LLAMA_VULKAN "build the Vulkan backend" ON)
 option(TL_LLAMA_OPENCL "build the OpenCL backend (Adreno GPUs, on Android)" OFF)
+option(TL_LLAMA_CUDA "build the CUDA backend instead of Vulkan (NVIDIA)" OFF)
+option(TL_LLAMA_VULKAN_HEADERS "build against the Vulkan and SPIR-V headers pinned below, not the system's (Linux: a distribution's can be too old for llama.cpp)" OFF)
 
 set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
@@ -24,6 +27,18 @@ set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)        # binaries run on other machines than the builder
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
   set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
+endif()
+if(TL_LLAMA_CUDA)
+  # one GPU backend: with Vulkan too, an NVIDIA card would be two devices the model is split across
+  if(TL_LLAMA_VULKAN)
+    message(FATAL_ERROR "tl_llama: TL_LLAMA_CUDA needs -DTL_LLAMA_VULKAN=OFF")
+  endif()
+  set(GGML_CUDA ON CACHE BOOL "" FORCE)
+  # recent cards only: RTX 30, 40 and 50 built for, Turing and the data-centre ones through PTX
+  # (compiled by the driver on first use); sm_120 needs CUDA 12.8
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "75-virtual;80-virtual;86-real;89-real;120-real" CACHE STRING "" FORCE)
+  endif()
 endif()
 if(TL_LLAMA_VULKAN)
   # the NDK's shader compiler lies outside what its toolchain lets CMake search
@@ -48,8 +63,10 @@ if(TL_LLAMA_VULKAN)
 endif()
 
 include(FetchContent)
-# the NDK has Vulkan's C headers only; llama.cpp's backend is written against the C++ ones
-if(ANDROID AND GGML_VULKAN)
+# the NDK has Vulkan's C headers only, and a Linux distribution's can be older than llama.cpp's backend
+# is written against (Debian 12: 1.3.239, without VK_EXT_layer_settings): the headers of one Vulkan
+# SDK, linked against the system's loader
+if(GGML_VULKAN AND (ANDROID OR TL_LLAMA_VULKAN_HEADERS))
   FetchContent_Declare(vulkan_headers
     URL "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.335.0.tar.gz"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
@@ -136,7 +153,7 @@ if(NOT TL_LLAMA_CLANG)
   # every library the plugin needs at run time, for the platform CMake files to bundle: the
   # backends are separate modules (which CPU variants exist depends on the processor family)
   set(_libs tl_llama llama mtmd ggml ggml-base)
-  foreach(b ggml-cpu ggml-vulkan ggml-opencl)
+  foreach(b ggml-cpu ggml-vulkan ggml-opencl ggml-cuda)
     if(TARGET ${b})
       list(APPEND _libs ${b})
     endif()

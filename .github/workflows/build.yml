@@ -180,6 +180,9 @@ jobs:
             build/cache/electron
           key: deps-electron-linux-${{ hashFiles('Cargo.lock', 'web/package-lock.json') }}
           restore-keys: deps-electron-linux-
+      # the on-device AI's GPU backend (Vulkan); without glslc build.sh builds the CPU one only
+      - name: Vulkan headers and shader compiler
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslc libvulkan-dev spirv-headers
       - name: Build
         run: ./build.sh --yes electron-linux
       - uses: actions/upload-artifact@v4

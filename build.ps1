@@ -110,7 +110,9 @@ function Need-Flutter {
 }
 
 function Need-Vulkan {
-  if ($env:VULKAN_SDK) { return }
+  # the variable alone is not enough: it outlives an SDK that was removed
+  if ($env:VULKAN_SDK -and (Test-Path "$env:VULKAN_SDK\Include\vulkan\vulkan.h")) { return }
+  if ($env:VULKAN_SDK) { Say "VULKAN_SDK is $env:VULKAN_SDK, but no Vulkan SDK is there" }
   Say 'Missing: Vulkan SDK (GPU support for on-device AI; about 500 MB). Without it the AI runs on the processor only.'
   if (Ask 'Install the Vulkan SDK with winget?') { winget install --id KhronosGroup.VulkanSDK -e --accept-source-agreements --accept-package-agreements; Refresh-Path }
 }

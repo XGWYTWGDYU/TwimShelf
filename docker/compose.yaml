@@ -28,3 +28,14 @@ services:
       # TL_ALLOW_PUBLIC: "true"  # answer the internet too (local network only otherwise); put HTTPS in front
       # TL_PORT: "2778"          # the port inside the container (with host networking: on the host)
       TZ: "Asia/Shanghai"
+    # GPU for on-device AI tagging (docker/README.md, GPU). AMD and Intel, with this image:
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # NVIDIA, with the CUDA image (./build.sh docker-cuda) and the NVIDIA Container Toolkit:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

@@ -53,22 +53,30 @@ static ggml_backend_dev_t opencl_device() {
 // encoder, that is also the size it warms up with, instead of its own limit of 1288²: an attention
 // that size fits no GPU buffer without flash attention, and runs on the processor in 4.8 GB.
 static constexpr int kTaggingTokens = 1024;
-// Without flash attention its encoder took 6.8 s instead of 12.8 s for such a picture on a Radeon
-// RX 580 (Vulkan, no fp16 or matrix cores), in a compute buffer of 1.2 GB instead of 0.6 GB. Taken
+// Vulkan: without flash attention its encoder took 6.8 s instead of 12.8 s for such a picture on a
+// Radeon RX 580 (no fp16 or matrix cores), in a compute buffer of 1.2 GB instead of 0.6 GB. Taken
 // where the GPU has that room left beside the projector once the language model is in place.
+// (CUDA's flash attention is its fast path: left as it is.)
 static constexpr size_t kEncoderBuffer = size_t(1300) << 20;
 
-/// What is free on the GPU the model runs on (the first one, when llama.cpp chooses); 0 without one.
-static size_t gpu_free(ggml_backend_dev_t chosen) {
-  ggml_backend_dev_t d = chosen;
-  for (size_t i = 0; !d && i < ggml_backend_dev_count(); i++) {
+/// The GPU the model runs on (the first one, when llama.cpp chooses), or none.
+static ggml_backend_dev_t model_gpu(ggml_backend_dev_t chosen) {
+  for (size_t i = 0; !chosen && i < ggml_backend_dev_count(); i++) {
     ggml_backend_dev_t c = ggml_backend_dev_get(i);
     const auto type = ggml_backend_dev_type(c);
-    if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) d = c;
+    if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) chosen = c;
   }
+  return chosen;
+}
+
+/// A Vulkan GPU with `bytes` free.
+static bool vulkan_with_room(ggml_backend_dev_t d, size_t bytes) {
+  if (!d) return false;
+  ggml_backend_reg_t r = ggml_backend_dev_backend_reg(d);
+  if (!r || std::strcmp(ggml_backend_reg_name(r), "Vulkan") != 0) return false;
   size_t free = 0, total = 0;
-  if (d) ggml_backend_dev_memory(d, &free, &total);
-  return free;
+  ggml_backend_dev_memory(d, &free, &total);
+  return free >= bytes;
 }
 
 static size_t file_size(const char *utf8) {
@@ -136,7 +144,7 @@ static tl_llama *load_model(const char *weights, const char *projector, int32_t 
     if (llama_model_meta_val_str(m->model, "general.architecture", arch, sizeof arch) > 0 && std::strcmp(arch, "qwen2vl") == 0) {
       vp.image_max_tokens = kTaggingTokens;
       const size_t projector_bytes = file_size(projector);
-      if (vp.use_gpu && projector_bytes > 0 && gpu_free(gpu) >= projector_bytes + kEncoderBuffer) vp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+      if (vp.use_gpu && projector_bytes > 0 && vulkan_with_room(model_gpu(gpu), projector_bytes + kEncoderBuffer)) vp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
 #ifdef __ANDROID__
       __android_log_print(ANDROID_LOG_INFO, "tl_llama", "encoder: flash attention %s", vp.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED ? "off" : "auto");
 #endif

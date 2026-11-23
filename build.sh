@@ -4,6 +4,7 @@
 #   ./build.sh                 everything this computer can build
 #   ./build.sh flutter-android native-macos …
 #   ./build.sh docker          the Linux server with the web app, as a Docker image
+#   ./build.sh docker-cuda     the same with NVIDIA (CUDA) on-device AI, amd64
 #   ./build.sh --list          the targets and where each can be built
 #   ./build.sh --check         only check the tools; install nothing, build nothing
 #   ./build.sh --configure     only apply config.yaml (names, ids, icons, share extension)
@@ -221,7 +222,7 @@ build_llama_linux() {   # build_llama_linux <output directory>
   # The packaged libraries sit together, so resolve them relative to each other.
   cmake -S "$ROOT/flutter/tl_llama/src" -B "$build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN' \
-    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$build/lib" -DTL_LLAMA_VULKAN=$vk "${extra[@]}"
+    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$build/lib" -DTL_LLAMA_VULKAN=$vk -DTL_LLAMA_VULKAN_HEADERS=ON "${extra[@]}"
   cmake --build "$build" --target tl_llama
   rm -rf "$out" && mkdir -p "$out"
   find "$build" -maxdepth 4 -type f -name 'lib*.so*' \
@@ -230,6 +231,7 @@ build_llama_linux() {   # build_llama_linux <output directory>
   find "$build" -maxdepth 4 -type l -name 'lib*.so*' \
     \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
     -exec cp -P {} "$out/" \;
+  [[ $vk == OFF || -e "$out/libggml-vulkan.so" ]] || fail "llama.cpp's Vulkan backend was not built (see $build)"
 }
 
 # the desktop app: React + the server binary in Electron
@@ -296,13 +298,19 @@ build_target() {
       [[ $OS == Darwin ]] || fail "electron-macos builds on macOS"
       build_electron mac
       rm -rf "$DIST/TwimShelf Electron.app"; cp -R "$ELECTRON_OUT"/mac*/TwimShelf.app "$DIST/TwimShelf Electron.app" ;;
-    docker)
+    docker|docker-cuda)
       # the Linux server and the web app; everything is compiled inside the image, so this
-      # computer needs only Docker (its own build cache stays in Docker's storage)
+      # computer needs only Docker (its own build cache stays in Docker's storage). The AI's GPU:
+      # Vulkan (AMD, Intel), or CUDA (NVIDIA, amd64; NVIDIA's images are several GB)
       have docker || fail "Docker is needed: https://docs.docker.com/get-docker/ (or OrbStack, Colima)"
-      docker build -f "$ROOT/docker/Dockerfile" --build-arg VERSION="$v" --build-arg RUST_VERSION="$RUST_TOOLCHAIN" --build-arg NODE_VERSION="$(tr -d ' \n' < "$ROOT/.node-version")" -t "twimshelf:$v" -t twimshelf:latest "$ROOT"
-      local arch; arch=$(docker image inspect --format '{{.Architecture}}' "twimshelf:$v")
-      docker save "twimshelf:$v" | gzip > "$DIST/TwimShelf-$v-docker-linux-$arch.tar.gz" ;;
+      local gpu=(--build-arg GPU=vulkan) tag=""
+      if [[ $t == docker-cuda ]]; then
+        local cuda; cuda=$(sed -nE 's/^ARG CUDA_VERSION=(.+)$/\1/p' "$ROOT/docker/Dockerfile")
+        gpu=(--platform linux/amd64 --build-arg GPU=cuda --build-arg RUNTIME="nvidia/cuda:$cuda-runtime-ubuntu24.04"); tag=-cuda
+      fi
+      docker build -f "$ROOT/docker/Dockerfile" "${gpu[@]}" --build-arg VERSION="$v" --build-arg RUST_VERSION="$RUST_TOOLCHAIN" --build-arg NODE_VERSION="$(tr -d ' \n' < "$ROOT/.node-version")" -t "twimshelf:$v$tag" -t "twimshelf:latest$tag" "$ROOT"
+      local arch; arch=$(docker image inspect --format '{{.Architecture}}' "twimshelf:$v$tag")
+      docker save "twimshelf:$v$tag" | gzip > "$DIST/TwimShelf-$v-docker$tag-linux-$arch.tar.gz" ;;
     windows) fail "the Windows app (native, WinUI 3) builds on Windows: build.ps1 windows" ;;
     *) fail "Unknown target: $t (see --list)" ;;
   esac
@@ -322,6 +330,7 @@ flutter-android  the Flutter Android app (.apk per ABI)    macOS or Linux (Windo
 electron-linux   the Linux desktop app, React + Electron (.AppImage)  Linux
 windows          the native Windows app (setup .exe)       Windows: build.ps1
 docker           the Linux server + web app (image, .tar.gz) any computer with Docker (not built by default)
+docker-cuda      the same, with NVIDIA (CUDA) AI, amd64      any computer with Docker (not built by default)
 This computer builds by default: $(all_targets)
 EOF
       exit 0 ;;
@@ -341,7 +350,7 @@ if [[ $CHECK == 1 ]]; then
       flutter-ios) need_xcode; need_rust; need_flutter; need_flutter_apple ;;
       flutter-android) need_rust; need_flutter; need_android ;;
       electron-*) need_rust; need_node ;;
-      docker) have docker || MISSING+=(Docker) ;;
+      docker|docker-cuda) have docker || MISSING+=(Docker) ;;
     esac
   done
   (( ${#MISSING[@]} )) && { say "Missing: ${MISSING[*]}"; exit 1; }
