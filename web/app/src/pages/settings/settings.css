@@ -206,13 +206,10 @@
   color: var(--accent);
   background: var(--accent-soft);
 }
-.icon-tile.tile-blue, .icon-tile.tile-accent { color: var(--accent); background: var(--accent-soft); }
-.icon-tile.tile-purple { color: var(--ai); background: var(--ai-soft); }
-.icon-tile.tile-teal, .icon-tile.tile-green { color: var(--approved); background: var(--approved-soft); }
-.icon-tile.tile-indigo { color: var(--indigo); background: color-mix(in srgb, var(--indigo) 12%, transparent); }
-.icon-tile.tile-orange, .icon-tile.tile-brown, .icon-tile.tile-yellow { color: var(--orange); background: color-mix(in srgb, var(--orange) 13%, transparent); }
-.icon-tile.tile-red, .icon-tile.tile-pink { color: var(--danger); background: var(--danger-soft); }
-.icon-tile.tile-gray, .icon-tile.tile-secondary { color: var(--fg-2); background: var(--bg-subtle); }
+/* the symbol alone in the text colour (black, white in dark mode): no coloured tiles (a page of rainbow tiles was too
+   loud); red stays where something is deleted or stopped (the tile colour names are kept) */
+.icon-tile { color: var(--fg); background: none; }
+.icon-tile.tile-red { color: var(--danger); }
 .icon-tile-mascot {
   display: inline-grid;
   place-items: center;

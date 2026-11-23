@@ -29,7 +29,7 @@ import ExtensionPage from './ExtensionPage';
 import ImportRecordsPage from './ImportRecordsPage';
 import { AboutPage, ProblemsPage, StoragePage, WipePage } from './MaintenancePages';
 import ModelHubPage from './ModelHubPage';
-import { size } from './serverFiles';
+import { info as serverInfo, size } from './serverFiles';
 import {
   ActivityRow, Card, CardRow, NavRow, NavTile, Pill, RowDivider,
   runWipeFlow, SectionGroup, settings, StatsStrip, ToggleRow,
@@ -75,6 +75,8 @@ function SettingsOverview() {
   const task = useTask();
   const [loginItem, setLoginItem] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  // the server's page: 检查更新 is offered when the server is a GitHub build (it only tells)
+  const serverRepo = useAsync(async () => (window.twimshelf?.desktop ? null : (await serverInfo()).update_repo ?? null), []);
 
   useEffect(() => {
     window.twimshelf?.getLoginItem?.().then(setLoginItem, () => {});
@@ -369,7 +371,7 @@ function SettingsOverview() {
           </SectionGroup>
         )}
 
-        {!!updateRepo() && (
+        {(!!updateRepo() || !!serverRepo.data) && (
           <SectionGroup footer={L('update.footer')}>
             <Card spacing={12}>
               <CardRow

@@ -19,9 +19,11 @@ COPY config.yaml Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY core core
 COPY server server
 COPY flutter/tl_llama/src flutter/tl_llama/src
+# owner/name of a GitHub build: the web page then tells of newer releases (empty: never looks)
+ARG TL_UPDATE_REPO=""
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    export TL_VERSION="$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' config.yaml)" && \
+    export TL_VERSION="$(sed -n 's/^version: *\([0-9.]*\).*/\1/p' config.yaml)" TL_UPDATE_REPO="$TL_UPDATE_REPO" && \
     cargo build -p tl-server --release --locked && cp target/release/twimshelf-server /twimshelf-server
 RUN --mount=type=cache,target=/src/llama-build \
     cmake -S flutter/tl_llama/src -B /src/llama-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTL_LLAMA_VULKAN=OFF && \

@@ -1402,6 +1402,7 @@
   "update.check": "Check for Updates",
   "update.checking": "Checking for updates…",
   "update.current": "You have the latest version (%@).",
+  "update.docker": "This is the server version: pull the new image on the server (docker pull %@) and recreate the container.",
   "update.downloading": "Downloading the update…",
   "update.failed": "Couldn't update: %@",
   "update.footer": "Looks for a newer release on GitHub when the app opens (at most once a day). Nothing else is sent.",

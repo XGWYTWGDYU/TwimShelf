@@ -21,7 +21,7 @@ enum UpdateCheck {
         let ud = UserDefaults.standard
         if !manual, Date().timeIntervalSince1970 - ud.double(forKey: lastKey) < 86_400 { return }
         #if os(iOS)
-        let suffixes: [String] = []      // iOS: the release page
+        let suffixes = ["-iOS-unsigned.ipa"]      // iOS: the app's .ipa, downloaded (never installed here)
         #else
         let suffixes = [".dmg"]
         #endif

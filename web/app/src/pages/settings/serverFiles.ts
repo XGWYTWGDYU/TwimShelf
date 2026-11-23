@@ -13,6 +13,8 @@ export interface ServerInfo {
   device_name: string;
   sync_service: string;
   local_ai?: { supported: boolean; devices: string | null };
+  /** A GitHub build's repository (owner/name): newer releases are told (`lib/update`). */
+  update_repo?: string | null;
 }
 
 export async function serverFetch(url: string, init?: RequestInit): Promise<Response> {

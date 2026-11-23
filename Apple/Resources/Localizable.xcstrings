@@ -36944,6 +36944,35 @@
         }
       }
     },
+    "update.docker" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is the server version: pull the new image on the server (docker pull %@) and recreate the container."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これはサーバー版です：サーバーで新しいイメージを取得し（docker pull %@）、コンテナを作り直してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是服务器版：在服务器上拉取新镜像（docker pull %@），再重新创建容器即可。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這是伺服器版：在伺服器上拉取新映像（docker pull %@），再重新建立容器即可。"
+          }
+        }
+      }
+    },
     "update.downloading" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -469,8 +469,10 @@ class _ColorTile extends StatelessWidget {
         key: ValueKey('seed-${seed?.toARGB32() ?? 'system'}'),
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
+        // the name takes the height it needs; the swatch fills what is left (a fixed square
+        // overflowed the cell by a fraction of a pixel with some fonts and text sizes)
         child: Column(children: [
-          AspectRatio(
+          Expanded(child: Center(child: AspectRatio(
             aspectRatio: 1,
             child: DecoratedBox(
               decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(16)),
@@ -482,7 +484,7 @@ class _ColorTile extends StatelessWidget {
                 ),
               ),
             ),
-          ),
+          ))),
           const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,

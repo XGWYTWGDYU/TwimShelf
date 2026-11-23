@@ -192,15 +192,13 @@ class FormViewController: UIViewController, UICollectionViewDelegate {
         cell.backgroundConfiguration = .listCell()
         cell.contentView.subviews.filter { $0.tag == 4242 }.forEach { $0.removeFromSuperview() }
         var c = UIListContentConfiguration.valueCell()
-        c.image = row.icon.map(Self.badge)
-        c.imageProperties.maximumSize = CGSize(width: 29, height: 29)
+        Self.apply(row.icon, to: &c)
         switch row.kind {
         case let .value(title, detail):
             c.text = title; c.secondaryText = detail
         case let .button(title, destructive, enabled, _):
             c = .cell()
-            c.image = row.icon.map(Self.badge)
-            c.imageProperties.maximumSize = CGSize(width: 29, height: 29)
+            Self.apply(row.icon, to: &c)
             c.text = title
             c.textProperties.color = !enabled ? .tertiaryLabel : (destructive ? .systemRed : .tintColor)
         case let .navigation(title, detail, _):
@@ -208,8 +206,7 @@ class FormViewController: UIViewController, UICollectionViewDelegate {
             cell.accessories = [.disclosureIndicator()]
         case let .expander(title, detail, expanded, _):
             c = .subtitleCell()
-            c.image = row.icon.map(Self.badge)
-            c.imageProperties.maximumSize = CGSize(width: 29, height: 29)
+            Self.apply(row.icon, to: &c)
             c.text = title; c.secondaryText = detail
             c.secondaryTextProperties.color = .secondaryLabel
             let arrow = UIImageView(image: UIImage(systemName: expanded ? "chevron.up" : "chevron.down"))
@@ -242,6 +239,8 @@ class FormViewController: UIViewController, UICollectionViewDelegate {
         case let .stepper(title, value, range, step, format, changed):
             // Own layout: icon · title · flexible space · value · stepper, so nothing overlaps.
             let icon = UIImageView(image: row.icon.map(Self.badge))
+            icon.contentMode = .center
+            icon.tintColor = row.icon.map(Self.tint)
             icon.setContentHuggingPriority(.required, for: .horizontal)
             let t = UILabel()
             t.text = title
@@ -324,29 +323,30 @@ class FormViewController: UIViewController, UICollectionViewDelegate {
         }
     }
 
-    // MARK: Settings-style icon badges
+    // MARK: Row icons
 
-    private static var badgeCache: [Icon: UIImage] = [:]
+    /// A row's icon: the symbol alone, no coloured tile, in the text colour (black, white in dark mode). Another
+    /// colour only where it means something (red: what deletes or stops). The mascot mode's
+    /// icons keep their own colours.
     static func badge(_ icon: Icon) -> UIImage {
         if icon.symbol.hasPrefix("mascot:") { return Mascot.icon(String(icon.symbol.dropFirst(7)), side: 29) }
-        if let i = badgeCache[icon] { return i }
-        let size = CGSize(width: 29, height: 29)
-        let img = UIGraphicsImageRenderer(size: size).image { _ in
-            let r = CGRect(origin: .zero, size: size)
-            let p = UIBezierPath(roundedRect: r, cornerRadius: 7)
-            let top = icon.color.withAlphaComponent(1), bottom = icon.color.adjusted(by: -0.12)
-            p.addClip()
-            let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [top.cgColor, bottom.cgColor] as CFArray, locations: [0, 1])!
-            UIGraphicsGetCurrentContext()?.drawLinearGradient(g, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
-            let sym = UIImage(systemName: icon.symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))?
-                .withTintColor(.white, renderingMode: .alwaysOriginal)
-            if let sym {
-                let s = sym.size
-                sym.draw(in: CGRect(x: (size.width - s.width) / 2, y: (size.height - s.height) / 2, width: s.width, height: s.height))
-            }
-        }
-        badgeCache[icon] = img
-        return img
+        let cfg = UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)
+        // all in line weight: a filled symbol's outline version where there is one
+        let outline = icon.symbol.replacingOccurrences(of: ".fill", with: "")
+        let image = UIImage(systemName: outline, withConfiguration: cfg) ?? UIImage(systemName: icon.symbol, withConfiguration: cfg) ?? UIImage()
+        return image.withRenderingMode(.alwaysTemplate)
+    }
+
+    static func tint(_ icon: Icon) -> UIColor {
+        icon.color == .systemRed ? .systemRed : .label
+    }
+
+    /// The icon into a list cell, centred in the same 29-point column whatever the symbol's shape.
+    private static func apply(_ icon: Icon?, to c: inout UIListContentConfiguration) {
+        c.image = icon.map(badge)
+        c.imageProperties.maximumSize = CGSize(width: 29, height: 29)
+        c.imageProperties.reservedLayoutSize = CGSize(width: 29, height: 29)
+        if let icon, !icon.symbol.hasPrefix("mascot:") { c.imageProperties.tintColor = tint(icon) }
     }
 
     // MARK: Helpers
@@ -446,14 +446,6 @@ final class BusyOverlay: UIView {
         UIView.animate(withDuration: 0.2, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, animations: { self.alpha = 0; self.card.transform = CGAffineTransform(scaleX: 0.92, y: 0.92) }) { _ in
             self.removeFromSuperview(); done()
         }
-    }
-}
-
-extension UIColor {
-    func adjusted(by amount: CGFloat) -> UIColor {
-        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        guard getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return self }
-        return UIColor(hue: h, saturation: s, brightness: max(0, min(1, b + amount)), alpha: a)
     }
 }
 

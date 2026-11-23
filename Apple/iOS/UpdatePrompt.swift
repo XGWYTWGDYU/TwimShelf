@@ -1,7 +1,7 @@
 import UIKit
 
-/// 检查更新 on iOS and iPadOS: a newer release opens its GitHub page, where it is downloaded
-/// (an app from outside the App Store cannot install itself).
+/// 检查更新 on iOS and iPadOS: a newer release's .ipa is downloaded (in the browser; an app from
+/// outside the App Store cannot install itself), or its GitHub page opens when it has none.
 @MainActor
 enum UpdatePrompt {
     static func show(_ r: Result<Core.UpdateInfo?, Error>, on vc: UIViewController?, manual: Bool = false) {
@@ -18,7 +18,8 @@ enum UpdatePrompt {
         case .success(let info?):
             a = UIAlertController(title: L("update.available.title", info.version), message: L("update.available.message", UpdateCheck.current), preferredStyle: .alert)
             a.addAction(UIAlertAction(title: L("update.openPage"), style: .default) { _ in
-                if let u = URL(string: info.pageUrl), u.scheme == "https" { UIApplication.shared.open(u) }
+                let target = info.assetUrl.flatMap(URL.init(string:)) ?? URL(string: info.pageUrl)
+                if let u = target, u.scheme == "https", u.host() == "github.com" { UIApplication.shared.open(u) }
             })
             a.addAction(UIAlertAction(title: L("update.skip"), style: .destructive) { _ in UpdateCheck.skip(info.version) })
             a.addAction(UIAlertAction(title: L("update.later"), style: .cancel))

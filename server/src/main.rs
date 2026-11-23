@@ -194,6 +194,8 @@ async fn info(State(cfg): State<Shared>) -> Json<Value> {
         "cache": d("cache"), "uploads": d("uploads"), "exports": d("exports"),
         "version": VERSION, "functions": dispatch::NAMES, "device_name": device_name(), "sync_service": env("TL_SYNC_SERVICE", "_twlib._tcp"),
         "local_ai": { "supported": local_ai_supported, "devices": local_ai_devices },
+        // a GitHub build's repository (the page tells of newer releases); none for other builds
+        "update_repo": option_env!("TL_UPDATE_REPO").filter(|r| r.contains('/')),
     }))
 }
 

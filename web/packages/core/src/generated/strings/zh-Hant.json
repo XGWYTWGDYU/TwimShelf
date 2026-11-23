@@ -1252,6 +1252,7 @@
   "update.check": "檢查更新",
   "update.checking": "正在檢查更新…",
   "update.current": "已是最新版本（%@）。",
+  "update.docker": "這是伺服器版：在伺服器上拉取新映像（docker pull %@），再重新建立容器即可。",
   "update.downloading": "正在下載更新…",
   "update.failed": "無法更新：%@",
   "update.footer": "應用程式開啟時在 GitHub 上查找新版本（每天最多一次），不傳送其他任何資訊。",

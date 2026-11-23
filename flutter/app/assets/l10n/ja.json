@@ -1252,6 +1252,7 @@
   "update.check": "アップデートを確認",
   "update.checking": "アップデートを確認中…",
   "update.current": "最新バージョンです（%@）。",
+  "update.docker": "これはサーバー版です：サーバーで新しいイメージを取得し（docker pull %@）、コンテナを作り直してください。",
   "update.downloading": "アップデートをダウンロード中…",
   "update.failed": "アップデートできませんでした：%@",
   "update.footer": "アプリを開いたときに GitHub で新しいリリースを確認します（1 日 1 回まで）。ほかには何も送信しません。",

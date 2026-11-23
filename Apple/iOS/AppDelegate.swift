@@ -35,6 +35,16 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             // the app's own window, not the lock in front of it: this is still there after unlocking
             UpdatePrompt.show(r, on: UIApplication.shared.connectedScenes.compactMap { $0.delegate as? SceneDelegate }.first?.window?.rootViewController)
         }
+        #if DEBUG
+        // TL_FAKE_UPDATE: the update prompt with a made-up newer release (a local build never checks)
+        if ProcessInfo.processInfo.environment["TL_FAKE_UPDATE"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let info = Core.UpdateInfo(version: "9.9.9", pageUrl: "https://github.com/XGWYTWGDYU/TwimShelf/releases", notes: "",
+                                           assetName: "TwimShelf-9.9.9-iOS-unsigned.ipa", assetUrl: "https://github.com/XGWYTWGDYU/TwimShelf/releases/download/v9.9.9/TwimShelf-9.9.9-iOS-unsigned.ipa", assetSize: 0, assetDigest: nil)
+                UpdatePrompt.show(.success(info), on: UIApplication.shared.connectedScenes.compactMap { $0.delegate as? SceneDelegate }.first?.window?.rootViewController)
+            }
+        }
+        #endif
         // Under memory pressure: stop AI work and release the model (it restarts on the next library change).
         NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { AutoTagger.shared.stop() }

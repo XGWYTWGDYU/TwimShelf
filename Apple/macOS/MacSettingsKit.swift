@@ -180,12 +180,12 @@ struct IconTile: View {
         if let mascot, mascotOn || alwaysMascot {
             Image(nsImage: Mascot.icon(mascot, side: size))
         } else {
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.46, weight: .semibold))
-                .foregroundStyle(.white)
+            // the symbol alone, in line weight and the text colour (black, white in dark mode): no coloured tile (a page of
+            // rainbow tiles was too loud); red stays where something is deleted or stopped
+            Image(systemName: NSImage(systemSymbolName: symbol.replacingOccurrences(of: ".fill", with: ""), accessibilityDescription: nil) != nil ? symbol.replacingOccurrences(of: ".fill", with: "") : symbol)
+                .font(.system(size: size * 0.5, weight: .regular))
+                .foregroundStyle(color == .red ? Color.red : Color.primary)
                 .frame(width: size, height: size)
-                .background(color.gradient, in: RoundedRectangle(cornerRadius: size * 0.29, style: .continuous))
-                .shadow(color: color.opacity(0.28), radius: 4, y: 2)
         }
     }
 }
