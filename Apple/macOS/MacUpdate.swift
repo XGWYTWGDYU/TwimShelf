@@ -159,7 +159,8 @@ enum MacUpdate {
     /// The app quits with a version staged: it is put in place (not reopened).
     static func applyOnQuit() { apply(relaunch: false) }
 
-    /// At launch: staged copies a run left behind (it crashed before quitting) go.
+    /// At launch: what a run left behind when it ended halfway (a crash, a force quit) goes —
+    /// staged copies beside the app, and disk images still mounted while one was being staged.
     static func removeLeftovers() {
         let app = Bundle.main.bundleURL, dir = app.deletingLastPathComponent()
         let prefix = ".\(app.deletingPathExtension().lastPathComponent)-update-"
@@ -167,6 +168,15 @@ enum MacUpdate {
             let fm = FileManager.default
             for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] where name.hasPrefix(prefix) && name.hasSuffix(".app") {
                 try? fm.removeItem(at: dir.appendingPathComponent(name))
+            }
+            let tmp = fm.temporaryDirectory
+            for name in (try? fm.contentsOfDirectory(atPath: tmp.path)) ?? [] where name.hasPrefix("TwimShelf-update-") {
+                let mount = tmp.appendingPathComponent(name)
+                // a mount point that still holds an image: detached first (an empty folder just goes)
+                if (try? fm.contentsOfDirectory(atPath: mount.path))?.isEmpty == false {
+                    _ = run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
+                }
+                try? fm.removeItem(at: mount)
             }
         }
     }
