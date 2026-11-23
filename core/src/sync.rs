@@ -793,6 +793,7 @@ impl SyncNode {
                             crate::oplog::Op::Recent { .. } => "recently_added".to_string(),
                             crate::oplog::Op::Setting { .. } => "setting".to_string(),
                             crate::oplog::Op::Album { .. } => "album".to_string(),
+                            crate::oplog::Op::Added { .. } => "added_time".to_string(),
                             crate::oplog::Op::Unknown(_) => "from_newer_app_version".to_string(),
                         };
                         *kinds.entry(k).or_default() += 1;

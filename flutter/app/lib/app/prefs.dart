@@ -77,8 +77,25 @@ class Prefs extends ChangeNotifier {
   int get densityLandscape => _p.getInt('feed.density.landscape') ?? 1;
   set densityLandscape(int v) => _set('feed.density.landscape', v);
 
+  /// 欢迎: seen once (not shown again by itself; 关于 opens it any time).
+  bool get welcomeSeen => _bool('welcome.seen', false);
+  set welcomeSeen(bool v) => _set('welcome.seen', v);
+
+  /// A phone held upright: one column of cards (少, the default) or two (多), the native key.
+  bool get phoneTwoColumns => _bool('feed.density.phone', false);
+  set phoneTwoColumns(bool v) => _set('feed.density.phone', v);
+
+  /// A tablet's screen, whatever size the window has now (a narrowed iPad window keeps the
+  /// tablet's choices: they are for the screen, and the window may widen again).
+  static bool largeScreen(BuildContext context) {
+    final display = View.of(context).display;
+    return display.size.shortestSide / display.devicePixelRatio >= 600;
+  }
+
   /// The columns of 浏览 for a width: one card per 400 at 适中, wider at 少, narrower at 多.
-  int feedColumns(double width, double height) {
+  /// A phone held upright has its own choice of one column or two.
+  int feedColumns(double width, double height, {bool phone = false}) {
+    if (phone && width <= height) return phoneTwoColumns ? 2 : 1;
     final level = (width > height ? densityLandscape : densityPortrait).clamp(0, 2);
     final per = 400 * const [1.35, 1.0, 0.72][level];
     return (width / per).floor().clamp(1, 4 + (level == 2 ? 2 : 0));

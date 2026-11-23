@@ -126,6 +126,7 @@ fn observe(s: &Store) -> BTreeSet<String> {
     q("SELECT name, deleted, hlc FROM folder", 3, "F");
     q("SELECT folder, media_id, present, hlc FROM folder_media", 4, "FM");
     q("SELECT post_id, at FROM recent", 2, "RA");
+    q("SELECT post_id, at FROM post_added", 2, "AD");
     q("SELECT key, value, hlc FROM setting", 3, "SET");
     v
 }
@@ -146,6 +147,8 @@ fn spec(ops: &[LoggedOp]) -> BTreeSet<String> {
     let mut folder: BTreeMap<String, (u64, bool)> = BTreeMap::new();
     let mut member: BTreeMap<(String, String), (u64, bool)> = BTreeMap::new();
     let mut recent: BTreeMap<String, u64> = BTreeMap::new();
+    // when a post came in: the smallest time recorded (0 = none)
+    let mut added: BTreeMap<String, u64> = BTreeMap::new();
     let mut settings: BTreeMap<String, (u64, Option<String>)> = BTreeMap::new();
     fn up<T: Ord + Clone>(slot: &mut Option<T>, x: T) { if slot.as_ref().map_or(true, |c| x > *c) { *slot = Some(x); } }
     for lo in ops {
@@ -177,6 +180,7 @@ fn spec(ops: &[LoggedOp]) -> BTreeSet<String> {
             Op::Recent { post_id, at } => { let e = recent.entry(post_id.clone()).or_insert(0); *e = (*e).max(*at); }
             Op::Setting { key, value, hlc } => { let mut s = settings.get(key).cloned(); up(&mut s, (*hlc, value.clone())); settings.insert(key.clone(), s.unwrap()); }
             Op::Album { .. } => {}
+            Op::Added { post_id, at } => { if *at > 0 { let e = added.entry(post_id.clone()).or_insert(*at); *e = (*e).min(*at); } }
             Op::Unknown(_) => {}
         }
     }
@@ -196,6 +200,7 @@ fn spec(ops: &[LoggedOp]) -> BTreeSet<String> {
     for (f, (h, del)) in &folder { v.insert(format!("F {f} {} {h}", *del as u8)); }
     for ((f, m), (h, p)) in &member { v.insert(format!("FM {f} {m} {} {h}", *p as u8)); }
     for (p, at) in &recent { v.insert(format!("RA {p} {at}")); }
+    for (p, at) in &added { v.insert(format!("AD {p} {at}")); }
     for (k, (h, val)) in &settings { v.insert(format!("SET {k} {} {h}", val.clone().unwrap_or("-".into()))); }
     v
 }

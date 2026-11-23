@@ -131,7 +131,7 @@ export const PostCard = memo(function PostCard({ post, width, onOpen, onContext,
 });
 
 /** The tags as pills in one row that scrolls sideways (TagStripView): "◷ Recently Added" first,
- *  then each tag in its colour (yours blue, an AI's purple with ✦, approved green with ✓), "+" last. */
+ *  then each tag with a dot in its colour (yours blue, an AI's purple, approved green), "+" last. */
 function TagStrip({ item, marks, onTag, onTagMenu, onAdd }: { item: FeedItem; marks?: Marks; onTag?: (l: string) => void; onTagMenu?: (it: FeedItem, l: string, e: React.MouseEvent) => void; onAdd?: (it: FeedItem) => void }) {
   const row = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -155,7 +155,7 @@ function TagStrip({ item, marks, onTag, onTagMenu, onAdd }: { item: FeedItem; ma
           <span key={t.label} className={`pill pill-${kind}`} title={t.label}
             onClick={(e) => { e.stopPropagation(); onTag?.(t.label); }}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onTagMenu?.(item, t.label, e); }}>
-            <span>{ai ? (mine ? '✓ ' : '✦ ') : ''}{markMatches(t.label, marks?.origins.includes(t.origin) ? marks.tag : undefined)}</span>
+            <span>{markMatches(t.label, marks?.origins.includes(t.origin) ? marks.tag : undefined)}</span>
           </span>
         );
       })}
@@ -168,7 +168,7 @@ function TagStrip({ item, marks, onTag, onTagMenu, onAdd }: { item: FeedItem; ma
 export function TagChip({ label, origin, onClick }: { label: string; origin: number; onClick?: () => void }) {
   const mine = (origin & 1) !== 0, ai = (origin & 2) !== 0;
   const kind = mine && ai ? 'approved' : ai ? 'ai' : 'mine';
-  return <span className={`pill pill-${kind}`} onClick={onClick}>{ai ? (mine ? '✓ ' : '✦ ') : ''}{label}</span>;
+  return <span className={`pill pill-${kind}`} onClick={onClick}>{label}</span>;
 }
 
 function Picture({ item, width }: { item: FeedItem; width: number }) {

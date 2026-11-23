@@ -30,8 +30,8 @@ final class TagSourcesViewController: UITableViewController {
         let models = t.models.map { ModelStore.shared.displayName($0) }
         c.secondaryText = models.isEmpty ? who : "\(who) · \(models.joined(separator: "、"))"
         c.secondaryTextProperties.color = .secondaryLabel
-        c.image = UIImage(systemName: t.isAI ? (t.isUser ? "checkmark.seal.fill" : "sparkles") : "person.fill")
-        c.imageProperties.tintColor = TagChip.color(t)
+        c.image = TagChip.dot(TagChip.color(t), side: 10)
+        c.imageProperties.reservedLayoutSize = CGSize(width: 20, height: 20)
         cell.contentConfiguration = c
         cell.selectionStyle = .none
         return cell

@@ -50,6 +50,7 @@ final class AdaptiveRootViewController: UIViewController {
     private func update() {
         let w = wantsWide
         guard w != wide else { return }
+        let previous = current
         wide = w
         // whatever was presented over the old layout belongs to it
         let presented = presentedViewController
@@ -62,6 +63,18 @@ final class AdaptiveRootViewController: UIViewController {
             bar = next
         }
         feed.onShowBrowse = { [weak next] in next?.select(.browse) }
+        // The search goes with the layout: into the search tab's page, or back into 浏览.
+        if next.searchFeed != nil {
+            let keys = feed.takeSearch()
+            next.attachSearch(to: feed)
+            if !keys.isEmpty { next.showSearch(keys: keys) }
+        } else {
+            next.attachSearch(to: feed)
+            if let page = previous?.searchFeed, previous?.isShowingSearch == true {
+                let keys = page.takeSearch()
+                if !keys.isEmpty { feed.setSearch(keys: keys); next.select(.browse) }
+            }
+        }
         child?.willMove(toParent: nil)
         child?.view.removeFromSuperview()
         child?.removeFromParent()
@@ -104,6 +117,10 @@ final class AdaptiveRootViewController: UIViewController {
     }
 
     func debugSizeTour(_ scene: UIWindowScene) {
+        // a search on the search tab first: it should follow into 浏览 (narrow) and back (wide)
+        if ProcessInfo.processInfo.environment["TL_SIZE_TOUR"] == "search" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.tablet?.showSearch(keys: [TokenQuery.termKey("seed")]) }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { self.tablet?.sidebar.isHidden = false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) { self.traitOverrides.horizontalSizeClass = .compact }
         DispatchQueue.main.asyncAfter(deadline: .now() + 18) { self.traitOverrides.horizontalSizeClass = .regular }
@@ -128,9 +145,7 @@ final class FeedHost: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         adopt()
-        if !feed.usesSharedNavigationBar {
-            navigationController?.setNavigationBarHidden(true, animated: false)
-        }
+        navigationController?.setNavigationBarHidden(true, animated: false)
     }
 
     func adopt() {
@@ -156,6 +171,9 @@ final class FeedHost: UIViewController {
 /// sidebar). The folders are listed one by one and follow the library.
 final class TabletRootController: UITabBarController, UITabBarControllerDelegate, UITabBarController.Sidebar.Delegate {
     private let feed: FeedViewController
+    /// The search tab's page (the wide layout only; elsewhere 浏览 searches in place).
+    let searchFeed: FeedViewController?
+    private var searchTab: UISearchTab?
     private let folderGroup: UITabGroup
     private let otherGroup: UITabGroup
     private var folderNames: [String] = []
@@ -186,6 +204,7 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     init(feed: FeedViewController, barOnly: Bool) {
         self.feed = feed
         railOnly = barOnly || UIDevice.current.userInterfaceIdiom == .phone
+        searchFeed = railOnly ? nil : FeedViewController(role: .search)
         folderGroup = Self.group(L("place.folders"), "folder", "group.folders", children: [])
         otherGroup = Self.group(L("sidebar.other"), "ellipsis.circle", "group.other", children: [])
         super.init(nibName: nil, bundle: nil)
@@ -222,7 +241,14 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         } else {
             // 浏览, 文件夹, 设置 in the bar (the media kinds and the others are sidebar sections,
             // listed in the sidebar in this order too)
-            tabs = [browse, media, folderGroup, otherGroup, settings]
+            // the search is a tab of its own: at the trailing end of the tab bar, at the top of
+            // the sidebar (UISearchTab's own places), its page a second feed
+            // (held in a NavContainer, as 设置: the tab bar controller wraps a tab's root in a
+            // navigation stack of its own when the sidebar folds, and stacks may not nest)
+            let search = UISearchTab { [searchFeed] _ in NavContainer(root: FeedHost(feed: searchFeed!)) }
+            if #available(iOS 26.0, *) { search.automaticallyActivatesSearch = false }
+            searchTab = search
+            tabs = [browse, media, folderGroup, otherGroup, settings, search]
         }
         Self.lock(tabs)
         reloadFolders()
@@ -251,37 +277,19 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     private var stressOpenedPhotos = 0
     private var stressOpenedVideos = 0
     private var stressCheckImmediately = false
-    private var stressBaselinePortraitNavY: CGFloat?
 
     @objc private func stressTick() {
         stressFrames += 1
         guard stressSettled || stressCheckImmediately, !changingSize, !changingSidebar else { return }
         let s = feed.debugChromeSnapshot()
         guard !s.modalOpen else { return }
-        if s.isLandscape {
-            // Top-right 3 buttons MUST be visible on the right edge, never drifted to top-left!
-            let expectedRight = s.safeAreaInWindow.maxX - 16
-            let expectedTop = s.safeAreaInWindow.minY + 26
-            let r = s.browseActionsInWindow
-            if s.browseActionsHidden || s.browseActionsAlpha < 0.9 {
-                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] landscape browseActions hidden=\(s.browseActionsHidden) alpha=\(s.browseActionsAlpha)")
-            } else if r.minX < s.windowSize.width * 0.5 || abs(r.maxX - expectedRight) > 6 || abs(r.minY - expectedTop) > 8 {
-                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] landscape browseActions DRIFT rect=\(NSCoder.string(for: r)) expectedRight=\(expectedRight) expectedTop=\(expectedTop) win=\(NSCoder.string(for: s.windowSize))")
-            }
-        } else {
-            // Portrait: 3 buttons live in navigation bar, navBar visible, browseChrome hidden, no upward jump.
-            if s.navBarHidden {
-                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait navBarHidden=true")
-            }
-            if s.rightBarItemCount < 3 {
-                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait rightBarItemCount=\(s.rightBarItemCount)")
-            }
-            if s.browseChromeAlpha > 0.05 {
-                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait browseChromeAlpha=\(s.browseChromeAlpha)")
-            }
-            if let baseY = stressBaselinePortraitNavY, abs(s.navBarFrameInWindow.minY - baseY) > 2 {
-                stressAnomalies.append("[\(stressPhase) f\(stressFrames)] portrait navBar jumped minY=\(s.navBarFrameInWindow.minY) baseline=\(baseY)")
-            }
+        // 浏览's two buttons on the tab bar's row, at its right margin, in both orientations
+        // (never drifted to the top-left, never hidden by a viewer coming and going)
+        let r = s.browseActionsInWindow
+        if s.browseActionsHidden || s.browseActionsAlpha < 0.9 {
+            stressAnomalies.append("[\(stressPhase) f\(stressFrames)] browseActions hidden=\(s.browseActionsHidden) alpha=\(s.browseActionsAlpha)")
+        } else if abs(r.maxX - s.actionsRightInWindow) > 6 || abs(r.minY - (s.safeAreaInWindow.minY + s.actionsTop)) > 6 {
+            stressAnomalies.append("[\(stressPhase) f\(stressFrames)] browseActions DRIFT rect=\(NSCoder.string(for: r)) right=\(s.actionsRightInWindow) top=\(s.safeAreaInWindow.minY + s.actionsTop) win=\(NSCoder.string(for: s.windowSize))")
         }
         if s.contentInsetTop < 0 || s.contentInsetTop > 260 {
             stressAnomalies.append("[\(stressPhase) f\(stressFrames)] bad contentInsetTop=\(s.contentInsetTop)")
@@ -299,11 +307,7 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         }
         // 1. Portrait baseline + photo open/close (check EVERY frame immediately on dismiss!)
         steps.append(("portrait-init", 0.8, { self.stressSettled = false; self.stressCheckImmediately = false; rotate(.portrait) }))
-        steps.append(("portrait-baseline", 0.5, {
-            let s = self.feed.debugChromeSnapshot()
-            self.stressBaselinePortraitNavY = s.navBarFrameInWindow.minY
-            self.stressSettled = true
-        }))
+        steps.append(("portrait-baseline", 0.5, { self.stressSettled = true }))
         steps.append(("portrait-open-photo", 0.8, {
             self.stressSettled = false; self.stressCheckImmediately = false
             if self.feed.debugOpenMedia(video: false) { self.stressOpenedPhotos += 1 }
@@ -413,7 +417,7 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         let landscapeAfter = size.width > size.height
         let wasLandscape = view.bounds.width > view.bounds.height
         let switchesChrome = !railOnly && (landscapeAfter != wasLandscape) && !sidebar.isHidden
-        if switchesChrome { feed.hideSearchDuringTransition(true) }
+        if switchesChrome { feed.hideActionsDuringTransition(true) }
         coordinator.animate(alongsideTransition: { [weak self] _ in
             guard let self else { return }
             self.layoutSearch(targetSize: size)
@@ -433,7 +437,7 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
                 self.view.layoutIfNeeded()
                 self.feed.view.layoutIfNeeded()
             }
-            if switchesChrome { self.feed.hideSearchDuringTransition(self.changingSize) }
+            if switchesChrome { self.feed.hideActionsDuringTransition(self.changingSize) }
         }
     }
 
@@ -462,47 +466,58 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     }
 
     private func layoutSearch(targetSize: CGSize? = nil) {
-        guard !changingSidebar, (targetSize != nil || !changingSize), view.window != nil, feed.isViewLoaded, feed.view.window != nil else { return }
-        guard selectedTab?.identifier == LibraryPlace.browse.id else {
-            feed.hostLandscapeActions(in: nil)
-            feed.additionalSafeAreaInsets.left = 0
-            feed.restoreSearchToContent(showsTitle: false)
-            return
-        }
+        guard !changingSidebar, (targetSize != nil || !changingSize), view.window != nil else { return }
         let size = targetSize ?? view.bounds.size
         let isLandscape = size.width > size.height
-        feed.hostLandscapeActions(in: isLandscape && !railOnly ? view : nil)
-        if railOnly || UIDevice.current.userInterfaceIdiom != .pad {
-            if abs(feed.additionalSafeAreaInsets.left) > 0.5 { feed.additionalSafeAreaInsets.left = 0 }
-            feed.restoreSearchToContent(showsTitle: true)
+        if isShowingSearch, let page = searchFeed, page.isViewLoaded, page.view.window != nil {
+            let inset = isLandscape ? coveredLeftInset(of: page) : 0
+            if abs(page.additionalSafeAreaInsets.left - inset) > 0.5 { page.additionalSafeAreaInsets.left = inset }
+        }
+        guard feed.isViewLoaded, feed.view.window != nil else { return }
+        guard selectedTab?.identifier == LibraryPlace.browse.id else {
+            feed.hostActions(in: nil)
+            feed.additionalSafeAreaInsets.left = 0
             return
         }
-        if isLandscape {
-            let inheritedLeft = max(0, feed.view.safeAreaInsets.left - feed.additionalSafeAreaInsets.left)
-            let coveredLeft = sidebarFrame.map { view.convert($0, to: feed.view).maxX } ?? 0
-            let leftInset = max(0, coveredLeft - inheritedLeft)
-            if abs(feed.additionalSafeAreaInsets.left - leftInset) > 0.5 {
-                feed.additionalSafeAreaInsets.left = leftInset
-            }
-            let showsSidebar: Bool
-            if #available(iOS 26.0, *) {
-                let content = contentLayoutGuide.layoutFrame
-                let safe = view.safeAreaLayoutGuide.layoutFrame
-                showsSidebar = !sidebar.isHidden && (content.minX > safe.minX + 1 || content.maxX < safe.maxX - 1 || coveredLeft > 1)
-            } else {
-                showsSidebar = !sidebar.isHidden
-            }
-            feed.restoreSearchToContent(showsTitle: showsSidebar)
-        } else {
-            if abs(feed.additionalSafeAreaInsets.left) > 0.5 {
-                feed.additionalSafeAreaInsets.left = 0
-            }
-            if let host = feed.parent as? FeedHost {
-                feed.setSearchFoldable(in: host.navigationItem)
-            } else {
-                feed.restoreSearchToContent(showsTitle: false)
-            }
+        if railOnly {
+            // a bar or a rail: 浏览 keeps its title, buttons and magnifier in its own row
+            feed.hostActions(in: nil)
+            if abs(feed.additionalSafeAreaInsets.left) > 0.5 { feed.additionalSafeAreaInsets.left = 0 }
+            return
         }
+        // the two buttons on the tab bar's row, as big as the bar, in both orientations
+        if let m = tabBarMetrics() { feed.setActionMetrics(m) }
+        feed.hostActions(in: view)
+        // (in portrait the sidebar is a passing overlay: nothing moves for it)
+        let leftInset = isLandscape ? coveredLeftInset(of: feed) : 0
+        if abs(feed.additionalSafeAreaInsets.left - leftInset) > 0.5 { feed.additionalSafeAreaInsets.left = leftInset }
+    }
+
+    /// The system's floating tab bar as it is on screen (iPadOS 18+; private views, read only):
+    /// its glass platter and one of its items. Nil while it is hidden (the sidebar shown): the
+    /// last measure stays in force.
+    private func tabBarMetrics() -> FeedViewController.ActionMetrics? {
+        func find(_ v: UIView, _ name: String) -> UIView? {
+            if NSStringFromClass(type(of: v)) == name { return v }
+            for c in v.subviews { if let f = find(c, name) { return f } }
+            return nil
+        }
+        guard let bar = find(view, "_UIFloatingTabBar"), !bar.isHidden, bar.alpha > 0.01, bar.window != nil,
+              let platter = (bar.subviews.first { $0 is UIVisualEffectView && !$0.isHidden && $0.bounds.height > 0 }),
+              // the search tab's item (pinned at the end): each button is that size
+              let item = find(platter, "_UIFloatingTabBarPinnedItemsView").flatMap({ find($0, "_UIFloatingTabBarItemView") }) ?? find(platter, "_UIFloatingTabBarItemView")
+        else { return nil }
+        let frame = platter.convert(platter.bounds, to: view)
+        guard frame.height > 0, frame.minY >= 0 else { return nil }
+        return .init(top: frame.minY - view.safeAreaInsets.top, height: frame.height, item: item.bounds.size)
+    }
+
+    /// How much of a page the sidebar covers beyond its own safe area (iPadOS 26 lays the
+    /// pages out under the floating sidebar).
+    private func coveredLeftInset(of page: UIViewController) -> CGFloat {
+        let inheritedLeft = max(0, page.view.safeAreaInsets.left - page.additionalSafeAreaInsets.left)
+        let coveredLeft = sidebarFrame.map { view.convert($0, to: page.view).maxX } ?? 0
+        return max(0, coveredLeft - inheritedLeft)
     }
 
     private var sidebarFrame: CGRect? {
@@ -554,6 +569,7 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     private static func lock(_ tabs: [UITab]) {
         for t in tabs {
             t.allowsHiding = false
+            if t is UISearchTab { continue }    // pinned at the end, where the system puts it
             if t.preferredPlacement != .sidebarOnly { t.preferredPlacement = .fixed }
             if let g = t as? UITabGroup {
                 g.allowsReordering = false
@@ -720,6 +736,41 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
 
     func select(_ p: LibraryPlace) {
         if let t = tab(forIdentifier: p.id) { selectedTab = t }
+    }
+
+    var isShowingSearch: Bool { searchTab != nil && selectedTab === searchTab }
+
+    /// 浏览 in this layout: with a search tab it has no search of its own and sends its
+    /// searches (a tag tapped, "在浏览中查看") to that tab.
+    func attachSearch(to feed: FeedViewController) {
+        guard let page = searchFeed else {
+            feed.searchElsewhere = false
+            feed.searchHandoff = nil
+            return
+        }
+        feed.searchElsewhere = true
+        feed.searchHandoff = { [weak self, weak page] run in
+            guard let self, let page else { return }
+            self.showSearchTab()
+            page.loadViewIfNeeded()
+            run(page)
+        }
+    }
+
+    /// The search tab with these capsules.
+    func showSearch(keys: [String]) {
+        guard let page = searchFeed else { return }
+        showSearchTab()
+        page.setSearch(keys: keys)
+    }
+
+    private func showSearchTab() {
+        guard let searchTab, selectedTab !== searchTab else { return }
+        selectedTab = searchTab
+    }
+
+    func tabBarController(_ tabBarController: UITabBarController, didSelectTab tab: UITab, previousTab: UITab?) {
+        if tab === searchTab { searchFeed?.activateSearch() }
     }
 
     /// A group of places (a sidebar section): the chosen place's page is shown in the group's

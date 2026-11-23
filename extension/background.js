@@ -183,7 +183,35 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
 // a worker woken up later (the browser stops idle workers) picks up where it was
 chrome.alarms.create("pump", { periodInMinutes: 0.5 });
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === "pump") pump().catch(() => {}); });
-chrome.runtime.onStartup.addListener(() => pump().catch(() => {}));
-chrome.runtime.onInstalled.addListener(() => pump().catch(() => {}));
+chrome.alarms.create("update", { periodInMinutes: 12 * 60 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "pump") pump().catch(() => {});
+  if (a.name === "update") checkUpdate().catch(() => {});
+});
+chrome.runtime.onStartup.addListener(() => { pump().catch(() => {}); checkUpdate().catch(() => {}); });
+chrome.runtime.onInstalled.addListener(() => { pump().catch(() => {}); checkUpdate().catch(() => {}); });
+
+// ------------------------------------------------------------------------------------------
+// 检查更新: the newest release on GitHub (the repository in the manifest's homepage_url), only
+// told in the popup. An unpacked extension cannot update itself: the person replaces the folder.
+
+/** "1.5.6" newer than "1.5.4"? (numbers compared part by part; a "v" in front ignored) */
+function newer(tag, current) {
+  const parts = (v) => String(v).replace(/^v/i, "").split(/[.+-]/).map((x) => parseInt(x, 10) || 0);
+  const a = parts(tag), b = parts(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  return false;
+}
+
+async function checkUpdate() {
+  const m = chrome.runtime.getManifest();
+  const repo = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/?$/.exec(m.homepage_url || "")?.[1];
+  if (!repo) return;
+  const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { Accept: "application/vnd.github+json" }, cache: "no-store" });
+  if (!r.ok) return;
+  const rel = await r.json();
+  const update = !rel.draft && !rel.prerelease && newer(rel.tag_name, m.version)
+    && /^https:\/\/github\.com\//.test(rel.html_url) ? { version: String(rel.tag_name).replace(/^v/i, ""), url: rel.html_url } : null;
+  await chrome.storage.local.set({ update });
+}
 pump().catch(() => {});

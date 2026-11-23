@@ -641,6 +641,7 @@ struct AboutPageView: View {
     @StateObject private var live = LiveTick()
     @State private var clicks = 0
     @State private var extras = LibraryPrefs.aboutExtras
+    @State private var welcomeNext = MacWelcomeController.shared.showOnNextLaunch
 
     private var version: String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -669,9 +670,34 @@ struct AboutPageView: View {
                     .background(Color.primary.opacity(0.06), in: Capsule())
                     .accessibilityIdentifier("aboutVersion")
                     .padding(.top, 8)
+                Button(L("menu.welcome")) {
+                    MacWelcomeController.shared.show(relativeTo: env.window)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .padding(.top, 10)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 32)
+            VStack(alignment: .leading, spacing: 10) {
+                Card {
+                    CardRow(symbol: "arrow.clockwise.circle.fill", color: .teal, title: L("about.showWelcomeNextLaunch")) {
+                        Toggle("", isOn: Binding(
+                            get: { welcomeNext },
+                            set: { v in welcomeNext = v; MacWelcomeController.shared.showOnNextLaunch = v }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                    }
+                    RowDivider()
+                    CardRow(symbol: "globe", color: .gray, title: "GitHub") {
+                        Button(UpdateCheck.projectURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))) {
+                            NSWorkspace.shared.open(UpdateCheck.projectURL)
+                        }
+                        .buttonStyle(.link)
+                    }
+                }
+            }
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeading(L("about.acknowledgments"))
                 Card {

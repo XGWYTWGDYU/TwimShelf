@@ -1,7 +1,7 @@
 // The TwimShelf desktop app (Linux; a macOS build exists for testing only): starts the bundled
 // TwimShelf server on 127.0.0.1 with a token only this app knows, and shows the React app the
 // server serves. The window and the web page are the same code; only the server is local.
-const { app, BrowserWindow, Menu, dialog, ipcMain, screen, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, screen, session, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -196,6 +196,11 @@ function setLoginItem(enabled) {
   return false;
 }
 
+/** The Linux window controls drawn over the toolbar: no plate of their own, symbols in the text colour. */
+function overlayColors() {
+  return { color: '#00000000', symbolColor: nativeTheme.shouldUseDarkColors ? '#e8e8ec' : '#1d1d1f', height: 52 };
+}
+
 async function createWindow() {
   const { base, token } = await startServer();
   await session.defaultSession.cookies.set({ url: base, name: 'tl_desktop', value: token, httpOnly: true, sameSite: 'strict' });
@@ -208,12 +213,15 @@ async function createWindow() {
     minWidth: 720, minHeight: 480, show: false,
     title: name,
     ...(process.platform !== 'darwin' && fs.existsSync(icon) ? { icon } : {}),
-    // Linux keeps the native window frame so the desktop draws rounded corners and puts the
-    // window controls in the title bar above the toolbar; macOS places traffic lights in the toolbar.
+    // No title bar of its own: the page runs up to the window's top edge (浏览's cards scroll
+    // under the toolbar). macOS puts its traffic lights in the toolbar; Linux draws the window
+    // controls over the toolbar's right end (the page keeps clear of them: Toolbar.css).
     backgroundColor: '#111113',
-    ...(mac ? { titleBarStyle: 'hidden', trafficLightPosition: { x: 18, y: 18 } } : { autoHideMenuBar: true }),
+    titleBarStyle: 'hidden',
+    ...(mac ? { trafficLightPosition: { x: 18, y: 18 } } : { autoHideMenuBar: true, titleBarOverlay: overlayColors() }),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, spellcheck: false },
   });
+  if (!mac) nativeTheme.on('updated', () => { if (!win.isDestroyed()) win.setTitleBarOverlay(overlayColors()); });
   let saveTimer = null;
   const queueSave = () => {
     clearTimeout(saveTimer);

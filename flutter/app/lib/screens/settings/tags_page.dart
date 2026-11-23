@@ -34,6 +34,8 @@ class TagsPage extends StatefulWidget {
 
 class _TagsPageState extends State<TagsPage> {
   List<TagCount>? _tags;
+  /// 筛选标签: only the tags whose name holds this (as the native apps' field).
+  String _query = '';
 
   @override
   void initState() {
@@ -122,7 +124,25 @@ class _TagsPageState extends State<TagsPage> {
   @override
   Widget build(BuildContext context) {
     final order = Prefs.instance.tagSort;
-    final tags = _tags == null ? null : sortedTags(_tags!, order);
+    final q = _query.trim().toLowerCase();
+    final all = _tags == null ? null : sortedTags(_tags!, order);
+    final tags = all == null || q.isEmpty ? all : all.where((t) => t.label.toLowerCase().contains(q)).toList();
+    final filter = Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: SearchBar(
+            key: const ValueKey('tagFilter'),
+            hintText: L('tags.filter'),
+            leading: const Icon(Icons.search),
+            elevation: const WidgetStatePropertyAll(0),
+            onChanged: (v) => setState(() => _query = v),
+            trailing: [if (_query.isNotEmpty) IconButton(tooltip: L('common.clear'), icon: const Icon(Icons.close), onPressed: () => setState(() => _query = ''))],
+          ),
+        ),
+      ),
+    );
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
@@ -149,10 +169,12 @@ class _TagsPageState extends State<TagsPage> {
       ),
       body: tags == null
           ? const Center(child: CircularProgressIndicator())
-          : tags.isEmpty
+          : all!.isEmpty
               ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text(L('tags.none'), style: theme.textTheme.titleMedium), Text(L('tags.none.message'))]))
-              : ListView.builder(
-                  padding: EdgeInsets.only(top: 8, bottom: 24 + MediaQuery.paddingOf(context).bottom),
+              : Column(children: [
+                filter,
+                Expanded(child: ListView.builder(
+                  padding: EdgeInsets.only(top: 0, bottom: 24 + MediaQuery.paddingOf(context).bottom),
                   itemCount: tags.length,
                   itemBuilder: (context, i) {
                     final t = tags[i];
@@ -184,7 +206,8 @@ class _TagsPageState extends State<TagsPage> {
                       ),
                     );
                   },
-                ),
+                )),
+              ]),
     );
   }
 }

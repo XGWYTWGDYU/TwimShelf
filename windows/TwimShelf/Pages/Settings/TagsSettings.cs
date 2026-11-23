@@ -17,6 +17,10 @@ public sealed partial class TagsSettings : SettingsSubpage
     readonly LibraryModel _library;
     readonly ListView _list;
     List<TagCount>? _tags;
+    /// 筛选标签: only the tags whose name holds what is typed (as the other apps). One box for the
+    /// page's life, moved into each rebuilt row; typing filters the list without rebuilding.
+    readonly TextBox _filter = new() { PlaceholderText = L("tags.filter"), Width = 240 };
+    Panel? _filterHost;
 
     public override string Title => L("common.tags");
 
@@ -30,6 +34,8 @@ public sealed partial class TagsSettings : SettingsSubpage
         };
         _list.ItemContainerStyle = new Style(typeof(ListViewItem)) { Setters = { new Setter(ListViewItem.PaddingProperty, new Thickness(0)), new Setter(ListViewItem.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch), new Setter(FrameworkElement.MinHeightProperty, 0.0) } };
         _list.ContainerContentChanging += OnContainer;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_filter, "tagFilter");
+        _filter.TextChanged += (_, _) => ApplyFilter();
         // the list scrolls itself (the page's own scroll would make every row at once)
         Content = new Grid { RowDefinitions = { new RowDefinition { Height = GridLength.Auto }, new RowDefinition() }, Children = { TakeBody() } };
         var grid = (Grid)Content;
@@ -79,10 +85,23 @@ public sealed partial class TagsSettings : SettingsSubpage
         sort.Flyout = menu;
         var deleteAi = new Button { Content = L("tags.deleteAIEllipsis") };
         deleteAi.Click += (_, _) => _ = DeleteAi();
-        Card(L("tags.sort"), null, "", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { sort, deleteAi } });
+        // (the box was in the previous row: taken out of it first, from the panel remembered:
+        // FrameworkElement.Parent is not reliable under AOT)
+        _filterHost?.Children.Remove(_filter);
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _filter, sort, deleteAi } };
+        _filterHost = controls;
+        Card(L("tags.sort"), null, "", controls);
         if (_tags == null) { _list.ItemsSource = null; Add(new ProgressRing { IsActive = true }); return; }
         if (_tags.Count == 0) { Card(L("tags.none"), L("tags.none.message"), ""); _list.ItemsSource = null; return; }
-        _list.ItemsSource = Sorted(_tags, order);
+        ApplyFilter();
+    }
+
+    void ApplyFilter()
+    {
+        if (_tags == null || _tags.Count == 0) return;
+        var q = _filter.Text.Trim();
+        var sorted = Sorted(_tags, Prefs.Instance.TagSort);
+        _list.ItemsSource = q.Length == 0 ? sorted : sorted.Where(t => t.Label.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
     void OnContainer(ListViewBase sender, ContainerContentChangingEventArgs args)

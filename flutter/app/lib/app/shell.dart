@@ -22,6 +22,7 @@ import 'activity.dart';
 import 'library.dart';
 import 'places.dart';
 import 'prefs.dart';
+import '../screens/welcome_page.dart';
 
 /// How much room the window gives, decided from its size only — never from the device (a
 /// phone, a foldable folded or open, a tablet in split view or in a window of any size).
@@ -82,9 +83,11 @@ class _ShellState extends State<Shell> {
     WidgetsBinding.instance.addPostFrameCallback((_) => library.shares.pendingChoices.toList().forEach(_shareEvent));
     prefs.addListener(_changed);
     ApplePlatform.instance.windowControls.addListener(_changed);
-    // GitHub builds: a newer release, at most once a day
+    // the welcome on the first launch (or when asked for), then — GitHub builds — a newer
+    // release, at most once a day
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await Updates.checkOnLaunch(context);
+      if (mounted) await Welcome.showIfDue(context);
+      if (mounted) await Updates.checkOnLaunch(context);
     });
   }
 

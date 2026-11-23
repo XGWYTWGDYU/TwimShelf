@@ -2,11 +2,18 @@
    with an 11 pt subtitle (window.title / window.subtitle), the grid's title on a glass pill 36 pt
    high with 14 pt padding (MacGlassTitle). */
 .toolbar { position: relative; z-index: 30; flex: none; height: var(--toolbar-h); display: flex; align-items: center; gap: 8px; padding: 0 16px 0 12px; -webkit-app-region: drag; }
+/* Electron on Linux draws the window controls over the toolbar's right end (titleBarOverlay):
+   the items stop short of them. Elsewhere the variables are unset and this is the usual 16 px. */
+.toolbar { padding-right: calc(16px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
 .toolbar > *, .toolbar-items > *, .toolbar-space > * { -webkit-app-region: no-drag; }
 .toolbar-space { flex: 1; min-width: 0; display: flex; justify-content: flex-end; -webkit-app-region: drag; }
 /* over the content (the grid and the cards start below it): a plain bar in the page's colour,
    no soft fade at the edge */
 .toolbar-overlay { position: absolute; top: 0; left: 0; right: 0; background: var(--bg); }
+/* 浏览: the cards run up under it to the window's top edge; only its controls float there */
+.toolbar-overlay.toolbar-clear { background: transparent; }
+.toolbar-clear, .toolbar-clear .toolbar-space { pointer-events: none; }
+.toolbar-clear > :not(.toolbar-space), .toolbar-clear .toolbar-space > * { pointer-events: auto; }
 .toolbar-titles { min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 4px; }
 .toolbar-title { font-size: 15px; font-weight: 600; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
 .toolbar-subtitle { font-size: 11px; line-height: 13px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

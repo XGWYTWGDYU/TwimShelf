@@ -202,5 +202,16 @@
   },
   "nDownloading": {
     "message": "$1 downloading"
+  },
+  "updateAvailable": {
+    "message": "A new version is out: $VERSION$",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "updateOpen": {
+    "message": "Get it"
   }
 }

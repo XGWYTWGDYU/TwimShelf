@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { L, type IntegritySummary, type StorageGroup, type StorageUsage } from '@twimshelf/core';
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, FileArchive, RefreshCw, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, FileArchive, Globe, RefreshCw, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
 import { Button, Empty, Row, Section, TextField, Toggle } from '../../components/ui';
 import { change, LoadState, useTask } from '../../components/libraryControls';
 import { alertMessage, choose } from '../../components/pickers';
 import { toast } from '../../components/toast';
+import { showWelcomeModal } from '../../components/WelcomeModal';
 import { core } from '../../lib/core';
 import { clearVideoFrames, thumbnailDirectories } from '../../lib/thumbs';
 import { useAsync, useInterval, useStore } from '../../lib/hooks';
@@ -291,6 +292,9 @@ function integrityTone(summary?: IntegritySummary | null): TileColor {
   return 'secondary';
 }
 
+/** The project's page (关于 › GitHub). */
+const PROJECT_URL = 'https://github.com/XGWYTWGDYU/TwimShelf';
+
 export function AboutPage() {
   const server = useAsync(info, []);
   const [extras, setExtras] = useState(() => localStorage.getItem('about.extras') === 'true');
@@ -329,6 +333,21 @@ export function AboutPage() {
       <div className="about-title">{L('web.appName')}</div>
       <div className="about-tagline">{L('about.tagline')}</div>
       {server.data && <Pill text={L('about.version', server.data.version)} color="secondary" />}
+      <div style={{ marginTop: 10 }}>
+        <Button onClick={showWelcomeModal}>{L('menu.welcome').replace('{app}', L('web.appName'))}</Button>
+      </div>
+    </div>
+
+    <div className="section-group">
+      {/* the welcome opens from the button above at once (no "show it next time" switch) */}
+      <Card>
+        <CardRow
+          icon={<Globe size={17} />}
+          color="gray"
+          title="GitHub"
+          trailing={<a className="about-link" href={PROJECT_URL} target="_blank" rel="noreferrer">{PROJECT_URL.replace('https://github.com/', '')}</a>}
+        />
+      </Card>
     </div>
 
     <div className="section-group">

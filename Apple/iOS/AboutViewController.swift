@@ -104,10 +104,20 @@ final class AboutViewController: FormViewController {
     private func build() {
         var s = [
             Section(id: "app", rows: [.banner("header", header)]),
-            Section(id: "acknowledgments", header: L("about.acknowledgments"), footer: L("about.acknowledgments.ai"), rows: [
-                .value("Claude · ChatGPT · Gemini", nil, icon: .init("sparkles", .systemPurple), id: "ack:ai"),
-            ]),
         ]
+        // the welcome opens from here at once (no "show it next time" switch), and the project's page
+        s.append(Section(id: "welcome", rows: [
+            .button(L("menu.welcome"), icon: .init("hand.wave.fill", .systemBlue), id: "b:welcome") { [weak self] in
+                guard let self else { return }
+                IOSWelcomeController.present(on: self)
+            },
+            .button("GitHub", icon: .init("globe", .systemGray), id: "b:github") {
+                UIApplication.shared.open(UpdateCheck.projectURL)
+            },
+        ]))
+        s.append(Section(id: "acknowledgments", header: L("about.acknowledgments"), footer: L("about.acknowledgments.ai"), rows: [
+            .value("Claude · ChatGPT · Gemini", nil, icon: .init("sparkles", .systemPurple), id: "ack:ai"),
+        ]))
         if extras {
             s.append(Section(id: "problems", header: L("settings.section.maintenance"), footer: L("settings.maintenance.footer"), rows: [
                 Core.verifyStatus()?.running == true

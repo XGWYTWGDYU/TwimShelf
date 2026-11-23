@@ -66,11 +66,11 @@ void main() {
   const sortBtn = ValueKey('sortByAdded');
   const magnifier = ValueKey('searchButton');
   const floatingSearch = ValueKey('floatingSearch');
-  const backdrop = ValueKey('browseHeaderBackdrop');
+  const header = ValueKey('browseHeader');
 
-  testWidgets('portrait shows title and three buttons, opens full-screen search, and returns', (t) async {
+  testWidgets('portrait shows three buttons (no title), opens full-screen search, and returns', (t) async {
     await pumpBrowse(t, const Size(390, 750));
-    expect(find.text(L('place.browse')), findsOneWidget);
+    expect(find.text(L('place.browse')), findsNothing);   // 浏览 shows no title
     expect(find.byKey(floatingSearch), findsNothing);
     expect(find.byTooltip(L('sidebar.other')), findsNothing);
     expect(find.byKey(const ValueKey('browseActionPill')), findsOneWidget);
@@ -90,31 +90,31 @@ void main() {
     expect(find.byKey(const ValueKey('searchScreen')), findsOneWidget);
     await t.binding.handlePopRoute();
     await t.pumpAndSettle();
-    expect(find.text(L('place.browse')), findsOneWidget);
+    expect(find.text(L('place.browse')), findsNothing);   // 浏览 shows no title
     expect(find.byKey(downloadBtn), findsOneWidget);
     expect(find.byKey(sortBtn), findsOneWidget);
     expect(find.byKey(magnifier), findsOneWidget);
     expect(find.byKey(floatingSearch), findsNothing);
   });
 
-  testWidgets('iPad landscape and portrait always keep browse title and three buttons', (t) async {
+  testWidgets('iPad landscape and portrait always keep the three buttons, no title', (t) async {
     await pumpBrowse(t, const Size(790, 570), display: const Size(1180, 820));
-    expect(find.text(L('place.browse')), findsOneWidget);
+    expect(find.text(L('place.browse')), findsNothing);   // 浏览 shows no title
     expect(find.byKey(downloadBtn), findsOneWidget);
     expect(find.byKey(sortBtn), findsOneWidget);
     expect(find.byKey(magnifier), findsOneWidget);
 
     t.view.physicalSize = const Size(570, 790);
     await t.pumpAndSettle();
-    expect(find.text(L('place.browse')), findsOneWidget);
+    expect(find.text(L('place.browse')), findsNothing);   // 浏览 shows no title
     expect(find.byKey(downloadBtn), findsOneWidget);
     expect(find.byKey(sortBtn), findsOneWidget);
     expect(find.byKey(magnifier), findsOneWidget);
   });
 
-  testWidgets('landscape sidebar shows title, three buttons, and inline search without groupToggle', (t) async {
+  testWidgets('landscape sidebar shows three buttons (no title), and inline search without groupToggle', (t) async {
     await pumpBrowse(t, const Size(1100, 760));
-    expect(find.text(L('place.browse')), findsOneWidget);
+    expect(find.text(L('place.browse')), findsNothing);   // 浏览 shows no title
     await t.tap(find.byKey(magnifier));
     await t.pumpAndSettle();
     expect(find.byType(TextField), findsOneWidget);
@@ -123,16 +123,16 @@ void main() {
 
     t.view.physicalSize = const Size(790, 570);
     await t.pumpAndSettle();
-    expect(find.text(L('place.browse')), findsOneWidget);
+    expect(find.text(L('place.browse')), findsNothing);   // 浏览 shows no title
     expect(find.byKey(downloadBtn), findsOneWidget);
     expect(find.byKey(sortBtn), findsOneWidget);
     expect(find.byKey(magnifier), findsOneWidget);
     t.view.physicalSize = const Size(1100, 760);
     await t.pumpAndSettle();
-    expect(find.text(L('place.browse')), findsOneWidget);
+    expect(find.text(L('place.browse')), findsNothing);   // 浏览 shows no title
   });
 
-  testWidgets('frosted glass appears when scrolling and vanishes at the top', (t) async {
+  testWidgets('nothing is frosted behind the buttons, at the top or scrolled', (t) async {
     final items = List.generate(
       12,
       (i) => FeedItem(
@@ -147,26 +147,18 @@ void main() {
     );
     await pumpBrowse(t, const Size(390, 750), items: items);
 
-    double backdropAlpha() {
-      final box = t.widget<AnimatedContainer>(find.byKey(backdrop));
-      return (box.decoration as BoxDecoration).color!.a;
-    }
-
-    expect(backdropAlpha(), 0);
+    // nothing frosted behind the buttons, at the top or with cards under them
+    expect(find.descendant(of: find.byKey(header), matching: find.byType(BackdropFilter)), findsNothing);
     await t.drag(find.byType(CustomScrollView), const Offset(0, -300));
     await t.pumpAndSettle();
-    expect(backdropAlpha(), greaterThan(0));
-
-    await t.drag(find.byType(CustomScrollView), const Offset(0, 500));
-    await t.pumpAndSettle();
-    expect(backdropAlpha(), 0);
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(find.byKey(downloadBtn), findsOneWidget);
   });
 
-  testWidgets('browse title and three buttons clear iPadOS 26+ window controls', (t) async {
+  testWidgets('the three buttons clear iPadOS 26+ window controls', (t) async {
     ApplePlatform.instance.windowControls.value = const Rect.fromLTWH(0, 0, 80, 52);
     await pumpBrowse(t, const Size(700, 760), display: const Size(1180, 820));
 
-    expect(t.getTopLeft(find.text(L('place.browse'))).dy, greaterThanOrEqualTo(52));
     expect(t.getTopLeft(find.byKey(downloadBtn)).dy, greaterThanOrEqualTo(52));
     expect(t.getTopLeft(find.byKey(sortBtn)).dy, greaterThanOrEqualTo(52));
     expect(t.getTopLeft(find.byKey(magnifier)).dy, greaterThanOrEqualTo(52));

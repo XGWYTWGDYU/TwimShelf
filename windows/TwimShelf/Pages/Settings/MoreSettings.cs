@@ -208,6 +208,8 @@ public sealed partial class AboutSettings(LibraryModel library) : SettingsSubpag
         Add(new TextBlock { Text = "TwimShelf", Style = (Style)Application.Current.Resources["TitleTextBlockStyle"], HorizontalAlignment = HorizontalAlignment.Center });
         Add(new TextBlock { Text = L("about.tagline"), HorizontalAlignment = HorizontalAlignment.Center, Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"] });
         Add(new TextBlock { Text = L("about.version", Updates.Display) + $" · {RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()}", HorizontalAlignment = HorizontalAlignment.Center, Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"], Margin = new Thickness(0, 4, 0, 12) });
+        Action(L("menu.welcome"), null, Sparkle, () => WelcomeWindow.Show());
+        // (the welcome opens from here at once: no "show it next time" switch)
         Action("GitHub", null, "", () => _ = Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/" + (Updates.Enabled ? Updates.Repo : "XGWYTWGDYU/TwimShelf"))));
         Header(L("about.acknowledgments"));
         Card("Claude · ChatGPT · Gemini", L("about.acknowledgments.ai"), "\uE734");

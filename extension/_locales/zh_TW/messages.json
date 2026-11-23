@@ -202,5 +202,16 @@
   },
   "nDownloading": {
     "message": "$1 個下載中"
+  },
+  "updateAvailable": {
+    "message": "有新版本 $VERSION$",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "updateOpen": {
+    "message": "查看"
   }
 }

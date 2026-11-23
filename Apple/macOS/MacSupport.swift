@@ -175,7 +175,19 @@ final class MacMediaLoader {
 }
 
 extension NSColor {
+    /// A tag's colour by where it comes from: blue yours, purple an AI's, green an AI's you approved.
     static func tagColor(_ t: TagView) -> NSColor { t.isUser && t.isAI ? .systemGreen : (t.isAI ? .systemPurple : .systemBlue) }
+}
+
+extension NSImage {
+    /// A tag's dot (Finder's tag look), for menus.
+    static func tagDot(_ color: NSColor, side: CGFloat = 8) -> NSImage {
+        NSImage(size: NSSize(width: side, height: side), flipped: false) { r in
+            color.setFill()
+            NSBezierPath(ovalIn: r).fill()
+            return true
+        }
+    }
 }
 
 

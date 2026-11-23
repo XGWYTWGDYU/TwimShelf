@@ -51,36 +51,6 @@ final class SearchSuggestionsView: UIView, UITableViewDataSource, UITableViewDel
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    var isDropdown = false {
-        didSet {
-            guard isDropdown != oldValue else { return }
-            let inset: CGFloat = isDropdown ? 12 : 0
-            directionalLayoutMargins = .init(top: 0, leading: inset, bottom: 0, trailing: inset)
-            table.layer.cornerCurve = .continuous
-            table.layer.cornerRadius = isDropdown ? 14 : 0
-            table.reloadData()
-        }
-    }
-
-    private final class SuggestionCell: UITableViewCell {
-        var roundedCorners: UIRectCorner = []
-        private let cardMask = CAShapeLayer()
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            guard !roundedCorners.isEmpty else { return }
-            guard layer.mask !== cardMask || cardMask.frame != bounds else { return }
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            cardMask.frame = bounds
-            cardMask.path = UIBezierPath(roundedRect: bounds, byRoundingCorners: roundedCorners,
-                                         cornerRadii: CGSize(width: 14, height: 14)).cgPath
-            layer.mask = cardMask
-            CATransaction.commit()
-        }
-    }
-
-    /// Room for the search bar floating above the list.
     /// Where the list starts (under the search field). A list resting at its top stays there when
     /// this moves (the bars around it settling after the field opened), instead of sliding under it.
     var topInset: CGFloat = 0 {
@@ -110,19 +80,13 @@ final class SearchSuggestionsView: UIView, UITableViewDataSource, UITableViewDel
 
     func tableView(_ tv: UITableView, cellForRowAt ip: IndexPath) -> UITableViewCell {
         let r = sections[ip.section].rows[ip.row]
-        let cell = SuggestionCell(style: .subtitle, reuseIdentifier: nil)
+        let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
         var c = cell.defaultContentConfiguration()
         c.text = r.title
         c.secondaryText = r.subtitle
         c.secondaryTextProperties.color = .secondaryLabel
         if r.destructive { c.textProperties.color = .systemRed }
         if let s = r.symbol { c.image = UIImage(systemName: s); c.imageProperties.tintColor = r.destructive ? .systemRed : r.tint }
-        if isDropdown {
-            if ip.row == 0 { cell.roundedCorners.formUnion([.topLeft, .topRight]) }
-            if ip.row == sections[ip.section].rows.count - 1 {
-                cell.roundedCorners.formUnion([.bottomLeft, .bottomRight])
-            }
-        }
         cell.contentConfiguration = c
         cell.accessibilityIdentifier = "sugg-" + r.id
         switch r.accessory {

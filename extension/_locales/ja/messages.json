@@ -202,5 +202,16 @@
   },
   "nDownloading": {
     "message": "$1 件ダウンロード中"
+  },
+  "updateAvailable": {
+    "message": "新しいバージョン $VERSION$ があります",
+    "placeholders": {
+      "version": {
+        "content": "$1"
+      }
+    }
+  },
+  "updateOpen": {
+    "message": "入手"
   }
 }

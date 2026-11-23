@@ -7,6 +7,8 @@ enum UpdateCheck {
         guard let r = Bundle.main.object(forInfoDictionaryKey: "TLUpdateRepository") as? String, r.contains("/"), !r.hasPrefix("$(") else { return nil }
         return r
     }
+    /// The project's page (关于 › GitHub): this build's repository, or the public one.
+    static var projectURL: URL { URL(string: "https://github.com/" + (repo ?? "XGWYTWGDYU/TwimShelf"))! }
     static var current: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
 
     private static let lastKey = "update.lastCheck", skippedKey = "update.skipped"

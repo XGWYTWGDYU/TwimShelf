@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
@@ -81,7 +80,6 @@ class _BrowsePageState extends State<BrowsePage> {
     widget.library.filterRequest.addListener(_showFilter);
     QuickAction.requests.addListener(_quickDownloadSoon);
     _quickDownloadSoon();
-    _scroll.addListener(_scrolledUnder);
     ApplePlatform.instance.windowControls.addListener(_windowControlsChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _showFilter());
     _load();
@@ -95,12 +93,6 @@ class _BrowsePageState extends State<BrowsePage> {
   /// to the top.
   String? _highlight;
   final _scroll = ScrollController();
-  /// Cards are under the floating search area (it turns frosted).
-  bool _under = false;
-  void _scrolledUnder() {
-    final under = _scroll.hasClients && _scroll.offset > 2;
-    if (under != _under) setState(() => _under = under);
-  }
   void _reveal() {
     final item = widget.library.revealRequest.value;
     if (item == null) return;
@@ -230,9 +222,10 @@ class _BrowsePageState extends State<BrowsePage> {
     _load();
   }
 
-  int _density = Prefs.instance.densityPortrait * 3 + Prefs.instance.densityLandscape;
+  static int get _densityKey => (Prefs.instance.densityPortrait * 3 + Prefs.instance.densityLandscape) * 2 + (Prefs.instance.phoneTwoColumns ? 1 : 0);
+  int _density = _densityKey;
   void _prefsChanged() {
-    final density = Prefs.instance.densityPortrait * 3 + Prefs.instance.densityLandscape;
+    final density = _densityKey;
     final grouped = Prefs.instance.feedGrouped;
     var changed = false;
     if (density != _density) {
@@ -321,6 +314,71 @@ class _BrowsePageState extends State<BrowsePage> {
     }
   }
 
+  /// The cards (and the end line under them), in [columns] at the width [c] gives; [context]
+  /// carries the text size they are drawn and measured with.
+  Widget _cardList(BuildContext context, BoxConstraints c, List<List<FeedItem>> cards, int columns, double top, EdgeInsets pad) {
+                    final side = c.maxWidth > 700 ? 24.0 : 12.0;
+                    final heights = CardHeights.of(context);
+                    final footer = Padding(
+                      key: const ValueKey('feedEnd'),
+                      padding: EdgeInsets.fromLTRB(24, 8, 24, 24 + MediaQuery.paddingOf(context).bottom),
+                      // the end, as native: "共 12 条帖子，已经到底", across the whole width
+                      child: Row(children: [
+                        const Expanded(child: Divider()),
+                        const SizedBox(width: 12),
+                        Icon(Icons.check_circle_outline, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 6),
+                        Text(L(_grouped ? 'feed.end.posts' : 'feed.end.media', [cards.length]),
+                            style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        const SizedBox(width: 12),
+                        const Expanded(child: Divider()),
+                      ]),
+                    );
+                    final list = CustomScrollView(
+                      controller: _scroll,
+                      slivers: [
+                        SliverPadding(
+                          // the cards start below the floating search area and pass under it
+                          padding: EdgeInsets.fromLTRB(side + pad.left, top + 4, side + pad.right, 16),
+                          sliver: SliverKnownMasonry(
+                            columns: columns,
+                            mainAxisSpacing: 18,
+                            crossAxisSpacing: 14,
+                            items: cards,
+                            keyOf: (i) => cards[i].first.media_id,
+                            estimate: (i, width) => heights.of(cards[i], _cardPages[cards[i].first.media_id] ?? 0, width),
+                            estimateKey: heights.key,
+                            delegate: SliverChildBuilderDelegate(childCount: cards.length, (context, i) => PostCard(
+                              key: ValueKey(cards[i].first.media_id),
+                              library: widget.library,
+                              media: cards[i],
+                              startPage: _cardPages[cards[i].first.media_id] ?? 0,
+                              onPage: (p) => _cardPages[cards[i].first.media_id] = p,
+                              highlighted: _highlight == cards[i].first.post_id,
+                              menuHost: _menuHost,
+                              marks: _query.marks,
+                              onOpen: _open,
+                            )),
+                          ),
+                        ),
+                        SliverToBoxAdapter(child: footer),
+                        // room above the floating bar
+                        SliverToBoxAdapter(child: SizedBox(height: pad.bottom)),
+                      ],
+                    );
+                    if (!_touchShuffle) return list;
+                    return RefreshIndicator(
+                      key: const ValueKey('pullToShuffle'),
+                      edgeOffset: top,
+                      notificationPredicate: (n) => n.depth == 0 && !Prefs.instance.feedByAdded,
+                      onRefresh: () async {
+                        HapticFeedback.mediumImpact();
+                        _shuffle();
+                      },
+                      child: list,
+                    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cards = _cards;
@@ -331,7 +389,6 @@ class _BrowsePageState extends State<BrowsePage> {
     final dense = ShellLayout.of(screen) == ShellLayout.bar;
     final topPad = dense ? math.max(pad.top, WindowChrome.top(context)) : pad.top;
     final showSearch = (!dense && _searchEditing) || _query.keys.isNotEmpty;
-    final under = cards != null && cards.isNotEmpty && _under;
     final sortSelected = Prefs.instance.feedByAdded;
     final actionStyle = IconButton.styleFrom(
       backgroundColor: scheme.surfaceContainerHighest,
@@ -355,14 +412,9 @@ class _BrowsePageState extends State<BrowsePage> {
       height: headerHeight,
       child: Padding(
         padding: EdgeInsets.only(left: pad.left + 16, right: pad.right + 12),
+        // no title and nothing frosted: the buttons float over the cards on their own
         child: Row(children: [
-          Expanded(
-            child: Semantics(
-              header: true,
-              child: Text(L('place.browse'), maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold)),
-            ),
-          ),
+          const Spacer(),
           Material(
             key: const ValueKey('browseActionPill'),
             color: scheme.surfaceContainerHighest,
@@ -503,88 +555,30 @@ class _BrowsePageState extends State<BrowsePage> {
         ]),
       ),
     ]);
-    // the search area floats over the cards: clear over the top of the list, frosted (blurred
-    // and tinted) once cards scroll underneath it
-    final searchHeader = dense ? floatingHeader : ClipRect(
-      child: BackdropFilter(
-        filter: under ? ImageFilter.blur(sigmaX: 18, sigmaY: 18) : ImageFilter.blur(),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          color: under ? scheme.surface.withValues(alpha: 0.72) : scheme.surface.withValues(alpha: 0),
-          padding: EdgeInsets.only(top: topPad, left: pad.left, right: pad.right),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            searchRow,
-          ]),
-        ),
-      ),
+    // the search area floats over the cards, nothing frosted under it
+    final searchHeader = dense ? floatingHeader : Padding(
+      padding: EdgeInsets.only(top: topPad, left: pad.left, right: pad.right),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        searchRow,
+      ]),
     );
     final top = topPad + headerHeight;
     final Widget body = cards == null
             ? const Center(child: CircularProgressIndicator())
             : cards.isEmpty
                 ? Center(child: Padding(padding: const EdgeInsets.all(32), child: Text(_query.keys.isEmpty ? L('feed.empty.library.app') : L('feed.empty.noMatch'), textAlign: TextAlign.center)))
-                : LayoutBuilder(builder: (context, c) {
-                    final screen = MediaQuery.sizeOf(context);
-                    final columns = Prefs.instance.feedColumns(c.maxWidth, screen.height);
-                    final side = c.maxWidth > 700 ? 24.0 : 12.0;
-                    final heights = CardHeights.of(context);
-                    final footer = Padding(
-                      key: const ValueKey('feedEnd'),
-                      padding: EdgeInsets.fromLTRB(24, 8, 24, 24 + MediaQuery.paddingOf(context).bottom),
-                      // the end, as native: "共 12 条帖子，已经到底", across the whole width
-                      child: Row(children: [
-                        const Expanded(child: Divider()),
-                        const SizedBox(width: 12),
-                        Icon(Icons.check_circle_outline, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                        const SizedBox(width: 6),
-                        Text(L(_grouped ? 'feed.end.posts' : 'feed.end.media', [cards.length]),
-                            style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        const SizedBox(width: 12),
-                        const Expanded(child: Divider()),
-                      ]),
-                    );
-                    final list = CustomScrollView(
-                      controller: _scroll,
-                      slivers: [
-                        SliverPadding(
-                          // the cards start below the floating search area and pass under it
-                          padding: EdgeInsets.fromLTRB(side + pad.left, top + 4, side + pad.right, 16),
-                          sliver: SliverKnownMasonry(
-                            columns: columns,
-                            mainAxisSpacing: 18,
-                            crossAxisSpacing: 14,
-                            items: cards,
-                            keyOf: (i) => cards[i].first.media_id,
-                            estimate: (i, width) => heights.of(cards[i], _cardPages[cards[i].first.media_id] ?? 0, width),
-                            estimateKey: heights.key,
-                            delegate: SliverChildBuilderDelegate(childCount: cards.length, (context, i) => PostCard(
-                              key: ValueKey(cards[i].first.media_id),
-                              library: widget.library,
-                              media: cards[i],
-                              startPage: _cardPages[cards[i].first.media_id] ?? 0,
-                              onPage: (p) => _cardPages[cards[i].first.media_id] = p,
-                              highlighted: _highlight == cards[i].first.post_id,
-                              menuHost: _menuHost,
-                              marks: _query.marks,
-                              onOpen: _open,
-                            )),
-                          ),
-                        ),
-                        SliverToBoxAdapter(child: footer),
-                        // room above the floating bar
-                        SliverToBoxAdapter(child: SizedBox(height: pad.bottom)),
-                      ],
-                    );
-                    if (!_touchShuffle) return list;
-                    return RefreshIndicator(
-                      key: const ValueKey('pullToShuffle'),
-                      edgeOffset: top,
-                      notificationPredicate: (n) => n.depth == 0 && !Prefs.instance.feedByAdded,
-                      onRefresh: () async {
-                        HapticFeedback.mediumImpact();
-                        _shuffle();
-                      },
-                      child: list,
+                : LayoutBuilder(builder: (outer, c) {
+                    final screen = MediaQuery.sizeOf(outer);
+                    final phone = !Prefs.largeScreen(outer);
+                    final columns = Prefs.instance.feedColumns(c.maxWidth, screen.height, phone: phone);
+                    // a phone upright in two columns: the cards' text (and their tags with it)
+                    // smaller, so it does not crowd the media
+                    final compact = phone && columns == 2 && c.maxWidth <= screen.height;
+                    if (!compact) return _cardList(outer, c, cards, columns, top, pad);
+                    final mq = MediaQuery.of(outer);
+                    return MediaQuery(
+                      data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1) * 0.84)),
+                      child: Builder(builder: (context) => _cardList(context, c, cards, columns, top, pad)),
                     );
                   });
     return Scaffold(
@@ -600,17 +594,7 @@ class _BrowsePageState extends State<BrowsePage> {
               child: ExcludeFocus(excluding: !showSearch, child: searchHeader),
             ),
             if (!showSearch)
-              ClipRect(
-                child: BackdropFilter(
-                  filter: under ? ImageFilter.blur(sigmaX: 18, sigmaY: 18) : ImageFilter.blur(),
-                  child: AnimatedContainer(
-                    key: const ValueKey('browseHeaderBackdrop'),
-                    duration: const Duration(milliseconds: 180),
-                    color: under ? scheme.surface.withValues(alpha: 0.72) : scheme.surface.withValues(alpha: 0),
-                    child: Padding(padding: EdgeInsets.only(top: topPad), child: browseRow),
-                  ),
-                ),
-              ),
+              Padding(key: const ValueKey('browseHeader'), padding: EdgeInsets.only(top: topPad), child: browseRow),
           ])),
         ]),
       ),
@@ -738,11 +722,11 @@ class _PostCardState extends State<PostCard> {
             ],
             if (tags.isNotEmpty || !loose) ...[
               const SizedBox(height: 10),
-              // one row of capsules that scrolls sideways, the + at its end (as native)
+              // one row of tags that scrolls sideways, the + at its end (as native)
               Row(children: [
                 Expanded(
                   child: SizedBox(
-                    height: 28,
+                    height: tagRowHeight(MediaQuery.textScalerOf(context)),
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: tags.length,
@@ -752,16 +736,7 @@ class _PostCardState extends State<PostCard> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                IconButton.filledTonal(
-                  key: const ValueKey('addTag'),
-                  tooltip: L('card.addTag'),
-                  visualDensity: VisualDensity.compact,
-                  iconSize: 16,
-                  constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-                  padding: EdgeInsets.zero,
-                  onPressed: () => showTagPicker(context, widget.library, current),
-                  icon: const Icon(Icons.add),
-                ),
+                _AddTagBox(onPressed: () => showTagPicker(context, widget.library, current)),
               ]),
             ],
           ]),
@@ -795,7 +770,7 @@ class CardHeights {
   final _Metrics _metrics;
 
   // the card's caption padding, gaps and tag row (PostCard.build)
-  static const _sides = 14.0 * 2, _top = 12.0, _bottom = 12.0, _gap = 6.0, _tagsGap = 10.0, _tags = 28.0;
+  static const _sides = 14.0 * 2, _top = 12.0, _bottom = 12.0, _gap = 6.0, _tagsGap = 10.0;
   /// Selectable text keeps room for its caret at the end of a line.
   static const _caret = 3.0;
 
@@ -808,7 +783,7 @@ class CardHeights {
     final text = first.text ?? '';
     if (text.isNotEmpty) h += _gap + m.lines(text, width - _sides - _caret) * m.body;
     if (first.url != null) h += _gap + m.small;
-    if (media[at].tags.isNotEmpty || !loose) h += _tagsGap + _tags;
+    if (media[at].tags.isNotEmpty || !loose) h += _tagsGap + m.tags;
     return h + _bottom;
   }
 }
@@ -831,9 +806,10 @@ class _Metrics {
     narrow = measure(TextSpan(text: latin, style: t.bodyMedium), width: true) / latin.length;
     const han = '的一是不了人我在有他这为之大来以个中上们';   // i18n-exempt: sample text measured for card heights, never shown
     wide = measure(TextSpan(text: han, style: t.bodyMedium), width: true) / han.length;
+    tags = tagRowHeight(scaler);
   }
 
-  late final double title, author, small, body;
+  late final double title, author, small, body, tags;
   /// Average width of a Latin letter, digit or space, and of a CJK character or emoji.
   late final double narrow, wide;
 
@@ -1012,26 +988,73 @@ class _FeedVideoState extends State<_FeedVideo> {
   }
 }
 
-/// A tag as the native cards show it: tinted by who added it (an AI's with a sparkle).
+/// The height of a card's tag row: it follows the text size (smaller in two columns on a phone).
+double tagRowHeight(TextScaler scaler) => (scaler.scale(13) * 2.15).roundToDouble();
+
+/// The neutral box every tag (and the "+") sits in: a hairline edge, as Finder's tags.
+BoxDecoration _tagBox(ColorScheme scheme, double height) => BoxDecoration(
+      color: scheme.onSurface.withValues(alpha: 0.045),
+      border: Border.all(color: scheme.onSurface.withValues(alpha: 0.12)),
+      borderRadius: BorderRadius.circular((height * 0.3).roundToDouble()),
+    );
+
+/// A tag as the native cards show it: a neutral box, a dot in the colour of where it comes from
+/// (blue mine, purple an AI's, green an AI's I approved), the name in the text colour.
 class _TagChip extends StatelessWidget {
   const _TagChip({required this.tag, this.marks = const []});
   final TagView tag;
   final List<String> marks;
 
+  static Color dotColor(TagView tag) {
+    final ai = tag.origin & 2 != 0, user = tag.origin & 1 != 0;
+    return ai && user ? const Color(0xFF34C759) : (ai ? const Color(0xFFAF52DE) : const Color(0xFF0A84FF));
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final scaler = MediaQuery.textScalerOf(context);
+    final h = tagRowHeight(scaler), font = scaler.scale(13);
     final ai = tag.origin & 2 != 0, user = tag.origin & 1 != 0;
-    final color = ai && !user ? scheme.tertiary : scheme.primary;
-    return Container(
-      height: 28,
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(14)),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+    return Semantics(
+      label: tag.label,
+      value: ai && user ? L('tag.source.both') : (ai ? 'AI' : L('tag.source.me')),
+      excludeSemantics: true,
+      child: Container(
+        height: h,
+        decoration: _tagBox(scheme, h),
+        padding: EdgeInsets.only(left: font * 0.7, right: font * 0.78),
         child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
-          if (ai) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(user ? Icons.verified : Icons.auto_awesome, size: 12, color: color)),
-          Text.rich(markedSpan(tag.label, marks, TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w500), scheme)),
+          Container(width: font * 0.54, height: font * 0.54, decoration: BoxDecoration(color: dotColor(tag), shape: BoxShape.circle)),
+          SizedBox(width: font * 0.46),
+          Text.rich(markedSpan(tag.label, marks, TextStyle(color: scheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500), scheme)),
         ]),
+      ),
+    );
+  }
+}
+
+/// The "+" after the tags: the same box, square.
+class _AddTagBox extends StatelessWidget {
+  const _AddTagBox({required this.onPressed});
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final scaler = MediaQuery.textScalerOf(context);
+    final h = tagRowHeight(scaler);
+    final box = _tagBox(scheme, h);
+    return Tooltip(
+      message: L('card.addTag'),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: const ValueKey('addTag'),
+          borderRadius: box.borderRadius as BorderRadius,
+          onTap: onPressed,
+          child: Ink(width: h, height: h, decoration: box, child: Icon(Icons.add, size: scaler.scale(13), color: scheme.onSurfaceVariant)),
+        ),
       ),
     );
   }

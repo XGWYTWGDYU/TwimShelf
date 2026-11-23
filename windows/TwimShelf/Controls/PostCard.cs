@@ -87,9 +87,13 @@ public sealed partial class PostCard : UserControl
         {
             Content = new FontIcon { Glyph = "", FontSize = 12 },
             Width = 28, Height = 28, Padding = new Thickness(0),
-            CornerRadius = new CornerRadius(14),
+            // the same box as the tags beside it (TagStyle.Box)
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
             VerticalAlignment = VerticalAlignment.Center,
         };
+        add.ActualThemeChanged += (_, _) => TagStyle.Box(add, add.ActualTheme == ElementTheme.Dark);
+        add.Loaded += (_, _) => TagStyle.Box(add, add.ActualTheme == ElementTheme.Dark);
         ToolTipService.SetToolTip(add, L("card.addTag"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(add, L("card.addTag"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(add, "addTag");
@@ -341,25 +345,27 @@ public sealed partial class PostCard : UserControl
         LoadMedia();
     }
 
-    /// A tag as the other apps show it (TagStyle): pink with a sparkle for an AI's suggestion, blue
-    /// with a tag for one the person added or approved.
+    /// A tag as the other apps show it (TagStyle): a neutral box with a hairline edge, a dot in the
+    /// colour of where it comes from (blue mine, purple an AI's, green an AI's I approved).
     Border Chip(TagView t)
     {
         var dark = ActualTheme == ElementTheme.Dark;
-        var color = new SolidColorBrush(TagStyle.Tint(t, dark));
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        row.Children.Add(TagStyle.Icon(t, 11, color));
-        var label = new TextBlock { FontSize = 13, Foreground = color, FontWeight = FontWeights.Medium, VerticalAlignment = VerticalAlignment.Center };
-        AddMarked(label.Inlines, t.Label, _marks.Tags, FontWeights.Medium, color);
+        var text = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        row.Children.Add(new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 7, Height = 7, Fill = new SolidColorBrush(TagStyle.Dot(t, dark)), VerticalAlignment = VerticalAlignment.Center });
+        var label = new TextBlock { FontSize = 13, Foreground = text, FontWeight = FontWeights.Medium, VerticalAlignment = VerticalAlignment.Center };
+        AddMarked(label.Inlines, t.Label, _marks.Tags, FontWeights.Medium, text);
         row.Children.Add(label);
-        return new Border
+        var b = new Border
         {
             Child = row,
             Height = 28,
-            Padding = new Thickness(10, 0, 10, 0),
-            CornerRadius = new CornerRadius(14),
-            Background = new SolidColorBrush(TagStyle.Fill(t, dark)),
+            Padding = new Thickness(9, 0, 10, 0),
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
         };
+        TagStyle.Box(b, dark);
+        return b;
     }
 
     void Turn(int by)

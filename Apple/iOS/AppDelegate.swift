@@ -155,10 +155,17 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             window.rootViewController = root
             MascotPetView.install(in: root.view)
             #if DEBUG
+            if ProcessInfo.processInfo.environment["TL_SHOW_WELCOME"] != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { IOSWelcomeController.present(on: root) }
+            } else if !ProcessInfo.processInfo.environment.keys.contains(where: { $0.hasPrefix("TL_") }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { IOSWelcomeController.showIfFirstLaunch(on: root) }
+            }
             if ProcessInfo.processInfo.environment["TL_SIZE_TOUR"] != nil { root.debugSizeTour(scene) }
             if let log = ProcessInfo.processInfo.environment["TL_WINDOW_TOUR"] {
                 root.debugWindowTour(scene, sizes: [CGSize(width: 1194, height: 834), CGSize(width: 1000, height: 760), CGSize(width: 760, height: 760), CGSize(width: 600, height: 800), CGSize(width: 400, height: 800)], log: log)
             }
+            #else
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { IOSWelcomeController.showIfFirstLaunch(on: root) }
             #endif
         }
     }

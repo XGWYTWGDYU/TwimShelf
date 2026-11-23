@@ -7,6 +7,7 @@ import { MenuHost } from './components/Menu';
 import { DropImport } from './components/DropImport';
 import { PetLayer } from './components/PetLayer';
 import { ActivityPanel } from './components/ActivityPanel';
+import { WelcomeHost } from './components/WelcomeModal';
 import { useRoute, type Route } from './lib/router';
 import { installAppMenu } from './lib/commands';
 import { core } from './lib/core';
@@ -56,6 +57,7 @@ export default function App() {
       <Toasts />
       <MenuHost />
       <DropImport />
+      <WelcomeHost />
     </div>
   );
 }

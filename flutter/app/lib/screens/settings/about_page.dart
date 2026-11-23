@@ -5,12 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:tl_core/tl_core.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/identity.g.dart';
 import '../../app/prefs.dart';
 import '../../l10n/l10n.dart';
 import '../settings_page.dart';
 import '../../widgets/text_menu.dart';
+import '../welcome_page.dart';
+import '../../services/updates.dart';
 
 /// 关于: the app's icon, name and version. Ten taps on the icon bring out what is only for
 /// looking into a problem (checking the media, the log, exporting the diagnostics) until ten more
@@ -149,6 +152,22 @@ class _AboutPageState extends State<AboutPage> {
             ),
           ),
           const SizedBox(height: 28),
+          SettingsSection(children: [
+            ListTile(
+              key: const ValueKey('about-welcome'),
+              leading: const SettingsIcon(Icons.waving_hand_outlined),
+              title: Text(L('menu.welcome')),
+              onTap: () => Welcome.show(context),
+            ),
+            // the welcome opens here at once (no "show it next time" switch); the project's page
+            ListTile(
+              key: const ValueKey('about-github'),
+              leading: const SettingsIcon(Icons.public),
+              title: const Text('GitHub'),
+              subtitle: Text(Updates.projectUrl.replaceFirst('https://github.com/', '')),
+              onTap: () => launchUrl(Uri.parse(Updates.projectUrl), mode: LaunchMode.externalApplication),
+            ),
+          ]),
           SettingsSection(title: L('about.acknowledgments'), footer: L('about.acknowledgments.ai'), children: [
             const ListTile(
               leading: SettingsIcon(Icons.auto_awesome),

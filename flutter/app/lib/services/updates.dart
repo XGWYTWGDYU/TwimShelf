@@ -19,6 +19,8 @@ import '../platform/os.dart';
 class Updates {
   Updates._();
   static const repo = String.fromEnvironment('TL_UPDATE_REPO');
+  /// The project's page (关于 › GitHub): this build's repository, or the public one.
+  static String get projectUrl => 'https://github.com/${enabled ? repo : 'XGWYTWGDYU/TwimShelf'}';
   static bool get enabled => repo.contains('/');
 
   static Future<String> current() async => (await PackageInfo.fromPlatform()).version;

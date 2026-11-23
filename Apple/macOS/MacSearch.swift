@@ -238,11 +238,25 @@ final class MacTokenSearch: NSView {
     /// The field's width follows the window (`setWidth`), so the toolbar's other items never
     /// end up in its overflow menu.
     private lazy var widthConstraint = field.superview!.widthAnchor.constraint(equalToConstant: 300)
-    func setWidth(_ w: CGFloat) {
-        fieldWidth = min(max(w, 150), 380).rounded()
+    func setWidth(_ w: CGFloat, animated: Bool = false) {
+        fieldWidth = min(max(w, 150), 560).rounded()
         let width = fieldWidth + (shuffleShown ? 0 : Self.shuffleRoom)
-        if widthConstraint.constant != width { widthConstraint.constant = width }
+        guard widthConstraint.constant != width else { return }
+        if animated {
+            // eased like Windows' bar: quick at first, settling into place
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.32
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1)
+                context.allowsImplicitAnimation = true
+                widthConstraint.animator().constant = width
+                superview?.layoutSubtreeIfNeeded()
+            }
+        } else {
+            widthConstraint.constant = width
+        }
     }
+    /// The field gets the keyboard (it spreads out again, as on Windows).
+    var onEditingChanged: ((Bool) -> Void)?
     private var fieldWidth: CGFloat = 300
 
     /// 重新随机: by date there is nothing to shuffle. It shrinks and fades away while the field
@@ -313,8 +327,8 @@ final class MacTokenSearch: NSView {
         field.setAccessibilityIdentifier("search")
         field.makeToken = { [weak self] w in self?.token(for: w) }
         field.onTextChange = { [weak self] in self?.changed(); self?.showSuggestions() }
-        field.onBeginEditing = { [weak self] in self?.tagsLoaded = false; self?.showSuggestions() }
-        field.onEndEditing = { [weak self] in self?.endedEditing() }
+        field.onBeginEditing = { [weak self] in self?.tagsLoaded = false; self?.showSuggestions(); self?.onEditingChanged?(true) }
+        field.onEndEditing = { [weak self] in self?.endedEditing(); self?.onEditingChanged?(false) }
         // Return searches: the list has done its work
         field.onCommit = { [weak self] in self?.changed(); self?.closeList() }
         exit.bezelStyle = .circular

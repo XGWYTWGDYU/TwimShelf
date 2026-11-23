@@ -13,7 +13,7 @@ import { cardMenu, tagMenu } from './cardMenu';
 import { core } from '../../lib/core';
 import { onCommand, setMenuState } from '../../lib/commands';
 import { useAsync, useStore } from '../../lib/hooks';
-import { libraryVersion, stats } from '../../lib/library';
+import { libraryVersion } from '../../lib/library';
 import { go, type Route } from '../../lib/router';
 import { openViewer } from '../../viewer/Viewer';
 import { fitMedia, intersect } from '../../viewer/transition';
@@ -56,7 +56,19 @@ export function queryFor(r: BrowseRoute, order: { newest: boolean; seed: number 
 
 export default function BrowsePage({ route, active }: { route: BrowseRoute; active: boolean }) {
   const version = useStore(libraryVersion);
-  const s = useStore(stats);
+  // the search: long at the top and while typing, narrower while reading down (as Windows' bar);
+  // a little travel the same way first, so small jitters of the wheel don't flicker it
+  const [narrow, setNarrow] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const reading = useRef({ last: 0, travel: 0 });
+  const onScrollTop = useCallback((y: number) => {
+    const r = reading.current;
+    const d = y - r.last;
+    r.last = y;
+    if (y < 40) { r.travel = 0; setNarrow(false); return; }
+    r.travel = Math.sign(d) === Math.sign(r.travel) ? r.travel + d : d;
+    if (r.travel > 24) setNarrow(true); else if (r.travel < -40) setNarrow(false);
+  }, []);
   const density = useStore(cardDensity);
   const fuzzy = useStore(fuzzySearch);
   const embedder = useStore(activeEmbedder);
@@ -198,8 +210,10 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
   );
 
   const toolbar = (
-    <Toolbar overlay title={L('place.browse')} subtitle={s ? L('activity.stats', s.posts, s.photos, s.videos) : undefined}
-      center={<div className="browse-search glass"><SearchBar value={route.q ?? ''} onSearch={search} />{buttons}</div>} />
+    // no title or totals: the cards run up under the toolbar to the window's top edge
+    <Toolbar overlay clear
+      center={<div className={`browse-search glass${narrow && !typing ? ' narrow' : ''}`} style={{ '--search-buttons': `${(byAdded ? 3 : 4) * 34}px` } as React.CSSProperties} onFocus={() => setTyping(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setTyping(false); }}>
+        <SearchBar value={route.q ?? ''} onSearch={search} />{buttons}</div>} />
   );
 
   const end = posts.length > 0 && (
@@ -210,7 +224,7 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
     <div ref={browse} className="browse-page">
       {feed.loading && !feed.data ? <div className="center"><Spinner /></div>
         : posts.length === 0 ? <div className="browse-empty">{L(route.q ? 'feed.empty.noMatch' : 'feed.empty.library')}</div>
-        : <Masonry ref={masonry} items={posts} active={active} density={density} keyOf={(p) => p.id} estimate={estimateCard} top={52 + 12} footer={end}
+        : <Masonry ref={masonry} items={posts} active={active} density={density} keyOf={(p) => p.id} estimate={estimateCard} top={52 + 12} footer={end} onScrollTop={onScrollTop}
           render={(p, w) => <PostCard post={p} width={w} onOpen={openPost} onContext={(post, m, e) => void context(post, m, e)}
             onTag={addTerm} onTagMenu={onTagMenu} onAddTag={(it) => onAddTag(it, p.media)}
             marks={marks} highlight={flash?.id === p.id ? flash.page : undefined} />} />}

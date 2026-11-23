@@ -8,12 +8,37 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     static let showFolderNote = Notification.Name("ShowFolder")
     /// object = a tag label: show only media with that tag.
     static let showLabelNote = Notification.Name("ShowLabel")
+
+    /// 浏览 (the shuffled library, with the search folded into it where there is no search tab),
+    /// or the page of the search tab (a wide iPad): the same cards, but only what is searched for,
+    /// the field always open at the top, and the suggestions as the page while nothing is.
+    enum Role { case browse, search }
+    let role: Role
+
+    init(role: Role = .browse) {
+        self.role = role
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// 浏览 in a layout with a search tab: no search of its own (no magnifier); what would search
+    /// here (a tag tapped, "在浏览中查看") goes to that tab through `searchHandoff`.
+    var searchElsewhere = false {
+        didSet {
+            guard searchElsewhere != oldValue, isViewLoaded else { return }
+            browseSearchButton.isHidden = searchElsewhere
+            syncSearchFold(animated: false, layoutChanged: true)
+        }
+    }
+    /// Runs a search on the search tab's page (selecting that tab first).
+    var searchHandoff: ((@escaping (FeedViewController) -> Void) -> Void)?
+
     // State
-    private var allItems: [FeedItem] = []
+    var allItems: [FeedItem] = []
     private var entries: [[FeedItem]] = []
     /// The search of the field's capsules (words, conditions, minus-words).
-    private var query = TokenQuery() { didSet { collectionView?.visibleCells.forEach { ($0 as? FeedCell)?.highlight = query.marks } } }
-    private var terms: [String] { query.terms }
+    var query = TokenQuery() { didSet { collectionView?.visibleCells.forEach { ($0 as? FeedCell)?.highlight = query.marks } } }
+    var terms: [String] { query.terms }
     /// Settings → 搜索 → 语义模糊搜索.
     private var fuzzy: Bool { LibraryPrefs.fuzzySearch }
     private var grouped: Bool { LibraryPrefs.feedGrouped }
@@ -24,54 +49,58 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     // Views
     private var collectionView: UICollectionView!
-    private let topFrostView = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
-    private var topFrostHeight: NSLayoutConstraint!
-    private var scrolledUnder = false
-    private let searchChrome = UIView()
+    let searchChrome = UIView()
     private let browseChrome = UIView()
     private let browseRow = UIStackView()
     private let browseActions = UIStackView()
-    private weak var landscapeActionsHost: UIView?
-    private var landscapeActionConstraints: [NSLayoutConstraint] = []
-    private let browseTitle = UILabel()
+    /// The wide layout's tab bar controller view, when 浏览's buttons are on the tab bar's row.
+    private weak var actionsHost: UIView?
+    private var actionsHostConstraints: [NSLayoutConstraint] = []
+    /// The row of the tab bar as measured (`ActionMetrics`), and what follows it.
+    private var actionMetrics = ActionMetrics.fallback
+    private var pillHeight: NSLayoutConstraint!
+    private var pillInsets: [NSLayoutConstraint] = []
+    private var pillButtonSizes: [NSLayoutConstraint] = []
+    private weak var pillGlass: UIView?
     private let browsePill = UIView()
     private let browseDownloadButton = UIButton(type: .system)
     private let browseSortButton = UIButton(type: .system)
     private let browseSearchButton = UIButton(type: .system)
-    /// The controls share the native tab bar row when there is room.
-    private weak var foldItem: UINavigationItem?
-    private var lastFoldedRowBottom: CGFloat?
     private var sidebarTransitionTopInset: CGFloat?
     private var updatingInsets = false
-    private var showsBrowseTitle = true
     private var searchFolded = false
-    private var folding = false
-    private var unfolded = false
+    var folding = false
+    var unfolded = false
     private var chromeHiddenForTransition = false
     private let header = FollowedView()
     /// The filter chips (仅 #标签, 文件夹…) float on their own under the search bar, not inside it.
-    private let searchField = UISearchTextField()
+    let searchField = UISearchTextField()
     /// The round × beside the search bar (not inside it): ends the search.
-    private let exitButton = UIButton(type: .system)
+    let exitButton = UIButton(type: .system)
     /// Exports what the search shows; beside the ×, shown while a search or filter is in effect.
-    private let exportButton = UIButton(type: .system)
-    private var exitShown = false, exportShown = false
-    private var headerBesideExport: NSLayoutConstraint!
-    private var exportBesideExit: NSLayoutConstraint!
-    private var exportAtEdge: NSLayoutConstraint!
-    private var headerTrailing: NSLayoutConstraint!
-    private var headerBesideExit: NSLayoutConstraint!
+    let exportButton = UIButton(type: .system)
+    var exitShown = false, exportShown = false
+    var headerBesideExport: NSLayoutConstraint!
+    var exportBesideExit: NSLayoutConstraint!
+    var exportAtEdge: NSLayoutConstraint!
+    var headerTrailing: NSLayoutConstraint!
+    var headerBesideExit: NSLayoutConstraint!
     private let searchRow = UIStackView()
     /// The list under the field while searching (suggestions, or filters and scopes).
-    private let suggestions = SearchSuggestionsView()
-    private var searching = false
+    let suggestions = SearchSuggestionsView()
+    var searching = false
+    /// The list of suggestions is over the cards (`showSuggestions`). On the search tab's page
+    /// it is also what the page shows while nothing is searched for.
+    var suggestionsShown = false
+    /// The field's own magnifier, kept while the mascot's takes its place.
+    var plainSearchIcon: UIView?
     /// Tags for the suggestions, read once per search.
-    private var tagCache: [TagCount] = []
-    private var folderCache: [(name: String, count: Int)] = []
+    var tagCache: [TagCount] = []
+    var folderCache: [(name: String, count: Int)] = []
     /// The L("place.folders") tab: its own navigation stack (folder → media), under the home's bar.
     private let emptyLabel = UILabel()
-    private let activityPanel = ActivityPanel()
-    private let toast = ToastView()
+    let activityPanel = ActivityPanel()
+    let toast = ToastView()
 
     // Inline autoplay: every video at least half in view plays, muted, with a player of its own.
     private lazy var inline = InlineVideos<MediaPageView>(
@@ -90,10 +119,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        NotificationCenter.default.addObserver(forName: QuickDownloadRequest.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { if self?.view.window != nil { self?.answerQuickDownloadRequest() } }
-        }
         view.backgroundColor = .feedBackground
+        if role == .browse { observeBrowseRequests() }
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged(_:)), name: .libraryChanged, object: nil)
         // in the background the video layer is dropped; back in front, playback is picked up again
         NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -101,6 +128,68 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         }
         NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateInlinePlayback() }
+        }
+        NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.updateSearchIcon()
+                self?.updateSortButtons()
+                self?.updateShuffleControl()
+                self?.reload()
+                if self?.suggestionsShown == true { self?.rebuildSuggestions() }
+            }
+        }
+        buildCollection()
+        // a new text size: every card's text is measured again
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in self.masonry.invalidateHeights() }
+        buildHeader()
+        buildBrowseChrome()
+        syncSearchFold(animated: false, layoutChanged: true)
+        activityPanel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(activityPanel)
+        NSLayoutConstraint.activate([
+            activityPanel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
+            activityPanel.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            activityPanel.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
+            { let c = activityPanel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 14); c.priority = .defaultHigh; return c }(),
+            activityPanel.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 14),
+        ])
+        NotificationCenter.default.addObserver(forName: ActivityCenter.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.suggestionsShown == true { self?.updateSuggestionFooter() } }
+        }
+        activityPanel.isHidden = role == .search
+        if role == .search {
+            // the page of the search tab opens on the suggestions
+            loadSuggestionSources()
+            showSuggestions(true, animated: false)
+        }
+        if role == .browse, CrashWatch.shared.lastRunAbnormal {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.toast.show(L("feed.lastRunAbnormal"), action: L("feed.exportDiagnostics")) { [weak self] in
+                    // a sheet of its own: 设置 may be in any state on its tab
+                    guard let self else { return }
+                    let m = SettingsViewController()
+                    let nav = UINavigationController(rootViewController: m)
+                    nav.modalPresentationStyle = .formSheet
+                    m.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak nav] _ in nav?.dismiss(animated: true) })
+                    self.present(nav, animated: true) { m.exportDiagnostics() }
+                }
+            }
+        }
+        toast.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(toast)
+        NSLayoutConstraint.activate([
+            toast.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            toast.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            toast.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, constant: -32),
+        ])
+        reload()
+    }
+
+    /// What only 浏览 answers (the search tab's page is a second feed and would answer twice):
+    /// quick downloads, "show this tag / folder", sync warnings and shared imports.
+    private func observeBrowseRequests() {
+        NotificationCenter.default.addObserver(forName: QuickDownloadRequest.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.view.window != nil { self?.answerQuickDownloadRequest() } }
         }
         NotificationCenter.default.addObserver(forName: Self.showLabelNote, object: nil, queue: .main) { [weak self] n in
             MainActor.assumeIsolated {
@@ -121,47 +210,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                 } else { self.toast.show(text) }
             }
         }
-        NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.updateSearchIcon()
-                self?.updateSortButtons()
-                self?.updateShuffleControl()
-                self?.reload()
-                if self?.searching == true { self?.rebuildSuggestions() }
-            }
-        }
-        buildCollection()
-        buildTopFrost()
-        // a new text size: every card's text is measured again
-        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in self.masonry.invalidateHeights() }
-        buildHeader()
-        buildBrowseChrome()
-        syncSearchFold(animated: false)
-        activityPanel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(activityPanel)
-        NSLayoutConstraint.activate([
-            activityPanel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
-            activityPanel.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            activityPanel.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
-            { let c = activityPanel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 14); c.priority = .defaultHigh; return c }(),
-            activityPanel.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 14),
-        ])
-        NotificationCenter.default.addObserver(forName: ActivityCenter.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { if self?.searching == true { self?.updateSuggestionFooter() } }
-        }
-        if CrashWatch.shared.lastRunAbnormal {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.toast.show(L("feed.lastRunAbnormal"), action: L("feed.exportDiagnostics")) { [weak self] in
-                    // a sheet of its own: 设置 may be in any state on its tab
-                    guard let self else { return }
-                    let m = SettingsViewController()
-                    let nav = UINavigationController(rootViewController: m)
-                    nav.modalPresentationStyle = .formSheet
-                    m.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak nav] _ in nav?.dismiss(animated: true) })
-                    self.present(nav, animated: true) { m.exportDiagnostics() }
-                }
-            }
-        }
         NotificationCenter.default.addObserver(forName: ShareInbox.failed, object: nil, queue: .main) { [weak self] n in
             MainActor.assumeIsolated { if let t = n.object as? String { self?.toast.show(t) } }
         }
@@ -175,14 +223,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                     else { self.present(UINavigationController(rootViewController: ImportHistoryViewController()), animated: true) } }
             }
         }
-        toast.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(toast)
-        NSLayoutConstraint.activate([
-            toast.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-            toast.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            toast.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, constant: -32),
-        ])
-        reload()
     }
 
     /// The safe area that also keeps clear of a window's corners (iPadOS 26+): the window
@@ -195,24 +235,22 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        if !usesSharedNavigationBar {
-            navigationController?.setNavigationBarHidden(true, animated: animated)
-        }
+        navigationController?.setNavigationBarHidden(true, animated: animated)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         updateInlinePlayback()
-        answerQuickDownloadRequest()
+        if role == .browse { answerQuickDownloadRequest() }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Presenting a full-screen media viewer over Browse must not tear down the hosted top-right
-        // actions or the folded navigation bar items; only clean up when actually leaving Browse.
+        // Presenting a full-screen media viewer over Browse must not take down the buttons on the
+        // tab bar's row; only leaving Browse does.
         if !showingMediaViewer && presentedViewController == nil {
-            hostLandscapeActions(in: nil)
-            restoreSearchToContent(showsTitle: false)
+            if role == .search { searchField.resignFirstResponder() }
+            hostActions(in: nil)
         }
         detachInline()   // (not just paused: a paused video layer can go black)
     }
@@ -250,41 +288,27 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        updateCompactCards()
         layoutSearchChrome()
         let safe = view.safeAreaInsets
-        if searchFolded, foldItem != nil, let rowBottom = foldedRowBottom {
-            lastFoldedRowBottom = rowBottom
-        }
         let defaultContentBottom = safe.top + 54
         let bottom: CGFloat
-        let landscapeRowBottom = landscapeActionsHost.flatMap { host -> CGFloat? in
+        // 浏览 with its buttons on the tab bar's row: the cards start under that row
+        let actionsRowBottom = actionsHost.flatMap { host -> CGFloat? in
             guard host.window != nil else { return nil }
-            return host.convert(host.safeAreaLayoutGuide.layoutFrame, to: view).minY + Self.landscapeActionTop + Self.browseActionHeight
+            return host.convert(CGPoint(x: 0, y: host.safeAreaInsets.top + actionMetrics.top + actionMetrics.height), to: view).y
         }
-        if let landscapeRowBottom {
-            bottom = landscapeRowBottom
-        } else if foldItem != nil {
-            if searchFolded || searching || isUnfiltered {
-                bottom = (searchFolded ? foldedRowBottom : nil) ?? lastFoldedRowBottom ?? safe.top
-            } else {
-                bottom = max(defaultContentBottom, header.convert(header.bounds, to: view).maxY)
-            }
+        if let actionsRowBottom {
+            bottom = actionsRowBottom
         } else if !searchFolded && !searching && !isUnfiltered {
             bottom = max(defaultContentBottom, searchRow.convert(searchRow.bounds, to: view).maxY)
         } else {
             bottom = defaultContentBottom
         }
         let top = sidebarTransitionTopInset ?? (bottom + 20)
-        if let landscapeRowBottom {
-            topFrostHeight.constant = landscapeRowBottom + 6
-        } else {
-            topFrostHeight.constant = (foldItem != nil && searchFolded)
-            ? ((foldedRowBottom ?? lastFoldedRowBottom ?? safe.top) + 6)
-            : max(browseChrome.frame.maxY, (!searchFolded && !searching && !isUnfiltered) ? header.convert(header.bounds, to: view).maxY : 0) + 6
-        }
-        suggestions.topInset = landscapeActionsHost != nil ? 0 : max(view.safeAreaInsets.top, header.convert(header.bounds, to: view).maxY) + 8
+        suggestions.topInset = max(view.safeAreaInsets.top, header.convert(header.bounds, to: view).maxY) + 8
         let keyboardTop = view.keyboardLayoutGuide.layoutFrame.minY
-        let below = landscapeActionsHost != nil ? 0 : max(view.bounds.maxY - keyboardTop, view.safeAreaInsets.bottom)
+        let below = max(view.bounds.maxY - keyboardTop, view.safeAreaInsets.bottom)
         if suggestions.table.contentInset.bottom != below {
             suggestions.table.contentInset.bottom = below
             suggestions.table.verticalScrollIndicatorInsets.bottom = below
@@ -315,50 +339,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             }
             updatingInsets = false
         }
-        updateTopFrost(animated: false)
     }
-
-    var usesSharedNavigationBar: Bool { searchFolded && foldItem != nil }
-
-    func restoreSearchToContent(showsTitle: Bool = true) { setSearchFoldable(in: nil, showsTitle: showsTitle) }
-
-    func setSearchFoldable(in item: UINavigationItem?, showsTitle: Bool = false) {
-        guard isViewLoaded else { return }
-        let layoutChanged = foldItem !== item || showsBrowseTitle != showsTitle
-        if foldItem !== item {
-            foldItem?.rightBarButtonItems = nil
-            foldItem = item
-            if let item {
-                let a = UINavigationBarAppearance()
-                a.configureWithTransparentBackground()
-                item.standardAppearance = a
-                item.scrollEdgeAppearance = a
-                item.compactAppearance = a
-            }
-        }
-        showsBrowseTitle = showsTitle
-        syncSearchFold(animated: false, layoutChanged: layoutChanged)
-    }
-
-    private lazy var foldSearchItem: UIBarButtonItem = {
-        let b = UIBarButtonItem(image: UIImage(systemName: "magnifyingglass"), primaryAction: UIAction { [weak self] _ in self?.unfoldSearch() })
-        b.accessibilityLabel = L("search.placeholder")
-        b.accessibilityIdentifier = "searchButton"
-        return b
-    }()
-    private lazy var foldSortItem: UIBarButtonItem = {
-        let b = UIBarButtonItem(image: UIImage(systemName: "clock"), primaryAction: UIAction { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) })
-        b.accessibilityLabel = L("feed.sortByAdded")
-        b.accessibilityIdentifier = "sortByAdded"
-        b.isSelected = LibraryPrefs.feedByAdded
-        return b
-    }()
-    private lazy var foldDownloadItem: UIBarButtonItem = {
-        let b = UIBarButtonItem(image: UIImage(systemName: "arrow.down"), primaryAction: UIAction { [weak self] _ in self?.showQuickDownload() })
-        b.accessibilityLabel = L("common.downloadPosts")
-        b.accessibilityIdentifier = "quickDownload"
-        return b
-    }()
 
     /// The magnifier: the bar opens above the cards, ready to type.
     private func unfoldSearch() {
@@ -368,62 +349,52 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     /// The search stays visible while editing or while it still has a query.
-    private func syncSearchFold(animated: Bool, layoutChanged: Bool = false) {
+    func syncSearchFold(animated: Bool, layoutChanged: Bool = false) {
         guard !folding else { return }
         let idle = !searching && !searchField.isFirstResponder && searchField.tokens.isEmpty && (searchField.text ?? "").isEmpty && currentFilter.isEmpty
-        let folded = !unfolded && idle
-        if folded, !searchFolded, animated {
+        // the search tab's page never folds its field; 浏览 without a search of its own always does
+        let folded = role == .browse && (searchElsewhere || (!unfolded && idle))
+        let changed = folded != searchFolded
+        // Closing: the field (with its × and export button as they are) fades and shrinks
+        // toward the magnifier while the title and the buttons come back, in one motion. What
+        // the field holds is settled once it is out of sight.
+        let closing = folded && changed && animated
+        if closing {
             folding = true
             searchChrome.isUserInteractionEnabled = false
-            // Keep the closing field, x, and export button in place until their fade ends.
-            UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
-                self.searchChrome.alpha = 0
-            } completion: { _ in
-                self.folding = false
-                UIView.performWithoutAnimation {
-                    self.syncSearchFold(animated: false, layoutChanged: true)
-                    self.updateExitButton()
-                }
-            }
-            return
         }
-
-        let changed = folded != searchFolded
         searchFolded = folded
-        let sharedRow = folded && foldItem != nil
-        let nav = (parent as? FeedHost)?.navigationController
-        let navChanged = nav.map { $0.isNavigationBarHidden == sharedRow } ?? false
-        if sharedRow && landscapeActionsHost == nil {
-            nav?.navigationBar.tintAdjustmentMode = .normal
-            if #available(iOS 26.0, *) {
-                if foldItem?.rightBarButtonItems?.count != 4 {
-                    foldItem?.rightBarButtonItems = [foldSearchItem, .fixedSpace(), foldSortItem, foldDownloadItem]
-                }
-            } else if foldItem?.rightBarButtonItems?.count != 3 {
-                foldItem?.rightBarButtonItems = [foldSearchItem, foldSortItem, foldDownloadItem]
-            }
-        } else {
-            foldItem?.rightBarButtonItems = nil
-            nav?.navigationBar.tintAdjustmentMode = .automatic
-        }
-        if navChanged { nav?.setNavigationBarHidden(!sharedRow, animated: false) }
-        guard changed || layoutChanged || navChanged else { return }
+        guard changed || layoutChanged else { return }
         if folded { updateSortButtons() }
         let change = {
             self.updateChromeVisibility()
             self.layoutSearchChrome()
-            if navChanged { nav?.view.layoutIfNeeded() }
             self.view.setNeedsLayout()
             self.view.layoutIfNeeded()
         }
-        if animated, changed {
+        if closing {
+            browseChrome.alpha = 0
+            browseActions.alpha = 0
+            UIView.animate(withDuration: 0.34, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                change()
+                let w = self.searchChrome.bounds.width
+                self.searchChrome.transform = CGAffineTransform(translationX: w * 0.04, y: 0).scaledBy(x: 0.92, y: 0.92)
+            } completion: { _ in
+                self.folding = false
+                UIView.performWithoutAnimation {
+                    self.searchChrome.transform = .identity
+                    self.syncSearchFold(animated: false, layoutChanged: true)
+                    self.updateExitButton()
+                }
+            }
+        } else if animated, changed {
             UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.88, initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: change)
         } else { UIView.performWithoutAnimation(change) }
     }
 
     private func updateChromeVisibility() {
         let showSearch = !chromeHiddenForTransition && !searchFolded && !folding
-        let showBrowse = !chromeHiddenForTransition && searchFolded && foldItem == nil
+        let showBrowse = !chromeHiddenForTransition && searchFolded
         searchChrome.alpha = showSearch ? 1 : 0
         searchChrome.isUserInteractionEnabled = showSearch
         searchChrome.accessibilityElementsHidden = !showSearch
@@ -432,10 +403,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         browseChrome.alpha = showBrowse ? 1 : 0
         browseChrome.isUserInteractionEnabled = showBrowse
         browseChrome.accessibilityElementsHidden = !showBrowse
-        browseTitle.isHidden = !showsBrowseTitle || sidebarTransitionTopInset != nil
     }
 
-    func hideSearchDuringTransition(_ hidden: Bool) {
+    func hideActionsDuringTransition(_ hidden: Bool) {
         chromeHiddenForTransition = hidden
         UIView.animate(withDuration: hidden ? 0.12 : 0.2,
                        delay: hidden ? 0 : 0.03,
@@ -455,7 +425,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     private func updateSortButtons() {
         let on = LibraryPrefs.feedByAdded
-        foldSortItem.isSelected = on
         var config: UIButton.Configuration = on ? .filled() : .plain()
         config.image = UIImage(systemName: "clock")
         config.preferredSymbolConfigurationForImage = .init(pointSize: 17, weight: .medium)
@@ -496,9 +465,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         let browseActionsHidden: Bool
         let browseActionsAlpha: CGFloat
         let browseChromeAlpha: CGFloat
-        let navBarHidden: Bool
-        let navBarFrameInWindow: CGRect
-        let rightBarItemCount: Int
+        /// Where the buttons should be: the host's right margin, and their top below the safe area.
+        let actionsRightInWindow: CGFloat
+        let actionsTop: CGFloat
         let safeAreaInWindow: CGRect
         let windowSize: CGSize
         let contentInsetTop: CGFloat
@@ -507,10 +476,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     func debugChromeSnapshot() -> DebugChromeSnapshot {
         let win = view.window
-        let nav = (parent as? FeedHost)?.navigationController
-        let navBar = nav?.navigationBar
         let actionsRect = browseActions.superview?.convert(browseActions.frame, to: win) ?? .zero
-        let navRect = navBar?.superview?.convert(navBar?.frame ?? .zero, to: win) ?? .zero
+        let margin = actionsHost.map { $0.convert($0.layoutMarginsGuide.layoutFrame, to: win).maxX } ?? actionsRect.maxX
         let safeRect = win?.safeAreaLayoutGuide.layoutFrame ?? .zero
         let winSize = win?.bounds.size ?? view.bounds.size
         return DebugChromeSnapshot(
@@ -520,9 +487,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             browseActionsHidden: browseActions.isHidden,
             browseActionsAlpha: browseActions.alpha,
             browseChromeAlpha: browseChrome.alpha,
-            navBarHidden: nav?.isNavigationBarHidden ?? true,
-            navBarFrameInWindow: navRect,
-            rightBarItemCount: foldItem?.rightBarButtonItems?.count ?? 0,
+            actionsRightInWindow: margin,
+            actionsTop: actionMetrics.top,
             safeAreaInWindow: safeRect,
             windowSize: winSize,
             contentInsetTop: collectionView?.contentInset.top ?? 0,
@@ -535,34 +501,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         let safe = cornerGuide.layoutFrame
         browseChrome.frame = CGRect(x: safe.minX + 10, y: view.safeAreaInsets.top + 6,
                                     width: max(0, safe.width - 20), height: 56)
-        guard let host = landscapeActionsHost else {
-            searchChrome.frame = browseChrome.frame
-            suggestions.frame = view.bounds
-            return
-        }
-        let area = host.safeAreaLayoutGuide.layoutFrame
-        let right = area.maxX - 16
-        let tabRight = tabBarController?.tabBar.items?.compactMap { $0.frame(in: host) }
-            .filter { !$0.isEmpty && $0.intersects(area) }.map(\.maxX).max()
-        let left = showsBrowseTitle ? view.convert(safe, to: host).minX + 16
-            : max(area.midX + 154, tabRight ?? 0) + 32
-        let belowTabs = right - left < 230
-        let width = searchFolded ? Self.browseActionHeight
-            : min(400, max(0, right - (belowTabs ? area.minX + 16 : left)))
-        let y = area.minY + Self.landscapeActionTop - 4 + (belowTabs && !searchFolded ? 64 : 0)
-        searchChrome.frame = CGRect(x: right - width, y: y, width: width, height: 56)
-        let listTop = searchChrome.frame.maxY + 6
-        let keyboard = view.convert(view.keyboardLayoutGuide.layoutFrame, to: host)
-        let limit = min(area.maxY, keyboard.minY)
-        suggestions.frame = CGRect(x: right - width, y: listTop, width: width,
-                                   height: min(380, max(0, limit - listTop - 12)))
-
-    }
-
-    /// Folded: the bottom of the row the tab bar and the magnifier share.
-    private var foldedRowBottom: CGFloat? {
-        guard searchFolded, let bar = (parent as? FeedHost)?.navigationController?.navigationBar, !bar.isHidden, bar.window != nil else { return nil }
-        return bar.convert(bar.bounds, to: view).maxY
+        // (while the field shrinks away it has a transform: its frame is left alone)
+        if !folding { searchChrome.frame = browseChrome.frame }
+        suggestions.frame = view.bounds
     }
 
     // MARK: Layout
@@ -578,8 +519,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         layout.height = { [weak self] i, w in
             guard let self, i < self.entries.count else { return w * 1.25 }
             let e = self.entries[i]
-            let traits = self.traitCollection
-            self.cardHeights.prepare(width: w, sizeKey: traits.preferredContentSizeCategory.rawValue)
+            // the cards' own traits (smaller on a phone in two columns: `updateCompactCards`)
+            let traits = self.collectionView.traitCollection
+            self.cardHeights.prepare(width: w, sizeKey: traits.preferredContentSizeCategory.rawValue + (traits[CompactCardsTrait.self] ? "#compact" : ""))
             let key = self.entryKey(e)
             let caption = self.cardHeights.height(key + "#\(e.first?.cardContentKey ?? 0)") { CardLayout(item: e.first, width: w, traits: traits).captionHeight }
             return caption + cardMediaHeight(e, width: w, position: CGFloat(self.cardPages.page(of: key, count: e.count)))
@@ -615,35 +557,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         ])
     }
 
-    private func buildTopFrost() {
-        topFrostView.isUserInteractionEnabled = false
-        topFrostView.alpha = 0
-        topFrostView.accessibilityIdentifier = "topFrost"
-        topFrostView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(topFrostView)
-        topFrostHeight = topFrostView.heightAnchor.constraint(equalToConstant: 0)
-        NSLayoutConstraint.activate([
-            topFrostView.topAnchor.constraint(equalTo: view.topAnchor),
-            topFrostView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topFrostView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topFrostHeight,
-        ])
-    }
-
-    private func updateTopFrost(animated: Bool = true) {
-        let under = !allItems.isEmpty && collectionView.contentOffset.y > -collectionView.adjustedContentInset.top + 2
-        guard under != scrolledUnder else { return }
-        scrolledUnder = under
-        if animated {
-            UIView.animate(withDuration: 0.18, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-                self.topFrostView.alpha = under ? 1 : 0
-            }
-        } else {
-            topFrostView.alpha = under ? 1 : 0
-        }
-    }
-
-    private func glass(_ host: UIView, corner: CGFloat) {
+    @discardableResult
+    private func glass(_ host: UIView, corner: CGFloat) -> UIView {
         let effect: UIVisualEffect
         if #available(iOS 26.0, *) { effect = UIGlassEffect() } else { effect = UIBlurEffect(style: .systemChromeMaterial) }
         let v = UIVisualEffectView(effect: effect)
@@ -654,6 +569,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         host.insertSubview(v, at: 0)
         NSLayoutConstraint.activate([v.topAnchor.constraint(equalTo: host.topAnchor), v.bottomAnchor.constraint(equalTo: host.bottomAnchor),
                                      v.leadingAnchor.constraint(equalTo: host.leadingAnchor), v.trailingAnchor.constraint(equalTo: host.trailingAnchor)])
+        return v
     }
 
     private func buildHeader() {
@@ -668,6 +584,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         searchField.delegate = self
         searchField.accessibilityIdentifier = "search"
         searchField.allowsDeletingTokens = true
+        // the search tab's page: the field's own clear button is its only ×, shown whenever
+        // there is something to clear
+        if role == .search { searchField.clearButtonMode = .always }
         // one box only: the glass bar is the field's frame (the field's own rounded background
         // inside it looked like a second box)
         searchField.borderStyle = .none
@@ -757,20 +676,40 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         updatePlaceholder()
     }
 
-    private static let landscapeActionTop: CGFloat = 4
-    private static let browseActionHeight: CGFloat = 48
+    /// Where 浏览's two buttons sit on the tab bar's row, measured from the system's floating
+    /// tab bar (`TabletRootController.tabBarMetrics`): its top below the safe area, its height,
+    /// and the size of one of its items. The capsule matches the bar; each button an item.
+    struct ActionMetrics: Equatable {
+        var top: CGFloat
+        var height: CGFloat
+        var item: CGSize
+        /// Before the bar has been seen (the sidebar shown from the start): a navigation bar's.
+        static var fallback: ActionMetrics {
+            let bar = UINavigationBar().sizeThatFits(CGSize(width: 1000, height: 1000)).height
+            return ActionMetrics(top: 0, height: bar, item: CGSize(width: bar, height: bar - 8))
+        }
+    }
+
+    func setActionMetrics(_ m: ActionMetrics) {
+        guard isViewLoaded, m != actionMetrics else { return }
+        actionMetrics = m
+        applyActionMetrics()
+        view.setNeedsLayout()
+    }
+
+    private func applyActionMetrics() {
+        let m = actionMetrics
+        let inset = max(0, (m.height - m.item.height) / 2)
+        pillHeight.constant = m.height
+        for c in pillInsets { c.constant = c.firstAttribute == .top || c.firstAttribute == .leading ? inset : -inset }
+        for c in pillButtonSizes { c.constant = c.firstAttribute == .width ? m.item.width : m.item.height }
+        pillGlass?.layer.cornerRadius = m.height / 2
+        actionsHostConstraints.first { $0.firstAttribute == .top }?.constant = m.top
+    }
 
     private func buildBrowseChrome() {
         view.addSubview(browseChrome)
-        browseTitle.text = L("place.browse")
-        browseTitle.font = UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: .systemFont(ofSize: 34, weight: .bold))
-        browseTitle.adjustsFontForContentSizeCategory = true
-        browseTitle.adjustsFontSizeToFitWidth = true
-        browseTitle.minimumScaleFactor = 0.6
-        browseTitle.accessibilityIdentifier = "browseTitle"
-        browseTitle.accessibilityTraits = .header
-        browseTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        glass(browsePill, corner: 24)
+        pillGlass = glass(browsePill, corner: actionMetrics.height / 2)
         browsePill.translatesAutoresizingMaskIntoConstraints = false
         for (button, symbol, label, identifier) in [
             (browseDownloadButton, "arrow.down", L("common.downloadPosts"), "quickDownload"),
@@ -784,11 +723,10 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             button.configuration = config
             button.accessibilityLabel = label
             button.accessibilityIdentifier = identifier
-            NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: 44),
-                button.heightAnchor.constraint(equalToConstant: 40),
-            ])
+            pillButtonSizes += [button.widthAnchor.constraint(equalToConstant: actionMetrics.item.width),
+                                button.heightAnchor.constraint(equalToConstant: actionMetrics.item.height)]
         }
+        NSLayoutConstraint.activate(pillButtonSizes)
         var searchConfig: UIButton.Configuration
         if #available(iOS 26.0, *) { searchConfig = .glass() } else { searchConfig = .gray() }
         searchConfig.image = UIImage(systemName: "magnifyingglass")
@@ -797,33 +735,34 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         browseSearchButton.configuration = searchConfig
         browseSearchButton.accessibilityLabel = L("search.placeholder")
         browseSearchButton.accessibilityIdentifier = "searchButton"
-        NSLayoutConstraint.activate([
-            browseSearchButton.widthAnchor.constraint(equalToConstant: 48),
-            browseSearchButton.heightAnchor.constraint(equalToConstant: Self.browseActionHeight),
-        ])
         browseDownloadButton.addAction(UIAction { [weak self] _ in self?.showQuickDownload() }, for: .touchUpInside)
         browseSortButton.tintAdjustmentMode = .normal
         browseSortButton.addAction(UIAction { [weak self] _ in self?.setByAdded(!LibraryPrefs.feedByAdded) }, for: .touchUpInside)
         browseSearchButton.addAction(UIAction { [weak self] _ in self?.unfoldSearch() }, for: .touchUpInside)
+        browseSearchButton.isHidden = searchElsewhere
         updateSortButtons()
         let pillRow = UIStackView(arrangedSubviews: [browseDownloadButton, browseSortButton])
-        pillRow.spacing = 2
+        pillRow.spacing = 0     // side by side, as the tab bar's items are
         pillRow.alignment = .center
         pillRow.translatesAutoresizingMaskIntoConstraints = false
         browsePill.addSubview(pillRow)
-        NSLayoutConstraint.activate([
-            browsePill.heightAnchor.constraint(equalToConstant: 48),
-            pillRow.topAnchor.constraint(equalTo: browsePill.topAnchor, constant: 4),
-            pillRow.bottomAnchor.constraint(equalTo: browsePill.bottomAnchor, constant: -4),
-            pillRow.leadingAnchor.constraint(equalTo: browsePill.leadingAnchor, constant: 6),
-            pillRow.trailingAnchor.constraint(equalTo: browsePill.trailingAnchor, constant: -6),
-        ])
+        pillHeight = browsePill.heightAnchor.constraint(equalToConstant: actionMetrics.height)
+        pillInsets = [pillRow.topAnchor.constraint(equalTo: browsePill.topAnchor), pillRow.bottomAnchor.constraint(equalTo: browsePill.bottomAnchor),
+                      pillRow.leadingAnchor.constraint(equalTo: browsePill.leadingAnchor), pillRow.trailingAnchor.constraint(equalTo: browsePill.trailingAnchor)]
+        NSLayoutConstraint.activate([pillHeight] + pillInsets)
+        applyActionMetrics()
         browseActions.spacing = 8
         browseActions.alignment = .center
         browseActions.addArrangedSubview(browsePill)
         browseActions.addArrangedSubview(browseSearchButton)
+        // the magnifier: a round button as tall as the capsule beside it
+        NSLayoutConstraint.activate([
+            browseSearchButton.heightAnchor.constraint(equalTo: browsePill.heightAnchor),
+            browseSearchButton.widthAnchor.constraint(equalTo: browseSearchButton.heightAnchor),
+        ])
         let row = browseRow
-        [browseTitle, UIView(), browseActions].forEach(row.addArrangedSubview)
+        // no title: the buttons float over the cards on their own, nothing frosted under them
+        [UIView(), browseActions].forEach(row.addArrangedSubview)
         row.spacing = 8
         row.alignment = .center
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -835,49 +774,51 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         ])
     }
 
-    func hostLandscapeActions(in host: UIView?) {
-        if landscapeActionsHost === host {
-            // Re-verify constraints if already hosted (e.g. after a transition or reparenting).
-            if let host, browseActions.superview !== host || landscapeActionConstraints.contains(where: { !$0.isActive }) {
-                NSLayoutConstraint.deactivate(landscapeActionConstraints)
-                browseActions.removeFromSuperview()
-                host.addSubview(browseActions)
-                browseActions.translatesAutoresizingMaskIntoConstraints = false
-                landscapeActionConstraints = [
-                    browseActions.trailingAnchor.constraint(equalTo: host.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-                    browseActions.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor, constant: Self.landscapeActionTop),
-                ]
-                NSLayoutConstraint.activate(landscapeActionConstraints)
-            }
-            return
-        }
-        NSLayoutConstraint.deactivate(landscapeActionConstraints)
-        landscapeActionConstraints = []
+    /// 浏览's buttons on the tab bar's row of the wide layout (`host`: the tab bar controller's
+    /// view, over every page), or back in 浏览's own row beside its title.
+    func hostActions(in host: UIView?) {
+        guard host !== actionsHost || (host != nil && (browseActions.superview !== host || actionsHostConstraints.contains { !$0.isActive })) else { return }
+        NSLayoutConstraint.deactivate(actionsHostConstraints)
+        actionsHostConstraints = []
         browseActions.removeFromSuperview()
-        let focused = searchField.isFirstResponder
-        landscapeActionsHost = host
-        let searchHost = host ?? view!
-        searchHost.addSubview(suggestions)
-        searchHost.addSubview(searchChrome)
-        suggestions.isDropdown = host != nil
-        suggestions.layer.cornerRadius = host == nil ? 0 : 18
-        suggestions.clipsToBounds = host != nil
-        if focused { searchField.becomeFirstResponder() }
+        actionsHost = host
         if let host {
             host.addSubview(browseActions)
             browseActions.translatesAutoresizingMaskIntoConstraints = false
-            // Pin to host.safeAreaLayoutGuide (never window.safeAreaLayoutGuide): UIKit detaches
-            // host from UIWindow during full-screen modal presentation, which would permanently
-            // deactivate any cross-hierarchy constraint to UIWindow.
-            landscapeActionConstraints = [
-                browseActions.trailingAnchor.constraint(equalTo: host.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-                browseActions.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor, constant: Self.landscapeActionTop),
+            // Pinned to the host's own guides (never the window's): UIKit takes the host out of
+            // the window during a full-screen presentation, which would drop such a constraint.
+            actionsHostConstraints = [
+                browseActions.trailingAnchor.constraint(equalTo: host.layoutMarginsGuide.trailingAnchor),
+                browseActions.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor, constant: actionMetrics.top),
             ]
-            NSLayoutConstraint.activate(landscapeActionConstraints)
+            NSLayoutConstraint.activate(actionsHostConstraints)
         } else {
             browseRow.addArrangedSubview(browseActions)
         }
         syncSearchFold(animated: false, layoutChanged: true)
+    }
+
+    /// A phone upright in two columns (设置 › 浏览页卡片数量 › 多): the cards' text two content
+    /// sizes smaller and their tags smaller too, so the text does not crowd the media.
+    private var compactCardsBase: UIContentSizeCategory?
+    private func updateCompactCards() {
+        guard let cv = collectionView else { return }
+        let compact = UIDevice.current.userInterfaceIdiom == .phone && LibraryPrefs.phoneTwoColumns && view.bounds.width <= view.bounds.height
+        let base = traitCollection.preferredContentSizeCategory
+        guard compact != cv.traitCollection[CompactCardsTrait.self] || (compact && base != compactCardsBase) else { return }
+        compactCardsBase = compact ? base : nil
+        if compact {
+            let order: [UIContentSizeCategory] = [.extraSmall, .small, .medium, .large, .extraLarge, .extraExtraLarge, .extraExtraExtraLarge,
+                                                  .accessibilityMedium, .accessibilityLarge, .accessibilityExtraLarge, .accessibilityExtraExtraLarge, .accessibilityExtraExtraExtraLarge]
+            let i = order.firstIndex(of: base) ?? 3
+            cv.traitOverrides.preferredContentSizeCategory = order[max(0, i - 2)]
+            cv.traitOverrides[CompactCardsTrait.self] = true
+        } else {
+            cv.traitOverrides.remove(UITraitPreferredContentSizeCategory.self)
+            cv.traitOverrides.remove(CompactCardsTrait.self)
+        }
+        masonry.invalidateHeights()
+        cv.reloadData()
     }
 
     /// A rail or sidebar came over the side, or the window turned: the cards fit the new room.
@@ -892,7 +833,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// Pulled down at the top: a new random order. Not while sorted by date, where there is
     /// nothing to shuffle.
     private func updateShuffleControl() {
-        if LibraryPrefs.feedByAdded {
+        if LibraryPrefs.feedByAdded || role == .search {
             collectionView.refreshControl = nil
         } else if collectionView.refreshControl == nil {
             let c = UIRefreshControl()
@@ -954,6 +895,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// capsules go into the field ("名字 用户", "标签名 标签", "文件夹 名字"), after what is
     /// searched already, or in its place. There are no other filters.
     private func search(_ f: FeedFilter, replacing: Bool = false) {
+        if handOff({ $0.search(f, replacing: replacing) }) { return }
         let old = replacing ? [] : searchField.tokens.compactMap { $0.representedObject as? String }
         searchField.tokens = TokenQuery.adding(TokenQuery.keys(for: f), to: old).map(makeToken)
         if replacing { searchField.text = nil }
@@ -962,9 +904,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
 
     // MARK: Data
 
-    private var reloadGeneration = 0
+    var reloadGeneration = 0
     /// The generation of the result on screen (an export waits for the latest search).
-    private var shownGeneration = -1
+    var shownGeneration = -1
 
     private let reloadWork = LatestWork()
 
@@ -976,7 +918,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         let fields = query.searchFields
         var req = FeedRequest(terms: terms, scope: query.scope, newestFirst: LibraryPrefs.feedByAdded, fuzzy: fuzzy, fields: fields, filter: currentFilter, wholePosts: grouped)
         // a search that asks for something and its opposite finds nothing, without asking the core
-        let contradictory = query.isContradictory
+        // the search tab's page shows cards only for a search (the suggestions before it)
+        let contradictory = query.isContradictory || (role == .search && isUnfiltered)
         let needsVectors = !contradictory && fuzzy && (fields.tags || fields.text || !fields.author) && !terms.isEmpty && ModelStore.shared.activeEmbedderId != nil && AIEngine.isSupported
         reloadWork.submit { [weak self] isCurrent in
             guard let self, isCurrent() else { return }
@@ -1004,7 +947,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     /// What the search field's capsules ask for (the only filters there are).
-    private var currentFilter: FeedFilter { query.filter(over: FeedFilter()) }
+    var currentFilter: FeedFilter { query.filter(over: FeedFilter()) }
 
     /// Where you were in the unfiltered feed before searching or filtering: restored when the
     /// search is closed (the order is stable, so the same position shows the same media).
@@ -1036,7 +979,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             collectionView.setContentOffset(CGPoint(x: -collectionView.adjustedContentInset.left, y: r.y - collectionView.adjustedContentInset.top), animated: false)
             updatingInsets = false
             restingAtTop = r.y <= 1
-            updateTopFrost(animated: false)
             emptyLabel.isHidden = !allItems.isEmpty
             DispatchQueue.main.async { self.updateInlinePlayback() }
             return
@@ -1052,11 +994,10 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             restingAtTop = true
         }
         updatingInsets = false
-        updateTopFrost(animated: false)
         if allItems.isEmpty {
             emptyLabel.text = isUnfiltered ? L("feed.empty.library") : L("feed.empty.noMatch")
         }
-        emptyLabel.isHidden = !allItems.isEmpty
+        emptyLabel.isHidden = !allItems.isEmpty || (role == .search && isUnfiltered)
         DispatchQueue.main.async { self.updateInlinePlayback() }
     }
 
@@ -1128,308 +1069,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     #endif
     private var sectionCount: Int { entries.isEmpty ? 0 : 1 }
 
-    // MARK: Search chips
-
-    func textFieldShouldReturn(_ tf: UITextField) -> Bool {
-        commitTypedText()
-        if landscapeActionsHost != nil {
-            tf.resignFirstResponder()
-            rebuildSuggestions()
-            return false
-        }
-        exitSearch()
-        return true
-    }
-
-    func textFieldDidBeginEditing(_ tf: UITextField) { enterSearch() }
-
-    /// A term to search for: a capsule in the field.
-    private func addTerm(_ t: String) {
-        let t = t.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !t.isEmpty, !terms.contains(t) else { return }
-        SearchHistory.add(t)
-        insertToken(key: TokenQuery.termKey(t))
-        applyTokens()
-    }
-
-    private func clearTerms() {
-        searchField.tokens = searchField.tokens.filter { !(($0.representedObject as? String)?.hasPrefix("t:") ?? false) }
-        query = TokenQuery(keys: searchField.tokens.compactMap { $0.representedObject as? String })
-        updateExitButton()
-    }
-
-    /// The × beside the bar: the whole search goes (capsules and text) and the list closes.
-    private func clearSearch() {
-        searchField.tokens = []
-        searchField.text = nil
-        if searching {
-            exitSearch()
-        } else {
-            applyTokens()
-        }
-    }
-
-    /// A tag was renamed: the search follows the new name.
-    private func replaceTerm(_ old: String, with new: String) {
-        for key in [TokenQuery.termKey(old), TokenQuery.minus + TokenQuery.termKey(old)] {
-            if let k = searchField.tokens.firstIndex(where: { ($0.representedObject as? String) == key }) {
-                searchField.removeToken(at: k)
-                searchField.insertToken(makeToken(key.hasPrefix(TokenQuery.minus) ? TokenQuery.minus + TokenQuery.termKey(new) : TokenQuery.termKey(new)), at: k)
-            }
-        }
-        query = TokenQuery(keys: searchField.tokens.compactMap { $0.representedObject as? String })
-    }
-
-    private var plainSearchIcon: UIView?
-    /// Once something is searched for, the mascot mode's search icon.
-    private func updateSearchIcon() {
-        if plainSearchIcon == nil { plainSearchIcon = searchField.leftView }
-        searchField.leftView = Mascot.isOn && !terms.isEmpty ? UIImageView(image: Mascot.icon("search", side: 24)) : plainSearchIcon
-    }
-
-    // MARK: Search mode
-
-    /// Tapping the field: the list of suggestions (or filters) opens under it.
-    private func enterSearch() {
-        guard !searching else { return }
-        searching = true
-        detachInline()   // (not just paused: a paused video layer can go black)
-        Task { [weak self] in
-            let (tags, folders) = await Task.detached { (Core.allTags(), Core.folders()) }.value
-            guard let self, self.searching else { return }
-            self.tagCache = tags
-            self.folderCache = folders
-            self.rebuildSuggestions()
-        }
-        rebuildSuggestions()
-        view.layoutIfNeeded()   // the field's final place (it may have just unfolded) before the list is placed under it
-        suggestions.scrollToTop()
-        suggestions.isHidden = false
-        suggestions.superview?.bringSubviewToFront(suggestions)
-        searchChrome.superview?.bringSubviewToFront(searchChrome)
-        searchChrome.bringSubviewToFront(exitButton)
-        searchChrome.bringSubviewToFront(exportButton)
-        UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0) { self.suggestions.alpha = 1 }
-        updateExitButton()
-    }
-
-    /// Return or another tab: the list closes; the search itself stays.
-    private func exitSearch() {
-        searchField.resignFirstResponder()
-        guard searching else { return }
-        searching = false
-        unfolded = false
-        commitTypedText()
-        updateExitButton()
-        UIView.animate(withDuration: 0.22, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, animations: {
-            self.suggestions.alpha = 0
-        }) { _ in
-            if !self.searching { self.suggestions.isHidden = true }
-            self.view.bringSubviewToFront(self.activityPanel)
-            self.view.bringSubviewToFront(self.toast)
-            self.updateInlinePlayback()
-        }
-    }
-
-    @objc private func searchTextChanged() {
-        if searchField.markedTextRange == nil {
-            // a word followed by a space becomes a capsule (a condition, or text to search for)
-            let (keys, rest) = TokenQuery.split(searchField.text ?? "")
-            if !keys.isEmpty {
-                for k in keys { addKey(k) }
-                searchField.text = rest
-            }
-            applyTokens()
-        }
-        if searching { rebuildSuggestions() }
-    }
-
-    /// A capsule from typed text. A word right after a pending L("place.folders") capsule names the folder
-    /// (matched to an existing folder regardless of case); a second folder replaces the first.
-    private func addKey(_ key: String) {
-        var k = key
-        let last = searchField.tokens.last?.representedObject as? String
-        // a word right after a pending L("place.folders") (or "-文件夹") names the folder
-        if k.hasPrefix("t:") || k.hasPrefix(TokenQuery.minus + "t:"), last == TokenQuery.pendingFolder || last == TokenQuery.minus + TokenQuery.pendingFolder {
-            searchField.removeToken(at: searchField.tokens.count - 1)
-            let word = k.hasPrefix(TokenQuery.minus) ? String(k.dropFirst(3)) : String(k.dropFirst(2))
-            k = (last == TokenQuery.pendingFolder ? "" : TokenQuery.minus) + TokenQuery.folderKey(word)
-        }
-        let negative = k.hasPrefix(TokenQuery.minus)
-        let bare = negative ? String(k.dropFirst()) : k
-        if bare.hasPrefix("d:") {
-            let typed = String(bare.dropFirst(2))
-            let name = folderCache.first { $0.name.lowercased() == typed.lowercased() }?.name ?? typed
-            k = (negative ? TokenQuery.minus : "") + TokenQuery.folderKey(name)
-            // one folder to look in (a new one replaces it); folders to leave out add up
-            if !negative { searchField.tokens = searchField.tokens.filter { !(($0.representedObject as? String)?.hasPrefix("d:") ?? false) } }
-        }
-        guard !searchField.tokens.contains(where: { ($0.representedObject as? String) == k }) else { return }
-        if bare.hasPrefix("t:") {
-            let t = String(bare.dropFirst(2)).lowercased()
-            k = (negative ? TokenQuery.minus : "") + TokenQuery.termKey(t)
-            if !negative { SearchHistory.add(t) }
-        }
-        insertToken(key: k)
-    }
-
-    /// Text left in the field when the search closes becomes a capsule too (the last word may
-    /// be a condition, or a folder's name after L("place.folders"), typed without a space after it).
-    private func commitTypedText() {
-        let t = (searchField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        searchField.text = nil
-        if !t.isEmpty { addKey(TokenQuery.key(for: t, after: nil)) }
-        // a L("place.folders") capsule still waiting for a name means nothing: it goes
-        if let last = searchField.tokens.last?.representedObject as? String, last == TokenQuery.pendingFolder || last == TokenQuery.minus + TokenQuery.pendingFolder { searchField.removeToken(at: searchField.tokens.count - 1) }
-        applyTokens()
-    }
-
-    /// What a capsule reads (VoiceOver: with "排除" for a minus capsule).
-    private func tokenTitle(_ key: String) -> String { TokenQuery.spoken(key) }
-
-    /// A capsule: its symbol (a minus capsule a ⊖) and title.
-    private func makeToken(_ key: String) -> UISearchToken {
-        let icon = TokenQuery.symbol(key).flatMap { UIImage(systemName: $0) }
-        let token = UISearchToken(icon: TokenQuery.isExcluded(key) ? icon?.withTintColor(.systemRed, renderingMode: .alwaysOriginal) : icon, text: TokenQuery.title(key))
-        token.representedObject = key
-        return token
-    }
-
-    private func insertToken(key: String) {
-        searchField.insertToken(makeToken(key), at: searchField.tokens.count)
-    }
-
-    /// The capsules decide the search: conditions, then the texts (all must match).
-    private func applyTokens() {
-        let q = TokenQuery(keys: searchField.tokens.compactMap { $0.representedObject as? String })
-        let changed = q != query
-        query = q
-        updateExitButton()
-        guard changed else { return }
-        updateSearchIcon()
-        reload()
-    }
-
-    /// The × shows while searching and while a search is in effect; it also says (to VoiceOver)
-    /// what the search is.
-    private func updateExitButton() {
-        let words = searchField.tokens.compactMap { ($0.representedObject as? String).map(tokenTitle) } + [searchField.text ?? ""].filter { !$0.isEmpty }
-        syncSearchFold(animated: true)
-        guard !folding else { return }
-        let show = searching || !words.isEmpty
-        // exporting is offered while a search or a filter is in effect (not while only typing begins)
-        let showExport = !words.isEmpty || !currentFilter.isEmpty
-        // These buttons are siblings of the header, so hiding the header cannot hide them.
-        exitButton.isHidden = !show
-        exportButton.isHidden = !showExport
-        exitButton.accessibilityValue = words.joined(separator: L("list.separator"))
-        guard show != exitShown || showExport != exportShown else { return }
-        exitShown = show; exportShown = showExport
-        // switch the old constraints off before the new ones on (never two required ones at odds)
-        [headerTrailing, headerBesideExit, headerBesideExport, exportBesideExit, exportAtEdge].forEach { $0?.isActive = false }
-        headerTrailing.isActive = !show && !showExport
-        headerBesideExit.isActive = show && !showExport
-        headerBesideExport.isActive = showExport
-        exportBesideExit.isActive = show
-        exportAtEdge.isActive = !show
-        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0) {
-            for (b, on) in [(self.exitButton, show), (self.exportButton, showExport)] {
-                b.alpha = on ? 1 : 0
-                b.transform = on ? .identity : CGAffineTransform(scaleX: 0.6, y: 0.6)
-            }
-            self.view.layoutIfNeeded()
-        } completion: { _ in
-            if !self.exitShown && self.exitButton.alpha == 0 { self.exitButton.isHidden = true }
-            if !self.exportShown && self.exportButton.alpha == 0 { self.exportButton.isHidden = true }
-        }
-    }
-
-    // MARK: Export of a search
-
-    /// The export button: a small popover (the switches, then 导出) for exactly the media the
-    /// search shows now.
-    private func showExport() {
-        searchField.resignFirstResponder()
-        guard shownGeneration == reloadGeneration else { return alert(L("search.busy.title"), L("search.busy.message")) }
-        let ids = allItems.map(\.mediaId)
-        let host = UIHostingController(rootView: SearchExportView(count: ids.count) { [weak self] in
-            self?.dismiss(animated: true) {
-                let options = SearchExportPrefs.options
-                self?.exportAndShare(fileName: SearchExportPrefs.fileName(terms: self?.query.terms ?? [])) { out in try Core.exportMedia(ids, options: options, to: out) }
-            }
-        })
-        host.view.backgroundColor = .clear
-        host.modalPresentationStyle = .popover
-        host.sizingOptions = .preferredContentSize
-        if let pop = host.popoverPresentationController {
-            let anchor = exportButton
-            pop.sourceView = anchor
-            pop.sourceRect = anchor.bounds
-            pop.permittedArrowDirections = [.up, .down]
-            pop.delegate = self
-        }
-        present(host, animated: true)
-    }
-
-    /// A real popover on the iPhone too (not a full sheet).
-    func adaptivePresentationStyle(for controller: UIPresentationController, traitCollection: UITraitCollection) -> UIModalPresentationStyle { .none }
-
-    func popoverPresentationController(_ controller: UIPopoverPresentationController,
-                                       willRepositionPopoverTo rect: UnsafeMutablePointer<CGRect>,
-                                       in sourceView: AutoreleasingUnsafeMutablePointer<UIView>) {
-        guard controller.sourceView === view, let frame = foldDownloadItem.frame(in: view), !frame.isEmpty else { return }
-        sourceView.pointee = view
-        rect.pointee = frame
-    }
-
-    private func updatePlaceholder() {
-        searchField.placeholder = L("search.placeholder")
-    }
-
-    private func updateSuggestionFooter() {
-        let stats = ActivityCenter.shared.statsLine
-        suggestions.setFooter((stats.isEmpty ? "" : stats + "\n") + SearchHighlight.guide)
-    }
-
-    private func rebuildSuggestions() {
-        let typed = (searchField.text ?? "").trimmingCharacters(in: .whitespaces)
-        suggestions.sections = tokenSuggestions(typed)
-        updateSuggestionFooter()
-    }
-
-    /// The shared list (conditions, words, tags, folders, recent searches; with a minus typed,
-    /// the same as exclusions) as system list rows.
-    private func tokenSuggestions(_ typed: String) -> [SearchSuggestionsView.Section] {
-        let keys = searchField.tokens.compactMap { $0.representedObject as? String }
-        return SearchSuggestions.sections(typed: typed, keys: keys, tags: tagCache, folders: folderCache).map { sec in
-            .init(title: sec.title, rows: sec.rows.map { r in
-                let tint: UIColor = switch r.tint { case .accent: .tintColor; case .folder: .systemTeal; case .secondary: .secondaryLabel; case .exclude: .systemRed }
-                return SearchSuggestionsView.Row(id: r.id, title: r.title, subtitle: r.subtitle, symbol: r.symbol, tint: tint, destructive: r.destructive,
-                                                 action: r.action.map { a in { [weak self] in self?.perform(a) } })
-            })
-        }
-    }
-
-    private func perform(_ a: SearchSuggestion.Action) {
-        switch a {
-        case .key(let k):
-            searchField.text = nil
-            addKey(k)
-            applyTokens()
-        case .folder(let name, let excluded):
-            searchField.text = nil
-            // the pending L("place.folders") capsule gives way to the folder
-            if let last = searchField.tokens.last?.representedObject as? String, last == TokenQuery.pendingFolder || last == TokenQuery.minus + TokenQuery.pendingFolder {
-                searchField.removeToken(at: searchField.tokens.count - 1)
-            }
-            addKey((excluded ? TokenQuery.minus : "") + TokenQuery.folderKey(name))
-            applyTokens()
-        case .clearHistory:
-            SearchHistory.clear()
-        }
-        rebuildSuggestions()
-    }
-
     /// The links typed into the quick download card; they stay when it closes without downloading.
     private let quickDownloadDraft = QuickDownloadDraft()
 
@@ -1469,20 +1108,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         // The system popover supplies one continuous glass surface, including its arrow.
         host.view.backgroundColor = .clear
         if let pop = host.popoverPresentationController {
-            if searchFolded, foldItem != nil, landscapeActionsHost == nil {
-                if let frame = foldDownloadItem.frame(in: view), !frame.isEmpty {
-                    // In the shared tab bar row UIKit hosts the item outside the feed's navigation bar.
-                    // Anchor in feed coordinates to keep the popover below the other controls.
-                    pop.sourceView = view
-                    pop.sourceRect = frame
-                } else {
-                    pop.sourceItem = foldDownloadItem
-                }
-            } else {
-                let anchor = searchFolded ? browseDownloadButton : searchChrome
-                pop.sourceView = anchor
-                pop.sourceRect = searchFolded ? anchor.bounds : CGRect(x: anchor.bounds.maxX - 22, y: 0, width: 22, height: anchor.bounds.height)
-            }
+            let anchor = searchFolded ? browseDownloadButton : searchChrome
+            pop.sourceView = anchor
+            pop.sourceRect = searchFolded ? anchor.bounds : CGRect(x: anchor.bounds.maxX - 22, y: 0, width: 22, height: anchor.bounds.height)
             pop.permittedArrowDirections = [.up, .down]
             pop.delegate = self
         }
@@ -1604,7 +1232,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         guard sv === collectionView else { return }
         if !updatingInsets {
             restingAtTop = sv.contentOffset.y <= -sv.adjustedContentInset.top + 1
-            updateTopFrost()
         }
         scheduleInlineUpdate()
     }
@@ -1612,7 +1239,6 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     func scrollViewDidScrollToTop(_ sv: UIScrollView) {
         guard sv === collectionView else { return }
         restingAtTop = true
-        updateTopFrost()
     }
 
     func feedCellPageDidChange(_ cell: FeedCell) {
@@ -1677,7 +1303,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     /// Plays every video page that is at least half in view, each with its own muted player.
-    private func updateInlinePlayback() {
+    func updateInlinePlayback() {
         guard !showingMediaViewer, viewIfLoaded?.window != nil, presentedViewController == nil else { return }
         let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
         var wanted: [InlineVideos<MediaPageView>.Card] = []
@@ -1712,7 +1338,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     /// Releases video decoders when the feed is covered or goes into the background.
-    private func detachInline() {
+    func detachInline() {
         inline.stopAll()
     }
 
@@ -1830,6 +1456,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// Shows only one folder's media (nil = everything).
     func showFolder(_ name: String?) {
         guard let name else {
+            if role == .browse && searchElsewhere { return }   // 浏览 has no search to clear
             searchField.tokens = searchField.tokens.filter { !(($0.representedObject as? String)?.hasPrefix("d:") ?? false) }
             return applyTokens()
         }
@@ -1960,7 +1587,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         }
     }
 
-    private func alert(_ title: String, _ message: String? = nil) {
+    func alert(_ title: String, _ message: String? = nil) {
         let a = UIAlertController(title: title, message: message, preferredStyle: .alert)
         a.addAction(UIAlertAction(title: L("common.ok"), style: .default))
         present(a, animated: true)

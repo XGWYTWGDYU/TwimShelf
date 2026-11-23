@@ -43,7 +43,8 @@ fn outgoing_log_snapshot_is_bounded_and_next_session_sends_new_writes() {
         if batch.is_empty() { break; }
         for op in batch { count += 1; cursor.insert(op.device, op.seq); }
     }
-    assert_eq!(count, 3);
+    // each new post is two records: the post, and when it came into the library
+    assert_eq!(count, 6);
     assert_eq!(cursor, upper);
-    assert_eq!(db.ops_since(&cursor, 10).unwrap().len(), 1);
+    assert_eq!(db.ops_since(&cursor, 10).unwrap().len(), 2);
 }

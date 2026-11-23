@@ -1052,6 +1052,8 @@
   color: var(--fg);
   margin: 0;
 }
+.about-link { color: var(--accent); text-decoration: none; font-size: 13px; }
+.about-link:hover { text-decoration: underline; }
 .about-tagline {
   font-size: 13px;
   color: var(--fg-2);

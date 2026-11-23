@@ -385,12 +385,13 @@ fn records_from_a_newer_version_are_kept_and_passed_on() {
         Op::Folder { name: "f".into(), deleted: false, hlc: 1 }, Op::FolderMedia { folder: "f".into(), media_id: "m".into(), present: true, hlc: 1 },
         Op::Alias { src: "a".into(), dst: None, hlc: 1 }, Op::Trash { media_id: "m".into(), inc: 0, state: 0, hlc: 1 },
         Op::TagSrc { media_id: "m".into(), label: "l".into(), model: "x".into(), present: true, hlc: 1 }, Op::Tag { media_id: "m".into(), label: "l".into(), origin: 1, mask: 3, hlc: 1 },
-        Op::Media { id: "m".into(), post_id: "p".into(), ordinal: 0, kind: MediaKind::Photo, ext: "jpg".into() }, Op::Post { meta: PostMeta::default(), hlc: 1 }, Op::Setting { key: "k".into(), value: None, hlc: 1 }];
+        Op::Media { id: "m".into(), post_id: "p".into(), ordinal: 0, kind: MediaKind::Photo, ext: "jpg".into() }, Op::Post { meta: PostMeta::default(), hlc: 1 }, Op::Setting { key: "k".into(), value: None, hlc: 1 },
+        Op::Added { post_id: "p".into(), at: 1 }];
     for o in samples {
         let t = tl_core::oplog::op_value(&o)["t"].as_str().unwrap().to_string();
         assert!(tl_core::oplog::KNOWN_OPS.contains(&t.as_str()), "{t} missing from KNOWN_OPS");
     }
-    assert_eq!(tl_core::oplog::KNOWN_OPS.len(), 12, "one entry per kind");
+    assert_eq!(tl_core::oplog::KNOWN_OPS.len(), 13, "one entry per kind");
 }
 
 

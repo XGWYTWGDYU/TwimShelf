@@ -22,6 +22,7 @@ const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${SVG[name] |
 if (new URLSearchParams(location.search).has("tab")) document.body.classList.add("tab");
 for (const e of document.querySelectorAll("[data-i18n]")) e.innerHTML = t(e.dataset.i18n).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
 for (const e of document.querySelectorAll("[data-i18n-placeholder]")) e.placeholder = t(e.dataset.i18nPlaceholder);
+for (const e of document.querySelectorAll("[data-i18n-label]")) { e.setAttribute("aria-label", t(e.dataset.i18nLabel)); e.title = t(e.dataset.i18nLabel); }
 document.documentElement.lang = chrome.i18n.getUILanguage();
 
 const ERRORS = {
@@ -30,6 +31,11 @@ const ERRORS = {
   too_old: "errorTooOld", too_new: "errorTooNew", origin: "errorUnreachable",
 };
 let adding = false;
+/** The tab shown once a device is bound: "tasks" (下载) or "devices" (设备). */
+let tab = "tasks";
+for (const [id, name] of [["tabTasks", "tasks"], ["tabDevices", "devices"]]) {
+  $(id).addEventListener("click", () => { tab = name; adding = false; status(""); render(); });
+}
 
 function status(text, kind = "") {
   const p = $("bindStatus");
@@ -73,7 +79,7 @@ $("bindForm").addEventListener("submit", async (e) => {
 });
 // pasting the binding text binds at once
 $("entry").addEventListener("paste", () => setTimeout(() => { if (/TWS1:/.test($("entry").value)) $("bindForm").requestSubmit(); }, 0));
-$("addToggle").addEventListener("click", () => { adding = true; render(); $("entry").focus(); });
+$("addToggle").addEventListener("click", () => { adding = true; tab = "devices"; render(); $("entry").focus(); });
 $("cancelAdd").addEventListener("click", () => { adding = false; status(""); render(); });
 
 // ------------------------------------------------------------------------------------------
@@ -145,9 +151,10 @@ function taskRow(x) {
   if (x.error && (x.state === "failed" || x.state === "offline")) info.append(el("div", "err-line", x.error));
   li.append(mark, info);
   if (x.state === "failed" || x.state === "cancelled") {
-    const again = el("button", "icon-btn");
+    const again = el("button", "icon-btn retry");
     again.type = "button";
     again.innerHTML = svg("retry");
+    again.append(t("retry"));
     again.title = t("retry");
     again.setAttribute("aria-label", t("retry"));
     again.addEventListener("click", async () => { again.disabled = true; await chrome.runtime.sendMessage({ type: "retry", key: x.key }); });
@@ -160,18 +167,28 @@ function taskRow(x) {
 
 async function render() {
   const { devices, tasks, defaultDevice } = await load();
+  const { update } = await chrome.storage.local.get("update");
+  $("updateBox").hidden = !update;
+  if (update) { $("updateText").textContent = t("updateAvailable", update.version); $("updateBox").href = update.url; }
   const usable = devices.filter((d) => !d.unbound);
   const list = Object.values(tasks).sort((a, b) => b.updated - a.updated).slice(0, 30);
   const active = list.filter((x) => ACTIVE.has(x.state)).length;
 
-  // binding by itself when there is nothing yet
-  const connecting = devices.length === 0 || adding;
+  // binding by itself when there is nothing yet; else 下载 and 设备 as tabs (adding a device
+  // shows the binding in 设备)
+  const bound = devices.length > 0;
+  $("tabs").hidden = !bound;
+  if (!bound) tab = "tasks";
+  $("tabTasks").setAttribute("aria-selected", String(tab === "tasks"));
+  $("tabDevices").setAttribute("aria-selected", String(tab === "devices"));
+  $("deviceCount").textContent = bound ? String(devices.length) : "";
+  const connecting = !bound || (adding && tab === "devices");
   $("connect").hidden = !connecting;
   $("connectTitle").textContent = devices.length === 0 ? t("connectTitle") : t("addDevice");
   $("cancelAdd").hidden = devices.length === 0;
   if (connecting) renderLocal();
 
-  $("devicesCard").hidden = devices.length === 0;
+  $("devicesCard").hidden = !bound || tab !== "devices";
   $("addToggle").hidden = adding;
   $("devices").replaceChildren(...devices.map((d) => deviceRow(d, usable.length)));
   $("defaultRow").hidden = usable.length < 2;
@@ -179,19 +196,20 @@ async function render() {
   select.replaceChildren(new Option(t("askEveryTime"), ""), ...usable.map((d) => new Option(d.name, d.id)));
   select.value = usable.some((d) => d.id === defaultDevice) ? defaultDevice : "";
 
-  $("tasksCard").hidden = devices.length === 0 && list.length === 0;
+  $("tasksCard").hidden = !bound || tab !== "tasks";
   $("tasks").replaceChildren(...list.map(taskRow));
   if (!list.length) $("tasks").replaceChildren(el("p", "empty", t("noTasks")));
   $("clear").hidden = !list.some((x) => !ACTIVE.has(x.state));
   $("hintX").hidden = devices.length === 0 || list.length > 0;
 
   const connected = usable.length === 1 ? t("oneDevice") : t("nDevices", usable.length);
-  $("summary").textContent = devices.length === 0 ? t("summaryNone") : active ? `${connected} · ${t("nDownloading", active)}` : connected;
+  $("summary").textContent = devices.length === 0 ? t("summaryNone") : active ? t("nDownloading", active) : connected;
+  $("summary").dataset.state = devices.length === 0 ? "none" : active ? "active" : "ok";
 }
 
 $("defaultDevice").addEventListener("change", (e) => setDefault(e.target.value));
 $("clear").addEventListener("click", () => updateTasks((tasks) => { for (const k of Object.keys(tasks)) if (!ACTIVE.has(tasks[k].state)) delete tasks[k]; }));
 // what the worker changes shows here as it happens (the binding form is left as typed)
-chrome.storage.onChanged.addListener((c, area) => { if (area === "local" && (c.tasks || c.devices || c.defaultDevice)) render(); });
+chrome.storage.onChanged.addListener((c, area) => { if (area === "local" && (c.tasks || c.devices || c.defaultDevice || c.update)) render(); });
 chrome.runtime.sendMessage({ type: "pump" }).catch(() => {});
 render().then(() => { if (!$("connect").hidden) $("entry").focus(); });

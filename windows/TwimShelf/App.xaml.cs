@@ -114,6 +114,7 @@ public partial class App : Application
             await Pages.DataHomeSettings.RequireOutsideProgram(LibraryModel.Current);
             _main.ShowPendingShares();
             _ = StartupChecks.Run(_main);
+            WelcomeWindow.ShowIfNeeded();
         }
         return true;
     }
@@ -145,6 +146,7 @@ public partial class App : Application
             await Pages.DataHomeSettings.RequireOutsideProgram(library);
             main.ShowPendingShares();
             _ = StartupChecks.Run(main);
+            WelcomeWindow.ShowIfNeeded();
         }
         catch (Exception e)
         {

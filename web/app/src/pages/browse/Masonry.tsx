@@ -16,6 +16,8 @@ export interface MasonryProps<T> {
   /** Room above the first row (the toolbar the cards scroll under, and 12 more). */
   top: number;
   footer?: ReactNode;
+  /** Every scroll, with how far down the list is. */
+  onScrollTop?: (top: number) => void;
 }
 
 export interface MasonryHandle {
@@ -28,7 +30,7 @@ interface Placed { key: string; index: number; x: number; y: number; h: number }
 
 const SIDE = 20, COL_GAP = 16, ROW_GAP = 18, FOOTER = 56;
 
-function MasonryInner<T>({ items, active, density, keyOf, estimate, render, top, footer }: MasonryProps<T>, ref: React.Ref<MasonryHandle>) {
+function MasonryInner<T>({ items, active, density, keyOf, estimate, render, top, footer, onScrollTop }: MasonryProps<T>, ref: React.Ref<MasonryHandle>) {
   const scroller = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [view, setView] = useState({ top: 0, height: 800 });
@@ -104,7 +106,7 @@ function MasonryInner<T>({ items, active, density, keyOf, estimate, render, top,
   const visible = layout.placed.filter((p) => p.y + p.h >= from && p.y <= to);
 
   return (
-    <div className="masonry-scroller" ref={scroller} tabIndex={-1} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight })}>
+    <div className="masonry-scroller" ref={scroller} tabIndex={-1} onScroll={(e) => { setView({ top: e.currentTarget.scrollTop, height: e.currentTarget.clientHeight }); onScrollTop?.(e.currentTarget.scrollTop); }}>
       <div className={`masonry${resizing ? ' resizing' : ''}`} style={{ height: layout.height + FOOTER }}>
         {width > 0 && visible.map((p) => (
           <Cell key={p.key} id={p.key} x={p.x} y={p.y} w={colW} report={report}>

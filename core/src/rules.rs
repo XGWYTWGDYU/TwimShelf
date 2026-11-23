@@ -250,6 +250,26 @@ pub const RECENT_MAX_FUTURE_MS: u64 = 86_400_000;
 
 pub fn merge_recent(a: u64, b: u64) -> u64 { if a >= b { a } else { b } }
 
+/// When a post came into the library: the earliest time any device recorded (0 = none). A
+/// grow-only minimum: order and repetition of records never matter.
+pub fn merge_added(a: u64, b: u64) -> u64 {
+    match (a, b) { (0, x) | (x, 0) => x, (a, b) => a.min(b) }
+}
+
+/// X's post ids carry the post's own time (a "snowflake": ms since 2010-11-04 in the high bits).
+const TWEPOCH_MS: u64 = 1_288_834_974_657;
+
+/// The sort time of a post: when it came into the library, or for a post from before that was
+/// recorded (v19), the time in its X id: the same on every device, older than anything added
+/// since. Anything else (loose media) has none and sorts last.
+pub fn added_or_tweet_time(added: Option<u64>, post_id: &str) -> u64 {
+    if let Some(a) = added.filter(|a| *a > 0) { return a }
+    match post_id.parse::<u64>() {
+        Ok(n) if n >> 22 > 0 => (n >> 22).saturating_add(TWEPOCH_MS),
+        _ => 0,
+    }
+}
+
 /// Whether a mark made at `at` (ms, 0 = none) is shown at `now`.
 pub fn recent_active(at: u64, now: u64) -> bool {
     at != 0 && at <= now.saturating_add(RECENT_MAX_FUTURE_MS) && now < at.saturating_add(RECENT_MS)
@@ -686,6 +706,12 @@ mod proofs {
     #[kani::proof]
     fn recent_mark_rules() {
         let (a, b, c, now, later): (u64, u64, u64, u64, u64) = (kani::any(), kani::any(), kani::any(), kani::any(), kani::any());
+        // merge_added: commutative, associative, idempotent; 0 is "none"
+        assert_eq!(merge_added(a, b), merge_added(b, a));
+        assert_eq!(merge_added(merge_added(a, b), c), merge_added(a, merge_added(b, c)));
+        assert_eq!(merge_added(a, a), a);
+        assert_eq!(merge_added(0, b), b);
+        if a != 0 && b != 0 { assert_eq!(merge_added(a, b), a.min(b)); }
         assert_eq!(merge_recent(a, b), merge_recent(b, a));
         assert_eq!(merge_recent(merge_recent(a, b), c), merge_recent(a, merge_recent(b, c)));
         assert_eq!(merge_recent(a, a), a);

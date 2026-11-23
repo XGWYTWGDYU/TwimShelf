@@ -60,7 +60,8 @@ fn forged_sequence_numbers_are_refused() {
     let r = s.apply_remote_counted(&[forged], |_, _| false).unwrap();
     assert_eq!((r.applied, r.refused), (0, 1));
     for i in 0..3 { s.upsert_post(&PostMeta { id: format!("c{i}"), ..Default::default() }).unwrap(); }
-    assert_eq!(s.version_vector().unwrap()[&me], 4, "the local log keeps counting 1, 2, 3, 4");
+    // (each new post is two records: the post, and when it came into the library)
+    assert_eq!(s.version_vector().unwrap()[&me], 8, "the local log keeps counting 1, 2, … 8");
     // another device's log with a gap: only the contiguous part is taken
     let other = [op("dev-b", 1, Op::Recent { post_id: "a".into(), at: 1 }), op("dev-b", 3, Op::Recent { post_id: "a".into(), at: 3 })];
     let r = s.apply_remote_counted(&other, |_, _| false).unwrap();
@@ -356,4 +357,45 @@ fn restored_renames_do_not_clobber_newer_rules() {
     assert_eq!(s.canonical("b").unwrap(), "c", "the newer rule is kept");
     // a name with a rule of its own (or one the user removed) is left alone
     assert!(!s.restore_rename("b", "x").unwrap());
+}
+
+/// 按添加时间排序: when a post came into the library is recorded where it was downloaded and
+/// synced, so every device sorts the same; downloaded on two devices, the earlier time wins; a
+/// post imported again keeps its first time; a post from before the record sorts by its X id's time.
+#[test]
+fn added_time_is_synced_and_the_earliest_wins() {
+    let (ia, ib, ic) = ("a".repeat(64), "b".repeat(64), "c".repeat(64));
+    let a = Store::open(":memory:").unwrap();
+    let b = Store::open(":memory:").unwrap();
+    a.upsert_post(&PostMeta { id: "1900000000000000001".into(), ..Default::default() }).unwrap();
+    a.add_media(&ia, "1900000000000000001", 0, &MediaKind::Photo, &format!("blobs/aa/{ia}.jpg"), false).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    b.upsert_post(&PostMeta { id: "1900000000000000002".into(), ..Default::default() }).unwrap();
+    b.add_media(&ib, "1900000000000000002", 0, &MediaKind::Photo, &format!("blobs/bb/{ib}.jpg"), false).unwrap();
+    // the same post downloaded on both devices, b later
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    for s in [&a, &b] {
+        s.upsert_post(&PostMeta { id: "1900000000000000003".into(), ..Default::default() }).unwrap();
+        s.add_media(&ic, "1900000000000000003", 0, &MediaKind::Photo, &format!("blobs/cc/{ic}.jpg"), false).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let first_c = a.posts_added().unwrap()["1900000000000000003"];
+    let (oa, ob) = (a.ops_since(&VersionVector::new(), 1000).unwrap(), b.ops_since(&VersionVector::new(), 1000).unwrap());
+    a.apply_remote(&ob, |_, _| true).unwrap();
+    b.apply_remote(&oa, |_, _| true).unwrap();
+    let (ta, tb) = (a.posts_added().unwrap(), b.posts_added().unwrap());
+    assert_eq!(ta, tb, "both devices sort the same");
+    assert_eq!(ta["1900000000000000003"], first_c, "the earlier download's time wins");
+    assert!(ta["1900000000000000001"] < ta["1900000000000000002"] && ta["1900000000000000002"] < ta["1900000000000000003"]);
+    // imported again: keeps its first time
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    a.upsert_post(&PostMeta { id: "1900000000000000001".into(), text: Some("again".into()), ..Default::default() }).unwrap();
+    assert_eq!(a.posts_added().unwrap()["1900000000000000001"], ta["1900000000000000001"]);
+    // a post from before the record (no time kept): its X id's own time, older than anything added since
+    a.conn().execute("DELETE FROM post_added WHERE post_id='1900000000000000002'", []).unwrap();
+    let old = a.posts_added().unwrap()["1900000000000000002"];
+    assert_eq!(old, ((1900000000000000002u64 >> 22) + 1_288_834_974_657) as i64);
+    assert!(old < ta["1900000000000000001"]);
+    // an older peer passes the record on unknown; this version applies it again from its log
+    assert!(oa.iter().any(|o| matches!(o.op, Op::Added { .. })));
 }

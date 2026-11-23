@@ -42,11 +42,15 @@
 /* the tag row: pills 20 high, 10 rounded, 7 padding, 12 medium, 5 apart, coloured text on 16 % */
 .card-tags { margin-top: 8px; height: 20px; display: flex; gap: 5px; padding: 0 14px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .card-tags::-webkit-scrollbar { display: none; }
-.pill { flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 10px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-.pill-mine { color: var(--tag); background: var(--tag-soft); }
-.pill-ai { color: var(--ai); background: var(--ai-soft); }
-.pill-approved { color: var(--approved); background: var(--approved-soft); }
-.pill-recent { color: #fff; background: var(--orange); font-weight: 700; }
-.pill-add { width: 24px; padding: 0; justify-content: center; color: var(--fg-2); background: color-mix(in srgb, var(--fg-2) 12%, transparent); }
+.pill { flex: none; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px 0 7px; border-radius: 6px; font-size: 12px; font-weight: 500; white-space: nowrap;
+  color: var(--fg); background: color-mix(in srgb, var(--fg) 5%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent); cursor: default; }
+/* a tag as Finder shows one: a neutral box, a dot in the colour of where it comes from */
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--dot, transparent); }
+.pill-mine { --dot: var(--tag); }
+.pill-ai { --dot: var(--ai); }
+.pill-approved { --dot: var(--approved); }
+.pill-recent { --dot: var(--orange); }
+.pill-add { width: 20px; padding: 0; justify-content: center; color: var(--fg-2); }
+.pill-add::before { display: none; }
 
 .search-mark { background: light-dark(#ffe394, #775314); color: light-dark(#332100, #fff2c2); border-radius: 2px; }

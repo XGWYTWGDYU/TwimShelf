@@ -117,6 +117,9 @@ public sealed class Prefs
     public double GridTile { get => Math.Clamp(Double("windows.grid.tile") ?? 160, 72, 400); set => Set("windows.grid.tile", value, notify: false); }
     public int GridLevel { get => (int)Math.Clamp(Long("windows.grid.level") ?? 1, 0, 2); set => Set("windows.grid.level", Math.Clamp(value, 0, 2), notify: false); }
     public double PlayerVolume { get => Math.Clamp(Double("player.volume") ?? 1.0, 0.0, 1.0); set => Set("player.volume", Math.Clamp(value, 0.0, 1.0), notify: false); }
+    /// Welcome guide: shown once on first launch, or again on next launch when toggled in About.
+    public bool WelcomeSeen { get => Bool("windows.welcome.seen", false); set => Set("windows.welcome.seen", value, notify: false); }
+    public bool WelcomeNextLaunch { get => Bool("windows.welcome.nextLaunch", false); set => Set("windows.welcome.nextLaunch", value, notify: false); }
 
     public JsonNode? Raw(string key) => Get(key);
 }

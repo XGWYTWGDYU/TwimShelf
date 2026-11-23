@@ -199,6 +199,7 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         bodyView.delegate = self
         bodyView.accessibilityIdentifier = "postText"
         linkButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
+        linkButton.titleLabel?.adjustsFontForContentSizeCategory = true
         linkButton.titleLabel?.lineBreakMode = .byTruncatingMiddle
         linkButton.contentHorizontalAlignment = .leading
         linkButton.contentEdgeInsets = .zero
@@ -207,21 +208,22 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         tagScroll.showsHorizontalScrollIndicator = false
         // the row spans the whole card and its inset moves the chips in: scrolled chips then end at
         // the card's own edge, not at an invisible line 16 pt inside it
-        tagScroll.contentInset = UIEdgeInsets(top: 0, left: CardLayout.side, bottom: 0, right: CardLayout.side)
+        tagScroll.contentInset = UIEdgeInsets(top: 0, left: CardLayout.Metrics.regular.side, bottom: 0, right: CardLayout.Metrics.regular.side)
         tagScroll.addSubview(tagRow)
         [pager, counter, authorLabel, bodyView, linkButton, tagScroll].forEach { contentView.addSubview($0) }
     }
 
     /// Each chip at its own width, side by side, the row as tall as the tag row; the "+" a circle.
     private func layoutTags() {
-        let h = CardLayout.tagsHeight
+        let m = CardLayout.Metrics.of(traitCollection)
+        let h = m.tagsHeight, gap = m.tagGap
         var x: CGFloat = 0
         for c in tagChips {
             let w = c.accessibilityIdentifier == "addTag" ? h : ceil(c.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: h)).width)
             c.frame = CGRect(x: x, y: 0, width: w, height: h)
-            x += w + 6
+            x += w + gap
         }
-        let width = max(0, x - 6)
+        let width = max(0, x - gap)
         tagRow.frame = CGRect(x: 0, y: 0, width: width, height: h)
         tagScroll.contentSize = CGSize(width: width, height: h)
     }
@@ -231,7 +233,7 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         super.layoutSubviews()
         let w = contentView.bounds.width
         guard w > 0 else { return }
-        if base?.width != w || base?.textSize != traitCollection.preferredContentSizeCategory { base = CardLayout(item: items.first, width: w, traits: traitCollection) }
+        if base?.width != w || base?.textSize != traitCollection.preferredContentSizeCategory || base?.compact != traitCollection[CompactCardsTrait.self] { base = CardLayout(item: items.first, width: w, traits: traitCollection) }
         guard let base else { return }
         // the media takes what the card has above its caption: the grid says how tall the card is
         let l = base.withMedia(height: contentView.bounds.height - base.captionHeight)
@@ -242,7 +244,9 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         bodyView.frame = l.body ?? .zero
         linkButton.frame = l.link ?? .zero
         // the tags at the bottom of the card (the card is exactly as tall as `CardLayout.height`)
-        tagScroll.frame = CGRect(x: 0, y: contentView.bounds.height - CardLayout.bottom - CardLayout.tagsHeight, width: w, height: CardLayout.tagsHeight)
+        let m = CardLayout.Metrics.of(traitCollection)
+        tagScroll.contentInset = UIEdgeInsets(top: 0, left: m.side, bottom: 0, right: m.side)
+        tagScroll.frame = CGRect(x: 0, y: contentView.bounds.height - m.bottom - m.tagsHeight, width: w, height: m.tagsHeight)
         layoutTags()
         // past the card's sides and bottom: the glass's own rim light would show there as a line
         captionGlass?.frame = CGRect(x: -3, y: l.pagerHeight, width: w + 6, height: contentView.bounds.height - l.pagerHeight + 3)
@@ -324,13 +328,13 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
             // Loose media has no post: a distinct marker instead of author, text and link.
             let icon = NSTextAttachment(image: UIImage(systemName: "square.dashed")!.withTintColor(.systemIndigo))
             author.append(NSAttributedString(attachment: icon))
-            author.append(NSAttributedString(string: " " + (it.isAlbum ? L("card.album") : L("card.loose")), attributes: [.font: UIFont.preferredFont(forTextStyle: .headline), .foregroundColor: UIColor.systemIndigo]))
+            author.append(NSAttributedString(string: " " + (it.isAlbum ? L("card.album") : L("card.loose")), attributes: [.font: UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traitCollection), .foregroundColor: UIColor.systemIndigo]))
         }
         if let name = it.authorName {
-            author.append(NSAttributedString(string: name, attributes: [.font: UIFont.preferredFont(forTextStyle: .headline), .foregroundColor: UIColor.label]))
+            author.append(NSAttributedString(string: name, attributes: [.font: UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traitCollection), .foregroundColor: UIColor.label]))
         }
         if let sn = it.screenName {
-            author.append(NSAttributedString(string: (author.length > 0 ? "  " : "") + "@\(sn)", attributes: [.foregroundColor: UIColor.secondaryLabel]))
+            author.append(NSAttributedString(string: (author.length > 0 ? "  " : "") + "@\(sn)", attributes: [.font: UIFont.preferredFont(forTextStyle: .subheadline, compatibleWith: traitCollection), .foregroundColor: UIColor.secondaryLabel]))
         }
         SearchHighlight.apply(highlight.author, to: author, Self.highlightAttrs)
         authorLabel.attributedText = author
@@ -345,15 +349,16 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
 
         tagChips.forEach { $0.removeFromSuperview() }
         var chips: [UIButton] = []
-        if it.isRecent { chips.append(TagChip.recent(target: self, action: #selector(recentTapped))) }
+        let m = CardLayout.Metrics.of(traitCollection)
+        if it.isRecent { chips.append(TagChip.recent(metrics: m, target: self, action: #selector(recentTapped))) }
         for t in it.tags {
-            let chip = TagChip.make(t, target: self, action: #selector(tagTapped(_:)), highlight: highlight.tags)
+            let chip = TagChip.make(t, metrics: m, target: self, action: #selector(tagTapped(_:)), highlight: highlight.tags)
             // Long-press a tag: only this tag, search, endorse, delete.
             chip.menu = delegate?.feedCell(self, menuForTag: t, of: it)
             chip.showsMenuAsPrimaryAction = false
             chips.append(chip)
         }
-        chips.append(TagChip.addButton(target: self, action: #selector(addTagTapped)))
+        chips.append(TagChip.addButton(metrics: m, target: self, action: #selector(addTagTapped)))
         chips.forEach(tagRow.addSubview)
         tagChips = chips
         layoutTags()
@@ -414,11 +419,25 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
     }
 }
 
+/// 浏览 on a phone in two columns: the cards draw smaller (`CardLayout.Metrics.compact`).
+struct CompactCardsTrait: UITraitDefinition {
+    static let defaultValue = false
+}
+
 /// Where the parts of a card go (the same numbers for the grid's heights and the card's layout):
 /// media 4:5, then author, text and link — each only when the post has it — then the tag row.
 struct CardLayout {
-    static let side: CGFloat = 16, captionTop: CGFloat = 12, authorGap: CGFloat = 6, linkGap: CGFloat = 4
-    static let tagsGap: CGFloat = 10, tagsHeight: CGFloat = 26, bottom: CGFloat = 14, linkHeight: CGFloat = 20
+    /// The spacing of a card. Compact: a phone showing two columns, where the text (two content
+    /// sizes smaller, `FeedViewController.updateCompactCards`) and the tags shrink with the card.
+    struct Metrics {
+        var side: CGFloat = 16, captionTop: CGFloat = 12, authorGap: CGFloat = 6, linkGap: CGFloat = 4
+        var tagsGap: CGFloat = 10, tagsHeight: CGFloat = 26, bottom: CGFloat = 14, linkHeight: CGFloat = 20
+        var tagFont: CGFloat = 13, tagPad: CGFloat = 9, tagDot: CGFloat = 7, tagGap: CGFloat = 6
+        static let regular = Metrics()
+        static let compact = Metrics(side: 11, captionTop: 9, authorGap: 4, linkGap: 3, tagsGap: 8, tagsHeight: 21, bottom: 10, linkHeight: 17,
+                                     tagFont: 11, tagPad: 7, tagDot: 6, tagGap: 4)
+        static func of(_ traits: UITraitCollection) -> Metrics { traits[CompactCardsTrait.self] ? .compact : .regular }
+    }
 
     private(set) var pagerHeight: CGFloat
     var author: CGRect?
@@ -442,34 +461,38 @@ struct CardLayout {
         return l
     }
 
+    let compact: Bool
+
     init(item it: FeedItem?, width w: CGFloat, traits: UITraitCollection) {
+        let m = Metrics.of(traits)
         width = w
         textSize = traits.preferredContentSizeCategory
+        compact = traits[CompactCardsTrait.self]
         pagerHeight = ceil(w * (it?.cardMediaRatio ?? 1.25))
-        var y = pagerHeight + Self.captionTop
-        let inner = w - Self.side * 2
+        var y = pagerHeight + m.captionTop
+        let inner = w - m.side * 2
         var gap: CGFloat = 0
         if let it, it.isLoose || it.authorName != nil || it.screenName != nil {
             let h = ceil(max(UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traits).lineHeight, UIFont.preferredFont(forTextStyle: .subheadline, compatibleWith: traits).lineHeight))
-            author = CGRect(x: Self.side, y: y, width: inner, height: h)
+            author = CGRect(x: m.side, y: y, width: inner, height: h)
             y += h
-            gap = Self.authorGap
+            gap = m.authorGap
         }
         if let text = it?.text, !text.isEmpty {
             y += gap
             let h = Self.textHeight(text, width: inner, traits: traits)
-            body = CGRect(x: Self.side, y: y, width: inner, height: h)
+            body = CGRect(x: m.side, y: y, width: inner, height: h)
             y += h
-            gap = Self.linkGap
+            gap = m.linkGap
         }
         if it?.url != nil {
             y += gap
-            link = CGRect(x: Self.side, y: y, width: inner, height: Self.linkHeight)
-            y += Self.linkHeight
+            link = CGRect(x: m.side, y: y, width: inner, height: m.linkHeight)
+            y += m.linkHeight
         }
         // no caption at all: the tags follow the media closely
         if author == nil && body == nil && link == nil { y = pagerHeight }
-        height = ceil(y + Self.tagsGap + Self.tagsHeight + Self.bottom)
+        height = ceil(y + m.tagsGap + m.tagsHeight + m.bottom)
     }
 
     /// The whole text's height at this width, as the card's text view lays it out.
@@ -481,29 +504,52 @@ struct CardLayout {
 
 }
 
-/// Tag capsule colored by origin: blue = mine, purple = AI, green = endorsed (both).
+/// A tag as Finder shows one: a neutral rounded box with a hairline edge, a dot in the colour
+/// of where the tag comes from (blue mine, purple AI, green an AI tag I approved), the name in
+/// the text colour.
 enum TagChip {
     static func color(_ t: TagView) -> UIColor {
         t.isUser && t.isAI ? .systemGreen : (t.isAI ? .systemPurple : .systemBlue)
     }
-    static func make(_ t: TagView, target: Any?, action: Selector, highlight: [String] = []) -> UIButton {
-        var cfg = UIButton.Configuration.filled()
+
+    /// A dot of this colour, as an image (a button's leading image).
+    static func dot(_ color: UIColor, side: CGFloat) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            color.setFill()
+            UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: side, height: side)).fill()
+        }.withRenderingMode(.alwaysOriginal)
+    }
+
+    /// The box every chip shares.
+    private static func base(_ m: CardLayout.Metrics) -> UIButton.Configuration {
+        var cfg = UIButton.Configuration.plain()
+        cfg.background.backgroundColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.07) : UIColor(white: 0, alpha: 0.035) }
+        cfg.background.strokeColor = UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 1, alpha: 0.12) : UIColor(white: 0, alpha: 0.11) }
+        cfg.background.strokeWidth = 1
+        cfg.background.cornerRadius = round(m.tagsHeight * 0.3)
+        cfg.cornerStyle = .fixed
+        cfg.baseForegroundColor = .label
+        cfg.contentInsets = .init(top: 0, leading: m.tagPad, bottom: 0, trailing: m.tagPad + 1)
+        cfg.imagePadding = m.tagGap
+        cfg.titleLineBreakMode = .byTruncatingTail
+        let size = m.tagFont
+        cfg.titleTextAttributesTransformer = .init { var a = $0; a.font = .systemFont(ofSize: size, weight: .medium); return a }
+        return cfg
+    }
+
+    static func make(_ t: TagView, metrics m: CardLayout.Metrics = .regular, target: Any?, action: Selector, highlight: [String] = []) -> UIButton {
+        var cfg = base(m)
         let marks = SearchHighlight.ranges(of: highlight, in: t.label)
         if marks.isEmpty { cfg.title = t.label } else {
             let a = NSMutableAttributedString(string: t.label)
             for r in marks { a.addAttributes(FeedCell.highlightAttrs, range: r) }
             cfg.attributedTitle = AttributedString(a)
         }
-        cfg.image = t.isAI ? UIImage(systemName: t.isUser ? "checkmark.seal.fill" : "sparkles") : nil
-        cfg.imagePadding = 4
-        cfg.preferredSymbolConfigurationForImage = .init(pointSize: 10, weight: .semibold)
-        cfg.cornerStyle = .capsule
-        cfg.baseBackgroundColor = color(t).withAlphaComponent(0.15)
-        cfg.baseForegroundColor = color(t)
-        cfg.contentInsets = .init(top: 4, leading: 10, bottom: 4, trailing: 10)
-        cfg.titleTextAttributesTransformer = .init { var a = $0; a.font = .systemFont(ofSize: 13, weight: .medium); return a }
+        cfg.image = dot(color(t), side: m.tagDot)
         let b = UIButton(configuration: cfg)
         b.accessibilityIdentifier = t.label
+        let who = t.isUser && t.isAI ? L("tag.source.both") : (t.isAI ? "AI" : L("tag.source.me"))
+        b.accessibilityValue = who
         if !t.models.isEmpty { b.accessibilityHint = L("tag.taggedBy", t.models.map { ModelStore.shared.displayName($0) }.joined(separator: L("list.separator"))) }
         b.addTarget(target, action: action, for: .touchUpInside)
         return b
@@ -511,19 +557,12 @@ enum TagChip {
 }
 
 extension TagChip {
-    /// The "+" chip at the end of every tag row.
-    /// L("place.recent"): not a tag (cannot be edited or removed); it expires 5 days after the download.
-    static func recent(target: Any?, action: Selector) -> UIButton {
-        var cfg = UIButton.Configuration.filled()
+    /// L("place.recent"): not a tag (cannot be edited or removed); it expires 5 days after the
+    /// download. The same box, an orange dot.
+    static func recent(metrics m: CardLayout.Metrics = .regular, target: Any?, action: Selector) -> UIButton {
+        var cfg = base(m)
         cfg.title = L("place.recent")
-        cfg.image = UIImage(systemName: "clock.badge.checkmark")
-        cfg.imagePadding = 4
-        cfg.preferredSymbolConfigurationForImage = .init(pointSize: 10, weight: .bold)
-        cfg.cornerStyle = .capsule
-        cfg.baseBackgroundColor = .systemOrange
-        cfg.baseForegroundColor = .white
-        cfg.contentInsets = .init(top: 4, leading: 10, bottom: 4, trailing: 10)
-        cfg.titleTextAttributesTransformer = .init { var a = $0; a.font = .systemFont(ofSize: 13, weight: .bold); return a }
+        cfg.image = dot(.systemOrange, side: m.tagDot)
         let b = UIButton(configuration: cfg)
         b.accessibilityIdentifier = "recentBadge"
         b.accessibilityHint = L("card.recent.tip.ios")
@@ -531,14 +570,15 @@ extension TagChip {
         return b
     }
 
-    static func addButton(target: Any?, action: Selector) -> UIButton {
-        var cfg = UIButton.Configuration.gray()
+    /// The "+" at the end of every tag row: the same box, square.
+    static func addButton(metrics m: CardLayout.Metrics = .regular, target: Any?, action: Selector) -> UIButton {
+        var cfg = base(m)
         cfg.image = UIImage(systemName: "plus")
-        cfg.preferredSymbolConfigurationForImage = .init(pointSize: 11, weight: .semibold)
-        cfg.cornerStyle = .capsule
-        cfg.contentInsets = .init(top: 4, leading: 4, bottom: 4, trailing: 4)
+        cfg.preferredSymbolConfigurationForImage = .init(pointSize: m.tagFont - 2, weight: .semibold)
+        cfg.baseForegroundColor = .secondaryLabel
+        cfg.contentInsets = .zero
         let b = UIButton(configuration: cfg)
-        // a circle as tall as the tags beside it (the row places it so)
+        // a square as tall as the tags beside it (the row places it so)
         b.accessibilityLabel = L("card.addTag")
         b.accessibilityIdentifier = "addTag"
         b.addTarget(target, action: action, for: .touchUpInside)

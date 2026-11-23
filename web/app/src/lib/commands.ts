@@ -5,9 +5,10 @@ import { L } from '@twimshelf/core';
 import type { NativeMenuItem } from './core';
 import { createFolder } from './folderActions';
 import { folderRoute, go, route } from './router';
+import { showWelcomeModal } from '../components/WelcomeModal';
 
 export type Command = 'newFolder' | 'zoomIn' | 'zoomOut' | 'select' | 'groupByPost' | 'reshuffle' | 'fullScreen'
-  | 'goBrowse' | 'goFolders' | 'goPhotos' | 'goVideos' | 'settings';
+  | 'goBrowse' | 'goFolders' | 'goPhotos' | 'goVideos' | 'settings' | 'welcome';
 
 export interface MenuState {
   onBrowse: boolean;
@@ -61,6 +62,9 @@ export function run(c: Command): void {
       if (route.get().page === 'settings') go({ page: 'browse' });
       else go({ page: 'settings' });
       return;
+    case 'welcome':
+      showWelcomeModal();
+      return;
     case 'fullScreen':
       if (window.twimshelf?.toggleFullScreen) window.twimshelf.toggleFullScreen();
       else if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen().catch(() => {});
@@ -86,6 +90,7 @@ export function installAppMenu(): () => void {
     t.setAppMenu!([
       ...(mac ? [{ label: app, items: [
         { role: 'about', label: L('menu.about').replace('{app}', app) },
+        item('welcome', L('menu.welcome').replace('{app}', app)),
         'separator' as const,
         item('settings', L('menu.manage'), 'CmdOrCtrl+,'),
         'separator' as const,

@@ -69,10 +69,18 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
     /// Top level, grouped as in Settings: library totals and live work first, then content,
     /// viewing, intelligence and sync, account, maintenance, and the destructive reset
     /// last. Forms with fields (download, import, Cookie) live one level down.
-    /// How many cards a row of 浏览 holds, for each orientation (a large screen only: empty, a
-    /// form shows nothing of it).
+    /// How many cards a row of 浏览 holds, for each orientation. A phone has one choice: one
+    /// column or two, upright.
     private func cardsSection() -> Section {
-        guard UIDevice.current.userInterfaceIdiom == .pad else { return Section(id: "cards", rows: []) }
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            let two = LibraryPrefs.phoneTwoColumns ? 1 : 0
+            return Section(id: "cards", header: L("cards.section"), footer: L("cards.footer.phone"), rows: [
+                .menu(L("cards.portrait"), value: LibraryPrefs.phoneDensityNames[two], icon: .init("rectangle.portrait.split.2x1", .systemTeal), id: "m:densityPhone") {
+                    UIMenu(children: LibraryPrefs.phoneDensityNames.enumerated().map { i, n in
+                        UIAction(title: n, state: i == two ? .on : .off) { [weak self] _ in LibraryPrefs.phoneTwoColumns = i == 1; self?.build() } })
+                },
+            ])
+        }
         return Section(id: "cards", header: L("cards.section"), rows: [
                 .menu(L("cards.portrait"), value: LibraryPrefs.densityNames[LibraryPrefs.cardDensityPortrait], icon: .init("rectangle.portrait.split.2x1", .systemTeal), id: "m:densityP") {
                     UIMenu(children: LibraryPrefs.densityNames.enumerated().map { i, n in

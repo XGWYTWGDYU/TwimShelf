@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 /// Random feed order drawn from the system's cryptographic random number generator
 /// (`SystemRandomNumberGenerator`, i.e. arc4random). Each media gets a random rank the first
@@ -94,6 +97,14 @@ enum LibraryPrefs {
     }
     static let densityNames = [L("cards.fewer"), L("cards.medium"), L("cards.more")]
 
+    /// A phone held upright: one column of cards (少, the default) or two (多). A phone has no
+    /// other choice (turned sideways, the width decides).
+    static var phoneTwoColumns: Bool {
+        get { UserDefaults.standard.bool(forKey: "feed.density.phone") }
+        set { UserDefaults.standard.set(newValue, forKey: "feed.density.phone"); NotificationCenter.default.post(name: changed, object: nil) }
+    }
+    static let phoneDensityNames = [L("cards.fewer"), L("cards.more")]
+
     /// The columns of 浏览 for a width: one card per `base` points at 适中, wider cards at 少,
     /// narrower at 多 (the window's shape picks the portrait or the landscape level; a Mac has the
     /// one level, whatever the shape of its window).
@@ -101,6 +112,7 @@ enum LibraryPrefs {
         #if os(macOS)
         let level = cardDensityLandscape
         #else
+        if UIDevice.current.userInterfaceIdiom == .phone && width <= height { return phoneTwoColumns ? 2 : 1 }
         let level = width > height ? cardDensityLandscape : cardDensityPortrait
         #endif
         let per = base * [1.35, 1.0, 0.72][min(max(level, 0), 2)]

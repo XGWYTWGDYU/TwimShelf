@@ -210,6 +210,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         tokenSearch.onSortByAdded = { [weak self] on in self?.feed.setByAdded(on) }
         feed.onByAddedChanged = { [weak self] on in self?.tokenSearch.sortByAdded = on; self?.tokenSearch.shuffleShown = !on }
         tokenSearch.onShuffle = { [weak self] in self?.feed.reshuffle() }
+        feed.onReading = { [weak self] down in
+            guard let self, self.searchNarrow != down else { return }
+            self.searchNarrow = down
+            self.fitSearchWidth(animated: true)
+        }
+        tokenSearch.onEditingChanged = { [weak self] on in
+            guard let self, self.searchEditing != on else { return }
+            self.searchEditing = on
+            self.fitSearchWidth(animated: true)
+        }
         tokenSearch.grouped = feed.grouped
         tokenSearch.onGrouped = { [weak self] on in self?.feed.grouped = on; self?.refreshChrome() }
         feed.onSearchKeys = { [weak self] keys, replacing in self?.tokenSearch.search(keys: keys, replacing: replacing) }
@@ -247,6 +257,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
         lockWindow?.orderOut(nil)
         lockWindow = nil
+        #if DEBUG
+        if let dir = ProcessInfo.processInfo.environment["TL_WELCOME_SHOTS"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                MacWelcomeController.shared.debugCaptureAllPages(to: URL(fileURLWithPath: dir, isDirectory: true))
+            }
+        } else if ProcessInfo.processInfo.environment["TL_SHOW_WELCOME"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                MacWelcomeController.shared.show(relativeTo: self?.window)
+            }
+        } else if !startHidden && !ProcessInfo.processInfo.environment.keys.contains(where: { $0.hasPrefix("TL_") }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                MacWelcomeController.shared.showIfFirstLaunch(relativeTo: self?.window)
+            }
+        }
+        #else
+        if !startHidden {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                MacWelcomeController.shared.showIfFirstLaunch(relativeTo: self?.window)
+            }
+        }
+        #endif
         // GitHub builds: a newer release, at most once a day
         UpdateCheck.run { [weak self] r in MacUpdate.show(r, window: self?.window) }
 
@@ -1300,7 +1331,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         // The title item stays in place and the text inside it appears or goes at once.
         let pill = c.page != nil
         titlePill.setShown(pill)
-        if window.titleVisibility != (pill ? .hidden : .visible) { window.titleVisibility = pill ? .hidden : .visible }
+        // (浏览: the window keeps its name for the Window menu and VoiceOver, but shows none)
+        let hideTitle = pill || c.place == .browse
+        if window.titleVisibility != (hideTitle ? .hidden : .visible) { window.titleVisibility = hideTitle ? .hidden : .visible }
         if let tb = window.toolbar {
             let desired = desiredToolbarIdentifiers(mode)
             if tb.items.map(\.itemIdentifier) != desired {
@@ -1350,8 +1383,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
     }
 
-    private func fitSearchWidth() {
-        tokenSearch.setWidth(window.frame.width * 0.28)
+    /// Long while at the top of 浏览 or typing; narrower while reading down (`MacFeedViewController.onReading`).
+    private var searchNarrow = false
+    private var searchEditing = false
+    private func fitSearchWidth(animated: Bool = false) {
+        let narrow = searchNarrow && !searchEditing
+        tokenSearch.setWidth(narrow ? 200 : window.frame.width * 0.42, animated: animated)
     }
 
     private func updateToolbarStates() {
@@ -1549,6 +1586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         let appItem = NSMenuItem(); main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: L("menu.about"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(withTitle: L("menu.welcome"), action: #selector(showWelcome), keyEquivalent: "")
         app.addItem(.separator())
         app.addItem(withTitle: L("menu.manage"), action: #selector(openSettings), keyEquivalent: ",")
         app.addItem(.separator())
@@ -1604,6 +1642,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         winItem.submenu = win
         NSApp.windowsMenu = win
         NSApp.mainMenu = main
+    }
+
+    @MainActor @objc private func showWelcome() {
+        MacWelcomeController.shared.show(relativeTo: window)
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {

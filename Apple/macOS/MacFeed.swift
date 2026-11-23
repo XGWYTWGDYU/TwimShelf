@@ -478,9 +478,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     private let scroll = NSScrollView()
     private let collection = ResizingFeedCollectionView()
     /// The row above the cards (the statistics on its right).
-    private let chipBar = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: "")
-    private let statsLabel = NSTextField(labelWithString: "")
     /// Every video card at least half in view plays, muted, with a player of its own.
     private lazy var inline: InlineVideos<FeedCard> = InlineVideos(
         attach: { [weak self] card, player in self?.attachInline(card, player) },
@@ -491,6 +489,25 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             }
         })
     private var generation = 0
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // the toolbar's height (the page's safe area) is the room above the first cards
+        let top = view.safeAreaInsets.top
+        if abs(scroll.contentInsets.top - top) > 0.5 {
+            let atTop = scroll.contentView.bounds.origin.y <= -scroll.contentInsets.top + 1
+            scroll.contentInsets = NSEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+            scroll.scrollerInsets = NSEdgeInsets(top: top, left: 0, bottom: 0, right: 0)
+            if atTop { scrollToTop() }
+        }
+    }
+
+    /// The first row of cards just below the toolbar (the page runs up under it: its top is the
+    /// scroll view's top inset, not the document's origin).
+    private func scrollToTop() {
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
 
     override func loadView() {
         // one background from the window's top edge down, under the toolbar and the chip row
@@ -523,35 +540,25 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         scroll.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
 
-        statsLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        statsLabel.textColor = .secondaryLabelColor
-        statsLabel.stringValue = ActivityCenter.shared.statsLine
-        statsLabel.isHidden = true      // the window's subtitle shows it now
-        NotificationCenter.default.addObserver(forName: ActivityCenter.changed, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.statsLabel.stringValue = ActivityCenter.shared.statsLine }
-        }
-        chipBar.orientation = .horizontal
-        chipBar.spacing = 8
-        chipBar.edgeInsets = NSEdgeInsets(top: 8, left: 20, bottom: 8, right: 20)
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.alignment = .center
         emptyLabel.font = .systemFont(ofSize: 15)
-        [chipBar, scroll, emptyLabel, statsLabel, toast].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; root.addSubview($0) }
+        [scroll, emptyLabel, toast].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; root.addSubview($0) }
+        // the cards fill the whole page, up to the window's top edge: they start below the
+        // toolbar (a top inset as tall as it, `viewDidLayout`) and scroll on under it
+        scroll.automaticallyAdjustsContentInsets = false
         NSLayoutConstraint.activate([
-            chipBar.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            chipBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            chipBar.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: chipBar.bottomAnchor),
+            scroll.topAnchor.constraint(equalTo: root.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             emptyLabel.centerXAnchor.constraint(equalTo: root.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
-            statsLabel.centerYAnchor.constraint(equalTo: chipBar.centerYAnchor),
-            statsLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            chipBar.trailingAnchor.constraint(lessThanOrEqualTo: statsLabel.leadingAnchor, constant: -10),
             toast.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             toast.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
         ])
         view = root
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TL_SCROLL_TOUR"] != nil { debugScrollTour() }
+        #endif
         NotificationCenter.default.addObserver(self, selector: #selector(libraryChanged), name: .libraryChanged, object: nil)
         NotificationCenter.default.addObserver(forName: LibraryPrefs.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.reload() }
@@ -733,7 +740,7 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             let origin = self.scroll.contentView.bounds.origin
             self.collection.reloadData()
             if let r = restore { self.collection.layoutSubtreeIfNeeded(); self.scroll.contentView.scroll(to: r); self.scroll.reflectScrolledClipView(self.scroll.contentView) }
-            else if keepPosition { self.scroll.contentView.scroll(to: origin) } else { self.collection.scroll(.zero) }
+            else if keepPosition { self.scroll.contentView.scroll(to: origin) } else { self.scrollToTop() }
             self.emptyLabel.stringValue = nowUnfiltered ? L("feed.empty.library.mac") : L("feed.empty.noMatch")
             self.emptyLabel.isHidden = !items.isEmpty
             DispatchQueue.main.async { self.updateInline() }
@@ -872,6 +879,33 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     @objc private func scrolled() {
         prefetchAhead()
         scheduleInlineUpdate()
+        trackReading()
+    }
+
+    /// Reading on (scrolling down) or back up, for the search field's width (as Windows' bar: long
+    /// at the top, narrower while reading down, long again going back up). A little travel the
+    /// same way first, so small jitters of the wheel or trackpad don't flicker it.
+    var onReading: ((Bool) -> Void)?
+    #if DEBUG
+    /// TL_SCROLL_TOUR: reads down a little, then back to the top (the search field's width follows).
+    func debugScrollTour() {
+        for (t, y) in [(4.0, 300.0), (4.3, 600.0), (4.6, 900.0), (8.0, 600.0), (8.3, 300.0), (8.6, 0.0)] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { [weak self] in
+                guard let self else { return }
+                self.scroll.contentView.scroll(to: NSPoint(x: 0, y: y - self.scroll.contentInsets.top))
+                self.scroll.reflectScrolledClipView(self.scroll.contentView)
+            }
+        }
+    }
+    #endif
+    private var lastReadY: CGFloat = 0, readTravel: CGFloat = 0
+    private func trackReading() {
+        let y = scroll.contentView.bounds.origin.y + scroll.contentInsets.top
+        let d = y - lastReadY
+        lastReadY = y
+        if y < 40 { readTravel = 0; onReading?(false); return }
+        readTravel = (d >= 0) == (readTravel >= 0) ? readTravel + d : d
+        if readTravel > 24 { onReading?(true) } else if readTravel < -40 { onReading?(false) }
     }
 
     private var lastPrefetchY: CGFloat = .nan
@@ -1271,7 +1305,8 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         if !item.tags.isEmpty { menu.addItem(ClosureMenuItem(L("card.menu.sources")) { [weak self] in self?.showSources(item) }) }
         if !item.tags.isEmpty { menu.addItem(.separator()) }
         for t in item.tags {
-            let mi = NSMenuItem(title: (t.isAI ? (t.isUser ? "✓ " : "✦ ") : "") + t.label, action: nil, keyEquivalent: "")
+            let mi = NSMenuItem(title: t.label, action: nil, keyEquivalent: "")
+            mi.image = NSImage.tagDot(NSColor.tagColor(t))
             mi.submenu = tagMenu(t, item: item)
             menu.addItem(mi)
         }
@@ -1766,26 +1801,26 @@ final class TagStripView: NSView, NSViewToolTipOwner {
     private var pills: [Pill] = []
     private(set) var contentWidth: CGFloat = 0
     var count: Int { pills.count }
-    private static let height: CGFloat = 20, gap: CGFloat = 5, pad: CGFloat = 7
+    /// A pill: a neutral rounded box with a hairline edge, a dot in the tag's colour (as Finder's
+    /// tags), then the name in the text colour.
+    private static let height: CGFloat = 20, gap: CGFloat = 5, pad: CGFloat = 7, dot: CGFloat = 6, dotGap: CGFloat = 5
     private static let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private static let boldFont = NSFont.systemFont(ofSize: 12, weight: .bold)
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
 
     func set(_ tags: [TagView], recent: Bool, highlight: [String] = []) {
         var list: [Pill] = []
-        if recent { list.append(Pill(kind: .recent, text: NSAttributedString(string: L("card.recentPill"), attributes: [.font: Self.boldFont, .foregroundColor: NSColor.white]), rect: .zero)) }
+        if recent { list.append(Pill(kind: .recent, text: NSAttributedString(string: L("card.recentPill"), attributes: [.font: Self.font, .foregroundColor: NSColor.labelColor]), rect: .zero)) }
         for t in tags {
-            let prefix = t.isAI ? (t.isUser ? "✓ " : "✦ ") : ""
-            let text = NSMutableAttributedString(string: prefix + t.label, attributes: [.font: Self.font, .foregroundColor: NSColor.tagColor(t)])
+            let text = NSMutableAttributedString(string: t.label, attributes: [.font: Self.font, .foregroundColor: NSColor.labelColor])
             SearchHighlight.apply(highlight, to: text, FeedCard.highlightAttrs)
             list.append(Pill(kind: .tag(t), text: text, rect: .zero))
         }
         list.append(Pill(kind: .add, text: nil, rect: .zero))
         var x: CGFloat = sideInset
         for i in list.indices {
-            let w = list[i].text.map { ceil($0.size().width) + Self.pad * 2 } ?? 24
+            let w = list[i].text.map { ceil($0.size().width) + Self.pad * 2 + Self.dot + Self.dotGap - 1 } ?? Self.height
             list[i].rect = NSRect(x: x, y: 0, width: w, height: Self.height)
             x += w + Self.gap
         }
@@ -1810,17 +1845,23 @@ final class TagStripView: NSView, NSViewToolTipOwner {
 
     override func draw(_ dirtyRect: NSRect) {
         for p in pills where p.rect.intersects(dirtyRect) {
-            let bg: NSColor
-            switch p.kind {
-            case .recent: bg = .systemOrange
-            case .tag(let t): bg = NSColor.tagColor(t).withAlphaComponent(0.16)
-            case .add: bg = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
-            }
-            bg.setFill()
-            NSBezierPath(roundedRect: p.rect, xRadius: 10, yRadius: 10).fill()
+            let box = NSBezierPath(roundedRect: p.rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+            NSColor.labelColor.withAlphaComponent(0.05).setFill()
+            box.fill()
+            NSColor.labelColor.withAlphaComponent(0.12).setStroke()
+            box.lineWidth = 1
+            box.stroke()
             if let text = p.text {
+                let dotColor: NSColor
+                switch p.kind {
+                case .recent: dotColor = .systemOrange
+                case .tag(let t): dotColor = NSColor.tagColor(t)
+                case .add: dotColor = .clear
+                }
+                dotColor.setFill()
+                NSBezierPath(ovalIn: NSRect(x: p.rect.minX + Self.pad, y: p.rect.midY - Self.dot / 2, width: Self.dot, height: Self.dot)).fill()
                 let size = text.size()
-                text.draw(at: NSPoint(x: p.rect.minX + Self.pad, y: p.rect.midY - size.height / 2))
+                text.draw(at: NSPoint(x: p.rect.minX + Self.pad + Self.dot + Self.dotGap, y: p.rect.midY - size.height / 2))
             } else {
                 let z = Self.plus.size
                 Self.plus.draw(in: NSRect(x: p.rect.midX - z.width / 2, y: p.rect.midY - z.height / 2, width: z.width, height: z.height))

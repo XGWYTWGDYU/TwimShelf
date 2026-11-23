@@ -7,7 +7,7 @@ import { ChevronLeft } from 'lucide-react';
 import { L } from '@twimshelf/core';
 import './Toolbar.css';
 
-export function Toolbar({ title, subtitle, back, pill, children, overlay, center }: {
+export function Toolbar({ title, subtitle, back, pill, children, overlay, clear, center }: {
   title?: ReactNode;
   subtitle?: ReactNode;
   back?: () => void;
@@ -15,12 +15,14 @@ export function Toolbar({ title, subtitle, back, pill, children, overlay, center
   pill?: boolean;
   /** Over the content (it scrolls underneath), rather than above it. */
   overlay?: boolean;
+  /** Nothing drawn behind it: the content shows right up to the window's top edge (浏览). */
+  clear?: boolean;
   /** Something in the middle that takes the free room (浏览's search). */
   center?: ReactNode;
   children?: ReactNode;
 }) {
   return (
-    <header className={`toolbar${overlay ? ' toolbar-overlay' : ''}`}>
+    <header className={`toolbar${overlay ? ' toolbar-overlay' : ''}${clear ? ' toolbar-clear' : ''}`}>
       {back && <ToolButton label={L('mac.toolbar.back')} onClick={back}><ChevronLeft size={18} strokeWidth={2} /></ToolButton>}
       {title !== undefined && (pill ? (
         <div className="toolbar-pill glass">

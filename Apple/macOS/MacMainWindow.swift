@@ -386,7 +386,8 @@ final class MacContentController: NSViewController {
     /// The title and subtitle of the window for what is shown.
     var titles: (String, String) {
         switch place {
-        case .browse: return (L("place.browse"), ActivityCenter.shared.statsLine)
+        // 浏览 shows no title or totals in the toolbar: the cards run up under it on their own
+        case .browse: return (L("place.browse"), "")
         case .allFolders: return (L("place.folders"), overview?.subtitle ?? "")
         case .settings: return (settingsPanel?.currentTitle ?? L("place.settings"), "")
         default: return (place.title, page?.subtitle ?? "")

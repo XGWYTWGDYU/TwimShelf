@@ -208,11 +208,24 @@ class _SettingsPageState extends State<SettingsPage> {
                     onChanged: withHaptic((v) => prefs.autoLandscape = v),
                   ),
               ]),
-              // how many cards a row of 浏览 holds: a large screen's choice (a phone shows one)
-              if (_largeScreen(context))
+              // how many cards a row of 浏览 holds, per orientation; a phone: one column or two, upright
+              if (Prefs.largeScreen(context))
                 _Section(title: L('cards.section'), footer: L('cards.footer'), children: [
                   _DensityRow(title: L('cards.portrait'), icon: Icons.view_column_outlined, value: prefs.densityPortrait, onChanged: (v) => prefs.densityPortrait = v),
                   _DensityRow(title: L('cards.landscape'), icon: Icons.view_week_outlined, value: prefs.densityLandscape, onChanged: (v) => prefs.densityLandscape = v),
+                ])
+              else
+                _Section(title: L('cards.section'), footer: L('cards.footer.phone'), children: [
+                  ListTile(
+                    key: const ValueKey('settings-phoneColumns'),
+                    leading: const SettingsIcon(Icons.view_column_outlined),
+                    title: Text(L('cards.portrait')),
+                    trailing: ChoiceMenu<bool>(
+                      value: prefs.phoneTwoColumns,
+                      items: [(false, L('cards.fewer')), (true, L('cards.more'))],
+                      onChanged: (v) => prefs.phoneTwoColumns = v,
+                    ),
+                  ),
                 ]),
               if (AppLock.offered)
                 _Section(title: L('applock.section'), children: [
@@ -346,13 +359,6 @@ class _Stat extends StatelessWidget {
       ]),
     ]);
   }
-}
-
-/// A tablet's screen, whatever size the window has now (a narrowed iPad window still has the
-/// setting: it is for the screen, and the window may widen again).
-bool _largeScreen(BuildContext context) {
-  final display = View.of(context).display;
-  return display.size.shortestSide / display.devicePixelRatio >= 600;
 }
 
 /// 少 / 适中 / 多 for a row of 浏览, as a menu on the row's end.

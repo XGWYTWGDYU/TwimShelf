@@ -3,7 +3,12 @@
    to 380 wide) and the round buttons beside it (28, 6 apart; MacTokenSearch). */
 .browse-page { position: relative; flex: 1; min-height: 0; --bg: var(--bg-feed); background: var(--bg-feed); }
 .browse-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 60px; text-align: center; white-space: pre-line; color: var(--fg-2); font-size: 13px; }
-.browse-search { height: 36px; border-radius: 18px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 4px; width: clamp(150px, 28vw, 380px); box-sizing: content-box; }
+.browse-search { height: 36px; border-radius: 18px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 4px; width: clamp(150px, 42vw, 560px); box-sizing: content-box;
+  transition: width 0.32s cubic-bezier(0.16, 1, 0.3, 1); }
+/* reading down: narrower, out of the way (the field 200 wide, the buttons beside it as they are);
+   back up (or typing): long again */
+.browse-search.narrow { width: calc(200px + var(--search-buttons, 136px)); }
+@media (prefers-reduced-motion: reduce) { .browse-search { transition: none; } }
 .round-btn { width: 28px; height: 28px; flex: none; border: 0; border-radius: 14px; padding: 0; display: grid; place-items: center; background: var(--bg-active); color: var(--fg); }
 .round-btn.on { background: var(--accent); color: #fff; }
 .round-btn:active:not(:disabled) { filter: brightness(0.9); }

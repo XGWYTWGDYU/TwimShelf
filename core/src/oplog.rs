@@ -32,6 +32,9 @@ pub enum Op {
     Recent { post_id: String, at: u64 },
     /// A media came in through a share extension (从相册导入); grow-only.
     Album { media_id: String },
+    /// When a post first came into the library (ms): the earliest wins (`rules::merge_added`).
+    /// Older versions keep it as an unknown record and pass it on.
+    Added { post_id: String, at: u64 },
     /// An app setting shared by every device (e.g. the AI prompt): a last-writer-wins register
     /// over (clock, value), `None` = back to the default (`rules::merge_alias`).
     Setting { key: String, value: Option<String>, hlc: u64 },
@@ -45,7 +48,7 @@ pub enum Op {
 /// Kinds this version understands (the `t` field). A record of any other kind is a newer
 /// app's and is kept as `Op::Unknown`; a record of a known kind that does not parse is an
 /// error (never skipped silently).
-pub const KNOWN_OPS: &[&str] = &["post", "media", "tag", "tagsrc", "aidone", "trash", "alias", "folder", "foldermedia", "recent", "setting", "album"];
+pub const KNOWN_OPS: &[&str] = &["post", "media", "tag", "tagsrc", "aidone", "trash", "alias", "folder", "foldermedia", "recent", "setting", "album", "added"];
 
 /// Parses a stored or received record.
 fn both_bits() -> u8 { 3 }
@@ -236,6 +239,7 @@ impl Store {
                 }
                 Op::Recent { post_id, at } => self.apply_recent(post_id, *at)?,
                 Op::Album { media_id } => self.apply_album(media_id)?,
+                Op::Added { post_id, at } => self.apply_added(post_id, *at)?,
                 Op::Setting { key, value, hlc } => {
                     self.observe_hlc(*hlc)?;
                     self.apply_setting(key, (*hlc, value.clone()))?;
@@ -389,10 +393,11 @@ mod tests {
         a.untag_media(ID, "猫").unwrap();
         a.tag_media(ID, "墙", Origin::USER).unwrap();
         let ops = a.ops_since(&VersionVector::new(), 1000).unwrap();
-        assert_eq!(ops.len(), 6);
+        // the post, when it came in, the media, four tag writes
+        assert_eq!(ops.len(), 7);
 
         let b = store();
-        assert_eq!(b.apply_remote(&ops, |_, _| false).unwrap(), 6);
+        assert_eq!(b.apply_remote(&ops, |_, _| false).unwrap(), 7);
         assert_eq!(b.apply_remote(&ops, |_, _| false).unwrap(), 0, "idempotent");
         assert_eq!(b.wanted_blobs(10).unwrap(), vec![(ID.to_string(), "jpg".to_string())]);
         b.blob_arrived(ID, &blob_rel(ID, "jpg")).unwrap();

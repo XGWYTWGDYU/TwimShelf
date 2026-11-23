@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { CheckCircle2, Folder, GalleryVerticalEnd, Image, Images, Layers2, Settings, SquareDashed, TriangleAlert, Trash2, Video, BadgeCheck } from 'lucide-react';
+import { CheckCircle2, Folder, GalleryVerticalEnd, Image, Images, Layers2, LogOut, Settings, SquareDashed, TriangleAlert, Trash2, Video, BadgeCheck } from 'lucide-react';
 import { L, store } from '@twimshelf/core';
 import { useStore } from '../lib/hooks';
 import { folders, stats } from '../lib/library';
@@ -97,6 +97,18 @@ export function Sidebar() {
           <Row to={{ page: 'grid', place: 'trash' }} icon={<Trash2 size={z} strokeWidth={sw} />} label={L('place.trash')} count={trashed > 0 ? trashed : null} />
         </Section>
       </div>
+      {!window.twimshelf && (
+        <div className="side-footer">
+          <button
+            type="button"
+            className="side-row side-logout"
+            onClick={() => { location.href = '/logout'; }}
+          >
+            <span className="side-icon"><LogOut size={z} strokeWidth={sw} /></span>
+            <span className="side-label">{L('settings.signOut')}</span>
+          </button>
+        </div>
+      )}
       <div className="side-resize" onMouseDown={(e) => {
         const x = e.clientX;
         const move = (ev: MouseEvent) => width.set(Math.min(320, Math.max(190, w + ev.clientX - x)));

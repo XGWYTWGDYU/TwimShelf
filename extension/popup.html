@@ -8,29 +8,41 @@
 </head>
 <body>
   <header class="top">
-    <img src="icons/icon48.png" alt="" width="32" height="32">
-    <div class="grow">
-      <h1>TwimShelf</h1>
-      <p id="summary" class="summary"></p>
-    </div>
+    <img src="icons/icon48.png" alt="" width="28" height="28">
+    <h1 class="grow">TwimShelf</h1>
+    <p id="summary" class="summary" role="status"></p>
   </header>
 
-  <!-- binding: shown by itself with no device, or under the devices after "Add" -->
-  <section id="connect" class="card connect" hidden>
+  <!-- a newer release on GitHub (the extension cannot install it itself) -->
+  <a id="updateBox" class="update" target="_blank" rel="noreferrer" hidden>
+    <span id="updateText" class="grow"></span>
+    <span class="update-go" data-i18n="updateOpen"></span>
+  </a>
+
+  <!-- 下载 and 设备, side by side (shown once a device is bound) -->
+  <div id="tabs" class="tabs" role="tablist" hidden>
+    <button id="tabTasks" class="tab" role="tab" type="button" aria-selected="true" aria-controls="tasksCard" data-i18n="tasksTitle"></button>
+    <button id="tabDevices" class="tab" role="tab" type="button" aria-selected="false" aria-controls="devicesCard"><span data-i18n="devicesTitle"></span> <span id="deviceCount" class="count"></span></button>
+  </div>
+
+  <!-- binding: shown by itself with no device, or in 设备 after "Add" -->
+  <section id="connect" class="sheet connect" hidden>
     <h2 id="connectTitle" data-i18n="connectTitle"></h2>
     <ol class="steps">
       <li data-i18n="stepOpen"></li>
       <li data-i18n="stepEnter"></li>
     </ol>
-    <form id="bindForm" autocomplete="off">
-      <input id="entry" class="entry" type="text" spellcheck="false" data-i18n-placeholder="entryPlaceholder" aria-describedby="bindStatus">
-      <button id="bind" class="primary" type="submit" data-i18n="bind"></button>
-    </form>
-    <p id="bindStatus" class="status" role="status"></p>
     <div id="localBox" class="local" hidden>
       <span class="local-label" data-i18n="foundHere"></span>
       <div id="local" class="chips"></div>
     </div>
+    <form id="bindForm" autocomplete="off">
+      <input id="entry" class="entry" type="text" spellcheck="false" data-i18n-placeholder="entryPlaceholder" aria-describedby="bindStatus">
+      <button id="bind" class="go" type="submit" data-i18n-label="bind">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </form>
+    <p id="bindStatus" class="status" role="status"></p>
     <details id="addressBox">
       <summary data-i18n="manualTitle"></summary>
       <p class="hint" data-i18n="manualHint"></p>
@@ -39,27 +51,24 @@
     <button id="cancelAdd" class="text" type="button" data-i18n="cancel" hidden></button>
   </section>
 
-  <section id="devicesCard" class="card" hidden>
-    <div class="card-head">
-      <h2 data-i18n="devicesTitle"></h2>
-      <button id="addToggle" class="text" type="button"><span aria-hidden="true">＋</span> <span data-i18n="addDevice"></span></button>
+  <section id="tasksCard" class="panel" role="tabpanel" aria-labelledby="tabTasks" hidden>
+    <ul id="tasks" class="cards"></ul>
+    <div class="panel-foot">
+      <p id="hintX" class="foot" data-i18n="howToUse" hidden></p>
+      <button id="clear" class="text" type="button" data-i18n="clearFinished"></button>
     </div>
-    <ul id="devices" class="rows"></ul>
+  </section>
+
+  <section id="devicesCard" class="panel" role="tabpanel" aria-labelledby="tabDevices" hidden>
+    <ul id="devices" class="cards"></ul>
     <label id="defaultRow" class="default-row" hidden>
       <span data-i18n="defaultDevice"></span>
       <select id="defaultDevice"></select>
     </label>
-  </section>
-
-  <section id="tasksCard" class="card" hidden>
-    <div class="card-head">
-      <h2 data-i18n="tasksTitle"></h2>
-      <button id="clear" class="text" type="button" data-i18n="clearFinished"></button>
+    <div class="panel-foot">
+      <button id="addToggle" class="text" type="button"><span aria-hidden="true">＋</span> <span data-i18n="addDevice"></span></button>
     </div>
-    <ul id="tasks" class="rows"></ul>
   </section>
-
-  <p id="hintX" class="foot" data-i18n="howToUse" hidden></p>
 
   <script type="module" src="popup.js"></script>
 </body>

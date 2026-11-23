@@ -36,7 +36,7 @@ pub struct TrashItem { #[serde(flatten)] pub item: FeedItem, /// When it was mov
 /// Schema version. Versions from `OLDEST` (the first release's) on are migrated in place;
 /// anything older, or a newer one (written by a newer app), is refused: a library is never
 /// rebuilt from nothing or downgraded.
-const VERSION: i64 = 18;
+const VERSION: i64 = 19;
 const OLDEST: i64 = 14;
 
 const SCHEMA: &str = "
@@ -85,6 +85,10 @@ CREATE TABLE IF NOT EXISTS folder_media(folder TEXT NOT NULL, media_id TEXT NOT 
 CREATE INDEX IF NOT EXISTS folder_media_media ON folder_media(media_id);
 -- Recently added (最近添加): when a post was batch-downloaded (ms). Grow-only register; expiry is computed.
 CREATE TABLE IF NOT EXISTS recent(post_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+-- When a post first came into the library (ms), on whichever device it was downloaded or imported
+-- (v19). The earliest wins (`rules::merge_added`); synced, so 按添加时间排序 is the same everywhere.
+-- A post from before v19 has none: it sorts by its tweet's own time (`rules::added_or_tweet_time`).
+CREATE TABLE IF NOT EXISTS post_added(post_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
 -- Media brought in through a share extension as media (从相册导入). Grow-only, synced.
 CREATE TABLE IF NOT EXISTS album(media_id TEXT PRIMARY KEY);
 -- Settings shared by every device (the AI prompt…): LWW register (hlc, value), NULL = default. Synced.
@@ -183,9 +187,12 @@ impl Store {
         // a record that cannot be sent in one sync frame would block every later one: limits
         // are applied here whatever the source (importers report what they cut)
         let (p, _) = p.clamped();
+        // a post new to the library: when it came in (a post imported again keeps its first time)
+        let new: bool = !self.conn.prepare_cached("SELECT 1 FROM post WHERE id=?1")?.exists([&p.id])?;
         let hlc = self.next_hlc()?;
         self.apply_post(&p, hlc)?;
         self.record(&crate::oplog::Op::Post { meta: p.clone(), hlc })?;
+        if new && self.added_at(&p.id)?.is_none() { self.mark_added(&p.id, now_ms())?; }
         self.post_arrived(&p.id, &blob_exists)
     }) }
 
@@ -1080,9 +1087,15 @@ impl Store {
     }
 
     /// Each post's place in the order things were added to this library: its newest media's row.
+    /// When each post with media came into the library (ms): its synced record, or for a post
+    /// from before they were kept, its tweet's own time (`rules::added_or_tweet_time`).
     pub fn posts_added(&self) -> rusqlite::Result<std::collections::HashMap<String, i64>> {
-        let mut st = self.conn.prepare_cached("SELECT post_id, max(rowid) FROM media GROUP BY post_id")?;
-        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect();
+        let mut st = self.conn.prepare_cached("SELECT m.post_id, pa.at FROM (SELECT DISTINCT post_id FROM media) m LEFT JOIN post_added pa ON pa.post_id=m.post_id")?;
+        let v = st.query_map([], |r| {
+            let id: String = r.get(0)?;
+            let at = crate::rules::added_or_tweet_time(r.get::<_, Option<i64>>(1)?.map(|a| a.max(0) as u64), &id);
+            Ok((id, at.min(i64::MAX as u64) as i64))
+        })?.collect();
         v
     }
 
@@ -1555,6 +1568,24 @@ impl Store {
             AND NOT EXISTS(SELECT 1 FROM tag o WHERE o.canon=tag.id)", [])?;
         self.conn.execute(&format!("DELETE FROM tag_vec WHERE label NOT IN (SELECT DISTINCT t.label FROM tag_c t JOIN tag_media tm ON tm.tag_id=t.raw_id JOIN media m ON m.id=tm.media_id WHERE tm.origin != 0 AND {LIVE_SQL})"), [])?;
         Ok(n)
+    }
+
+    /// Records when a post came into the library (ms), for sync.
+    pub fn mark_added(&self, post_id: &str, at: u64) -> rusqlite::Result<()> { self.atomic(|| {
+        self.apply_added(post_id, at)?;
+        self.record(&crate::oplog::Op::Added { post_id: post_id.into(), at })
+    }) }
+
+    pub(crate) fn added_at(&self, post_id: &str) -> rusqlite::Result<Option<u64>> {
+        use rusqlite::OptionalExtension;
+        self.conn.prepare_cached("SELECT at FROM post_added WHERE post_id=?1")?.query_row([post_id], |r| r.get::<_, i64>(0)).optional().map(|v| v.map(|a| a.max(0) as u64))
+    }
+
+    pub(crate) fn apply_added(&self, post_id: &str, at: u64) -> rusqlite::Result<()> {
+        if at == 0 { return Ok(()) }    // no time: nothing to keep
+        let at = crate::rules::merge_added(self.added_at(post_id)?.unwrap_or(0), at).min(i64::MAX as u64) as i64;
+        self.conn.execute("INSERT INTO post_added VALUES(?1,?2) ON CONFLICT(post_id) DO UPDATE SET at=excluded.at", params![post_id, at])?;
+        Ok(())
     }
 
     /// Marks a post "最近添加" at `at` (ms) and records it for sync.
