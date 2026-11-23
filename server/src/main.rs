@@ -120,7 +120,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/proxy", post(proxy).layer(DefaultBodyLimit::max(64 << 20)))
         .route("/api/scaled", get(scaled))
         .route("/api/ai/describe", post(ai_describe).layer(DefaultBodyLimit::max(32 << 20)))
-        .route("/api/ai/embed", post(ai_embed).layer(DefaultBodyLimit::max(4 << 20)))
         .route("/api/ai/unload", post(ai_unload))
         .route("/gfonts/{*path}", get(gfont))
         .route("/api/lease", post(gate::lease))
@@ -554,11 +553,6 @@ struct LocalDescribeRequest {
     max_tokens: Option<i32>,
 }
 
-#[derive(Deserialize)]
-struct LocalEmbedRequest {
-    model_id: String,
-    texts: Vec<String>,
-}
 
 fn find_local_gguf(model_id: &str) -> anyhow::Result<(PathBuf, Option<PathBuf>, bool)> {
     let raw = wire::take(tl_core::ffi::tl_models_installed());
@@ -591,18 +585,6 @@ async fn ai_describe(State(cfg): State<Shared>, Json(req): Json<LocalDescribeReq
     }).await;
     match res {
         Ok(Ok(text)) => Json(json!({ "ok": text })).into_response(),
-        Ok(Err(e)) => Json(json!({ "error": format!("{e:#}") })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-async fn ai_embed(Json(req): Json<LocalEmbedRequest>) -> Response {
-    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<(usize, Vec<Vec<f32>>)> {
-        let (weights, _, _) = find_local_gguf(&req.model_id)?;
-        llama::embed(&weights, &req.texts)
-    }).await;
-    match res {
-        Ok(Ok((dim, vectors))) => Json(json!({ "ok": { "dim": dim, "vectors": vectors } })).into_response(),
         Ok(Err(e)) => Json(json!({ "error": format!("{e:#}") })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

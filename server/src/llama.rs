@@ -31,8 +31,6 @@ const LIB_NAME: &str = "libtl_llama.so";
 type InitFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type LoadFn = unsafe extern "C" fn(*const c_char, *const c_char, i32, i32, i32, *mut *mut c_char) -> *mut c_void;
 type DescribeFn = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *const c_char, i32, *mut *mut c_char) -> *mut c_char;
-type DimensionsFn = unsafe extern "C" fn(*mut c_void) -> i32;
-type EmbedFn = unsafe extern "C" fn(*mut c_void, *const c_char, *mut f32, *mut *mut c_char) -> i32;
 type UnloadFn = unsafe extern "C" fn(*mut c_void);
 type FreeStringFn = unsafe extern "C" fn(*mut c_char);
 
@@ -40,8 +38,6 @@ struct Api {
     init: InitFn,
     load: LoadFn,
     describe: DescribeFn,
-    dimensions: DimensionsFn,
-    embed: EmbedFn,
     unload: UnloadFn,
     free_string: FreeStringFn,
     devices: String,
@@ -57,9 +53,9 @@ struct Loaded {
 
 unsafe impl Send for Loaded {}
 
+/// Only the tagger runs here: search by meaning (an embedding model) is the Apple apps' alone.
 struct State {
     tagger: Option<Loaded>,
-    embedder: Option<Loaded>,
     last_used: Instant,
 }
 
@@ -68,7 +64,7 @@ static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 static WATCHER: OnceLock<()> = OnceLock::new();
 
 fn state() -> &'static Mutex<State> {
-    STATE.get_or_init(|| Mutex::new(State { tagger: None, embedder: None, last_used: Instant::now() }))
+    STATE.get_or_init(|| Mutex::new(State { tagger: None, last_used: Instant::now() }))
 }
 
 fn start_watcher() {
@@ -77,9 +73,8 @@ fn start_watcher() {
             std::thread::sleep(Duration::from_secs(5));
             let Some(Some(api)) = API.get() else { continue };
             let Ok(mut g) = state().lock() else { continue };
-            if (g.tagger.is_some() || g.embedder.is_some()) && g.last_used.elapsed() >= Duration::from_secs(30) {
+            if g.tagger.is_some() && g.last_used.elapsed() >= Duration::from_secs(30) {
                 if let Some(t) = g.tagger.take() { unsafe { (api.unload)(t.handle) }; }
-                if let Some(e) = g.embedder.take() { unsafe { (api.unload)(e.handle) }; }
             }
         });
     });
@@ -132,13 +127,11 @@ fn load_api() -> Option<Api> {
                 sym::<InitFn>(handle, b"tl_llama_init\0")?,
                 sym::<LoadFn>(handle, b"tl_llama_load\0")?,
                 sym::<DescribeFn>(handle, b"tl_llama_describe\0")?,
-                sym::<DimensionsFn>(handle, b"tl_llama_dimensions\0")?,
-                sym::<EmbedFn>(handle, b"tl_llama_embed\0")?,
                 sym::<UnloadFn>(handle, b"tl_llama_unload\0")?,
                 sym::<FreeStringFn>(handle, b"tl_llama_free_string\0")?,
             ))
         };
-        let Some((init, load, describe, dimensions, embed, unload, free_string)) = loaded else { continue };
+        let Some((init, load, describe, unload, free_string)) = loaded else { continue };
         let cdir = backend_dir.as_ref().and_then(|d| CString::new(d.to_string_lossy().as_bytes()).ok());
         let dev_ptr = unsafe { init(cdir.as_ref().map_or(std::ptr::null(), |s| s.as_ptr())) };
         let devices = if dev_ptr.is_null() {
@@ -149,7 +142,7 @@ fn load_api() -> Option<Api> {
             s
         };
         eprintln!("local ai: loaded {} ({})", lib_path.display(), if devices.is_empty() { "CPU" } else { &devices });
-        return Some(Api { init, load, describe, dimensions, embed, unload, free_string, devices });
+        return Some(Api { init, load, describe, unload, free_string, devices });
     }
     None
 }
@@ -222,48 +215,9 @@ pub fn describe(
     }
 }
 
-pub fn embed(weights: &Path, texts: &[String]) -> anyhow::Result<(usize, Vec<Vec<f32>>)> {
-    let api = api().ok_or_else(|| anyhow!("local ai unavailable"))?;
-    start_watcher();
-    let w_str = weights.to_string_lossy();
-    let key = w_str.into_owned();
-    let cw = cstr(&key)?;
-
-    let mut g = state().lock().map_err(|_| anyhow!("lock poisoned"))?;
-    if g.embedder.as_ref().is_none_or(|e| e.key != key) {
-        if let Some(old) = g.embedder.take() { unsafe { (api.unload)(old.handle) }; }
-        let mut err: *mut c_char = std::ptr::null_mut();
-        let h = unsafe { (api.load)(cw.as_ptr(), std::ptr::null(), 999, 2048, 1, &mut err) };
-        if h.is_null() {
-            let msg = unsafe { take_string(api, err) }.unwrap_or_else(|| "?".into());
-            bail!("load: {msg}");
-        }
-        g.embedder = Some(Loaded { key, handle: h });
-    }
-    let handle = g.embedder.as_ref().unwrap().handle;
-    let dim = unsafe { (api.dimensions)(handle) };
-    if dim <= 0 { bail!("invalid embedding dimensions: {dim}"); }
-    let dim = dim as usize;
-    let mut out = Vec::with_capacity(texts.len());
-    for t in texts {
-        let ct = cstr(t)?;
-        let mut vec = vec![0f32; dim];
-        let mut err: *mut c_char = std::ptr::null_mut();
-        let rc = unsafe { (api.embed)(handle, ct.as_ptr(), vec.as_mut_ptr(), &mut err) };
-        if rc != 0 {
-            let msg = unsafe { take_string(api, err) }.unwrap_or_else(|| format!("code {rc}"));
-            bail!("embed: {msg}");
-        }
-        out.push(vec);
-    }
-    g.last_used = Instant::now();
-    Ok((dim, out))
-}
-
 pub fn unload_all() {
     let Some(api) = api() else { return };
     if let Ok(mut g) = state().lock() {
         if let Some(t) = g.tagger.take() { unsafe { (api.unload)(t.handle) }; }
-        if let Some(e) = g.embedder.take() { unsafe { (api.unload)(e.handle) }; }
     }
 }

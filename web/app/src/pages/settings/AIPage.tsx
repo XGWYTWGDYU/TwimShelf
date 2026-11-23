@@ -15,8 +15,8 @@ import { core } from '../../lib/core';
 import { useAsync, useInterval, useStore } from '../../lib/hooks';
 import { libraryVersion } from '../../lib/library';
 import {
-  activeEmbedder, activeTagger, autoTag, defaultPrompt, deleteModel, endpoint, externalModels,
-  getPrompt, localAIInfo, modelTitle, promptFields, runTagging, saveModel, selectEmbedder, selectTagger,
+  activeTagger, autoTag, defaultPrompt, deleteModel, endpoint, externalModels,
+  getPrompt, localAIInfo, modelTitle, promptFields, runTagging, saveModel, selectTagger,
   setAuto, setSetting, stopTagging, tagging, testModel, unloadLocalModels, type ExternalModel, type Prompt,
 } from './aiTagging';
 import { ModelProgress } from './ModelHubPage';
@@ -47,7 +47,6 @@ function isLocalUrl(rawUrl: string): boolean {
 export default function AIPage() {
   const version = useStore(libraryVersion);
   const selected = useStore(activeTagger);
-  const selectedEmbedder = useStore(activeEmbedder);
   const automatic = useStore(autoTag);
   const activity = useStore(tagging);
   const localAI = useAsync(localAIInfo, []);
@@ -80,14 +79,12 @@ export default function AIPage() {
   const localSupported = !!localAI.data?.supported;
   const localList = (installed.data ?? []).filter((m) => m.format === 'gguf');
   const localTaggers = localSupported ? localList.filter((m) => m.vision) : [];
-  const localEmbedders = localSupported ? localList.filter((m) => !m.vision) : [];
   const modelList = models.data ?? [];
   const taggerOptions = [
     ...localTaggers.map((m) => ({ id: m.id, title: m.repo || m.id })),
     ...modelList.map((m) => ({ id: m.id, title: modelTitle(m) })),
   ];
   const activeChoice = taggerOptions.find((candidate) => candidate.id === selected);
-  const activeEmbChoice = localEmbedders.find((candidate) => candidate.id === selectedEmbedder);
   const [done = 0, total = 0] = counts.data ?? [0, 0];
   const ratio = total > 0 ? done / total : 0;
 
@@ -159,7 +156,6 @@ export default function AIPage() {
     if (ok == null) return;
     await task.run(async () => {
       if (m.id === selected) { stopTagging(); selectTagger(''); }
-      if (m.id === selectedEmbedder) selectEmbedder('');
       await unloadLocalModels();
       await change(core.read(core.b.tl_model_delete(m.id)));
     });
@@ -310,25 +306,6 @@ export default function AIPage() {
             </div>
           </div>
 
-          <div className="ai-default-card">
-            <IconTile icon={<Search size={15} strokeWidth={2} />} color="teal" size={30} />
-            <div className="ai-default-meta">
-              <span className="ai-default-label">{L('mac.models.embedder')}</span>
-              {!localEmbedders.length ? (
-                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-2)' }}>{L('common.notInstalled')}</span>
-              ) : (
-                <PopupSelect
-                  label={L('mac.models.embedder')}
-                  value={activeEmbChoice?.id ?? ''}
-                  options={[
-                    ...(activeEmbChoice ? [] : [{ value: '', label: L('mac.notChosen') }]),
-                    ...localEmbedders.map((entry) => ({ value: entry.id, label: entry.repo || entry.id })),
-                  ]}
-                  onChange={(id) => selectEmbedder(id)}
-                />
-              )}
-            </div>
-          </div>
         </div>
 
         {activity.error && (
@@ -395,8 +372,9 @@ export default function AIPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {installed.data.map((item) => {
               const open = expanded.has(item.id);
-              const isDefault = item.vision ? item.id === selected : item.id === selectedEmbedder;
-              const runnable = localSupported && item.format === 'gguf';
+              // (only a vision model runs here: search by meaning is the Apple apps' alone)
+              const isDefault = item.vision && item.id === selected;
+              const runnable = localSupported && item.format === 'gguf' && item.vision;
               return (
                 <Card key={item.id} spacing={12}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -421,12 +399,8 @@ export default function AIPage() {
                       <Button
                         disabled={activity.running}
                         onClick={() => {
-                          if (item.vision) {
-                            selectTagger(item.id);
-                            if (automatic) void runTagging();
-                          } else {
-                            selectEmbedder(item.id);
-                          }
+                          selectTagger(item.id);
+                          if (automatic) void runTagging();
                         }}>
                         {L('mac.models.setDefault')}
                       </Button>

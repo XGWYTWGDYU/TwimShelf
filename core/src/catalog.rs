@@ -1,6 +1,7 @@
 //! The models every app offers to download, in one place: MLX folders for Apple devices, GGUF
-//! files for llama.cpp (Android, Windows, Linux). Names and notes are catalog keys the front
-//! ends translate; sizes are what a download takes.
+//! files for llama.cpp (Android, Windows, Linux: vision models only — search by meaning, with an
+//! embedding model, is the Apple apps' alone). Names and notes are catalog keys the front ends
+//! translate; sizes are what a download takes.
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,8 +40,6 @@ pub const ALL: &[CatalogModel] = &[
          "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf", Some("mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf")),
     gguf("ggml-org/Qwen2.5-VL-7B-Instruct-GGUF", "tagger", "catalog.gguf.qwen25vl7b", "catalog.note.gguf.large", 5_500_000_000, 15,
          "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf", Some("mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf")),
-    gguf("Qwen/Qwen3-Embedding-0.6B-GGUF", "embedder", "catalog.qwen3embedding", "catalog.note.embedder", 640_000_000, 0,
-         "Qwen3-Embedding-0.6B-Q8_0.gguf", None),
 ];
 
 /// The catalog for one format, in display order.

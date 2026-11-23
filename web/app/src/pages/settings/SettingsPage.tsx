@@ -6,7 +6,7 @@ import {
 } from '@twimshelf/core';
 import {
   ArrowDownCircle, ChevronDown, Download, HardDrive, Info, LogOut, Package, Power, Puzzle, Scale,
-  RefreshCw, Search, Sparkles, Tags, Trash2, Columns3,
+  RefreshCw, Sparkles, Tags, Trash2, Columns3,
 } from 'lucide-react';
 import { Button, Page } from '../../components/ui';
 import { mascotEnabled, setMascotEnabled } from '../../components/Mascot';
@@ -20,8 +20,8 @@ import TagsPage from '../TagsPage';
 import { cardDensities, cardDensity, setCardDensity } from '../browse/density';
 import AIPage from './AIPage';
 import {
-  activeEmbedder, activeTagger, allTaggers, enableAutoTagging, fuzzySearch,
-  localAIInfo, setFuzzySearch, tagging,
+  activeTagger, allTaggers, enableAutoTagging,
+  localAIInfo, tagging,
 } from './aiTagging';
 import { checkForUpdate, updateRepo } from '../../lib/update';
 import DownloadsPage from './DownloadsPage';
@@ -68,8 +68,6 @@ function SettingsOverview() {
   const density = useStore(cardDensity);
   const version = useStore(libraryVersion);
   const selectedTagger = useStore(activeTagger);
-  const selectedEmbedder = useStore(activeEmbedder);
-  const fuzzy = useStore(fuzzySearch);
   const tagActivity = useStore(tagging);
   const mascot = useStore(mascotEnabled);
   const task = useTask();
@@ -104,7 +102,6 @@ function SettingsOverview() {
   const dl = d?.dl;
   const [aiDone = 0, aiTotal = 0] = d?.aiCounts ?? [0, 0];
   const activeModel = d?.taggers.find((m) => m.id === selectedTagger);
-  const semanticAvailable = !!d?.localAI.supported && !!selectedEmbedder;
   const sync = d?.sync;
   const hasAccount = !!sync?.account_id;
   const onlinePeers = hasAccount
@@ -337,14 +334,6 @@ function SettingsOverview() {
           </Card>
           <Card spacing={14}>
             <div className="card-group-label">{L('common.search')}</div>
-            <ToggleRow
-              icon={<Search size={15} strokeWidth={2} />}
-              color="purple"
-              title={L('settings.fuzzy')}
-              checked={semanticAvailable && fuzzy}
-              disabled={!semanticAvailable}
-              onChange={setFuzzySearch}
-            />
             <div style={{ padding: 12, borderRadius: 12, background: 'var(--bg-subtle)' }}>
               <div className="chips-row" style={{ gap: 6 }}>
                 {KEYWORDS.map((kw) => (

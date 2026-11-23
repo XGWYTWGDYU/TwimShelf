@@ -27,7 +27,6 @@ import { cardDensity } from './density';
 import { markPattern } from './SearchMarks';
 import { revealRequest } from './reveal';
 import { openTagPicker } from '../../components/pickers';
-import { activeEmbedder, fuzzySearch, queryVectors } from '../settings/aiTagging';
 import './BrowsePage.css';
 
 type BrowseRoute = Extract<Route, { page: 'browse' }>;
@@ -70,23 +69,13 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
     if (r.travel > 24) setNarrow(true); else if (r.travel < -40) setNarrow(false);
   }, []);
   const density = useStore(cardDensity);
-  const fuzzy = useStore(fuzzySearch);
-  const embedder = useStore(activeEmbedder);
   const [byAdded, setByAdded] = useState(() => pref('feed.byAdded') === '1');
   const [seed, setSeed] = useState(() => { const v = Number(pref('feed.seed')); return v > 0 ? v : newSeed(); });
   const [grouped, setGrouped] = useState(() => pref('grouped') !== '0');
   useEffect(() => setPref('feed.seed', String(seed)), [seed]);
   const query = useMemo(() => queryFor(route, { newest: byAdded, seed: byAdded ? null : seed }, grouped),
     [route.q, route.kind, route.folder, route.view, byAdded, seed, grouped]);
-  const feed = useAsync(async () => {
-    if (!query) return [];
-    let q = query;
-    if (query.terms && query.terms.length > 0 && fuzzy && embedder) {
-      const vec = await queryVectors(query.terms);
-      if (vec) q = { ...query, fuzzy: true, term_vectors: vec.vectors, embed_model: vec.embedModel };
-    }
-    return core.feed(q);
-  }, [query, version, fuzzy, embedder]);
+  const feed = useAsync(async () => (query ? core.feed(query) : []), [query, version]);
   const marks = useMemo(() => {
     const pattern = markPattern(query?.terms ?? []);
     if (!query || !pattern) return;

@@ -10,9 +10,7 @@ export const promptFields = ['system', 'prompt', 'existing', 'vocabulary', 'cont
 export type Prompt = Record<typeof promptFields[number], string>;
 const modelsKey = 'ai.external';
 const selectionKey = 'twimshelf.ai.tagger';
-const embedderKey = 'twimshelf.ai.embedder';
 const autoKey = 'twimshelf.ai.auto';
-const fuzzyKey = 'twimshelf.search.fuzzy';
 
 export function modelTitle(model: ExternalModel): string {
   return model.name || model.model || model.url;
@@ -213,9 +211,7 @@ export async function testModel(model: ExternalModel, key: string, clear: boolea
 }
 
 export const activeTagger = store(localStorage.getItem(selectionKey) ?? '');
-export const activeEmbedder = store(localStorage.getItem(embedderKey) ?? '');
 export const autoTag = store(localStorage.getItem(autoKey) === 'true');
-export const fuzzySearch = store(localStorage.getItem(fuzzyKey) !== 'false');
 
 export interface TaggingState {
   running: boolean;
@@ -244,21 +240,9 @@ export function selectTagger(id: string) {
   activeTagger.set(id);
 }
 
-export function selectEmbedder(id: string) {
-  localStorage.setItem(embedderKey, id);
-  activeEmbedder.set(id);
-  if (id) void embedMissingLabels();
-}
-
 export function setAuto(enabled: boolean) {
   localStorage.setItem(autoKey, String(enabled));
   autoTag.set(enabled);
-}
-
-export function setFuzzySearch(enabled: boolean) {
-  localStorage.setItem(fuzzyKey, String(enabled));
-  fuzzySearch.set(enabled);
-  libraryChanged();
 }
 
 /** Extracts a video frame in the page at 33% of duration and fits it for vision models
@@ -347,7 +331,6 @@ let finished: Promise<void> = Promise.resolve();
 let interval: number | undefined;
 let unsubLib: (() => void) | undefined;
 let retryAfter = 0;
-let embeddingBusy = false;
 const leaseId = crypto.getRandomValues(new Uint32Array(4)).join('-');
 
 async function lease(): Promise<boolean> {
@@ -365,60 +348,10 @@ export function enableAutoTagging() {
   if (interval !== undefined) return;
   const tick = () => {
     if (autoTag.get() && activeTagger.get() && Date.now() >= retryAfter) void runTagging({ automatic: true });
-    if (activeEmbedder.get()) void embedMissingLabels();
   };
   interval = window.setInterval(tick, 15_000);
   unsubLib = libraryVersion.subscribe(tick);
   tick();
-}
-
-export async function embedMissingLabels(): Promise<void> {
-  const modelId = activeEmbedder.get();
-  if (!modelId || embeddingBusy) return;
-  const ai = await localAIInfo();
-  if (!ai.supported) return;
-  embeddingBusy = true;
-  try {
-    const epoch = await core.read<number>(core.b.tl_epoch());
-    while (activeEmbedder.get() === modelId) {
-      const missing = await core.read<string[]>(core.b.tl_labels_missing_vectors(modelId));
-      if (!missing.length) break;
-      const chunk = missing.slice(0, 64);
-      const resp = await serverFetch(`${core.transport.base}/api/ai/embed`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ model_id: modelId, texts: chunk }),
-      });
-      if (!resp.ok) break;
-      const data = await resp.json() as { ok?: { dim: number; vectors: number[][] }; error?: string };
-      if (!data.ok || data.ok.vectors.length !== chunk.length) break;
-      const items: Array<[string, number[]]> = chunk.map((label, i) => [label, data.ok!.vectors[i]]);
-      await core.readJson('tl_set_vectors', { epoch, model: modelId, items });
-    }
-  } catch { /* ignore */ } finally {
-    embeddingBusy = false;
-  }
-}
-
-export async function queryVectors(terms: string[]): Promise<{ embedModel: string; vectors: number[][] } | null> {
-  if (!terms.length || !fuzzySearch.get()) return null;
-  const modelId = activeEmbedder.get();
-  if (!modelId) return null;
-  const ai = await localAIInfo();
-  if (!ai.supported) return null;
-  try {
-    const resp = await serverFetch(`${core.transport.base}/api/ai/embed`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model_id: modelId, texts: terms }),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json() as { ok?: { dim: number; vectors: number[][] } };
-    if (!data.ok || data.ok.vectors.length !== terms.length) return null;
-    return { embedModel: modelId, vectors: data.ok.vectors };
-  } catch {
-    return null;
-  }
 }
 
 interface ResolvedRunner {
@@ -575,7 +508,6 @@ export async function runTagging(opts: {
     tagging.set({ ...tagging.get(), running: false, currentPath: null });
     if (done) {
       libraryChanged();
-      if (activeEmbedder.get()) void embedMissingLabels();
     }
     ended();
   }
