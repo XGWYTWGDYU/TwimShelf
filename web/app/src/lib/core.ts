@@ -28,7 +28,8 @@ declare global {
       setLoginItem?: (enabled: boolean) => Promise<boolean>;
       getUpdatePrefs?: () => Promise<{ lastCheck?: number; skipped?: string }>;
       setUpdatePrefs?: (prefs: { lastCheck?: number; skipped?: string }) => Promise<void>;
-      installUpdate?: (serverFile: string) => Promise<string>;
+      installUpdate?: (serverFile: string) => Promise<{ replaced: boolean; path: string }>;
+      relaunch?: () => Promise<void>;
     };
   }
 }

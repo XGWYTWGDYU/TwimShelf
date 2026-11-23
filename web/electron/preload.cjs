@@ -31,5 +31,8 @@ contextBridge.exposeInMainWorld('twimshelf', {
   setLoginItem: (enabled) => ipcRenderer.invoke('set-login-item', !!enabled),
   getUpdatePrefs: () => ipcRenderer.invoke('get-update-prefs'),
   setUpdatePrefs: (prefs) => ipcRenderer.invoke('set-update-prefs', prefs),
+  /** Puts a downloaded update in place: { replaced: true } when this AppImage was replaced
+   *  (reopen to use it), else { replaced: false, path } (a file shown in the file manager). */
   installUpdate: (serverFile) => ipcRenderer.invoke('install-update', String(serverFile)),
+  relaunch: () => ipcRenderer.invoke('relaunch'),
 });

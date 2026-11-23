@@ -14,7 +14,8 @@ import '../platform/os.dart';
 
 /// 检查更新, in GitHub builds only: they are built with `--dart-define=TL_UPDATE_REPO=owner/name`;
 /// every other build has none and never looks. At most once a day when the app opens, or when
-/// asked in Settings. iOS and iPadOS open the release page; Android downloads the release's APK
+/// asked in Settings. iOS and iPadOS download the release's (Flutter) .ipa in the browser — an
+/// app from outside the App Store cannot install itself; Android downloads the release's APK
 /// (checked against the release: size, SHA-256) and opens it.
 class Updates {
   Updates._();
@@ -28,6 +29,7 @@ class Updates {
   /// Installer endings for this platform, preferred first; empty: the release page.
   static List<String> get _suffixes {
     if (OS.isAndroid) return const ['.apk'];
+    if (OS.isIOS) return const ['-iOS-unsigned.ipa'];
     return const [];
   }
 
@@ -75,7 +77,8 @@ class Updates {
   }
 
   static Future<void> offer(BuildContext context, UpdateInfo info) async {
-    final installs = info.asset_url != null;
+    // Android installs here; iOS downloads the .ipa in the browser (or opens the page without one)
+    final installs = info.asset_url != null && OS.isAndroid;
     final choice = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
@@ -95,8 +98,8 @@ class Updates {
     if (choice == 'skip') Prefs.instance.updateSkipped = info.version;
     if (choice != 'go' || !context.mounted) return;
     if (!installs) {
-      final u = Uri.tryParse(info.page_url);
-      if (u != null && u.scheme == 'https') await launchUrl(u, mode: LaunchMode.externalApplication);
+      final u = Uri.tryParse(info.asset_url ?? info.page_url);
+      if (u != null && u.scheme == 'https' && u.host == 'github.com') await launchUrl(u, mode: LaunchMode.externalApplication);
       return;
     }
     // (fetched only now: nothing large is downloaded before the person says so)

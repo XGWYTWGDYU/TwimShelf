@@ -106,8 +106,14 @@ export async function checkForUpdate(manual: boolean): Promise<void> {
     toast(L('update.downloading'));
     const srv = await serverInfo();
     const staged = await core.read<string>(core.b.tl_update_download(JSON.stringify(update), srv.exports));
-    const dest = await tw.installUpdate(staged);
-    toast(dest);
+    const result = await tw.installUpdate(staged);
+    if (result.replaced) {
+      // in place: reopen now, or the next start is the new version
+      const again = await choose(L('update.ready.title'), L('update.ready.message', update.version), [L('update.later'), L('update.relaunch')], { cancel: false });
+      if (again === 1) await tw.relaunch?.();
+    } else {
+      toast(result.path);
+    }
   } catch (e) {
     if (manual) {
       const msg = e instanceof Error ? L(e.message) : L('common.notDone');

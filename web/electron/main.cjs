@@ -391,6 +391,25 @@ ipcMain.handle('install-update', async (e, serverFile) => {
   const real = fs.realpathSync(serverFile);
   const inside = Object.values(dataPaths()).some((d) => fs.existsSync(d) && real.startsWith(fs.realpathSync(d) + path.sep));
   if (!inside) throw new Error('common.notDone');
+  // An AppImage replaces itself where it is (as mature apps update): the new file next to it,
+  // made executable, then renamed over it. The running copy is not disturbed (it keeps the old
+  // file open); reopening starts the new one.
+  const current = process.platform === 'linux' ? process.env.APPIMAGE : null;
+  if (current && real.endsWith('.AppImage') && fs.existsSync(current)) {
+    const dir = path.dirname(current);
+    const staged = path.join(dir, `.${path.basename(current)}.update-${crypto.randomUUID()}`);
+    try {
+      await fs.promises.access(dir, fs.constants.W_OK);
+      await fs.promises.copyFile(real, staged);
+      await fs.promises.chmod(staged, 0o755);
+      await fs.promises.rename(staged, current);
+      await fs.promises.rm(real, { force: true }).catch(() => {});
+      return { replaced: true, path: current };
+    } catch {
+      await fs.promises.rm(staged, { force: true }).catch(() => {});
+      // (a folder it may not write: the new file goes to Downloads instead, below)
+    }
+  }
   const dest = path.join(app.getPath('downloads'), path.basename(real));
   const tmp = path.join(app.getPath('downloads'), `.twimshelf-update-${crypto.randomUUID()}.tmp`);
   try {
@@ -399,11 +418,19 @@ ipcMain.handle('install-update', async (e, serverFile) => {
     await fs.promises.rename(tmp, dest);
     await fs.promises.rm(real, { force: true }).catch(() => {});
     shell.showItemInFolder(dest);
-    return dest;
+    return { replaced: false, path: dest };
   } catch (err) {
     await fs.promises.rm(tmp, { force: true }).catch(() => {});
     throw err;
   }
+});
+
+// 立即重新打开 after an update: the (replaced) AppImage starts again
+ipcMain.handle('relaunch', (e) => {
+  if (!fromPage(e)) return;
+  app.relaunch(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE, args: process.argv.slice(1) } : undefined);
+  app.isQuitting = true;
+  app.quit();
 });
 
 app.on('second-instance', () => {

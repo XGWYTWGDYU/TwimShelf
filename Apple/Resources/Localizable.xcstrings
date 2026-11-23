@@ -36857,6 +36857,35 @@
         }
       }
     },
+    "update.badSignature" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The downloaded app is not signed as this one is."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロードしたアプリの署名がこのアプリと一致しません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的应用签名与当前应用不一致。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載的應用簽名與目前應用不一致。"
+          }
+        }
+      }
+    },
     "update.check" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37176,6 +37205,93 @@
         }
       }
     },
+    "update.ready.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TwimShelf %@ has been downloaded. Reopen the app to switch to it; if you keep working, it is put in place when you quit."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TwimShelf %@ をダウンロードしました。アプリを開き直すと新しいバージョンに切り替わります。このまま使い続けると、終了時に入れ替わります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TwimShelf %@ 已下载好。重新打开应用就会换成新版本；继续使用的话，退出时自动换上。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TwimShelf %@ 已下載好。重新打開應用就會換成新版本；繼續使用的話，結束時自動換上。"
+          }
+        }
+      }
+    },
+    "update.ready.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update Ready"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アップデートの準備ができました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新已准备好"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新已準備好"
+          }
+        }
+      }
+    },
+    "update.relaunch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reopen Now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今すぐ開き直す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即重新打开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即重新打開"
+          }
+        }
+      }
+    },
     "update.skip" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37201,6 +37317,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "略過此版本"
+          }
+        }
+      }
+    },
+    "update.wrongApp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The download does not hold this app at the release’s version."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダウンロードにこのリリースのバージョンのアプリが含まれていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的文件里没有这个版本的应用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下載的檔案裡沒有這個版本的應用。"
           }
         }
       }

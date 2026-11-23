@@ -70,6 +70,12 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private var updatingInsets = false
     private var searchFolded = false
     var folding = false
+    /// While the field grows out of the magnifier or shrinks back into it: its frame (nil: its
+    /// row), and its × and export button kept out of the way.
+    var morphFrame: CGRect?
+    var morphing = false
+    /// The next result replaces the cards with a cross-fade (a search closed from its results).
+    var crossfadeNextResult = false
     var unfolded = false
     private var chromeHiddenForTransition = false
     private let header = FollowedView()
@@ -342,10 +348,54 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     /// The magnifier: the bar opens above the cards, ready to type.
+    /// The magnifier: the field grows out of it to the whole row while the buttons fade, and
+    /// the list of suggestions fades in under it, ready to type.
     private func unfoldSearch() {
+        guard searchFolded, actionsHost == nil, view.window != nil else {
+            unfolded = true
+            syncSearchFold(animated: true)
+            searchField.becomeFirstResponder()
+            return
+        }
+        let icon = magnifierFrame()
         unfolded = true
-        syncSearchFold(animated: true)
+        morphing = true
+        UIView.performWithoutAnimation {
+            morphFrame = icon
+            syncSearchFold(animated: false)
+            // still on screen: they fade out below
+            browseChrome.alpha = 1
+            browseActions.isHidden = false
+            browseActions.alpha = 1
+            searchChrome.alpha = 1
+            view.layoutIfNeeded()
+        }
         searchField.becomeFirstResponder()
+        UIView.animate(withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, options: [.allowUserInteraction]) {
+            self.morphFrame = nil
+            self.layoutSearchChrome()
+            self.view.layoutIfNeeded()
+        } completion: { _ in
+            self.morphing = false
+            self.updateExitButton()
+        }
+        UIView.animate(withDuration: 0.14, delay: 0, options: [.curveEaseOut]) {
+            self.browseChrome.alpha = 0
+            self.browseActions.alpha = 0
+        } completion: { _ in
+            if !self.searchFolded { self.updateChromeVisibility() }
+        }
+    }
+
+    /// Where the magnifier is (laid out even while the field covers its row).
+    private func magnifierFrame() -> CGRect {
+        let hidden = browseActions.isHidden
+        browseActions.isHidden = false
+        browseChrome.setNeedsLayout()
+        browseChrome.layoutIfNeeded()
+        let f = browseSearchButton.convert(browseSearchButton.bounds, to: view)
+        browseActions.isHidden = hidden
+        return f
     }
 
     /// The search stays visible while editing or while it still has a query.
@@ -355,10 +405,10 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         // the search tab's page never folds its field; 浏览 without a search of its own always does
         let folded = role == .browse && (searchElsewhere || (!unfolded && idle))
         let changed = folded != searchFolded
-        // Closing: the field (with its × and export button as they are) fades and shrinks
-        // toward the magnifier while the title and the buttons come back, in one motion. What
-        // the field holds is settled once it is out of sight.
-        let closing = folded && changed && animated
+        // Closing: the × and export button go first, the field shrinks back into the magnifier
+        // and only then fades, while the buttons come back. What the field holds is settled once
+        // it is out of sight.
+        let closing = folded && changed && animated && actionsHost == nil && view.window != nil
         if closing {
             folding = true
             searchChrome.isUserInteractionEnabled = false
@@ -373,19 +423,45 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             self.view.layoutIfNeeded()
         }
         if closing {
-            browseChrome.alpha = 0
-            browseActions.alpha = 0
-            UIView.animate(withDuration: 0.34, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-                change()
-                let w = self.searchChrome.bounds.width
-                self.searchChrome.transform = CGAffineTransform(translationX: w * 0.04, y: 0).scaledBy(x: 0.92, y: 0.92)
+            let icon = magnifierFrame()
+            morphing = true
+            // the field takes the row alone (its buttons fade over it), so it can shrink freely
+            [headerTrailing, headerBesideExit, headerBesideExport, exportBesideExit, exportAtEdge].forEach { $0?.isActive = false }
+            headerTrailing.isActive = true
+            exportAtEdge.isActive = true
+            exitShown = false
+            exportShown = false
+            UIView.performWithoutAnimation {
+                browseChrome.alpha = 0
+                browseActions.isHidden = false
+                browseActions.alpha = 0
+                searchChrome.alpha = 1
+                view.layoutIfNeeded()
+            }
+            UIView.animate(withDuration: 0.12, delay: 0, options: [.curveEaseOut]) {
+                self.exitButton.alpha = 0
+                self.exportButton.alpha = 0
+            }
+            UIView.animate(withDuration: 0.38, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0, options: [.allowUserInteraction]) {
+                self.morphFrame = icon
+                self.layoutSearchChrome()
+                self.view.setNeedsLayout()
+                self.view.layoutIfNeeded()
             } completion: { _ in
                 self.folding = false
+                self.morphing = false
+                self.morphFrame = nil
                 UIView.performWithoutAnimation {
-                    self.searchChrome.transform = .identity
+                    self.exitButton.isHidden = true
+                    self.exportButton.isHidden = true
                     self.syncSearchFold(animated: false, layoutChanged: true)
                     self.updateExitButton()
                 }
+            }
+            UIView.animate(withDuration: 0.14, delay: 0.2, options: [.curveEaseIn]) { self.searchChrome.alpha = 0 }
+            UIView.animate(withDuration: 0.2, delay: 0.16, options: [.curveEaseOut]) {
+                self.browseChrome.alpha = 1
+                self.browseActions.alpha = 1
             }
         } else if animated, changed {
             UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.88, initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: change)
@@ -502,7 +578,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         browseChrome.frame = CGRect(x: safe.minX + 10, y: view.safeAreaInsets.top + 6,
                                     width: max(0, safe.width - 20), height: 56)
         // (while the field shrinks away it has a transform: its frame is left alone)
-        if !folding { searchChrome.frame = browseChrome.frame }
+        searchChrome.frame = morphFrame ?? browseChrome.frame
         suggestions.frame = view.bounds
     }
 
@@ -953,9 +1029,18 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     /// search is closed (the order is stable, so the same position shows the same media).
     private var savedBrowse: CGPoint?
     private var lastUnfiltered = true
-    private var isUnfiltered: Bool { terms.isEmpty && currentFilter.isEmpty && !query.isContradictory }
+    var isUnfiltered: Bool { terms.isEmpty && currentFilter.isEmpty && !query.isContradictory }
 
     private func apply(_ items: [FeedItem], keepPosition: Bool) {
+        // a search closed from its results: the cards it showed fade into 浏览's
+        if crossfadeNextResult, let snap = collectionView.snapshotView(afterScreenUpdates: false) {
+            crossfadeNextResult = false
+            snap.frame = collectionView.frame
+            snap.isUserInteractionEnabled = false
+            view.insertSubview(snap, aboveSubview: collectionView)
+            UIView.animate(withDuration: 0.28, delay: 0.04, options: [.curveEaseInOut]) { snap.alpha = 0 } completion: { _ in snap.removeFromSuperview() }
+        }
+        crossfadeNextResult = false
         let nowUnfiltered = isUnfiltered
         // kept from the top of the cards: the space above them may differ when it comes back
         // (the iPad's search bar folds away once the search is closed)

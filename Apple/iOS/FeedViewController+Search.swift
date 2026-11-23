@@ -85,6 +85,8 @@ extension FeedViewController {
     /// The × beside the bar: the whole search goes (capsules and text) and the list closes.
     func clearSearch() {
         let wasEmpty = searchField.tokens.isEmpty && (searchField.text ?? "").isEmpty
+        // closed with results on screen: they cross-fade into 浏览's cards
+        if !isUnfiltered { crossfadeNextResult = true }
         searchField.tokens = []
         searchField.text = nil
         if role == .search {
@@ -153,7 +155,8 @@ extension FeedViewController {
             searchChrome.bringSubviewToFront(exitButton)
             searchChrome.bringSubviewToFront(exportButton)
             let appear = { self.suggestions.alpha = 1 }
-            if animated { UIView.animate(withDuration: 0.25, delay: 0, usingSpringWithDamping: 0.86, initialSpringVelocity: 0, animations: appear) } else { appear() }
+            // quickly: the page is there as the field grows
+            if animated { UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .beginFromCurrentState], animations: appear) } else { appear() }
             return
         }
         guard suggestionsShown else { return }
@@ -270,7 +273,7 @@ extension FeedViewController {
         guard !folding else { return }
         // the search tab's page has no × to leave by (another tab leaves it); the field's own
         // clear button empties it
-        let show = role == .browse && (searching || !words.isEmpty)
+        let show = role == .browse && (searching || !words.isEmpty) && !morphing
         // exporting is offered while a search or a filter is in effect (not while only typing begins)
         let showExport = !words.isEmpty || !currentFilter.isEmpty
         // These buttons are siblings of the header, so hiding the header cannot hide them.

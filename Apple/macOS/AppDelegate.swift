@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         startHidden = LoginItem.launchedByLogin() && LoginItem.isOn
     }
 
+    /// A downloaded update waiting beside the app goes in place as it quits.
+    @MainActor func applicationWillTerminate(_ notification: Notification) { MacUpdate.applyOnQuit() }
+
     @MainActor func applicationDidFinishLaunching(_ notification: Notification) {
         LibraryPrefs.removeRetired()
         if startHidden {
@@ -279,7 +282,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
         #endif
         // GitHub builds: a newer release, at most once a day
+        MacUpdate.removeLeftovers()
         UpdateCheck.run { [weak self] r in MacUpdate.show(r, window: self?.window) }
+        #if DEBUG
+        if let dmg = ProcessInfo.processInfo.environment["TL_FAKE_UPDATE_DMG"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                MacUpdate.debugFakeUpdate(dmg: dmg, auto: ProcessInfo.processInfo.environment["TL_FAKE_UPDATE_AUTO"] != nil, window: self?.window)
+            }
+        }
+        #endif
 
         #if DEBUG
         if let out = ProcessInfo.processInfo.environment["TL_FILTER_TEST"], ProcessInfo.processInfo.environment["TL_LIBRARY_DIR"] != nil { runFeedFilterTest(out) }
