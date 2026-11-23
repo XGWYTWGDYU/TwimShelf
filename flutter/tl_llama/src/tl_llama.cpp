@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -45,6 +46,35 @@ static ggml_backend_dev_t opencl_device() {
     if (r && std::strcmp(ggml_backend_reg_name(r), "OpenCL") == 0 && ggml_backend_dev_type(d) == GGML_BACKEND_DEVICE_TYPE_GPU) return d;
   }
   return nullptr;
+}
+
+// Qwen2.5-VL (general.architecture "qwen2vl"), the vision models of the catalog. The picture the
+// tagger prepares is at most 896 on its long side: (896 / 28)² = 1024 of its tokens. Said to the
+// encoder, that is also the size it warms up with, instead of its own limit of 1288²: an attention
+// that size fits no GPU buffer without flash attention, and runs on the processor in 4.8 GB.
+static constexpr int kTaggingTokens = 1024;
+// Without flash attention its encoder took 6.8 s instead of 12.8 s for such a picture on a Radeon
+// RX 580 (Vulkan, no fp16 or matrix cores), in a compute buffer of 1.2 GB instead of 0.6 GB. Taken
+// where the GPU has that room left beside the projector once the language model is in place.
+static constexpr size_t kEncoderBuffer = size_t(1300) << 20;
+
+/// What is free on the GPU the model runs on (the first one, when llama.cpp chooses); 0 without one.
+static size_t gpu_free(ggml_backend_dev_t chosen) {
+  ggml_backend_dev_t d = chosen;
+  for (size_t i = 0; !d && i < ggml_backend_dev_count(); i++) {
+    ggml_backend_dev_t c = ggml_backend_dev_get(i);
+    const auto type = ggml_backend_dev_type(c);
+    if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) d = c;
+  }
+  size_t free = 0, total = 0;
+  if (d) ggml_backend_dev_memory(d, &free, &total);
+  return free;
+}
+
+static size_t file_size(const char *utf8) {
+  std::error_code e;
+  const auto n = std::filesystem::file_size(std::filesystem::u8path(utf8), e);
+  return e ? 0 : static_cast<size_t>(n);
 }
 
 static void fail(char **error, const std::string &why) {
@@ -102,6 +132,15 @@ static tl_llama *load_model(const char *weights, const char *projector, int32_t 
     vp.use_gpu = gpu_layers > 0;
     vp.device = gpu;
     vp.print_timings = false;
+    char arch[64] = {0};
+    if (llama_model_meta_val_str(m->model, "general.architecture", arch, sizeof arch) > 0 && std::strcmp(arch, "qwen2vl") == 0) {
+      vp.image_max_tokens = kTaggingTokens;
+      const size_t projector_bytes = file_size(projector);
+      if (vp.use_gpu && projector_bytes > 0 && gpu_free(gpu) >= projector_bytes + kEncoderBuffer) vp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+#ifdef __ANDROID__
+      __android_log_print(ANDROID_LOG_INFO, "tl_llama", "encoder: flash attention %s", vp.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED ? "off" : "auto");
+#endif
+    }
     m->vision = mtmd_init_from_file(projector, m->model, vp);
     if (!m->vision) { fail(error, "projector"); tl_llama_unload(m); return nullptr; }
   }
