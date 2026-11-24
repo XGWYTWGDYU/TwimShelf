@@ -14,6 +14,7 @@
 #include "llama.h"
 #ifdef __ANDROID__
 #include <android/log.h>
+#include <sys/system_properties.h>
 #endif
 #include "mtmd.h"
 #include "mtmd-helper.h"
@@ -34,6 +35,18 @@ static char *dup(const std::string &s) {
 // why a model did not load is only ever said here
 static void log_to_logcat(ggml_log_level level, const char *text, void *) {
   if (level == GGML_LOG_LEVEL_WARN || level == GGML_LOG_LEVEL_ERROR) __android_log_write(level == GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_WARN, "tl_llama", text);
+}
+// the vision part's own timings (the picture encoded, the prompt read) are information, kept too
+static void mtmd_to_logcat(ggml_log_level level, const char *text, void *u) {
+  if (level == GGML_LOG_LEVEL_INFO && std::strstr(text, " ms")) __android_log_write(ANDROID_LOG_INFO, "tl_llama", text);
+  else log_to_logcat(level, text, u);
+}
+// Diagnostics, set over adb: `setprop debug.tl.device Vulkan0` runs the model on another GPU than
+// the core chose, `setprop debug.tl.encoder Vulkan0` only the picture's encoder.
+static std::string prop(const char *key) {
+  char v[PROP_VALUE_MAX] = {0};
+  __system_property_get(key, v);
+  return v;
 }
 #endif
 
@@ -67,7 +80,7 @@ extern "C" void tl_llama_init(const char *dir) {
   std::call_once(once, [dir] {
 #ifdef __ANDROID__
     llama_log_set(log_to_logcat, nullptr);
-    mtmd_helper_log_set(log_to_logcat, nullptr);
+    mtmd_helper_log_set(mtmd_to_logcat, nullptr);
 #endif
     if (dir && *dir) ggml_backend_load_all_from_path(dir); else ggml_backend_load_all();
     llama_backend_init();
@@ -102,6 +115,12 @@ static tl_llama *load_model(const char *weights, const char *projector, const ch
                            int32_t embeddings, char **error) {
   ggml_backend_dev_t gpu = gpu_named(device);
   if (!gpu) { fail(error, std::string("no such GPU: ") + (device ? device : "(none)")); return nullptr; }
+  ggml_backend_dev_t encoder = gpu;
+#ifdef __ANDROID__
+  if (ggml_backend_dev_t d = gpu_named(prop("debug.tl.device").c_str())) encoder = gpu = d;
+  if (ggml_backend_dev_t d = gpu_named(prop("debug.tl.encoder").c_str())) encoder = d;
+  __android_log_print(ANDROID_LOG_INFO, "tl_llama", "encoder on %s (%s)", ggml_backend_dev_name(encoder), ggml_backend_dev_description(encoder));
+#endif
   auto *m = new tl_llama();
   llama_model_params mp = llama_model_default_params();
   ggml_backend_dev_t only[] = {gpu, nullptr};
@@ -123,8 +142,13 @@ static tl_llama *load_model(const char *weights, const char *projector, const ch
   if (projector && *projector) {
     mtmd_context_params vp = mtmd_context_params_default();
     vp.use_gpu = true;
-    vp.device = gpu;
-    vp.print_timings = false;
+    vp.device = encoder;
+    vp.print_timings = true;
+    // The pictures the core sends are at most 896 on their long side (core/src/ai/picture.rs),
+    // which no model turns into more than 1024 tokens (14-pixel patches merged 2 by 2: 32 x 32).
+    // Said to the encoder, it warms up and reserves for that, not for its own limit (Qwen2.5-VL:
+    // 8464): that much fits no buffer of a phone's OpenCL, and the first picture ended the app.
+    vp.image_max_tokens = 1024;
     m->vision = mtmd_init_from_file(projector, m->model, vp);
     if (!m->vision) { fail(error, "projector"); tl_llama_unload(m); return nullptr; }
   }
@@ -161,7 +185,9 @@ static char *describe_picture(tl_llama *m, const char *image, const char *system
   const mtmd_bitmap *bitmaps[1] = {bitmap};
   int32_t r = mtmd_tokenize(m->vision, chunks, &text, bitmaps, 1);
   llama_pos past = 0;
+  const auto t_read = std::chrono::steady_clock::now();
   if (r == 0) r = mtmd_helper_eval_chunks(m->vision, m->ctx, chunks, 0, 0, (int32_t)llama_n_batch(m->ctx), true, &past);
+  const auto t_gen = std::chrono::steady_clock::now();
   mtmd_input_chunks_free(chunks);
   mtmd_bitmap_free(bitmap);
   if (r != 0) { fail(error, "prompt"); return nullptr; }
@@ -181,6 +207,13 @@ static char *describe_picture(tl_llama *m, const char *image, const char *system
     if (llama_decode(m->ctx, b) != 0) break;
   }
   llama_sampler_free(smpl);
+#ifdef __ANDROID__
+  using ms = std::chrono::milliseconds;
+  const auto t_end = std::chrono::steady_clock::now();
+  __android_log_print(ANDROID_LOG_INFO, "tl_llama", "stages: picture and prompt %lld ms (%d positions), answer %lld ms (%zu chars)",
+                      (long long)std::chrono::duration_cast<ms>(t_gen - t_read).count(), (int)past,
+                      (long long)std::chrono::duration_cast<ms>(t_end - t_gen).count(), out.size());
+#endif
   return dup(out);
 }
 
