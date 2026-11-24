@@ -317,6 +317,32 @@ void main() {
       expect(value.done, 3);
     },
   );
+  test('re-tag everything while an automatic run is on a picture the engine cannot stop: all of it after that picture', () async {
+    final core = FakeCore(List.generate(5, media));
+    final entered = Completer<void>(), finish = Completer<void>();
+    var first = true;
+    final value = runner(
+      core,
+      // the on-device engine finishes the picture it has started, then the call says cancelled
+      infer: (_, _, _, _, _, cancel) async {
+        if (first) {
+          first = false;
+          entered.complete();
+          await finish.future;
+          cancel.check();
+        }
+        return ['cat'];
+      },
+    );
+    value.start(const TaggingJob(model: 'ext:test'));
+    await entered.future;
+    value.retagAll(model: 'ext:test');
+    finish.complete();
+    await value.settled;
+    expect(core.applied.map((r) => r.id), List.generate(5, (i) => media(i).media_id));
+    expect(value.outcome, 'succeeded');
+    expect(value.done, 5);
+  });
   test('selected retag preempts whole run then queued run resumes', () async {
     final core = FakeCore(List.generate(3, media));
     final entered = Completer<void>();
@@ -446,8 +472,20 @@ void main() {
       expect(core.events, ['begin:m000', 'undo:m000']);
       expect(core.applied, isEmpty);
       expect(value.outcome, 'failed');
+      // the page says why, not only "didn't finish"
+      expect(value.lastError?.detail, contains('epoch changed'));
     },
   );
+  test('a re-tag whose write the core refuses ends saying why', () async {
+    final core = FakeCore(List.generate(3, media))..rejectApply = true;
+    final value = runner(core);
+    value.retagAll(model: 'ext:test');
+    await value.settled;
+    expect(core.applied, isEmpty);
+    expect(value.outcome, 'failed');
+    expect(value.lastError?.kind, ExternalFailureKind.transport);
+    expect(value.lastError?.detail, contains('epoch changed'));
+  });
 }
 
 SharedSettings memorySettings() {

@@ -160,6 +160,18 @@ class TaggingJob {
 }
 
 typedef TaggingImageLoader = Future<String?> Function(MediaRef);
+
+/// Something that went wrong outside the model's own answer (the core refused a write, a read
+/// failed): a run that ends on it says what it was, not only "didn't finish", and the log has it
+/// (logcat and the console show it in release builds too).
+ExternalFailure unexpectedFailure(Object error, [StackTrace? stack]) {
+  debugPrint('auto tagger: $error${stack == null ? '' : '\n$stack'}');
+  final text = error is CoreError ? error.message : '$error';
+  return ExternalFailure(
+    ExternalFailureKind.transport,
+    detail: text.length > 200 ? '${text.substring(0, 200)}…' : text,
+  );
+}
 /// The model a run uses: an external service, or an installed on-device model.
 class TaggingModel {
   TaggingModel.external(ExternalModel this.external) : id = external.id, title = external.title;
@@ -407,8 +419,8 @@ class AutoTagger extends ChangeNotifier {
     lastError = null;
     // Schedule after assignment so synchronous progress listeners see running.
     _task = Future<void>(() => _run(job, cancellation))
-        .catchError((Object _) {
-          lastError = const ExternalFailure(ExternalFailureKind.transport);
+        .catchError((Object error, StackTrace stack) {
+          lastError = unexpectedFailure(error, stack);
         })
         .whenComplete(() {
           final marker = _resumeMarker;
@@ -526,8 +538,8 @@ class AutoTagger extends ChangeNotifier {
               return;
             }
             failure = error;
-          } catch (_) {
-            failure = const ExternalFailure(ExternalFailureKind.transport);
+          } catch (error, stack) {
+            failure = unexpectedFailure(error, stack);
           }
           if (cancellation.isCancelled) {
             if (counted) {
@@ -583,11 +595,11 @@ class AutoTagger extends ChangeNotifier {
               job.replaceOld && labels.isNotEmpty,
               epoch,
             );
-          } catch (_) {
+          } catch (error, stack) {
             if (counted) {
               await core.attempt(AiAttemptStep.undo, media.media_id, job.model);
             }
-            lastError = const ExternalFailure(ExternalFailureKind.transport);
+            lastError = unexpectedFailure(error, stack);
             _post();
             return;
           }

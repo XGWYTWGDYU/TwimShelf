@@ -4,13 +4,19 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:tl_core/tl_core.dart';
+import 'package:twimshelf/ai/auto_tagger.dart';
+import 'package:twimshelf/ai/external_models.dart';
 import 'package:twimshelf/app/library.dart';
 import 'package:twimshelf/app/prefs.dart';
 import 'package:twimshelf/l10n/l10n.dart';
 import 'package:twimshelf/screens/settings/ai_page.dart';
 
 /// 打标签 settings against a fake OpenAI-compatible service on 127.0.0.1 (nothing leaves the
-/// machine): add a model, test the connection, make it the tagger. TL_LIBRARY_DIR: synthetic.
+/// machine): add a model, test the connection, make it the tagger; then tag the library and
+/// re-tag all of it. Run on a simulator whose app holds no library yet, with a synthetic seed
+/// (`python3 scripts/make_seed.py <dir>`): `flutter test` does not hand environment variables to
+/// the app there, so the seed goes in as `--dart-define=TL_IMPORT_DIR=<dir>`.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -61,6 +67,65 @@ void main() {
     await library.aiModels.setActiveTagger(library.aiModels.all.single.id);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byKey(const ValueKey('ai-tagger')), findsOneWidget);
+
+    for (final m in library.aiModels.all) {
+      await library.aiModels.remove(m.id);
+    }
+    await server.close(force: true);
+  });
+
+  testWidgets('re-tag everything goes through the whole library', (tester) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    var asked = 0;
+    var again = false;
+    server.listen((r) async {
+      await utf8.decodeStream(r);
+      if (r.uri.path.endsWith('/chat/completions')) asked++;
+      r.response.headers.contentType = ContentType.json;
+      r.response.write(jsonEncode({
+        'choices': [
+          {'message': {'content': again ? 'gray, square' : 'gray, square, n$asked'}}
+        ]
+      }));
+      await r.response.close();
+    });
+    await L10n.load();
+    await Prefs.load();
+    final library = await LibraryModel.open();
+    for (final m in library.aiModels.all) {
+      await library.aiModels.remove(m.id);
+    }
+    await library.aiModels.setAutoTag(false);
+    final model = ExternalModel(id: ExternalModel.create().id, name: 'Fake', url: 'http://127.0.0.1:${server.port}/v1', model: 'fake-vision');
+    await library.aiModels.save(model);
+    await library.aiModels.setActiveTagger(model.id);
+    await tester.pumpWidget(MaterialApp(home: AiPage(models: library.aiModels, ai: library.ai, tagger: library.tagger)));
+    final media = await coreRunAsync(() => Core.mediaPage('', 100000));
+    expect(media.length, greaterThan(3));
+
+    // as on the phone: everything tagged automatically first, then re-tagged keeping those tags
+    library.tagger.start(TaggingJob(model: model.id));
+    for (var i = 0; i < 600 && (library.tagger.running || library.tagger.outcome == 'idle'); i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    // ignore: avoid_print
+    print('automatic: outcome ${library.tagger.outcome}, ${library.tagger.done}/${library.tagger.total}, asked $asked, error ${library.tagger.lastError?.message}');
+    expect(library.tagger.outcome, 'succeeded');
+    asked = 0;
+    // a model that only says again what the pictures already carry
+    again = true;
+    library.tagger.retagAll(model: model.id);
+    await tester.pump();
+    for (var i = 0; i < 600 && library.tagger.running; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    // ignore: avoid_print
+    print('re-tag: outcome ${library.tagger.outcome}, ${library.tagger.done}/${library.tagger.total}, asked $asked of ${media.length}, error ${library.tagger.lastError?.message}');
+    // the synthetic seed has one damaged file on purpose: the run goes on past it and says so
+    expect(asked, library.tagger.done);
+    expect(library.tagger.done, greaterThanOrEqualTo(media.length - 1));
+    expect(library.tagger.outcome, library.tagger.done == media.length ? 'succeeded' : 'partial');
+    if (library.tagger.done < media.length) expect(library.tagger.lastError?.kind, ExternalFailureKind.unreadable);
 
     for (final m in library.aiModels.all) {
       await library.aiModels.remove(m.id);
