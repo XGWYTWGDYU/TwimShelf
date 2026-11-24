@@ -52,10 +52,42 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
         return c
     }
 
+    /// On a phone or tablet: tagging is better left to the computers of the account, whose tags
+    /// arrive here by sync.
+    private lazy var mobileBanner: UIView = {
+        let icon = UIImageView(image: UIImage(systemName: "info.circle"))
+        icon.tintColor = .secondaryLabel
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        let label = UILabel()
+        label.text = L("ai.mobile.banner")
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 0
+        let row = UIStackView(arrangedSubviews: [icon, label])
+        row.alignment = .top
+        row.spacing = 10
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let box = UIView()
+        box.backgroundColor = .secondarySystemGroupedBackground
+        box.layer.cornerRadius = 12
+        box.layer.cornerCurve = .continuous
+        box.accessibilityIdentifier = "ai-mobile-banner"
+        box.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: box.topAnchor, constant: 12),
+            row.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -12),
+            row.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
+            row.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
+        ])
+        return box
+    }()
+
     private func build() {
         let store = ModelStore.shared
         let counts = AutoTagger.shared.counts
-        var s: [Section] = []
+        var s: [Section] = [Section(id: "mobile", rows: [.banner("mobile", mobileBanner)])]
         if !AIEngine.isSupported {
             s.append(Section(id: "sim", footer: L("models.simulator.footer"), rows: [
                 .value(L("models.simulator"), L("models.manageOnly"), icon: .init("exclamationmark.triangle.fill", .systemOrange))]))

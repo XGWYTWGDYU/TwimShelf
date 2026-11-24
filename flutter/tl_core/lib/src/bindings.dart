@@ -439,4 +439,23 @@ class CoreBindings {
   late final tl_ext_remove = library.lookupFunction<
       Pointer<Utf8> Function(Pointer<Utf8>),
       Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ext_remove');
+  late final tl_ai_set_engine_dir = library.lookupFunction<
+      Void Function(Pointer<Utf8>), void Function(Pointer<Utf8>)>('tl_ai_set_engine_dir');
+  late final tl_ai_tag = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ai_tag');
+  late final tl_ai_cancel = library.lookupFunction<
+      Void Function(Pointer<Utf8>), void Function(Pointer<Utf8>)>('tl_ai_cancel');
+  late final tl_ai_service_models = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ai_service_models');
+  late final tl_ai_default_prompt = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ai_default_prompt');
+  late final tl_ai_hardware = library.lookupFunction<
+      Pointer<Utf8> Function(), Pointer<Utf8> Function()>('tl_ai_hardware');
+  late final tl_ai_fit = library.lookupFunction<
+      Pointer<Utf8> Function(Uint64), Pointer<Utf8> Function(int)>('tl_ai_fit');
+  late final tl_ai_unload =
+      library.lookupFunction<Void Function(), void Function()>('tl_ai_unload');
 }

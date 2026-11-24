@@ -36,6 +36,7 @@ mod dnssd;
 mod mdnssd;
 /// Specification of tagging and sync, checked by tests and Kani proofs.
 pub mod tagmodel;
+pub mod ai;
 pub mod diagnostics;
 pub mod protected;
 pub mod ffi;

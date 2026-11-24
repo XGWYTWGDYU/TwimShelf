@@ -2,7 +2,6 @@ import { L, store, type MediaRef, type ModelInfo, type TagCount } from '@twimshe
 import { core } from '../../lib/core';
 import { libraryChanged, libraryVersion } from '../../lib/library';
 import { info as serverInfo, readSecret, serverFetch, updateSecrets } from './serverFiles';
-import { parseTags, thinkingOff } from './tagReply';
 
 export interface ExternalModel { id: string; name: string; url: string; model: string }
 export interface TaggerChoice { id: string; title: string; kind: 'local' | 'external' }
@@ -124,90 +123,57 @@ export async function getPrompt(id: string): Promise<Prompt> {
   return { ...defaultPrompt(), ...JSON.parse(await setting('ai.prompt') ?? '{}') };
 }
 
-function base64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-  return btoa(binary);
-}
+/** The model a picture is tagged with, as the core takes it (core/src/ai/mod.rs). */
+type ModelRef =
+  | { kind: 'local'; id: string }
+  | { kind: 'external'; id: string; url: string; model: string; key: string | null };
 
-async function proxy<T>(url: URL, key: string | null, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const headers = [['content-type', 'application/json']];
-  if (key) headers.push(['authorization', `Bearer ${key}`]);
-  let response: Response;
+/** Why the core could not tag a picture (its `ai.kind`), as the message the page shows. */
+const aiMessages: Record<string, string> = {
+  badUrl: 'models.external.err.url',
+  http: 'models.external.err.status',
+  noModel: 'models.external.err.noModel',
+  empty: 'models.external.err.empty',
+  invalidResponse: 'models.external.err.empty',
+  unreadable: 'ai.err.unreadable',
+  badTags: 'ai.err.badReply',
+  noTags: 'ai.err.noTags',
+  noGpu: 'ai.err.noGpu',
+};
+
+/** The tags for one picture, from the core (on the server): it prepares the picture, asks the
+ *  model and reads the tags out of the reply. `image`: a path in the library, or `frameB64`, a frame
+ *  the page took from a video; neither: a plain grey picture (to try a model). */
+async function coreTag(model: ModelRef, opts: {
+  image?: string; frameB64?: string; existing?: string[]; vocabulary?: string[]; postText?: string; signal?: AbortSignal;
+} = {}): Promise<string[]> {
+  const job = `web-${crypto.getRandomValues(new Uint32Array(2)).join('-')}`;
+  const request = {
+    job, model, image: opts.image ?? '', existing: opts.existing ?? [], vocabulary: opts.vocabulary ?? [], post_text: opts.postText ?? null,
+  };
+  const stop = () => { void core.b.tl_ai_cancel(job).catch(() => {}); };
+  opts.signal?.addEventListener('abort', stop);
+  let reply: { ok?: { tags: string[] }; error?: string; ai?: { kind: string; status?: number; detail?: string } };
   try {
-    response = await serverFetch(`${core.transport.base}/api/proxy`, {
+    const response = await serverFetch(`${core.transport.base}/api/ai/tag`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ url: url.href, method: body ? 'POST' : 'GET', headers,
-        body: body ? base64(new TextEncoder().encode(JSON.stringify(body))) : undefined }),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
+      body: JSON.stringify({ request, frame_b64: opts.frameB64 }),
+      signal: opts.signal,
     });
-  } catch {
-    throw new Error('common.notDone');
+    if (!response.ok) throw new Error('common.notDone');
+    reply = await response.json();
+  } finally {
+    opts.signal?.removeEventListener('abort', stop);
   }
-  if (!response.ok) throw new Error('common.notDone');
-  const reply = await response.json() as { status: number; body: string };
-  if (reply.status < 200 || reply.status >= 300) throw Object.assign(new Error(L('models.external.err.status', reply.status)), { status: reply.status });
-  if (reply.body.length > 3_000_000) throw new Error('models.external.err.empty');
-  try {
-    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(reply.body), (c) => c.charCodeAt(0)))) as T;
-  } catch {
-    throw new Error('models.external.err.empty');
-  }
-}
-
-/** Servers that refused the switch for reasoning: asked plainly from then on. */
-const refusedThinkingOff = new Set<string>();
-
-async function completion(model: ExternalModel, key: string | null, prompt: Prompt, question: string, imageDataUrl: string, signal?: AbortSignal) {
-  const name = model.model || (await proxy<{ data?: Array<{ id: string }> }>(endpoint(model.url, 'models'), key, undefined, signal)).data?.[0]?.id;
-  if (!name) throw new Error('models.external.err.noModel');
-  type Reply = { choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }> };
-  const url = endpoint(model.url, 'chat/completions');
-  const ask = (extra: Record<string, unknown>) => proxy<Reply>(url, key, {
-    ...extra, model: name, max_tokens: 300, stream: false, temperature: 0.1,
-    messages: [
-      { role: 'system', content: prompt.system },
-      { role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: imageDataUrl } }] },
-    ],
-  }, signal);
-  const off = refusedThinkingOff.has(model.url) ? {} : thinkingOff(url.hostname);
-  let result: Reply;
-  try {
-    result = await ask(off);
-  } catch (error) {
-    const status = (error as { status?: number }).status;
-    if (!Object.keys(off).length || (status !== 400 && status !== 422)) throw error;
-    refusedThinkingOff.add(model.url);
-    result = await ask({});
-  }
-  const content = result.choices?.[0]?.message?.content ?? '';
-  // (never the parts that hold the model's reasoning)
-  return parseTags(typeof content === 'string' ? content : content.filter((p) => !/think|reason/i.test(p.type ?? '')).map((p) => p.text ?? '').join(''));
-}
-
-async function localDescribe(modelId: string, prompt: Prompt, question: string, imageB64: string, signal?: AbortSignal): Promise<string[]> {
-  const response = await serverFetch(`${core.transport.base}/api/ai/describe`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model_id: modelId, image_b64: imageB64, system: prompt.system, question, max_tokens: 160 }),
-    signal,
-  });
-  if (!response.ok) throw new Error('common.notDone');
-  const reply = await response.json() as { ok?: string; error?: string };
-  if (reply.error !== undefined) throw new Error(reply.error);
-  return parseTags(reply.ok ?? '');
+  if (reply.ok) return reply.ok.tags;
+  if (reply.ai?.kind === 'cancelled') throw new DOMException('Aborted', 'AbortError');
+  const key = reply.ai ? aiMessages[reply.ai.kind] ?? 'common.notDone' : reply.error ?? 'common.notDone';
+  const status = reply.ai?.status;
+  throw Object.assign(new Error(key === 'models.external.err.status' ? L(key, status) : key), { status });
 }
 
 export async function testModel(model: ExternalModel, key: string, clear: boolean) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 64;
-  const context = canvas.getContext('2d');
-  if (context) {
-    context.fillStyle = '#888';
-    context.fillRect(0, 0, 64, 64);
-  }
-  const prompt = await getPrompt(model.id);
-  return completion(model, key || (clear ? null : await modelCredential(model)), prompt, prompt.prompt, canvas.toDataURL('image/jpeg', 0.8));
+  return coreTag({ kind: 'external', id: model.id, url: model.url, model: model.model, key: key || (clear ? null : await modelCredential(model)) });
 }
 
 export const activeTagger = store(localStorage.getItem(selectionKey) ?? '');
@@ -313,19 +279,6 @@ async function videoFrameB64(path: string, signal: AbortSignal): Promise<string>
   });
 }
 
-async function imageFor(item: MediaRef, signal: AbortSignal): Promise<{ dataUrl: string; b64: string }> {
-  if (item.kind === 'video') {
-    const b64 = await videoFrameB64(item.path, signal);
-    return { b64, dataUrl: 'data:image/jpeg;base64,' + b64 };
-  }
-  const base = core.transport.base;
-  const query = new URLSearchParams({ path: item.path, side: '896', whole: '1' });
-  const response = await serverFetch(`${base}/api/scaled?${query}`, { signal });
-  if (!response.ok) throw new Error('ai.err.unreadable');
-  const b64 = base64(new Uint8Array(await response.arrayBuffer()));
-  return { b64, dataUrl: 'data:image/jpeg;base64,' + b64 };
-}
-
 let abort: AbortController | undefined;
 let finished: Promise<void> = Promise.resolve();
 let interval: number | undefined;
@@ -357,7 +310,7 @@ export function enableAutoTagging() {
 interface ResolvedRunner {
   id: string;
   name: string;
-  ask: (prompt: Prompt, question: string, img: { dataUrl: string; b64: string }, signal: AbortSignal) => Promise<string[]>;
+  model: ModelRef;
 }
 
 async function resolveRunner(modelId: string): Promise<ResolvedRunner | null> {
@@ -372,16 +325,12 @@ async function resolveRunner(modelId: string): Promise<ResolvedRunner | null> {
     return {
       id: extModel.id,
       name: modelTitle(extModel),
-      ask: (prompt, question, img, signal) => completion(extModel, key, prompt, question, img.dataUrl, signal),
+      model: { kind: 'external', id: extModel.id, url: extModel.url, model: extModel.model, key },
     };
   }
   const localModel = ai.supported ? local.find((m) => m.id === modelId && m.vision) : undefined;
   if (localModel) {
-    return {
-      id: localModel.id,
-      name: localModel.repo || localModel.id,
-      ask: (prompt, question, img, signal) => localDescribe(localModel.id, prompt, question, img.b64, signal),
-    };
+    return { id: localModel.id, name: localModel.repo || localModel.id, model: { kind: 'local', id: localModel.id } };
   }
   return null;
 }
@@ -419,14 +368,12 @@ export async function runTagging(opts: {
       return;
     }
     heartbeat = window.setInterval(() => { void lease().then((held) => { if (!held) controller.abort(); }).catch(() => controller.abort()); }, 15_000);
-    const [prompt, epoch, counts] = await Promise.all([
-      getPrompt(runner.id),
+    const [epoch, counts] = await Promise.all([
       core.read<number>(core.b.tl_epoch()),
       core.read<[number, number]>(core.b.tl_ai_counts()).catch(() => [0, 0] as [number, number]),
     ]);
     const total = explicitItems ? explicitItems.length : retag ? counts[1] : Math.max(0, counts[1] - counts[0]);
     const since = Math.floor(Date.now() / 1000);
-    const separator = L('list.separator');
     let words: string[] = [];
     const loadVocab = async () => {
       const vocabulary = await core.read<TagCount[]>(core.b.tl_all_tags());
@@ -451,19 +398,14 @@ export async function runTagging(opts: {
         try {
           if (processed > 0 && processed % 10 === 0) await loadVocab();
           processed++;
-          const [img, tags] = await Promise.all([
-            imageFor(item, signal),
+          const [frameB64, tags] = await Promise.all([
+            item.kind === 'video' ? videoFrameB64(item.path, signal) : Promise.resolve(undefined),
             core.read<Array<[string, number]>>(core.b.tl_media_tags(item.media_id)),
           ]);
-          const rawPost = item.text?.replace(/https?:\/\/\S+|@[A-Za-z0-9_]{1,15}/g, '').trim() ?? '';
-          const post = rawPost.length > 300 ? `${rawPost.slice(0, 300)}…` : rawPost;
-          const question = [
-            prompt.prompt,
-            tags.length && prompt.existing.replaceAll('{existing}', tags.map(([tag]) => tag).join(separator)),
-            words.length && prompt.vocabulary.replaceAll('{tags}', words.join(separator)),
-            post && prompt.context.replaceAll('{text}', post),
-          ].filter(Boolean).join('\n\n');
-          const labels = await runner.ask(prompt, question, img, signal);
+          const labels = await coreTag(runner.model, {
+            image: item.kind === 'video' ? undefined : item.path, frameB64,
+            existing: tags.map(([tag]) => tag), vocabulary: words, postText: item.text ?? undefined, signal,
+          });
           if (!labels.length) throw new Error('ai.err.noTags');
           if (signal.aborted || (!opts.modelId && activeTagger.get() !== selected)) { await attempt('undo'); return false; }
           await core.readJson('tl_ai_apply', { epoch, media_id: item.media_id, model: runner.id, labels, replace_old: replace });

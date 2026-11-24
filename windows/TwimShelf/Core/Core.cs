@@ -12,6 +12,15 @@ namespace TwimShelf.Core;
 
 public sealed class CoreException(string message) : Exception(message);
 
+/// Why the core could not tag a picture: Kind is badUrl, http, noModel, empty, invalidResponse,
+/// transport, timeout, cancelled, unreadable, badTags, noTags, noGpu or engine.
+public sealed class AiException(string kind, int? status, string detail) : Exception(kind)
+{
+    public string Kind { get; } = kind;
+    public int? Status { get; } = status;
+    public string Detail { get; } = detail;
+}
+
 /// A thumbnail the core could not decode (handled without reading a localized message).
 public sealed class ThumbnailNotDecodableException() : Exception("not_decodable");
 
@@ -40,6 +49,32 @@ public static unsafe class TlCore
     }
 
     static T Ok<T>(nint p, JsonTypeInfo<T> type) => Ok(p).Deserialize(type)!;
+
+    /// [Ok], with an [AiException] for what the tagging functions report (core/src/ai/error.rs).
+    static JsonElement OkAi(nint p)
+    {
+        if (p == 0) throw new CoreException("core.noResult");
+        try
+        {
+            var bytes = MemoryMarshal.CreateReadOnlySpanFromNullTerminated((byte*)p).ToArray();
+            using var doc = JsonDocument.Parse(bytes);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("ai", out var ai))
+            {
+                var kind = ai.TryGetProperty("kind", out var k) ? k.GetString() ?? "engine" : "engine";
+                int? status = ai.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.Number ? st.GetInt32() : null;
+                var detail = ai.TryGetProperty("detail", out var d) ? d.GetString() ?? "" : "";
+                throw new AiException(kind, status, detail);
+            }
+            if (root.TryGetProperty("error", out var e)) throw new CoreException(e.GetString() ?? "");
+            if (!root.TryGetProperty("ok", out var ok)) throw new CoreException("core.emptyResult");
+            return ok.Clone();
+        }
+        finally
+        {
+            Native.tl_string_free(p);
+        }
+    }
     static T? OkOrNull<T>(nint p, JsonTypeInfo<T> type) where T : class
     {
         var e = Ok(p);
@@ -400,6 +435,28 @@ public static unsafe class TlCore
             ["step"] = JsonNamingPolicy.SnakeCaseLower.ConvertName(step.ToString()), ["media_id"] = mediaId, ["model"] = model, ["reason"] = reason,
             ["now"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
         })));
+    // ---- tagging with a vision model (core/src/ai): the core prepares the picture, asks the model
+    // (this device's GPU, or a service) and reads the tags out of its reply
+
+    public static void AiSetEngineDirectory(string dir) => Native.tl_ai_set_engine_dir(dir);
+
+    /// The tags for one picture (a TagRequest, core/src/ai/mod.rs). Blocks: never on the UI thread.
+    public static List<string> AiTag(JsonObject request) =>
+        [.. OkAi(Native.tl_ai_tag(Json(request))).GetProperty("tags").EnumerateArray().Select(t => t.GetString() ?? "")];
+
+    public static void AiCancel(string job) => Native.tl_ai_cancel(job);
+
+    public static List<string> AiServiceModels(JsonObject service) =>
+        [.. OkAi(Native.tl_ai_service_models(Json(service))).EnumerateArray().Select(t => t.GetString() ?? "")];
+
+    /// What this device has for on-device AI: {engine, gpus, memory, chosen}.
+    public static JsonElement AiHardware() => Ok(Native.tl_ai_hardware());
+
+    /// How a model of `bytes` fits this device: recommended, usable, tooBig or noGpu.
+    public static string AiFit(ulong bytes) => OkString(Native.tl_ai_fit(bytes));
+
+    public static void AiUnload() => Native.tl_ai_unload();
+
     public static void SetVectors(string model, IEnumerable<(string Label, IReadOnlyList<double> Vector)> items, long? atEpoch = null)
     {
         var arr = new JsonArray();

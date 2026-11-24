@@ -774,6 +774,63 @@ enum Core {
     static func aiFailures() -> [AiFailure] { (try? call(tl_ai_failures(), as: [AiFailure].self)) ?? [] }
     static func aiFailuresClear() { _ = try? call(tl_ai_failures_clear(), as: Int.self) }
     /// A setting shared by every device of the sync account (nil = the default).
+    // MARK: tagging with a vision model (core/src/ai): the core prepares the picture, asks the
+    // model (MLX here, through TLLocalAI.CoreBridge, or a service) and reads the tags out of its reply
+
+    /// Why the core could not tag a picture.
+    struct AIFailure: LocalizedError {
+        let kind: String
+        let status: Int?
+        let detail: String
+        /// The model or the device, not the picture: the run stops, nothing is counted against it.
+        var isDeviceProblem: Bool { ["noGpu", "noModel", "engine"].contains(kind) }
+        var errorDescription: String? {
+            let label: String = switch kind {
+            case "badUrl": L("models.external.err.url")
+            case "http": L("models.external.err.status", status ?? 0)
+            case "noModel": L("models.external.err.noModel")
+            case "empty", "invalidResponse": L("models.external.err.empty")
+            case "unreadable": L("ai.err.unreadable")
+            case "badTags": L("ai.err.badReply")
+            case "noTags": L("ai.err.noTags")
+            case "noGpu": L("ai.err.noGpu")
+            default: L("common.notDone")
+            }
+            return detail.isEmpty ? label : L("format.labelValue", label, detail)
+        }
+    }
+
+    private static func aiCall(_ p: UnsafeMutablePointer<CChar>?) throws -> Any? {
+        guard let p else { throw CoreError(message: "core returned nothing") }
+        defer { tl_string_free(p) }
+        let o = try JSONSerialization.jsonObject(with: Data(bytes: p, count: strlen(p))) as? [String: Any] ?? [:]
+        if let a = o["ai"] as? [String: Any] {
+            throw AIFailure(kind: a["kind"] as? String ?? "engine", status: a["status"] as? Int, detail: a["detail"] as? String ?? "")
+        }
+        if let e = o["error"] as? String { throw CoreError(message: e) }
+        return o["ok"]
+    }
+
+    /// The tags for one picture (core/src/ai/mod.rs `TagRequest`). Blocks: never on the main thread.
+    static func aiTag(_ request: [String: Any]) throws -> [String] {
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: request), as: UTF8.self)
+        let ok = try aiCall(tl_ai_tag(json)) as? [String: Any]
+        return ok?["tags"] as? [String] ?? []
+    }
+
+    static func aiCancel(_ job: String) { tl_ai_cancel(job) }
+
+    /// The models a service offers.
+    static func aiServiceModels(_ service: [String: Any]) throws -> [String] {
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: service), as: UTF8.self)
+        return try aiCall(tl_ai_service_models(json)) as? [String] ?? []
+    }
+
+    /// How a model of `bytes` fits this device: recommended, usable, tooBig or noGpu.
+    static func aiFit(_ bytes: UInt64) -> String {
+        (try? aiCall(tl_ai_fit(bytes)) as? String) ?? "usable"
+    }
+
     static func setting(_ key: String) -> String? { (try? decodeOk(tl_setting(key), as: String?.self)) ?? nil }
     static func setSetting(_ key: String, _ value: String?) {
         let p = value.map { v in v.withCString { tl_set_setting(key, $0) } } ?? tl_set_setting(key, nil)

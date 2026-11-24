@@ -244,21 +244,24 @@ final class AutoTagger {
                 if counted { await Task.detached { Core.aiAttempt(.begin, mediaId: m.mediaId, model: job.model) }.value }
                 let failure: String?
                 var unreadable = false
-                if let img = await Task.detached(priority: .utility, operation: { AIEngine.stillImage(path: m.path, kind: m.kind) }).value {
-                    do { labels = try await AIEngine.shared.tags(for: img, repo: job.model, postText: m.text, existing: existing, vocabulary: vocabulary); failure = nil }
-                    catch is CancellationError {
-                        if counted { await Task.detached { Core.aiAttempt(.undo, mediaId: m.mediaId, model: job.model) }.value }
-                        return
-                    }
-                    catch let e as AIEngine.EngineError {
-                        // the model or the device, not this image: nothing is counted against it
-                        if counted { await Task.detached { Core.aiAttempt(.undo, mediaId: m.mediaId, model: job.model) }.value }
-                        lastError = e.localizedDescription
-                        post()
-                        return
-                    }
-                    catch { failure = error.localizedDescription }
-                } else { failure = L("ai.err.unreadable"); unreadable = true }
+                do { labels = try await AIEngine.tags(path: m.path, kind: m.kind, repo: job.model, postText: m.text, existing: existing, vocabulary: vocabulary); failure = nil }
+                catch is CancellationError {
+                    if counted { await Task.detached { Core.aiAttempt(.undo, mediaId: m.mediaId, model: job.model) }.value }
+                    return
+                }
+                catch let e as Core.AIFailure where e.kind == "cancelled" {
+                    if counted { await Task.detached { Core.aiAttempt(.undo, mediaId: m.mediaId, model: job.model) }.value }
+                    return
+                }
+                catch let e as Core.AIFailure where e.isDeviceProblem {
+                    // the model or the device, not this image: nothing is counted against it
+                    if counted { await Task.detached { Core.aiAttempt(.undo, mediaId: m.mediaId, model: job.model) }.value }
+                    lastError = e.localizedDescription
+                    post()
+                    return
+                }
+                catch let e as Core.AIFailure { failure = e.localizedDescription; unreadable = e.kind == "unreadable" }
+                catch { failure = error.localizedDescription }
                 if let failure {
                     AppLog.error("ai", L("ai.err.analyze", m.mediaId.prefix(12), failure))
                     if counted { await Task.detached { Core.aiAttempt(.failed, mediaId: m.mediaId, model: job.model, reason: failure) }.value }

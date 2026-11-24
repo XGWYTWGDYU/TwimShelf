@@ -3,9 +3,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <exception>
-#include <filesystem>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -37,93 +37,78 @@ static void log_to_logcat(ggml_log_level level, const char *text, void *) {
 }
 #endif
 
-/// The GPU to run on when there is a choice: OpenCL is the backend made for Adreno, the one GPU family
-/// it is offered for here (a device where Vulkan's queue is lost mid-job). None: llama.cpp chooses.
-static ggml_backend_dev_t opencl_device() {
-  for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
-    ggml_backend_dev_t d = ggml_backend_dev_get(i);
-    ggml_backend_reg_t r = ggml_backend_dev_backend_reg(d);
-    if (r && std::strcmp(ggml_backend_reg_name(r), "OpenCL") == 0 && ggml_backend_dev_type(d) == GGML_BACKEND_DEVICE_TYPE_GPU) return d;
-  }
-  return nullptr;
-}
-
-// Qwen2.5-VL (general.architecture "qwen2vl"), the vision models of the catalog. The picture the
-// tagger prepares is at most 896 on its long side: (896 / 28)² = 1024 of its tokens. Said to the
-// encoder, that is also the size it warms up with, instead of its own limit of 1288²: an attention
-// that size fits no GPU buffer without flash attention, and runs on the processor in 4.8 GB.
-static constexpr int kTaggingTokens = 1024;
-// Vulkan: without flash attention its encoder took 6.8 s instead of 12.8 s for such a picture on a
-// Radeon RX 580 (no fp16 or matrix cores), in a compute buffer of 1.2 GB instead of 0.6 GB. Taken
-// where the GPU has that room left beside the projector once the language model is in place.
-// (CUDA's flash attention is its fast path: left as it is.)
-static constexpr size_t kEncoderBuffer = size_t(1300) << 20;
-
-/// The GPU the model runs on (the first one, when llama.cpp chooses), or none.
-static ggml_backend_dev_t model_gpu(ggml_backend_dev_t chosen) {
-  for (size_t i = 0; !chosen && i < ggml_backend_dev_count(); i++) {
-    ggml_backend_dev_t c = ggml_backend_dev_get(i);
-    const auto type = ggml_backend_dev_type(c);
-    if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) chosen = c;
-  }
-  return chosen;
-}
-
-/// A Vulkan GPU with `bytes` free.
-static bool vulkan_with_room(ggml_backend_dev_t d, size_t bytes) {
-  if (!d) return false;
-  ggml_backend_reg_t r = ggml_backend_dev_backend_reg(d);
-  if (!r || std::strcmp(ggml_backend_reg_name(r), "Vulkan") != 0) return false;
-  size_t free = 0, total = 0;
-  ggml_backend_dev_memory(d, &free, &total);
-  return free >= bytes;
-}
-
-static size_t file_size(const char *utf8) {
-  std::error_code e;
-  const auto n = std::filesystem::file_size(std::filesystem::u8path(utf8), e);
-  return e ? 0 : static_cast<size_t>(n);
-}
-
 static void fail(char **error, const std::string &why) {
   if (error) *error = dup(why);
 }
 
-extern "C" char *tl_llama_init(const char *dir) {
-  // once per process (Dart calls it from every worker isolate)
-  static std::mutex lock;
-  static std::string devices;
-  static bool ready = false;
-  std::lock_guard<std::mutex> g(lock);
-  if (ready) return dup(devices);
-  ready = true;
-#ifdef __ANDROID__
-  llama_log_set(log_to_logcat, nullptr);
-  mtmd_helper_log_set(log_to_logcat, nullptr);
-#endif
-  if (dir && *dir) ggml_backend_load_all_from_path(dir); else ggml_backend_load_all();
-  llama_backend_init();
-  for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
-    ggml_backend_dev_t d = ggml_backend_dev_get(i);
-    if (!devices.empty()) devices += ", ";
-    devices += ggml_backend_dev_name(d);
-    const char *desc = ggml_backend_dev_description(d);
-    if (desc && *desc) { devices += " ("; devices += desc; devices += ")"; }
+static std::string json_string(const char *s) {
+  std::string o = "\"";
+  for (const char *p = s ? s : ""; *p; p++) {
+    const unsigned char c = static_cast<unsigned char>(*p);
+    if (c == '"' || c == '\\') { o += '\\'; o += static_cast<char>(c); }
+    else if (c < 0x20) { char u[8]; std::snprintf(u, sizeof u, "\\u%04x", c); o += u; }
+    else o += static_cast<char>(c);
   }
-  return dup(devices);
+  return o + "\"";
 }
 
-static tl_llama *load_model(const char *weights, const char *projector, int32_t gpu_layers, int32_t context,
+static const char *type_name(enum ggml_backend_dev_type t) {
+  switch (t) {
+    case GGML_BACKEND_DEVICE_TYPE_GPU: return "gpu";
+    case GGML_BACKEND_DEVICE_TYPE_IGPU: return "igpu";
+    case GGML_BACKEND_DEVICE_TYPE_CPU: return "cpu";
+    default: return "accel";
+  }
+}
+
+extern "C" void tl_llama_init(const char *dir) {
+  // once per process
+  static std::once_flag once;
+  std::call_once(once, [dir] {
+#ifdef __ANDROID__
+    llama_log_set(log_to_logcat, nullptr);
+    mtmd_helper_log_set(log_to_logcat, nullptr);
+#endif
+    if (dir && *dir) ggml_backend_load_all_from_path(dir); else ggml_backend_load_all();
+    llama_backend_init();
+  });
+}
+
+extern "C" char *tl_llama_devices(void) {
+  std::string out = "[";
+  for (size_t i = 0; i < ggml_backend_dev_count(); i++) {
+    ggml_backend_dev_t d = ggml_backend_dev_get(i);
+    ggml_backend_dev_props props;
+    ggml_backend_dev_get_props(d, &props);
+    ggml_backend_reg_t r = ggml_backend_dev_backend_reg(d);
+    if (i) out += ",";
+    out += "{\"name\":" + json_string(props.name) + ",\"backend\":" + json_string(r ? ggml_backend_reg_name(r) : "") +
+           ",\"description\":" + json_string(props.description) + ",\"type\":\"" + type_name(props.type) +
+           "\",\"free\":" + std::to_string(props.memory_free) + ",\"total\":" + std::to_string(props.memory_total) +
+           ",\"id\":" + json_string(props.device_id) + "}";
+  }
+  return dup(out + "]");
+}
+
+static ggml_backend_dev_t gpu_named(const char *name) {
+  if (!name) return nullptr;
+  ggml_backend_dev_t d = ggml_backend_dev_by_name(name);
+  if (!d) return nullptr;
+  const auto t = ggml_backend_dev_type(d);
+  return t == GGML_BACKEND_DEVICE_TYPE_GPU || t == GGML_BACKEND_DEVICE_TYPE_IGPU ? d : nullptr;
+}
+
+static tl_llama *load_model(const char *weights, const char *projector, const char *device, int32_t context,
                            int32_t embeddings, char **error) {
-  if (ggml_backend_dev_count() == 0) { fail(error, "no llama.cpp backend found"); return nullptr; }
+  ggml_backend_dev_t gpu = gpu_named(device);
+  if (!gpu) { fail(error, std::string("no such GPU: ") + (device ? device : "(none)")); return nullptr; }
   auto *m = new tl_llama();
   llama_model_params mp = llama_model_default_params();
-  mp.n_gpu_layers = gpu_layers;
-  ggml_backend_dev_t gpu = gpu_layers > 0 ? opencl_device() : nullptr;
   ggml_backend_dev_t only[] = {gpu, nullptr};
-  if (gpu) mp.devices = only;
+  mp.devices = only;
+  mp.n_gpu_layers = -1;  // all of it
 #ifdef __ANDROID__
-  __android_log_print(ANDROID_LOG_INFO, "tl_llama", "load: gpu layers %d, device %s", gpu_layers, gpu ? ggml_backend_dev_description(gpu) : "chosen by llama.cpp");
+  __android_log_print(ANDROID_LOG_INFO, "tl_llama", "load on %s (%s)", device, ggml_backend_dev_description(gpu));
 #endif
   m->model = llama_model_load_from_file(weights, mp);
   if (!m->model) { fail(error, "model"); delete m; return nullptr; }
@@ -137,18 +122,9 @@ static tl_llama *load_model(const char *weights, const char *projector, int32_t 
   if (!m->ctx) { fail(error, "context"); tl_llama_unload(m); return nullptr; }
   if (projector && *projector) {
     mtmd_context_params vp = mtmd_context_params_default();
-    vp.use_gpu = gpu_layers > 0;
+    vp.use_gpu = true;
     vp.device = gpu;
     vp.print_timings = false;
-    char arch[64] = {0};
-    if (llama_model_meta_val_str(m->model, "general.architecture", arch, sizeof arch) > 0 && std::strcmp(arch, "qwen2vl") == 0) {
-      vp.image_max_tokens = kTaggingTokens;
-      const size_t projector_bytes = file_size(projector);
-      if (vp.use_gpu && projector_bytes > 0 && vulkan_with_room(model_gpu(gpu), projector_bytes + kEncoderBuffer)) vp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
-#ifdef __ANDROID__
-      __android_log_print(ANDROID_LOG_INFO, "tl_llama", "encoder: flash attention %s", vp.flash_attn_type == LLAMA_FLASH_ATTN_TYPE_DISABLED ? "off" : "auto");
-#endif
-    }
     m->vision = mtmd_init_from_file(projector, m->model, vp);
     if (!m->vision) { fail(error, "projector"); tl_llama_unload(m); return nullptr; }
   }
@@ -222,9 +198,9 @@ static auto guarded(char **error, F body) -> decltype(body()) {
   return nullptr;
 }
 
-extern "C" tl_llama *tl_llama_load(const char *weights, const char *projector, int32_t gpu_layers, int32_t context,
+extern "C" tl_llama *tl_llama_load(const char *weights, const char *projector, const char *device, int32_t context,
                                    int32_t embeddings, char **error) {
-  return guarded(error, [&] { return load_model(weights, projector, gpu_layers, context, embeddings, error); });
+  return guarded(error, [&] { return load_model(weights, projector, device, context, embeddings, error); });
 }
 
 extern "C" char *tl_llama_describe(tl_llama *m, const char *image, const char *system, const char *question,

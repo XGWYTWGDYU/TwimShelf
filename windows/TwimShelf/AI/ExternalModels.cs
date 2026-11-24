@@ -1,12 +1,9 @@
 // Tagging with external models (any OpenAI-compatible service): the services the person added
 // (shared by every device of the sync account through the core's settings), their API keys (in this
 // device's secrets, bound to the service's origin), and the prompts. As the other apps do it.
-using System.Globalization;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using TwimShelf.Core;
 using TwimShelf.Services;
 using static TwimShelf.Services.Strings;
@@ -91,26 +88,6 @@ public sealed record AiPrompt(string System, string Prompt, string Context, stri
     }
 
     public JsonObject ToJson() => new() { ["system"] = System, ["prompt"] = Prompt, ["context"] = Context, ["existing"] = Existing, ["vocabulary"] = Vocabulary };
-
-    public string Question(IReadOnlyList<string>? existing = null, IReadOnlyList<string>? vocabulary = null, string? postText = null)
-    {
-        var q = Prompt;
-        if (existing is { Count: > 0 }) q += "\n\n" + Existing.Replace("{existing}", string.Join(L("list.separator"), existing));
-        if (vocabulary is { Count: > 0 }) q += "\n\n" + Vocabulary.Replace("{tags}", string.Join(L("list.separator"), vocabulary));
-        var clean = CleanContext(postText);
-        if (clean != null) q += "\n\n" + Context.Replace("{text}", clean);
-        return q;
-    }
-
-    public static string? CleanContext(string? text)
-    {
-        if (text == null) return null;
-        var v = Regex.Replace(text, @"https?://\S+", "");
-        v = Regex.Replace(v, "@[A-Za-z0-9_]{1,15}", "").Trim();
-        if (v.Length == 0) return null;
-        var si = new StringInfo(v);
-        return si.LengthInTextElements > 300 ? si.SubstringByTextElements(0, 300) + "…" : v;
-    }
 }
 
 public sealed class ExternalModels
@@ -284,11 +261,12 @@ public sealed class ExternalModels
     public Task SetActiveTagger(string? value) => Serial(() => { Prefs.Instance.Set("ai.tagger.id", value); return Task.CompletedTask; });
 }
 
-public sealed partial class ExternalAI(ExternalModels models)
+/// Services as the core reaches them (core/src/ai/external.rs): the app keeps their list and keys,
+/// the core sends the requests.
+public sealed class ExternalAI(ExternalModels models)
 {
-    static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(120);
-
+    /// The address of `path` at the service `baseUrl`, as the core forms it: for checking what the
+    /// user typed, and for binding a key to its origin.
     public static Uri Endpoint(string baseUrl, string path)
     {
         var v = baseUrl.Trim();
@@ -303,152 +281,41 @@ public sealed partial class ExternalAI(ExternalModels models)
         return uri;
     }
 
-    /// The request, byte for byte the other apps' (keys sorted as Swift's encoder gives them).
-    public static string Body(string model, string system, string question, byte[] jpeg, JsonObject? thinkingOff = null)
+    /// `model` as the core takes it, with its key from this device's credential store.
+    public async Task<JsonObject> Service(ExternalModel model)
     {
-        var o = new JsonObject
-        {
-            ["max_tokens"] = 300,
-            ["messages"] = new JsonArray(
-                new JsonObject { ["content"] = system, ["role"] = "system" },
-                new JsonObject
-                {
-                    ["content"] = new JsonArray(
-                        new JsonObject { ["text"] = question, ["type"] = "text" },
-                        new JsonObject { ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(jpeg) }, ["type"] = "image_url" }),
-                    ["role"] = "user",
-                }),
-            ["model"] = model,
-            ["stream"] = false,
-            ["temperature"] = 0.1,
-        };
-        if (thinkingOff != null) foreach (var (k, v) in thinkingOff) o[k] = v?.DeepClone();
-        return o.ToJsonString(new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
-            .Replace("\"temperature\":0.1", "\"temperature\":0.10000000000000001");
-    }
-
-    /// What turns a model's reasoning off, as this service spells it. Services that answer with the
-    /// result alone get nothing; the rest of the world (local servers) gets the usual words.
-    public static JsonObject? ThinkingOff(string host)
-    {
-        var h = host.ToLowerInvariant();
-        bool At(string d) => h == d || h.EndsWith("." + d, StringComparison.Ordinal);
-        if (At("openai.com") || At("openai.azure.com") || At("x.ai") || At("anthropic.com")) return null;
-        if (At("deepseek.com") || At("bigmodel.cn") || At("z.ai")) return new JsonObject { ["thinking"] = new JsonObject { ["type"] = "disabled" } };
-        if (At("aliyuncs.com") || At("siliconflow.cn") || At("siliconflow.com")) return new JsonObject { ["enable_thinking"] = false };
-        if (At("openrouter.ai")) return new JsonObject { ["reasoning"] = new JsonObject { ["enabled"] = false } };
-        if (At("googleapis.com")) return new JsonObject { ["reasoning_effort"] = "none" };
-        return new JsonObject { ["think"] = false, ["enable_thinking"] = false, ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false } };
-    }
-
-    /// Servers that refused the switch above: asked plainly from then on.
-    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> RefusedThinkingOff = new();
-
-    async Task<byte[]> Send(ExternalModel model, string path, string? body, CancellationToken cancel)
-    {
-        cancel.ThrowIfCancellationRequested();
-        var uri = Endpoint(model.Url, path);
+        Endpoint(model.Url, "models");
         var key = await models.ApiKey(model);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        timeout.CancelAfter(Timeout);
-        using var request = new HttpRequestMessage(body == null ? HttpMethod.Get : HttpMethod.Post, uri);
-        if (key != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        if (body != null) request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-        try
-        {
-            using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-            using var ms = new MemoryStream();
-            var buffer = new byte[65536];
-            int n;
-            while ((n = await stream.ReadAsync(buffer, timeout.Token)) > 0)
-            {
-                if (ms.Length + n > 2 * 1024 * 1024) throw new ExternalFailure(ExternalFailureKind.InvalidResponse);
-                ms.Write(buffer, 0, n);
-            }
-            var data = ms.ToArray();
-            if (!response.IsSuccessStatusCode)
-            {
-                string message;
-                try
-                {
-                    var json = JsonNode.Parse(data);
-                    var error = json?["error"];
-                    message = error is JsonObject eo && eo["message"] is JsonValue mv && mv.TryGetValue<string>(out var m) ? m
-                        : error is JsonValue ev && ev.TryGetValue<string>(out var es) ? es
-                        : Encoding.UTF8.GetString(data.AsSpan(0, Math.Min(200, data.Length)));
-                }
-                catch { message = Encoding.UTF8.GetString(data.AsSpan(0, Math.Min(200, data.Length))); }
-                if (key != null) message = message.Replace(key, "");
-                throw new ExternalFailure(ExternalFailureKind.Http, (int)response.StatusCode, message);
-            }
-            return data;
-        }
-        catch (ExternalFailure) { throw; }
-        catch (OperationCanceledException) when (cancel.IsCancellationRequested) { throw new ExternalFailure(ExternalFailureKind.Cancelled); }
-        catch (OperationCanceledException) { throw new ExternalFailure(ExternalFailureKind.Timeout); }
-        // the system's reason (refused, no route, a certificate…): it names at most the host typed in
-        catch (Exception e) { throw new ExternalFailure(ExternalFailureKind.Transport, detail: (e.InnerException ?? e).Message.Trim()); }
-    }
-
-    static JsonNode? Json(byte[] data)
-    {
-        try { return JsonNode.Parse(data); }
-        catch { throw new ExternalFailure(ExternalFailureKind.InvalidResponse); }
+        return new JsonObject { ["kind"] = "external", ["id"] = model.Id, ["url"] = model.Url, ["model"] = model.Model, ["key"] = key };
     }
 
     public async Task<List<string>> AvailableModels(ExternalModel model, CancellationToken cancel = default)
     {
-        var json = Json(await Send(model, "models", null, cancel));
-        return json?["data"] is JsonArray a ? [.. a.OfType<JsonObject>().Select(r => r["id"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null).OfType<string>()] : [];
+        var service = await Service(model);
+        cancel.ThrowIfCancellationRequested();
+        try { return await TlCore.Run(() => TlCore.AiServiceModels(service)); }
+        catch (AiException e) { throw ExternalFailure.FromCore(e); }
     }
 
-    [GeneratedRegex("^[\\t \\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000]+|[\\t \\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000]+$")]
-    private static partial Regex Blank();
-
-    public async Task<string> ModelName(ExternalModel model, CancellationToken cancel)
-    {
-        var v = Blank().Replace(model.Model, "");
-        if (v.Length > 0) return v;
-        var names = await AvailableModels(model, cancel);
-        return names.Count > 0 ? names[0] : throw new ExternalFailure(ExternalFailureKind.NoModel);
-    }
-
-    public static string Answer(byte[] data)
-    {
-        var content = Json(data)?["choices"]?[0]?["message"]?["content"];
-        if (content is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0) return s;
-        if (content is JsonArray parts)
-        {
-            // (never the parts that hold the model's reasoning)
-            var joined = string.Concat(parts.OfType<JsonObject>().Where(p => !(p["type"] is JsonValue k && k.TryGetValue<string>(out var type) && (type.Contains("think", StringComparison.OrdinalIgnoreCase) || type.Contains("reason", StringComparison.OrdinalIgnoreCase)))).Select(p => p["text"] is JsonValue t && t.TryGetValue<string>(out var x) ? x : ""));
-            if (joined.Length > 0) return joined;
-        }
-        throw new ExternalFailure(ExternalFailureKind.Empty);
-    }
-
-
-    /// A model's answer as tags: a JSON list if there is one, else separated words; at most 12, each short.
-    /// A model's reply as tags (TagReply.Parse: the rules every app shares).
-    public static List<string> ParseTags(string raw) => TagReply.Parse(raw);
-
-    public async Task<List<string>> Tags(ExternalModel model, byte[] jpeg, IReadOnlyList<string> existing, IReadOnlyList<string> vocabulary, string? postText, CancellationToken cancel)
-    {
-        var prompt = models.PromptFor(model.Id);
-        var name = await ModelName(model, cancel);
-        var question = prompt.Question(existing, vocabulary, postText);
-        var off = RefusedThinkingOff.ContainsKey(model.Url) ? null : ThinkingOff(Endpoint(model.Url, "chat/completions").Host);
-        byte[] data;
-        try { data = await Send(model, "chat/completions", Body(name, prompt.System, question, jpeg, off), cancel); }
-        catch (ExternalFailure e) when (off != null && e.Kind == ExternalFailureKind.Http && e.Status is 400 or 422)
-        {
-            RefusedThinkingOff[model.Url] = true;
-            data = await Send(model, "chat/completions", Body(name, prompt.System, question, jpeg), cancel);
-        }
-        return ParseTags(Answer(data));
-    }
-
-    /// 测试: a small grey picture, to see the service answer.
+    /// 测试: the tags for a plain grey picture, to see the service answer as a tagger should.
     public async Task<List<string>> Test(ExternalModel model, CancellationToken cancel = default) =>
-        await Tags(model, await TaggingImage.GrayJpeg(), [], [], null, cancel);
+        await CoreTags(await Service(model), "", [], [], null, cancel);
+
+    /// The tags for the picture at `image` (empty: a plain grey one) from `model` (a local
+    /// {kind, id} or a Service): the core prepares the picture, asks the model and reads its reply.
+    public static async Task<List<string>> CoreTags(JsonObject model, string image, IReadOnlyList<string> existing, IReadOnlyList<string> vocabulary, string? postText, CancellationToken cancel)
+    {
+        cancel.ThrowIfCancellationRequested();
+        var job = "tag-" + Guid.NewGuid().ToString("N");
+        var request = new JsonObject
+        {
+            ["job"] = job, ["model"] = model, ["image"] = image,
+            ["existing"] = new JsonArray(existing.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray()),
+            ["vocabulary"] = new JsonArray(vocabulary.Select(t => (JsonNode?)JsonValue.Create(t)).ToArray()),
+            ["post_text"] = postText,
+        };
+        using var stop = cancel.Register(() => TlCore.AiCancel(job));
+        try { return await TlCore.Run(() => TlCore.AiTag(request)); }
+        catch (AiException e) { throw ExternalFailure.FromCore(e); }
+    }
 }

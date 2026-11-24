@@ -5,11 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tl_core/tl_core.dart';
-import 'package:tl_llama/tl_llama.dart';
 import 'package:tl_native/tl_native.dart';
 
 import '../l10n/l10n.dart';
-import 'external_models.dart';
 import '../platform/os.dart';
 
 /// A model the app offers to download (the core's catalog, the same list as the native apps').
@@ -18,10 +16,10 @@ extension CatalogNames on CatalogEntry {
   String get note => L(note_key); // i18n-exempt: catalog keys from tl-core catalog.rs
 }
 
-/// On-device models. Apple devices run MLX (the same engine and the same models as the native
-/// apps, `TLLocalAI` through `tl_native`); Android runs llama.cpp (`tl_llama`,
-/// CPU or Vulkan) with GGUF models. Only Apple devices export, import or pull models from other
-/// devices: MLX models run on Apple silicon alone.
+/// On-device models, run by the core (core/src/ai): on Apple devices with MLX (the same engine and
+/// the same models as the native apps, `TLLocalAI`, which `tl_native` hands to the core), on Android
+/// with llama.cpp (`tl_llama`: OpenCL on Adreno, Vulkan elsewhere; never the processor) and GGUF
+/// models. Models go between devices of the same kind (export, import, pull from another device).
 class LocalModels extends ChangeNotifier {
   LocalModels._();
   static final instance = LocalModels._();
@@ -39,7 +37,8 @@ class LocalModels extends ChangeNotifier {
   late List<CatalogEntry> catalog = Core.modelCatalog(format).where((c) => !c.embedder).toList();
 
   bool supported = false;
-  /// llama.cpp's devices (e.g. "Vulkan0 (…), CPU"); null on Apple devices.
+  /// The GPU llama.cpp runs models on (e.g. "Vulkan0 (Mali-G720)"); null on Apple devices, and
+  /// where there is none (on-device AI is then off).
   String? devices;
   List<ModelInfo> installed = const [];
   ModelDownloadStatus? download;
@@ -60,10 +59,17 @@ class LocalModels extends ChangeNotifier {
       } catch (_) {
         supported = false;
       }
-    } else if (LlamaEngine.isSupported) {
+    } else {
       try {
-        devices = await LlamaEngine.instance.init(OS.isAndroid ? await _androidLibDir() : null);
-        supported = true;
+        if (OS.isAndroid) {
+          final dir = await _androidLibDir();
+          if (dir != null) Core.setAiEngineDirectory(dir);
+        }
+        final hw = await coreRunAsync(Core.aiHardware);
+        final gpus = (hw['gpus'] as List? ?? const []).cast<Map<String, dynamic>>();
+        final chosen = gpus.where((g) => g['name'] == hw['chosen']).firstOrNull ?? gpus.firstOrNull;
+        devices = chosen == null ? null : '${chosen['name']} (${chosen['description']})';
+        supported = hw['engine'] == true && gpus.isNotEmpty;
       } catch (_) {
         supported = false;
       }
@@ -131,42 +137,17 @@ class LocalModels extends ChangeNotifier {
         await _native.invokeMethod<void>('aiUnload');
       } catch (_) {}
     } else if (supported) {
-      await LlamaEngine.instance.unloadAll();
+      await coreRunAsync(Core.aiUnload);
     }
   }
 
-  // ---- Apple devices only: models between Apple devices (MLX runs on Apple silicon alone)
+  // ---- models between devices of the same kind (MLX between Apple devices, GGUF between the others)
 
   Future<int> export(String id, String out) => Core.exportModelZipAsync(id, out);
   Future<void> import(String path) async {
     await Core.importModelAsync(path);
     refresh();
   }
-
-  /// Tags for one picture (the JPEG the tagger prepared: the same input on every device).
-  Future<List<String>> tags(String id, {required Uint8List jpeg, required String system, required String question}) async {
-    final m = find(id);
-    if (m == null) throw const ExternalFailure(ExternalFailureKind.noModel);
-    final sep = OS.pathSeparator;
-    final tmp = File('${(await getTemporaryDirectory()).path}${sep}tl-tag-${DateTime.now().microsecondsSinceEpoch}.jpg');
-    await tmp.writeAsBytes(jpeg, flush: true);
-    try {
-      if (apple) {
-        // iOS ends an app over its memory limit without a warning that arrives in time
-        final available = await _native.invokeMethod<int>('aiAvailableMemory');
-        final need = m.bytes + m.bytes ~/ 4 + 500000000;
-        if (available != null && available < need) throw LocalModelError(L('ai.err.memory', [_gb(need), _gb(available)]));
-        final raw = await _native.invokeMethod<String>('aiRespond', {'modelDir': m.path, 'path': tmp.path, 'kind': 'photo', 'system': system, 'question': question});
-        return ExternalAI.parseTags(raw ?? '');
-      }
-      final raw = await LlamaEngine.instance.describe(weights: '${m.path}$sep${m.weights}', projector: '${m.path}$sep${m.projector}', image: tmp.path, system: system, question: question);
-      return ExternalAI.parseTags(raw);
-    } finally {
-      unawaited(tmp.delete().then((_) {}, onError: (Object _) {}));
-    }
-  }
-
-  static String _gb(int bytes) => '${(bytes / 1e9).toStringAsFixed(1)} GB';
 }
 
 class LocalModelError implements Exception {

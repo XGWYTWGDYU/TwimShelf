@@ -24,7 +24,7 @@ class AiPage extends StatelessWidget {
   final ExternalModels models;
   final ExternalAI ai;
   final AutoTagger tagger;
-  /// For pulling models from the account's other Apple devices.
+  /// For pulling models from the account's other devices.
   final SyncModel? sync;
   LocalModels get local => LocalModels.instance;
 
@@ -66,6 +66,23 @@ class AiPage extends StatelessWidget {
               top: false,
               bottom: false,
               child: ListView(padding: EdgeInsets.only(top: 8, bottom: 8 + MediaQuery.paddingOf(context).bottom), children: [
+                // a phone or tablet (all this app runs on): tagging is better left to the
+                // computers of the account, whose tags arrive here by sync
+                Padding(
+                  key: const ValueKey('ai-mobile-banner'),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(12)),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Icon(Icons.info_outline, size: 20, color: scheme.onSurfaceVariant),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(L('ai.mobile.banner'), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant))),
+                      ]),
+                    ),
+                  ),
+                ),
                 if (taggers.isEmpty)
                   SettingsSection(children: [
                     ListTile(leading: const Icon(Icons.auto_awesome_outlined), title: Text(L('models.none.title')), subtitle: Text(L('models.none.message'))),
@@ -136,7 +153,7 @@ class AiPage extends StatelessWidget {
                 _LocalModelsSection(local: local, active: active, models: models, onRetag: (m) => _retagAll(context, m), onDeleted: (id) async {
                   if (id == active) await models.setActiveTagger(null);
                 }),
-                if (LocalModels.apple && local.supported) _AppleOnlySection(local: local, sync: sync),
+                if (local.supported) _ModelTransferSection(local: local, sync: sync),
                 SettingsSection(title: L('models.external'), children: [
                   for (final m in all)
                     _ModelCard(
@@ -275,18 +292,18 @@ class _LocalModelsSection extends StatelessWidget {
   }
 }
 
-/// MLX models between Apple devices: import a folder or ZIP, export one, pull one from another
-/// Apple device of the account. Not offered on Android.
-class _AppleOnlySection extends StatefulWidget {
-  const _AppleOnlySection({required this.local, this.sync});
+/// Models between devices of the same kind (MLX between Apple devices, GGUF between the others):
+/// import a folder or ZIP, export one, pull one from another device of the account.
+class _ModelTransferSection extends StatefulWidget {
+  const _ModelTransferSection({required this.local, this.sync});
   final LocalModels local;
   final SyncModel? sync;
 
   @override
-  State<_AppleOnlySection> createState() => _AppleOnlySectionState();
+  State<_ModelTransferSection> createState() => _ModelTransferSectionState();
 }
 
-class _AppleOnlySectionState extends State<_AppleOnlySection> {
+class _ModelTransferSectionState extends State<_ModelTransferSection> {
   List<(DiscoveredPeer, ModelInfo)>? _offers;
   bool _querying = false;
   LocalModels get local => widget.local;
@@ -318,17 +335,15 @@ class _AppleOnlySectionState extends State<_AppleOnlySection> {
   }
 
   Future<void> _query() async {
-    final peers = (widget.sync?.accountPeers ?? const <DiscoveredPeer>[])
-        // MLX models: other Apple devices only
-        .where((p) => p.reachable && const ['mac', 'iphone', 'ipad'].contains(p.kind))
-        .toList();
+    // the core keeps the models of this device's format (MLX on Apple devices, GGUF elsewhere)
+    final peers = (widget.sync?.accountPeers ?? const <DiscoveredPeer>[]).where((p) => p.reachable).toList();
     setState(() => _querying = true);
     final have = local.installed.map((m) => m.id).toSet();
     final offers = <(DiscoveredPeer, ModelInfo)>[];
     for (final p in peers) {
       try {
         for (final m in await Core.syncPeerModelsAsync(p.host!, p.port!)) {
-          if (m.format == 'mlx' && !have.contains(m.id) && !offers.any((o) => o.$2.id == m.id)) offers.add((p, m));
+          if (m.format == local.format && !have.contains(m.id) && !offers.any((o) => o.$2.id == m.id)) offers.add((p, m));
         }
       } catch (_) {}
     }

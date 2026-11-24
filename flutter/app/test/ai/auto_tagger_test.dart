@@ -1,11 +1,6 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
-import 'package:image/image.dart' as image;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tl_core/tl_core.dart';
 import 'package:twimshelf/ai/auto_tagger.dart';
@@ -128,10 +123,7 @@ void main() {
         model: 'synthetic',
       ),
     );
-    api = ExternalAI(
-      models,
-      client: MockClient((_) async => http.Response('{}', 200)),
-    );
+    api = ExternalAI(models);
   });
   tearDown(() async {
     for (final runner in runners) {
@@ -153,7 +145,7 @@ void main() {
       ai: api,
       cacheDirectory: '/synthetic/cache',
       core: core,
-      imageLoader: load ?? (_) async => Uint8List.fromList([1]),
+      imageLoader: load ?? (_) async => '/synthetic/picture.jpg',
       infer: infer ?? (_, _, _, _, _, _) async => ['cat'],
       now: () => DateTime.fromMillisecondsSinceEpoch(100000),
       onChanged: changed,
@@ -241,7 +233,7 @@ void main() {
     final core = FakeCore(List.generate(5, media));
     final value = runner(
       core,
-      load: (m) async => m.media_id == 'm004' ? Uint8List(1) : null,
+      load: (m) async => m.media_id == 'm004' ? '/synthetic/m004.jpg' : null,
     );
     value.start(const TaggingJob(model: 'ext:test'));
     await value.settled;
@@ -454,29 +446,6 @@ void main() {
       expect(core.events, ['begin:m000', 'undo:m000']);
       expect(core.applied, isEmpty);
       expect(value.outcome, 'failed');
-    },
-  );
-  test(
-    'photo preparation makes JPEG and pads narrow media off the UI isolate',
-    () async {
-      final directory = await Directory.systemTemp.createTemp('e1-photo-');
-      try {
-        final source = File('${directory.path}/synthetic.png');
-        await source.writeAsBytes(
-          image.encodePng(image.Image(width: 5, height: 500)),
-        );
-        final jpeg = await prepareTaggingJpeg(
-          MediaRef(media_id: 'fixture', path: source.path, kind: 'photo'),
-          directory.path,
-        );
-        expect(jpeg!.take(2), [0xff, 0xd8]);
-        final picture = image.decodeJpg(jpeg)!;
-        expect(picture.height, 896);
-        expect(picture.width, 224);
-        expect(await source.exists(), true);
-      } finally {
-        await directory.delete(recursive: true);
-      }
     },
   );
 }

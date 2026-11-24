@@ -17,6 +17,17 @@ class CoreError implements Exception {
   String toString() => message;
 }
 
+/// Why the core could not tag a picture (core/src/ai/error.rs): [kind] is `badUrl`, `http`,
+/// `noModel`, `empty`, `invalidResponse`, `transport`, `timeout`, `cancelled`, `unreadable`,
+/// `badTags`, `noTags`, `noGpu` or `engine`.
+class AiError extends CoreError {
+  const AiError(this.kind, {this.status, this.detail = ''}) : super(kind);
+  final String kind;
+  final int? status;
+  /// Sanitized text from the service or engine, never a request, header or credential.
+  final String detail;
+}
+
 /// Decode failures can be handled without parsing a localized message.
 class ThumbnailNotDecodable extends CoreError {
   const ThumbnailNotDecodable() : super('not_decodable');
@@ -27,6 +38,48 @@ class Core {
   Core._();
   static final _bindings = createBindings();
   static T _call<T>(T Function(NArena) action) => withArena(action);
+  /// [_read], with an [AiError] for what the tagging functions report.
+  static Object? _readAi(NStr pointer) {
+    if (isNullNStr(pointer)) throw const CoreError('core.noResult');
+    try {
+      final envelope = jsonDecode(readNStr(pointer)) as Map<String, dynamic>;
+      final ai = envelope['ai'];
+      if (ai is Map) throw AiError(ai['kind'] as String? ?? 'engine', status: ai['status'] as int?, detail: ai['detail'] as String? ?? '');
+      if (envelope.containsKey('error')) throw CoreError(envelope['error'] as String);
+      return envelope['ok'];
+    } finally {
+      _bindings.tl_string_free(pointer);
+    }
+  }
+
+  // ---- tagging with a vision model (core/src/ai): the core prepares the picture, asks the model
+  // (this device's GPU, or a service) and reads the tags out of its reply
+
+  /// Where the on-device engine (llama.cpp) is (Android: the app's native libraries).
+  static void setAiEngineDirectory(String dir) => _call((arena) => _bindings.tl_ai_set_engine_dir(_string(dir, arena)));
+
+  /// The tags for one picture: a request as core/src/ai/mod.rs takes it (`job`, `model`, `image`,
+  /// `existing`, `vocabulary`, `post_text`, `prompt`). `{tags, device?, ms}`; [AiError] otherwise.
+  /// Blocks until the model answers: run it with [coreRunAsync].
+  static Map<String, dynamic> aiTag(Map<String, Object?> request) => _call((arena) =>
+      _readAi(_bindings.tl_ai_tag(_string(jsonEncode(request), arena))) as Map<String, dynamic>);
+
+  /// Calls off the tagging job named [job].
+  static void aiCancel(String job) => _call((arena) => _bindings.tl_ai_cancel(_string(job, arena)));
+
+  /// The models a service (`{url, model?, key?}`) offers.
+  static List<String> aiServiceModels(Map<String, Object?> service) => _call((arena) =>
+      (_readAi(_bindings.tl_ai_service_models(_string(jsonEncode(service), arena))) as List).cast<String>());
+
+  /// What this device has for on-device AI: `{engine, gpus: [{name, backend, description, type,
+  /// free, total}], memory, chosen}`. No GPU: on-device AI is off (never the processor).
+  static Map<String, dynamic> aiHardware() => _read(_bindings.tl_ai_hardware()) as Map<String, dynamic>;
+
+  /// How a model of [bytes] fits this device: `recommended`, `usable`, `tooBig` or `noGpu`.
+  static String aiFit(int bytes) => _read(_bindings.tl_ai_fit(bytes)) as String;
+
+  /// Frees the on-device model now.
+  static void aiUnload() => _bindings.tl_ai_unload();
   static NStr _string(String? value, NArena arena) => toNStr(value, arena);
   static Object? _read(NStr pointer) {
     if (isNullNStr(pointer)) throw const CoreError('core.noResult');

@@ -9,6 +9,10 @@ enum Core {
     static var settings: [String:String] = [:]
     static func setting(_ k:String)->String? { settings[k] }
     static func setSetting(_ k:String,_ v:String?) {settings[k]=v}
+    /// what the app hands the core for a service (the core sends the request)
+    nonisolated(unsafe) static var captured: [String: Any]?
+    static func aiServiceModels(_ service: [String: Any]) throws -> [String] { captured = service; return ["audit-model"] }
+    static func aiTag(_ request: [String: Any]) throws -> [String] { captured = request["model"] as? [String: Any]; return [] }
 }
 enum Keychain {
     static var items: [String:String] = [:]
@@ -27,31 +31,18 @@ enum AIEngine {
     static func cleanContext(_ s:String?)->String? {s}
     static func parseTags(_ s:String)->[String] {[]}
 }
-final class MockTransport: URLProtocol {
-    static var captured: URLRequest?
-    override class func canInit(with request: URLRequest)->Bool {true}
-    override class func canonicalRequest(for request:URLRequest)->URLRequest {request}
-    override func startLoading() {
-        Self.captured=request
-        client?.urlProtocol(self,didReceive:HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!,cacheStoragePolicy:.notAllowed)
-        client?.urlProtocol(self,didLoad:Data("{\"data\":[{\"id\":\"audit-model\"}]}".utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
 struct BoundaryHarness {
     static func main() async throws {
-        let config=URLSessionConfiguration.ephemeral; config.protocolClasses=[MockTransport.self]
-        ExternalAI.session=URLSession(configuration:config)
         var m=ExternalModel(id:"ext:audit",name:"test",url:"https://original.example/v1",model:"audit-model")
         m.apiKey="SYNTHETIC_TEST_KEY_ONLY"
         ExternalModels.save(m)
         m.url="https://changed-by-peer.example/v1"
         Core.setSetting("ai.external",String(decoding:try JSONEncoder().encode([m]),as:UTF8.self))
         _ = try await ExternalAI.models(ExternalModels.find(m.id)!)
-        let captured=MockTransport.captured!
-        print("Synced endpoint change -> host=\(captured.url!.host!), Authorization=\(captured.value(forHTTPHeaderField:"Authorization") ?? "nil")")
-        if captured.value(forHTTPHeaderField:"Authorization") != nil { print("FAIL the key followed the URL"); exit(1) }
+        let service=Core.captured ?? [:]
+        let key=service["key"] as? String
+        print("Synced endpoint change -> url=\(service["url"] ?? "nil"), key=\(key ?? "nil")")
+        if key != nil { print("FAIL the key followed the URL"); exit(1) }
     }
 }
 // more cases

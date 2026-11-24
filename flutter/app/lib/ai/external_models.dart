@@ -1,12 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
-import 'package:characters/characters.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:image/image.dart' as image;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tl_core/tl_core.dart';
 
@@ -30,10 +26,20 @@ enum ExternalFailureKind {
   badTags,
   /// The model's list holds no tags.
   noTags,
+  /// No GPU to run an on-device model on (on-device AI is off: never the processor).
+  noGpu,
+  /// The on-device engine failed (a damaged model, out of memory, a GPU that gave up).
+  engine,
 }
 
 class ExternalFailure implements Exception {
   const ExternalFailure(this.kind, {this.status, this.detail = ''});
+  /// What the core reported.
+  factory ExternalFailure.fromCore(AiError e) => ExternalFailure(
+        ExternalFailureKind.values.where((k) => k.name == e.kind).firstOrNull ?? ExternalFailureKind.engine,
+        status: e.status,
+        detail: e.detail,
+      );
   final ExternalFailureKind kind;
   final int? status;
   // Sanitized server text, never a request/header/credential. Never log it.
@@ -47,6 +53,7 @@ class ExternalFailure implements Exception {
     ExternalFailureKind.unreadable => 'ai.err.unreadable',
     ExternalFailureKind.badTags => 'ai.err.badReply',
     ExternalFailureKind.noTags => 'ai.err.noTags',
+    ExternalFailureKind.noGpu => 'ai.err.noGpu',
     _ => 'common.notDone',
   };
   String get message {
@@ -209,35 +216,6 @@ class AiPrompt {
     'existing': existing,
     'vocabulary': vocabulary,
   };
-  String question({
-    List<String> existing = const [],
-    List<String> vocabulary = const [],
-    String? postText,
-  }) {
-    var question = prompt;
-    if (existing.isNotEmpty) {
-      question +=
-          '\n\n${this.existing.replaceAll('{existing}', existing.join(L('list.separator')))}';
-    }
-    if (vocabulary.isNotEmpty) {
-      question +=
-          '\n\n${this.vocabulary.replaceAll('{tags}', vocabulary.join(L('list.separator')))}';
-    }
-    final clean = cleanContext(postText);
-    if (clean != null) question += '\n\n${context.replaceAll('{text}', clean)}';
-    return question;
-  }
-
-  static String? cleanContext(String? text) {
-    final value = text
-        ?.replaceAll(RegExp(r'https?://\S+'), '')
-        .replaceAll(RegExp(r'@[A-Za-z0-9_]{1,15}'), '')
-        .trim();
-    if (value == null || value.isEmpty) return null;
-    return value.characters.length > 300
-        ? '${value.characters.take(300)}\u2026'
-        : value;
-  }
 }
 
 /// Per-device preferences as requested by E1; keys match the native names.
@@ -456,17 +434,14 @@ class ExternalModels extends ChangeNotifier {
   });
 }
 
+/// Services as the core reaches them (core/src/ai/external.rs): the app keeps their list and keys,
+/// the core sends the requests.
 class ExternalAI {
-  ExternalAI(
-    this.models, {
-    http.Client? client,
-    this.timeout = const Duration(seconds: 120),
-  }) : _client = client ?? http.Client(),
-       _ownsClient = client == null;
+  ExternalAI(this.models);
   final ExternalModels models;
-  final http.Client _client;
-  final bool _ownsClient;
-  final Duration timeout;
+
+  /// The address of [path] at the service [base], as the core forms it; for checking what the user
+  /// typed, and for binding a key to its origin.
   static Uri endpoint(String base, String path) {
     var value = base.trim();
     if (!value.contains('://')) value = 'http://$value';
@@ -474,416 +449,68 @@ class ExternalAI {
       value = value.substring(0, value.length - 1);
     }
     for (final tail in ['/chat/completions', '/models']) {
-      if (value.endsWith(tail)) {
-        value = value.substring(0, value.length - tail.length);
-      }
+      if (value.endsWith(tail)) value = value.substring(0, value.length - tail.length);
     }
     if (!value.endsWith('/v1')) value += '/v1';
     final uri = Uri.tryParse('$value/$path');
-    if (uri == null ||
-        !['http', 'https'].contains(uri.scheme) ||
-        uri.host.isEmpty ||
-        uri.userInfo.isNotEmpty ||
-        uri.hasQuery ||
-        uri.hasFragment) {
+    if (uri == null || !['http', 'https'].contains(uri.scheme) || uri.host.isEmpty || uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment) {
       throw const ExternalFailure(ExternalFailureKind.badUrl);
     }
     return uri;
   }
 
-  // Swift JSONSerialization dictionaries have unspecified byte order. Stable
-  // sorting allows canonical byte parity; keys/values are exactly the Swift body.
-  static String body({
-    required String model,
-    required String system,
-    required String question,
-    required List<int> jpeg,
-    Map<String, Object> thinkingOff = const {},
-  }) {
-    final encoded = jsonEncode({
-      'max_tokens': 300,
-      'messages': [
-        {'content': system, 'role': 'system'},
-        {
-          'content': [
-            {'text': question, 'type': 'text'},
-            {
-              'image_url': {
-                'url': 'data:image/jpeg;base64,${base64Encode(jpeg)}',
-              },
-              'type': 'image_url',
-            },
-          ],
-          'role': 'user',
-        },
-      ],
-      'model': model,
-      'stream': false,
-      'temperature': 0.1,
-      ...thinkingOff,
-    });
-    // Foundation NSNumber encodes this Double with 17 significant digits.
-    return encoded.replaceFirst(
-      '"temperature":0.1',
-      '"temperature":0.10000000000000001',
-    );
+  /// [model] as the core takes it, with its key from this device's secure storage.
+  Future<Map<String, Object?>> service(ExternalModel model) async {
+    endpoint(model.url, 'models');
+    return {'kind': 'external', 'id': model.id, 'url': model.url, 'model': model.model, 'key': await models.apiKey(model)};
   }
 
-  Future<Uint8List> _send(
-    ExternalModel model,
-    String path, {
-    String? body,
-    AiCancellation? cancellation,
-  }) async {
+  Future<List<String>> availableModels(ExternalModel model, {AiCancellation? cancellation}) async {
+    final s = await service(model);
     cancellation?.check();
-    final uri = endpoint(model.url, path);
-    final key = await models.apiKey(model);
-    cancellation?.check();
-    final abort = Completer<void>();
-    void stop() {
-      if (!abort.isCompleted) abort.complete();
-    }
-
-    final interrupted = Completer<Uint8List>();
-    final unlisten = cancellation?.listen(() {
-      stop();
-      if (!interrupted.isCompleted) {
-        interrupted.completeError(
-          const ExternalFailure(ExternalFailureKind.cancelled),
-        );
-      }
-    });
-    final request =
-        http.AbortableRequest(
-            body == null ? 'GET' : 'POST',
-            uri,
-            abortTrigger: abort.future,
-          )
-          ..followRedirects = false
-          ..headers['Content-Type'] = 'application/json';
-    if (key != null) request.headers['Authorization'] = 'Bearer $key';
-    if (body != null) request.body = body;
-    Future<Uint8List> read() async {
-      final response = await _client.send(request);
-      final bytes = BytesBuilder(copy: false);
-      await for (final chunk in response.stream) {
-        if (bytes.length + chunk.length > 2 * 1024 * 1024) {
-          stop();
-          throw const ExternalFailure(ExternalFailureKind.invalidResponse);
-        }
-        bytes.add(chunk);
-      }
-      final data = bytes.takeBytes();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        String message;
-        try {
-          final json = jsonDecode(utf8.decode(data));
-          final error = json is Map ? json['error'] : null;
-          message = error is Map && error['message'] is String
-              ? error['message'] as String
-              : error is String
-              ? error
-              : utf8.decode(data.take(200).toList(), allowMalformed: true);
-        } catch (_) {
-          message = utf8.decode(data.take(200).toList(), allowMalformed: true);
-        }
-        if (key != null) message = message.replaceAll(key, '');
-        throw ExternalFailure(
-          ExternalFailureKind.http,
-          status: response.statusCode,
-          detail: message,
-        );
-      }
-      return data;
-    }
-
     try {
-      final result =
-          await Future.any([
-            read(),
-            if (cancellation != null) interrupted.future,
-          ]).timeout(
-            timeout,
-            onTimeout: () {
-              stop();
-              throw const ExternalFailure(ExternalFailureKind.timeout);
-            },
-          );
-      cancellation?.check();
-      return result;
-    } on ExternalFailure {
-      rethrow;
-    } catch (_) {
-      cancellation?.check();
-      throw const ExternalFailure(ExternalFailureKind.transport);
-    } finally {
-      unlisten?.call();
+      return await coreRunAsync(() => Core.aiServiceModels(s));
+    } on AiError catch (e) {
+      throw ExternalFailure.fromCore(e);
     }
   }
 
-  static Object? _json(List<int> data) {
-    try {
-      return jsonDecode(utf8.decode(data));
-    } catch (_) {
-      throw const ExternalFailure(ExternalFailureKind.invalidResponse);
-    }
-  }
+  /// Tags for a plain grey picture: whether the service answers as a tagger should.
+  Future<List<String>> test(ExternalModel model, {AiCancellation? cancellation}) async =>
+      coreTags(await service(model), cancellation: cancellation);
 
-  Future<List<String>> availableModels(
-    ExternalModel model, {
-    AiCancellation? cancellation,
-  }) async {
-    final json = _json(
-      await _send(model, 'models', cancellation: cancellation),
-    );
-    final data = json is Map ? json['data'] : null;
-    return data is List
-        ? data
-              .whereType<Map>()
-              .map((row) => row['id'])
-              .whereType<String>()
-              .toList()
-        : [];
-  }
-
-  Future<String> modelName(
-    ExternalModel model, {
-    AiCancellation? cancellation,
-  }) async {
-    // Foundation .whitespaces deliberately does not remove newlines.
-    final value = model.model.replaceAll(
-      RegExp(
-        r'^[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+|[\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]+$',
-      ),
-      '',
-    );
-    if (value.isNotEmpty) return value;
-    final names = await availableModels(model, cancellation: cancellation);
-    if (names.isEmpty) throw const ExternalFailure(ExternalFailureKind.noModel);
-    return names.first;
-  }
-
-  static String answer(List<int> data) {
-    final json = _json(data);
-    final choices = json is Map ? json['choices'] : null;
-    final first = choices is List && choices.isNotEmpty ? choices.first : null;
-    final message = first is Map ? first['message'] : null;
-    final content = message is Map ? message['content'] : null;
-    if (content is String && content.isNotEmpty) return content;
-    if (content is List) {
-      final value = content
-          .whereType<Map>()
-          // (never the parts that hold the model's reasoning)
-          .where((p) => !'${p['type']}'.toLowerCase().contains(RegExp('think|reason')))
-          .map((p) => p['text'])
-          .whereType<String>()
-          .join();
-      if (value.isNotEmpty) return value;
-    }
-    throw const ExternalFailure(ExternalFailureKind.empty);
-  }
-
-  /// A model's reply as tags, by the rules every app shares (scripts/checks/ai_tags/cases.json):
-  /// a list in brackets (after a reasoning block, inside a code fence or a `{"tags": …}`, cut off
-  /// by the length limit, with single quotes), or, from a reply with no brackets at all, a list
-  /// split at commas and the like. What is no tag in a good list (`}`, a number) is left out. A
-  /// reply that is no list, or holds nothing but such pieces, is [badTags]; an empty list is
-  /// [noTags]. Either way the analysis failed, and nothing is written.
-  static List<String> parseTags(String raw) {
-    const bad = ExternalFailure(ExternalFailureKind.badTags);
-    var text = _withoutThinking(raw).trim();
-    if (text.startsWith('```')) {
-      final nl = text.indexOf('\n');
-      text = nl < 0 ? '' : text.substring(nl + 1);
-      if (text.trimRight().endsWith('```')) text = text.trimRight().substring(0, text.trimRight().length - 3);
-      text = text.trim();
-    }
-    List<String> items;
-    final a = text.indexOf('['), b = text.lastIndexOf(']');
-    if (a >= 0 || b >= 0) {
-      if (a < 0 || (b >= 0 && b < a)) throw bad;
-      final brackets = RegExp(r'[\[\]{}]');
-      final before = text.substring(0, a).trim();
-      final after = b < 0 ? '' : text.substring(b + 1).trim();
-      final wrapped = before.startsWith('{') && !before.substring(1).contains(brackets) && (after == '}' || b < 0);
-      if (!wrapped && (before + after).contains(brackets)) throw bad;
-      items = _listItems(text.substring(a + 1, b < 0 ? text.length : b), cutOff: b < 0);
-    } else {
-      if (text.contains(_thinkingAloud)) throw bad;
-      text = text.replaceFirst(RegExp('^[^,\uFF0C\u3001;\uFF1B\n:\uFF1A{}"]{1,24}[:\uFF1A]\\s*'), '');
-      if (text.contains(RegExp(r'[{}:"]'))) throw bad;
-      items = text.split(RegExp('[,\uFF0C\u3001;\uFF1B\n#]'));
-    }
-    final edge = RegExp(
-      '^[\\s"\'\u201C\u201D\\[\\]()\uFF08\uFF09\u3002.]+|[\\s"\'\u201C\u201D\\[\\]()\uFF08\uFF09\u3002.]+\$',
-    );
-    final fragment = RegExp(r'[{}\[\]<>:"\\`\x00-\x1F\x7F]');
-    final punctuation = RegExp(r'^[\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E\s]+$');
-    final seen = <String>{};
-    final result = <String>[];
-    var pieces = false;
-    for (final item in items) {
-      final clean = item.replaceAll(edge, '').toLowerCase();
-      if (clean.isEmpty) continue;
-      if (fragment.hasMatch(clean) || punctuation.hasMatch(clean)) {
-        pieces = true;
-        continue;
-      }
-      if (clean.characters.length <= 12 && seen.add(clean)) result.add(clean);
-      if (result.length == 12) break;
-    }
-    if (result.isEmpty) throw ExternalFailure(pieces ? ExternalFailureKind.badTags : ExternalFailureKind.noTags);
-    return result;
-  }
-
-  // How models mark their reasoning, and a plain reply that is reasoning without any mark.
-  static const _thinkingEnds = ['</think>', '</thinking>', '</reasoning>', '</reason>', '[/think]', '◁/think▷', '</seed:think>', '<channel|>', '<|end_of_thought|>', '<|channel|>final<|message|>'];
-  static const _thinkingStarts = ['<think>', '<thinking>', '<reasoning>', '<reason>', '[think]', '◁think▷', '<seed:think>', '<|channel>thought', '<|channel|>analysis', '<|begin_of_thought|>'];
-  static final _thinkingAloud = RegExp(
-    r"^((thinking process|thinking|thoughts?|reasoning|analysis)\s*[:：]|let me|let's|okay,|ok,|hmm|the user|the image|this image|思考|嗯|好的|首先|用户)",
-    caseSensitive: false,
-  );
-
-  /// What follows the model's reasoning. Reasoning that never ended (the length limit) is no answer.
-  static String _withoutThinking(String raw) {
-    var text = raw;
-    for (final end in _thinkingEnds) {
-      final at = text.toLowerCase().lastIndexOf(end);
-      if (at >= 0) text = text.substring(at + end.length);
-    }
-    final lower = text.toLowerCase();
-    if (_thinkingStarts.any(lower.contains)) throw const ExternalFailure(ExternalFailureKind.badTags);
-    return text;
-  }
-
-  /// What turns a model's reasoning off, as this service spells it. Services that answer with the
-  /// result alone get nothing; the rest of the world (local servers) gets the usual words.
-  static Map<String, Object> thinkingOff(String host) {
-    final h = host.toLowerCase();
-    bool at(String d) => h == d || h.endsWith('.$d');
-    if (at('openai.com') || at('openai.azure.com') || at('x.ai') || at('anthropic.com')) return const {};
-    if (at('deepseek.com') || at('bigmodel.cn') || at('z.ai')) return const {'thinking': {'type': 'disabled'}};
-    if (at('aliyuncs.com') || at('siliconflow.cn') || at('siliconflow.com')) return const {'enable_thinking': false};
-    if (at('openrouter.ai')) return const {'reasoning': {'enabled': false}};
-    if (at('googleapis.com')) return const {'reasoning_effort': 'none'};
-    return const {'think': false, 'enable_thinking': false, 'chat_template_kwargs': {'enable_thinking': false}};
-  }
-
-  /// Servers that refused the switch above: asked plainly from then on.
-  static final _refusedThinkingOff = <String>{};
-
-  /// The entries between a list's brackets. [cutOff]: the reply stopped inside the list, and what
-  /// it was still writing is left out.
-  static List<String> _listItems(String c, {required bool cutOff}) {
-    const bad = ExternalFailure(ExternalFailureKind.badTags);
-    const closers = {'"': '"', "'": "'", '\u201C': '\u201D', '\u2018': '\u2019'};
-    final space = RegExp(r'\s');
-    final items = <String>[];
-    var i = 0;
-    while (i < c.length) {
-      if (c[i] == ',' || space.hasMatch(c[i])) {
-        i++;
-        continue;
-      }
-      final close = closers[c[i]];
-      if (close != null) {
-        final word = StringBuffer();
-        var j = i + 1;
-        var closed = false;
-        while (j < c.length) {
-          if (c[j] == r'\' && j + 1 < c.length) {
-            final e = c[j + 1];
-            if (e == 'n' || e == 't' || e == 'r') {
-              word.write(' ');
-              j += 2;
-            } else if (e == 'u') {
-              final v = j + 5 < c.length ? int.tryParse(c.substring(j + 2, j + 6), radix: 16) : null;
-              if (v == null) throw bad;
-              word.writeCharCode(v);
-              j += 6;
-            } else {
-              word.write(e);
-              j += 2;
-            }
-            continue;
-          }
-          if (c[j] == close) {
-            // an apostrophe inside a word in single quotes (dog's) is not the end
-            var k = j + 1;
-            while (k < c.length && space.hasMatch(c[k])) {
-              k++;
-            }
-            if (close != "'" || k >= c.length || c[k] == ',') {
-              closed = true;
-              j++;
-              break;
-            }
-          }
-          word.write(c[j]);
-          j++;
-        }
-        if (!closed) break;
-        items.add(word.toString());
-        i = j;
-      } else {
-        var j = c.indexOf(',', i);
-        if (j < 0) j = c.length;
-        final word = c.substring(i, j).trim();
-        if (word.contains(RegExp(r'[\[\]{}]'))) throw bad;
-        if (!(cutOff && j == c.length) && double.tryParse(word) == null && !const {'null', 'true', 'false'}.contains(word)) items.add(word);
-        i = j;
-      }
-    }
-    return items;
-  }
-
-  Future<List<String>> tags({
-    required ExternalModel model,
-    required List<int> jpeg,
-    List<String> existing = const [],
-    List<String> vocabulary = const [],
-    String? postText,
-    AiCancellation? cancellation,
-  }) async {
-    final prompt = models.promptFor(model.id);
-    final name = await modelName(model, cancellation: cancellation);
-    final question = prompt.question(existing: existing, vocabulary: vocabulary, postText: postText);
-    final off = _refusedThinkingOff.contains(model.url) ? const <String, Object>{} : thinkingOff(endpoint(model.url, 'chat/completions').host);
-    Future<Uint8List> ask(Map<String, Object> extra) => _send(
-          model,
-          'chat/completions',
-          body: body(model: name, system: prompt.system, question: question, jpeg: jpeg, thinkingOff: extra),
-          cancellation: cancellation,
-        );
-    Uint8List data;
-    try {
-      data = await ask(off);
-    } on ExternalFailure catch (e) {
-      if (off.isEmpty || e.kind != ExternalFailureKind.http || (e.status != 400 && e.status != 422)) rethrow;
-      _refusedThinkingOff.add(model.url);
-      data = await ask(const {});
-    }
-    return parseTags(answer(data));
-  }
-
-  Future<List<String>> test(
-    ExternalModel model, {
-    AiCancellation? cancellation,
-  }) async {
-    return tags(
-      model: model,
-      jpeg: await _grayJpeg(),
-      cancellation: cancellation,
-    );
-  }
-
-  void close() {
-    if (_ownsClient) _client.close();
-  }
+  void close() {}
 }
 
-Future<Uint8List> _grayJpeg() => coreRunAsync(() {
-  final picture = image.Image(width: 64, height: 64, numChannels: 3);
-  image.fill(picture, color: image.ColorRgb8(128, 128, 128));
-  return Uint8List.fromList(image.encodeJpg(picture, quality: 80));
-});
+/// The tags for the picture at [image] (none: a plain grey one) from [model] (`{'kind': 'local',
+/// 'id': …}` or a [ExternalAI.service]): the core prepares the picture, asks the model and reads its
+/// reply.
+Future<List<String>> coreTags(
+  Map<String, Object?> model, {
+  String image = '',
+  List<String> existing = const [],
+  List<String> vocabulary = const [],
+  String? postText,
+  AiCancellation? cancellation,
+}) async {
+  cancellation?.check();
+  final job = 'tag-${_uuid()}';
+  final request = <String, Object?>{
+    'job': job,
+    'model': model,
+    'image': image,
+    'existing': existing,
+    'vocabulary': vocabulary,
+    'post_text': postText,
+  };
+  final stop = cancellation?.listen(() => Core.aiCancel(job));
+  try {
+    final r = await coreRunAsync(() => Core.aiTag(request));
+    cancellation?.check();
+    return (r['tags'] as List).cast<String>();
+  } on AiError catch (e) {
+    throw ExternalFailure.fromCore(e);
+  } finally {
+    stop?.call();
+  }
+}

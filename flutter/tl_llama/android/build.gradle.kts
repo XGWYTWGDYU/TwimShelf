@@ -8,11 +8,12 @@ plugins {
 android {
     namespace = "org.twimshelf.tl_llama"
     compileSdk = 36
-    // Vulkan 1.2 (llama.cpp's GPU backend) is checked at run time; older devices use the CPU
+    // the GPU backends (OpenCL on Adreno, Vulkan 1.2 elsewhere) are checked at run time; a device
+    // with neither has no on-device AI (never the processor)
     defaultConfig {
         // as the app; the Vulkan backend links functions the libvulkan of older levels does not have
         minSdk = 31
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
             cmake {
                 arguments += listOf("-DANDROID_STL=c++_shared", "-DTL_LLAMA_VULKAN=ON", "-DTL_LLAMA_OPENCL=ON")

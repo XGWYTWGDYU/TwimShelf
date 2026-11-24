@@ -145,7 +145,12 @@ fn wanted(name: &str) -> bool {
     if !crate::rules::portable_basename(name) || name.contains("..") { return false; }
     let l = name.to_ascii_lowercase();
     l.ends_with(".safetensors") || l.ends_with(".json") || l.ends_with(".jinja") || l.ends_with(".txt") || l.ends_with(".model") || l.ends_with(".tiktoken")
+        || l.ends_with(".gguf")
 }
+
+/// The model format this build of the app runs: MLX on the Apple devices, GGUF (llama.cpp)
+/// everywhere else. What it offers to take from other devices.
+pub fn local_format() -> &'static str { if cfg!(target_vendor = "apple") { "mlx" } else { "gguf" } }
 
 #[derive(Deserialize)]
 struct TreeEntry { #[serde(rename = "type")] kind: String, path: String, size: u64, lfs: Option<Lfs> }
@@ -337,9 +342,11 @@ async fn download_gguf(repo: &str, revision: &str, weights: &str, projector: Opt
     Ok(())
 }
 
-/// Checks a model folder: parsable config.json, at least one safetensors file, and every
+/// Checks a model folder. MLX: parsable config.json, at least one safetensors file, and every
 /// safetensors header consistent with the file size (catches truncated or corrupted copies).
+/// GGUF: its manifest, and the files it names, each a GGUF file.
 pub fn validate_dir(dir: &Path) -> anyhow::Result<()> {
+    if dir.join(GGUF_MANIFEST).exists() { return validate_gguf(dir); }
     let cfg: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("config.json")).context(tr!("models.noConfig"))?).context(tr!("models.configUnreadable"))?;
     if !cfg.is_object() { bail!(tr!("models.configBad")); }
     let mut n = 0;
@@ -348,6 +355,17 @@ pub fn validate_dir(dir: &Path) -> anyhow::Result<()> {
         if p.extension().and_then(|x| x.to_str()) == Some("safetensors") { check_safetensors(&p)?; n += 1; }
     }
     if n == 0 { bail!(tr!("models.noSafetensors")); }
+    Ok(())
+}
+
+fn validate_gguf(dir: &Path) -> anyhow::Result<()> {
+    let m: GgufManifest = serde_json::from_slice(&fs::read(dir.join(GGUF_MANIFEST))?).context(tr!("models.configUnreadable"))?;
+    for name in std::iter::once(&m.weights).chain(m.projector.as_ref()) {
+        if !crate::rules::portable_basename(name) || name.contains("..") { bail!(tr!("models.badName")); }
+        let mut magic = [0u8; 4];
+        let ok = File::open(dir.join(name)).and_then(|mut f| { use std::io::Read; f.read_exact(&mut magic) }).is_ok() && &magic == b"GGUF";
+        if !ok { bail!(tr!("models.configBad")); }
+    }
     Ok(())
 }
 
@@ -520,8 +538,10 @@ fn import_claimed(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
         }
         // The model root is the staging dir or its single sub-folder.
         let mut root = staging.clone();
-        if !root.join("config.json").exists() {
-            let subs: Vec<PathBuf> = fs::read_dir(&staging)?.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.join("config.json").exists()).collect();
+        // an MLX folder has its config.json, a GGUF one its manifest
+        let is_root = |p: &Path| p.join("config.json").exists() || p.join(GGUF_MANIFEST).exists();
+        if !is_root(&root) {
+            let subs: Vec<PathBuf> = fs::read_dir(&staging)?.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| is_root(p)).collect();
             if subs.len() != 1 { bail!(tr!("models.noFolder")); }
             name = subs[0].file_name().unwrap().to_string_lossy().into_owned();
             root = subs[0].clone();
@@ -539,6 +559,34 @@ fn import_claimed(models_dir: &Path, path: &Path) -> anyhow::Result<ModelInfo> {
 
 #[cfg(test)]
 mod tests {
+    /// One model operation at a time (the app's rule): the tests that import take turns.
+    static IMPORTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A GGUF model goes from one device to another as the MLX ones do: export, import, validated.
+    #[test]
+    fn a_gguf_model_travels_between_devices() {
+        let _turn = IMPORTS.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("tl-gguf-move-{}", rand::random::<u64>()));
+        let (a, b) = (root.join("a"), root.join("b"));
+        let m = a.join("ggml-org--Tiny-VL-GGUF");
+        std::fs::create_dir_all(&m).unwrap();
+        let file = |name: &str| { let mut v = b"GGUF".to_vec(); v.extend_from_slice(&[3, 0, 0, 0]); v.extend(std::iter::repeat(7u8).take(4096)); std::fs::write(m.join(name), v).unwrap(); };
+        file("tiny-Q4_K_M.gguf");
+        file("mmproj-tiny-Q8_0.gguf");
+        std::fs::write(m.join("tl-model.json"), r#"{"format":"gguf","repo":"ggml-org/Tiny-VL-GGUF","weights":"tiny-Q4_K_M.gguf","projector":"mmproj-tiny-Q8_0.gguf"}"#).unwrap();
+        super::validate_dir(&m).unwrap();
+        let listed = super::installed(&a);
+        assert_eq!((listed.len(), listed[0].format.as_str(), listed[0].vision), (1, "gguf", true));
+        let zip = root.join("model.zip");
+        super::export_zip(&a, "ggml-org--Tiny-VL-GGUF", &zip).unwrap();
+        let got = super::import(&b, &zip).unwrap();
+        assert_eq!((got.format.as_str(), got.weights.as_deref(), got.projector.as_deref()), ("gguf", Some("tiny-Q4_K_M.gguf"), Some("mmproj-tiny-Q8_0.gguf")));
+        // a damaged copy is refused
+        std::fs::write(m.join("tiny-Q4_K_M.gguf"), b"nope").unwrap();
+        assert!(super::validate_dir(&m).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn replacing_a_model_keeps_the_old_one_when_it_cannot_go_through() {
         let d = std::env::temp_dir().join(format!("tl-replace-{}", rand::random::<u64>()));
@@ -580,6 +628,7 @@ mod tests {
 
     #[test]
     fn standard_folder_zip_roundtrip_and_validation() {
+        let _turn = IMPORTS.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("tl-models-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let (a, b) = (root.join("a"), root.join("b"));

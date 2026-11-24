@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/widgets.dart';
-import 'package:flutter/foundation.dart';
-import 'package:image/image.dart' as image;
 import 'package:tl_core/tl_core.dart';
 
 import '../l10n/l10n.dart';
@@ -105,73 +102,11 @@ class NativeTaggingCore implements TaggingCore {
   ) => _apply(media, model, labels, replace, epoch);
 }
 
-/// JPEG at quality80, <=896px before padding, matching the native external path.
-/// Decode/orientation/downsampling/encoding never run on the UI isolate.
-Uint8List? _jpeg(String path) {
-  try {
-    return _jpegOf(File(path).readAsBytesSync());
-  } catch (_) {
-    return null;
-  }
-}
-
-Uint8List? _jpegOf(Uint8List bytes) {
-  try {
-    final decoded = image.decodeImage(bytes);
-    if (decoded == null) return null;
-    var picture = image.bakeOrientation(decoded);
-    if (picture.width > 896 || picture.height > 896) {
-      picture = image.copyResize(
-        picture,
-        width: picture.width >= picture.height ? 896 : null,
-        height: picture.height > picture.width ? 896 : null,
-        interpolation: image.Interpolation.average,
-      );
-    }
-    final short = picture.width < picture.height
-        ? picture.width
-        : picture.height;
-    final long = picture.width > picture.height
-        ? picture.width
-        : picture.height;
-    final scale = (112 / short).clamp(1.0, 896 / long < 1 ? 1.0 : 896 / long);
-    if (scale > 1) {
-      picture = image.copyResize(
-        picture,
-        width: (picture.width * scale).round(),
-        height: (picture.height * scale).round(),
-      );
-    }
-    final w = picture.width > (picture.height / 4).ceil()
-        ? picture.width
-        : (picture.height / 4).ceil();
-    final h = picture.height > (picture.width / 4).ceil()
-        ? picture.height
-        : (picture.width / 4).ceil();
-    if (w != picture.width || h != picture.height) {
-      final canvas = image.Image(width: w, height: h, numChannels: 3);
-      image.fill(canvas, color: image.ColorRgb8(0, 0, 0));
-      image.compositeImage(
-        canvas,
-        picture,
-        dstX: ((w - picture.width) / 2).round(),
-        dstY: ((h - picture.height) / 2).round(),
-      );
-      picture = canvas;
-    }
-    return Uint8List.fromList(image.encodeJpg(picture, quality: 80));
-  } catch (_) {
-    return null;
-  }
-}
-
-Future<Uint8List?> prepareTaggingJpeg(
-  MediaRef media,
-  String cacheDirectory,
-) async {
-  var path = media.path;
+/// The picture of [media] as a file the core can read: a photo as it is, a HEIF one decoded, a
+/// frame of a video (the player takes it). The core prepares it for the model.
+Future<String?> taggingPicture(MediaRef media, String cacheDirectory) async {
   if (media.kind == 'video') {
-    final poster = await videoPoster(
+    return videoPoster(
       FeedItem(
         media_id: media.media_id,
         post_id: '',
@@ -183,16 +118,15 @@ Future<Uint8List?> prepareTaggingJpeg(
       896,
       cacheDirectory,
     );
-    if (poster == null) return null;
-    path = poster;
-  } else if (isHeifPath(path)) {
+  }
+  if (isHeifPath(media.path)) {
     try {
-      path = await Core.displayImageAsync(path, 896, cacheDirectory);
+      return await Core.displayImageAsync(media.path, 896, cacheDirectory);
     } on CoreError {
       return null;
     }
   }
-  return coreRunAsync(() => _jpeg(path));
+  return media.path;
 }
 
 enum TaggingScope { untagged, media, all }
@@ -225,7 +159,7 @@ class TaggingJob {
   );
 }
 
-typedef TaggingImageLoader = Future<Uint8List?> Function(MediaRef);
+typedef TaggingImageLoader = Future<String?> Function(MediaRef);
 /// The model a run uses: an external service, or an installed on-device model.
 class TaggingModel {
   TaggingModel.external(ExternalModel this.external) : id = external.id, title = external.title;
@@ -234,9 +168,10 @@ class TaggingModel {
   final ExternalModel? external;
 }
 
+/// The tags for the picture at a path (see [coreTags]).
 typedef TaggingInference = Future<List<String>> Function(
   TaggingModel,
-  Uint8List,
+  String,
   List<String>,
   List<String>,
   String?,
@@ -258,19 +193,17 @@ class AutoTagger extends ChangeNotifier {
   }) : core = core ?? NativeTaggingCore(),
        _image =
            imageLoader ??
-           ((media) => prepareTaggingJpeg(media, cacheDirectory)),
+           ((media) => taggingPicture(media, cacheDirectory)),
        _infer =
            infer ??
-           ((model, jpeg, existing, vocabulary, text, cancellation) => model.external != null
-               ? ai.tags(
-                   model: model.external!,
-                   jpeg: jpeg,
-                   existing: existing,
-                   vocabulary: vocabulary,
-                   postText: text,
-                   cancellation: cancellation,
-                 )
-               : _local(models, model.id, jpeg, existing, vocabulary, text)),
+           ((model, picture, existing, vocabulary, text, cancellation) async => coreTags(
+                 model.external != null ? await ai.service(model.external!) : {'kind': 'local', 'id': model.id},
+                 image: picture,
+                 existing: existing,
+                 vocabulary: vocabulary,
+                 postText: text,
+                 cancellation: cancellation,
+               )),
        _now = now ?? DateTime.now {
     // iOS ends an app that keeps the GPU busy in the background, as the native apps know
     if (OS.isIOS) {
@@ -335,19 +268,6 @@ class AutoTagger extends ChangeNotifier {
     if (e != null) return TaggingModel.external(e);
     final m = LocalModels.instance.find(id);
     return m != null && m.vision ? TaggingModel.local(id: m.id, title: LocalModels.instance.title(m)) : null;
-  }
-
-  static Future<List<String>> _local(ExternalModels models, String id, Uint8List jpeg, List<String> existing, List<String> vocabulary, String? text) async {
-    final prompt = models.promptFor(id);
-    try {
-      return await LocalModels.instance.tags(id, jpeg: jpeg, system: prompt.system,
-          question: prompt.question(existing: existing, vocabulary: vocabulary, postText: text));
-    } on ExternalFailure {
-      rethrow;
-    } catch (e) {
-      // the engine's reason (memory, a damaged model) is shown as the run's error
-      throw ExternalFailure(ExternalFailureKind.transport, detail: '$e');
-    }
   }
 
   /// [asked]: someone asked for it just now (a switch, another try), which ends a 停止标记.
@@ -580,15 +500,14 @@ class AutoTagger extends ChangeNotifier {
           ExternalFailure? failure;
           var unreadable = false;
           try {
-            final jpeg = await _image(media);
+            final picture = await _image(media);
             cancellation.check();
-            if (jpeg == null) {
-              unreadable = true;
+            if (picture == null) {
               failure = const ExternalFailure(ExternalFailureKind.unreadable);
             } else {
               labels = await _infer(
                 model,
-                jpeg,
+                picture,
                 existing,
                 vocabulary,
                 media.text,
@@ -616,6 +535,7 @@ class AutoTagger extends ChangeNotifier {
             }
             return;
           }
+          unreadable = failure?.kind == ExternalFailureKind.unreadable;
           if (failure != null) {
             _handled++;
             if (!counted) skipped = failure;

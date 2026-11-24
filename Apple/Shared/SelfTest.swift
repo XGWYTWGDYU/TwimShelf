@@ -99,10 +99,9 @@ enum SelfTest {
         // 1. automatic tagging of untagged media
         var tagged: [[String: Any]] = []
         for m in Core.aiPending(limit: 50) {
-            guard let img = AIEngine.stillImage(path: m.path, kind: m.kind) else { continue }
             let t0 = Date()
             do {
-                let labels = try await AIEngine.shared.tags(for: img, repo: tagger, postText: m.text)
+                let labels = try await AIEngine.tags(path: m.path, kind: m.kind, repo: tagger, postText: m.text)
                 try Core.aiApply(mediaId: m.mediaId, model: tagger, labels: labels)
                 tagged.append(["media": String(m.mediaId.prefix(8)), "labels": labels, "ms": Int(Date().timeIntervalSince(t0) * 1000)])
             } catch { tagged.append(["media": String(m.mediaId.prefix(8)), "error": "\(error)"]) }

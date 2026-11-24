@@ -174,3 +174,19 @@ char *tl_ext_pair_begin(const char *addresses_json);
 void tl_ext_pair_cancel(void);
 char *tl_ext_clients(void);
 char *tl_ext_remove(const char *id);
+// Tagging with a vision model (see core/src/ai): every app asks the core, the core asks the model.
+/// The on-device engine (llama.cpp) is looked for in `dir` (empty: next to the program).
+void tl_ai_set_engine_dir(const char *dir);
+/// MLX's answer about the picture at `image` from the model in `model_dir`, or NULL with *error set.
+typedef char *(*tl_mlx_describe)(const char *model_dir, const char *image, const char *system, const char *question, int32_t max_tokens, char **error);
+typedef void (*tl_mlx_free)(char *text);
+/// The Apple apps: MLX as the on-device engine, and the memory their GPU has for a model.
+void tl_ai_set_mlx(tl_mlx_describe describe, tl_mlx_free free_text, uint64_t memory);
+/// The tags for one picture (a TagRequest, see core/src/ai/mod.rs). Blocks: not on the main thread.
+char *tl_ai_tag(const char *request_json);
+void tl_ai_cancel(const char *job);
+char *tl_ai_service_models(const char *service_json);
+char *tl_ai_default_prompt(const char *lang);
+char *tl_ai_hardware(void);
+char *tl_ai_fit(uint64_t bytes);
+void tl_ai_unload(void);

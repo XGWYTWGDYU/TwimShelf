@@ -113,32 +113,8 @@ enum ModelPrompts {
     static func forget(_ model: String) { Core.setSetting(key(model), nil) }
 }
 
-extension AIEngine.Prompt {
-    /// The question sent with each image: the prompt, then this media's tags, the library's
-    /// tags and the post text (each only when there is something to say).
-    func question(existing: [String], vocabulary: [String], postText: String?) -> String {
-        var q = prompt
-        if !existing.isEmpty { q += "\n\n" + self.existing.replacingOccurrences(of: "{existing}", with: existing.joined(separator: L("list.separator"))) }
-        if !vocabulary.isEmpty { q += "\n\n" + self.vocabulary.replacingOccurrences(of: "{tags}", with: vocabulary.joined(separator: L("list.separator"))) }
-        if let ctx = AIEngine.cleanContext(postText) { q += "\n\n" + context.replacingOccurrences(of: "{text}", with: ctx) }
-        return q
-    }
-}
-
-/// The OpenAI-compatible client.
+/// Services as the core reaches them (core/src/ai/external.rs): the app keeps their list and keys.
 enum ExternalAI {
-    enum Failure: LocalizedError {
-        case badURL, http(Int, String), noModel, empty
-        var errorDescription: String? {
-            switch self {
-            case .badURL: L("models.external.err.url")
-            case .http(let c, let m): m.isEmpty ? L("models.external.err.status", c) : L("format.labelValue", L("models.external.err.status", c), m)
-            case .noModel: L("models.external.err.noModel")
-            case .empty: L("models.external.err.empty")
-            }
-        }
-    }
-
     /// "https://api.x.ai" / ".../v1" / ".../v1/chat/completions" all lead to the endpoint.
     static func endpoint(_ base: String, _ path: String) -> URL? {
         var s = base.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -149,100 +125,10 @@ enum ExternalAI {
         return URL(string: s + "/" + path)
     }
 
-    static var session: URLSession = {
-        let c = URLSessionConfiguration.ephemeral
-        c.timeoutIntervalForRequest = 120
-        return URLSession(configuration: c)
-    }()
-
-    private static func request(_ url: URL, key: String?, body: Data? = nil) -> URLRequest {
-        var r = URLRequest(url: url)
-        r.httpMethod = body == nil ? "GET" : "POST"
-        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let key { r.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        r.httpBody = body
-        return r
-    }
-
-    private static func send(_ r: URLRequest) async throws -> Data {
-        let (data, resp) = try await session.data(for: r)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else {
-            let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]).flatMap { ($0["error"] as? [String: Any])?["message"] as? String ?? $0["error"] as? String }
-                ?? String(decoding: data.prefix(200), as: UTF8.self)
-            throw Failure.http(code, msg)
-        }
-        return data
-    }
-
-    /// The server's models (GET /v1/models).
+    /// The server's models.
     static func models(_ m: ExternalModel) async throws -> [String] {
-        guard let url = endpoint(m.url, "models") else { throw Failure.badURL }
-        let data = try await send(request(url, key: m.apiKey))
-        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return (obj?["data"] as? [[String: Any]])?.compactMap { $0["id"] as? String } ?? []
-    }
-
-    /// The model name to send: the one configured, or (a local server) its first model.
-    static func modelName(_ m: ExternalModel) async throws -> String {
-        if !m.model.trimmingCharacters(in: .whitespaces).isEmpty { return m.model.trimmingCharacters(in: .whitespaces) }
-        guard let first = try await models(m).first else { throw Failure.noModel }
-        return first
-    }
-
-    /// The request body: a system message and a user message with the text and the image.
-    static func body(model: String, system: String, question: String, jpeg: Data, thinkingOff: [String: Any] = [:]) -> Data {
-        let json: [String: Any] = thinkingOff.merging([
-            "model": model,
-            "temperature": 0.1,
-            "max_tokens": 300,
-            "stream": false,
-            "messages": [
-                ["role": "system", "content": system],
-                ["role": "user", "content": [
-                    ["type": "text", "text": question],
-                    ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64," + jpeg.base64EncodedString()]],
-                ]],
-            ],
-        ]) { _, own in own }
-        return (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
-    }
-
-    /// What turns a model's reasoning off, as this service spells it. Services that answer with
-    /// the result alone get nothing; the rest of the world (local servers) gets the usual words.
-    static func thinkingOff(host: String) -> [String: Any] {
-        let h = host.lowercased()
-        func at(_ d: String) -> Bool { h == d || h.hasSuffix("." + d) }
-        if at("openai.com") || at("openai.azure.com") || at("x.ai") || at("anthropic.com") { return [:] }
-        if at("deepseek.com") || at("bigmodel.cn") || at("z.ai") { return ["thinking": ["type": "disabled"]] }
-        if at("aliyuncs.com") || at("siliconflow.cn") || at("siliconflow.com") { return ["enable_thinking": false] }
-        if at("openrouter.ai") { return ["reasoning": ["enabled": false]] }
-        if at("googleapis.com") { return ["reasoning_effort": "none"] }
-        return ["think": false, "enable_thinking": false, "chat_template_kwargs": ["enable_thinking": false]]
-    }
-
-    /// Servers that refused the switch above: asked plainly from then on.
-    private static let refusedLock = NSLock()
-    nonisolated(unsafe) private static var refusedThinkingOff = Set<String>()
-    private static func refusesThinkingOff(_ url: String, add: Bool = false) -> Bool {
-        refusedLock.lock(); defer { refusedLock.unlock() }
-        if add { refusedThinkingOff.insert(url) }
-        return refusedThinkingOff.contains(url)
-    }
-
-    /// The answer text of a Chat Completions response.
-    static func answer(_ data: Data) throws -> String {
-        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let msg = (obj?["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any]
-        if let s = msg?["content"] as? String, !s.isEmpty { return s }
-        // some servers return content as parts
-        if let parts = msg?["content"] as? [[String: Any]] {
-            // (never the parts that hold the model's reasoning)
-            let s = parts.filter { p in !((p["type"] as? String)?.lowercased().contains("think") == true || (p["type"] as? String)?.lowercased().contains("reason") == true) }
-                .compactMap { $0["text"] as? String }.joined()
-            if !s.isEmpty { return s }
-        }
-        throw Failure.empty
+        let service: [String: Any] = ["id": m.id, "url": m.url, "model": m.model, "key": m.apiKey as Any]
+        return try await Task.detached { try Core.aiServiceModels(service) }.value
     }
 
     /// Expensive to make and safe to share between threads.
@@ -256,25 +142,9 @@ enum ExternalAI {
         return CGImageDestinationFinalize(dst) ? out as Data : nil
     }
 
-    static func tags(for image: CIImage, model m: ExternalModel, postText: String?, existing: [String], vocabulary: [String]) async throws -> [String] {
-        guard let url = endpoint(m.url, "chat/completions") else { throw Failure.badURL }
-        guard let jpg = jpeg(image) else { throw Failure.empty }
-        let p = ModelPrompts.prompt(forModel: m.id)
-        let name = try await modelName(m)
-        let question = p.question(existing: existing, vocabulary: vocabulary, postText: postText)
-        let off = refusesThinkingOff(m.url) ? [:] : thinkingOff(host: url.host ?? "")
-        let data: Data
-        do { data = try await send(request(url, key: m.apiKey, body: body(model: name, system: p.system, question: question, jpeg: jpg, thinkingOff: off))) }
-        catch Failure.http(let code, _) where (code == 400 || code == 422) && !off.isEmpty {
-            _ = refusesThinkingOff(m.url, add: true)
-            data = try await send(request(url, key: m.apiKey, body: body(model: name, system: p.system, question: question, jpeg: jpg)))
-        }
-        return try AIEngine.parseTags(try answer(data))
-    }
-
-    /// "测试": one small request with a plain gray image; returns the tags or throws.
+    /// "测试": the tags for a plain grey picture, or why there are none.
     static func test(_ m: ExternalModel) async throws -> [String] {
-        let img = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
-        return try await tags(for: img, model: m, postText: nil, existing: [], vocabulary: [])
+        let request: [String: Any] = ["model": ["kind": "external", "id": m.id, "url": m.url, "model": m.model, "key": m.apiKey as Any], "image": ""]
+        return try await Task.detached { try Core.aiTag(request) }.value
     }
 }

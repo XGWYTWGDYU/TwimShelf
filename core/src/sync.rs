@@ -469,8 +469,9 @@ impl SyncNode {
     async fn serve_models(&self, mut ch: Channel) -> anyhow::Result<()> {
         let dir = self.lib.models_dir();
         match ch.recv().await? {
-            // MLX folders only: they run on Apple devices alone, and only those pull models
-            Msg::ListModels => ch.send(&Msg::Models { list: crate::models::installed(&dir).into_iter().filter(|m| m.format == "mlx").collect() }).await,
+            // every model here: the asking device keeps those of its own format (MLX on the Apple
+            // devices, GGUF elsewhere)
+            Msg::ListModels => ch.send(&Msg::Models { list: crate::models::installed(&dir) }).await,
             Msg::FetchModel { id } => {
                 let Ok(id) = crate::models::checked_id(&id).map(str::to_string) else { return ch.send(&Msg::ModelError { message: tr!("models.badName").into() }).await };
                 let mdir = dir.join(&id);
@@ -501,7 +502,10 @@ impl SyncNode {
     pub async fn peer_models(&self, host: &str, port: u16) -> anyhow::Result<Vec<crate::models::ModelInfo>> {
         let mut ch = self.connect_auth(host, port, "models").await?;
         silence_limited(ch.send(&Msg::ListModels)).await?;
-        match silence_limited(ch.recv()).await? { Msg::Models { list } => Ok(list), _ => bail!("protocol: models") }
+        match silence_limited(ch.recv()).await? {
+            Msg::Models { list } => Ok(list.into_iter().filter(|m| m.format == crate::models::local_format()).collect()),
+            _ => bail!("protocol: models"),
+        }
     }
 
     /// Copies one model folder from a peer, validates it, then installs it. Progress is reported

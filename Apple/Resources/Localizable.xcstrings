@@ -1362,6 +1362,35 @@
         }
       }
     },
+    "ai.err.noGpu" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device has no GPU that can run on-device models"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスにはオンデバイスモデルを実行できる GPU がありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备没有能运行本机模型的 GPU"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這台裝置沒有能執行本機模型的 GPU"
+          }
+        }
+      }
+    },
     "ai.err.noTags" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1474,6 +1503,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法讀取這個檔案"
+          }
+        }
+      }
+    },
+    "ai.mobile.banner" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tagging with on-device models isn't recommended on phones and tablets: it's slow and drains the battery. Tags that computers on the same sync account make sync to this device."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スマートフォンやタブレットでのオンデバイスモデルによるタグ付けはおすすめしません（遅く、電池を多く消費します）。同じ同期アカウントのコンピュータが付けたタグは、このデバイスに同期されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不建议在手机和平板上用本机模型打标签：速度慢，也很耗电。同一同步账户里的电脑打的标签会同步到这台设备。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不建議在手機和平板上用本機模型加標籤：速度慢，也很耗電。同一同步帳號裡的電腦加的標籤會同步到這台裝置。"
           }
         }
       }
@@ -18271,25 +18329,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Between Apple Devices Only"
+            "value" : "Between Devices of the Same Kind"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple デバイス間のみ"
+            "value" : "同じ種類のデバイス間のみ"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "仅限 Apple 设备之间"
+            "value" : "只在同类设备之间"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "僅限 Apple 裝置之間"
+            "value" : "只在同類裝置之間"
           }
         }
       }
@@ -18300,25 +18358,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Exporting, importing and pulling models work between Apple devices only: these MLX models run on Apple silicon alone. Android, Windows and Linux download their own models."
+            "value" : "Models are exported, imported and pulled between devices of the same kind: MLX models between Apple devices, GGUF models between Android, Windows and Linux."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "モデルの書き出し・読み込み・ほかのデバイスからの取得は Apple デバイス間でのみ使えます。これらの MLX モデルは Apple シリコンでしか動きません。Android、Windows、Linux はそれぞれのモデルをダウンロードします。"
+            "value" : "モデルの書き出し・読み込み・取得は同じ種類のデバイス間で行えます：Apple デバイス間は MLX モデル、Android・Windows・Linux 間は GGUF モデルです。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "导出、导入和从其他设备拉取模型仅限 Apple 设备之间使用：这些 MLX 模型只能在 Apple 芯片上运行。Android、Windows 和 Linux 会下载各自的模型。"
+            "value" : "模型只在同类设备之间导出、导入和拉取：Apple 设备之间是 MLX 模型，Android、Windows 和 Linux 之间是 GGUF 模型。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "匯出、匯入和從其他裝置拉取模型僅限 Apple 裝置之間使用：這些 MLX 模型只能在 Apple 晶片上執行。Android、Windows 和 Linux 會下載各自的模型。"
+            "value" : "模型只在同類裝置之間匯出、匯入和拉取：Apple 裝置之間是 MLX 模型，Android、Windows 和 Linux 之間是 GGUF 模型。"
           }
         }
       }
@@ -20388,25 +20446,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Runs on this device with llama.cpp, on the graphics card (Vulkan) where there is one, otherwise on the processor. Nothing leaves the device."
+            "value" : "Runs on this device's graphics card with llama.cpp (CUDA, Vulkan or OpenCL); without one, on-device models are off. Nothing leaves the device."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "llama.cpp でこのデバイス上で動きます。使えるグラフィックス（Vulkan）があればそれを、なければプロセッサを使います。何もデバイスの外に出ません。"
+            "value" : "llama.cpp でこのデバイスのグラフィックス（CUDA、Vulkan、OpenCL）上で動きます。使えるグラフィックスがなければオンデバイスモデルは使えません。何もデバイスの外に出ません。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用 llama.cpp 在本机运行：有可用显卡（Vulkan）时用显卡，否则用处理器。不会把任何内容发出设备。"
+            "value" : "使用 llama.cpp 在本机显卡上运行（CUDA、Vulkan 或 OpenCL）；没有可用的显卡时，本机模型不可用。不会把任何内容发出设备。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用 llama.cpp 在本機執行：有可用顯示卡（Vulkan）時用顯示卡，否則用處理器。不會把任何內容傳出裝置。"
+            "value" : "使用 llama.cpp 在本機顯示卡上執行（CUDA、Vulkan 或 OpenCL）；沒有可用的顯示卡時，本機模型無法使用。不會把任何內容傳出裝置。"
           }
         }
       }

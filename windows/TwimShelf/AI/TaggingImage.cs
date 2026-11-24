@@ -100,21 +100,4 @@ public static class TaggingImage
         bmp.CopyFromBuffer(dst.AsBuffer());
         return bmp;
     }
-
-    /// A small grey picture (the test of an external service).
-    public static async Task<byte[]> GrayJpeg()
-    {
-        var px = new byte[64 * 64 * 4];
-        for (var i = 0; i < px.Length; i += 4) { px[i] = px[i + 1] = px[i + 2] = 128; px[i + 3] = 255; }
-        var bmp = new SoftwareBitmap(BitmapPixelFormat.Bgra8, 64, 64, BitmapAlphaMode.Ignore);
-        bmp.CopyFromBuffer(px.AsBuffer());
-        using var output = new InMemoryRandomAccessStream();
-        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, output);
-        encoder.SetSoftwareBitmap(bmp);
-        await encoder.FlushAsync();
-        var bytes = new byte[output.Size];
-        output.Seek(0);
-        await output.ReadAsync(bytes.AsBuffer(), (uint)bytes.Length, InputStreamOptions.None);
-        return bytes;
-    }
 }

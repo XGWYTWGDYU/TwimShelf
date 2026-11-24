@@ -28,6 +28,8 @@ enum Core {
  static func aiApply(mediaId:String,model:String,labels:[String],replaceOld:Bool,epoch:UInt64)throws {completed.insert(mediaId)}
  static func labelsMissingVectors(model:String)->[String] {[]}
  static func setVectors(model:String,items:[(String,[Float])],epoch:UInt64)throws {}
+ struct AIFailure: Error,LocalizedError {let kind:String;let status:Int?;let detail:String
+  var isDeviceProblem:Bool {["noGpu","noModel","engine"].contains(kind)};var errorDescription:String?{kind}}
 }
 final class ModelStore {
  static let shared=ModelStore();var autoTag=true;var activeTaggerId:String?="test-model";var activeEmbedderId:String?=nil
@@ -40,10 +42,11 @@ final class AIEngine {
  static var healthyCalls=0
  static func canRun(_ s:String)->Bool {true}
  static func memoryCheck(_ s:String)->EngineError? {nil}
- static func stillImage(path:String,kind:String)->Int? {path.hasPrefix("bad") ? nil:(path=="modelbad" ? 2:1)}
- func tags(for img:Int,repo:String,postText:String?,existing:[String],vocabulary:[String])async throws->[String] {
-  if img==2 {struct Refused:Error{};throw Refused()}
-  Self.healthyCalls+=1;return ["tag"]}
+ // what the core reports: a damaged file cannot be read; the model refuses the "modelbad" ones
+ static func tags(path:String,kind:String,repo:String,postText:String?,existing:[String],vocabulary:[String])async throws->[String] {
+  if path.hasPrefix("bad") {throw Core.AIFailure(kind:"unreadable",status:nil,detail:"")}
+  if path=="modelbad" {throw Core.AIFailure(kind:"badTags",status:nil,detail:"")}
+  healthyCalls+=1;return ["tag"]}
  func embed(_ chunk:[String],repo:String)async throws->[[Float]] {[]}
 }
 @main struct QueueHarness {

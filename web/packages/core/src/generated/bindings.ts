@@ -134,4 +134,12 @@ export class CoreBindings {
   tl_ext_pair_cancel(): Promise<void> { return this.t.call('tl_ext_pair_cancel', []) as Promise<void>; }
   tl_ext_clients(): Promise<string | null> { return this.t.call('tl_ext_clients', []) as Promise<string | null>; }
   tl_ext_remove(a0: string | null): Promise<string | null> { return this.t.call('tl_ext_remove', [a0]) as Promise<string | null>; }
+  tl_ai_set_engine_dir(a0: string | null): Promise<void> { return this.t.call('tl_ai_set_engine_dir', [a0]) as Promise<void>; }
+  tl_ai_tag(a0: string | null): Promise<string | null> { return this.t.call('tl_ai_tag', [a0]) as Promise<string | null>; }
+  tl_ai_cancel(a0: string | null): Promise<void> { return this.t.call('tl_ai_cancel', [a0]) as Promise<void>; }
+  tl_ai_service_models(a0: string | null): Promise<string | null> { return this.t.call('tl_ai_service_models', [a0]) as Promise<string | null>; }
+  tl_ai_default_prompt(a0: string | null): Promise<string | null> { return this.t.call('tl_ai_default_prompt', [a0]) as Promise<string | null>; }
+  tl_ai_hardware(): Promise<string | null> { return this.t.call('tl_ai_hardware', []) as Promise<string | null>; }
+  tl_ai_fit(a0: number): Promise<string | null> { return this.t.call('tl_ai_fit', [a0]) as Promise<string | null>; }
+  tl_ai_unload(): Promise<void> { return this.t.call('tl_ai_unload', []) as Promise<void>; }
 }

@@ -14,10 +14,6 @@ swiftc -module-cache-path "$out/cache" -parse-as-library -o "$out/queue" Apple/S
 SCENARIO=unreadable "$out/queue"
 SCENARIO=model "$out/queue"
 
-# what a model's reply becomes (the same cases as the Flutter tests and the Windows parser)
-swiftc -module-cache-path "$out/cache" -o "$out/tags" scripts/checks/ai_tags/main.swift Apple/TLLocalAI/Sources/TLLocalAI/ModelInput.swift
-"$out/tags"
-
 python3 scripts/checks/frontend_contracts/run.py
 python3 scripts/checks/icons.py
 # config.yaml's version is in every file in git that carries one

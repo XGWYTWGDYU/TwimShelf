@@ -1,5 +1,7 @@
-// A small C interface over llama.cpp for Dart's FFI: load a model (and a vision projector),
-// ask about one picture. Strings returned are freed with tl_llama_free_string.
+// A small C interface over llama.cpp, loaded by the Rust core (tl-core's `ai` module): list the
+// devices, load a model on one of them, ask about one picture. Which device, and everything around
+// the answer (prompt, picture, reading the reply), is the core's. Strings returned are freed with
+// tl_llama_free_string.
 #pragma once
 #include <stdint.h>
 
@@ -15,14 +17,20 @@ extern "C" {
 
 typedef struct tl_llama tl_llama;
 
-// Loads the backends found in `dir` (the app's library folder); null: next to this library.
-// Returns the devices found, e.g. "Vulkan0 (Adreno 740), CPU". Call once.
-TL_LLAMA_API char *tl_llama_init(const char *dir);
+// Loads the backends found in `dir` (the app's library folder); null: next to this library. Once
+// per process; later calls do nothing.
+TL_LLAMA_API void tl_llama_init(const char *dir);
 
-// A model: `projector` (a vision model's mmproj) may be null; `embeddings` for an embedder.
-// `gpu_layers` 0 keeps everything on the CPU. On failure null, and *error says why.
-TL_LLAMA_API tl_llama *tl_llama_load(const char *weights, const char *projector, int32_t gpu_layers,
-                                     int32_t context, int32_t embeddings, char **error);
+// The devices llama.cpp found, as JSON: [{"name": "Vulkan0", "backend": "Vulkan", "description":
+// "NVIDIA GeForce RTX 5090", "type": "gpu" | "igpu" | "cpu" | "accel", "free": bytes, "total": bytes,
+// "id": "PCI bus id or empty"}]. The memory is as of this call.
+TL_LLAMA_API char *tl_llama_devices(void);
+
+// A model, entirely on the device named `device` (a "name" above), which has to be a GPU: there is
+// no running on the processor. `projector` (a vision model's mmproj) may be null; `embeddings` for an
+// embedder. On failure null, and *error says why.
+TL_LLAMA_API tl_llama *tl_llama_load(const char *weights, const char *projector, const char *device, int32_t context,
+                                     int32_t embeddings, char **error);
 
 // The model's answer about the picture at `image` (JPEG, PNG, BMP, GIF), at most `max_tokens`.
 TL_LLAMA_API char *tl_llama_describe(tl_llama *m, const char *image, const char *system, const char *question,

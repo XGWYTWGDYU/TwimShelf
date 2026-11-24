@@ -4,8 +4,6 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/widgets.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:image/image.dart' as image;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tl_core/tl_core.dart';
@@ -45,37 +43,38 @@ Future<void> main() async {
     SharedPreferences.setMockInitialValues({});
     final models = ExternalModels(await SharedPreferences.getInstance(), shared: memorySettings(), secrets: SecretStore(MemorySecretBackend()),
     );
+    // a service on this machine, as the core reaches it: the picture it sends has to be a JPEG
+    var label = 'first';
+    var calls = 0;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      final body = await utf8.decodeStream(request);
+      if (request.uri.path.endsWith('/chat/completions')) {
+        final json = jsonDecode(body) as Map;
+        final uri = json['messages'][1]['content'][1]['image_url']['url'] as String;
+        if (image.decodeJpg(base64Decode(uri.split(',').last)) == null) {
+          request.response.statusCode = 400;
+        } else {
+          calls++;
+          request.response.write(jsonEncode({
+            'choices': [
+              {'message': {'content': jsonEncode([label])}},
+            ],
+          }));
+        }
+      } else {
+        request.response.statusCode = 404;
+      }
+      await request.response.close();
+    });
     await models.save(
-      const ExternalModel(
+      ExternalModel(
         id: 'ext:synthetic',
-        url: 'https://synthetic.invalid',
+        url: 'http://127.0.0.1:${server.port}',
         model: 'synthetic',
       ),
     );
-    var label = 'first';
-    var calls = 0;
-    final client = MockClient((request) async {
-      final body = jsonDecode(request.body) as Map;
-      final uri =
-          body['messages'][1]['content'][1]['image_url']['url'] as String;
-      if (image.decodeJpg(base64Decode(uri.split(',').last)) == null) {
-        throw StateError('e1.jpeg');
-      }
-      calls++;
-      return http.Response(
-        jsonEncode({
-          'choices': [
-            {
-              'message': {
-                'content': jsonEncode([label]),
-              },
-            },
-          ],
-        }),
-        200,
-      );
-    });
-    final ai = ExternalAI(models, client: client);
+    final ai = ExternalAI(models);
     final tagger = AutoTagger(
       models: models,
       ai: ai,
@@ -112,7 +111,7 @@ Future<void> main() async {
     await tagger.close();
     tagger.dispose();
     ai.close();
-    client.close();
+    await server.close(force: true);
     models.dispose();
     await output.writeAsString(
       jsonEncode({

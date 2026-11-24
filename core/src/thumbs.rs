@@ -140,13 +140,21 @@ fn thumbnail_inner(
     Ok((result(), true))
 }
 
-fn square(path: &Path, side: u32) -> anyhow::Result<RgbImage> {
+/// A picture as decoded, with what is needed to show it the right way up and in its colours.
+pub(crate) struct Decoded {
+    pub image: DynamicImage,
+    pub icc: Option<Vec<u8>>,
+    pub orientation: image::metadata::Orientation,
+}
+
+/// Decodes the picture at `path` (HEIF too; the first frame of an animation).
+pub(crate) fn decode(path: &Path) -> anyhow::Result<Decoded> {
     fn not_decodable<E>(_: E) -> ThumbError {
         ThumbError::NotDecodable
     }
     if crate::heif::is_heif(path) {
         let decoded = crate::heif::decode(path).map_err(not_decodable)?;
-        return square_of(DynamicImage::ImageRgba8(decoded.image), decoded.icc, image::metadata::Orientation::NoTransforms, side);
+        return Ok(Decoded { image: DynamicImage::ImageRgba8(decoded.image), icc: decoded.icc, orientation: image::metadata::Orientation::NoTransforms });
     }
     let reader = ImageReader::open(path)
         .map_err(not_decodable)?
@@ -171,8 +179,23 @@ fn square(path: &Path, side: u32) -> anyhow::Result<RgbImage> {
         .and_then(image::metadata::Orientation::from_exif)
         .unwrap_or(image::metadata::Orientation::NoTransforms);
     // ImageDecoder::read_image reads the first frame for GIF and animated WebP.
-    let decoded = DynamicImage::from_decoder(decoder).map_err(not_decodable)?;
-    square_of(decoded, icc, orientation, side)
+    let image = DynamicImage::from_decoder(decoder).map_err(not_decodable)?;
+    Ok(Decoded { image, icc, orientation })
+}
+
+/// The picture at `path` the right way up, in sRGB, transparent parts on white.
+pub(crate) fn upright(path: &Path) -> anyhow::Result<RgbImage> {
+    let d = decode(path)?;
+    let mut rgb = flatten(d.image);
+    if let Some(icc) = d.icc { to_srgb(&mut rgb, &icc); }
+    let mut out = DynamicImage::ImageRgb8(rgb);
+    out.apply_orientation(d.orientation);
+    Ok(out.into_rgb8())
+}
+
+fn square(path: &Path, side: u32) -> anyhow::Result<RgbImage> {
+    let d = decode(path)?;
+    square_of(d.image, d.icc, d.orientation, side)
 }
 
 /// Transparent parts on white.

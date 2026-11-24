@@ -23,7 +23,6 @@
 mod auth;
 mod dispatch;
 mod gate;
-mod llama;
 mod secrets;
 mod wire;
 
@@ -119,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/info", get(info))
         .route("/api/proxy", post(proxy).layer(DefaultBodyLimit::max(64 << 20)))
         .route("/api/scaled", get(scaled))
-        .route("/api/ai/describe", post(ai_describe).layer(DefaultBodyLimit::max(32 << 20)))
+        .route("/api/ai/tag", post(ai_tag).layer(DefaultBodyLimit::max(32 << 20)))
         .route("/api/ai/unload", post(ai_unload))
         .route("/gfonts/{*path}", get(gfont))
         .route("/api/lease", post(gate::lease))
@@ -187,7 +186,11 @@ fn apply_cookies(cfg: &Config) {
 
 async fn info(State(cfg): State<Shared>) -> Json<Value> {
     let d = |n: &str| cfg.dir(n).to_string_lossy().into_owned();
-    let (local_ai_supported, local_ai_devices) = tokio::task::spawn_blocking(llama::info).await.unwrap_or((false, None));
+    // on-device AI: a GPU the engine runs models on (never the processor)
+    let hardware: Value = tokio::task::spawn_blocking(|| wire::take(tl_core::ffi::tl_ai_hardware())).await.unwrap_or(Value::Null);
+    let gpus: Vec<String> = hardware["ok"]["gpus"].as_array().map(|g| g.iter().map(|d| format!("{} ({})", d["name"].as_str().unwrap_or(""), d["description"].as_str().unwrap_or(""))).collect()).unwrap_or_default();
+    let local_ai_supported = hardware["ok"]["engine"].as_bool().unwrap_or(false) && !gpus.is_empty();
+    let local_ai_devices = (!gpus.is_empty()).then(|| gpus.join(", "));
     Json(json!({
         "data": cfg.data.to_string_lossy(), "library": d("library"), "models": d("models"),
         "cache": d("cache"), "uploads": d("uploads"), "exports": d("exports"),
@@ -543,55 +546,43 @@ async fn scaled(State(cfg): State<Shared>, Query(q): Query<ScaledQuery>) -> Resp
     }
 }
 
+/// A picture to tag: the core's request (`tl_ai_tag`), and a frame the page took from a video,
+/// which the core cannot read from the library itself.
 #[derive(Deserialize)]
-struct LocalDescribeRequest {
-    model_id: String,
-    image_b64: String,
-    system: String,
-    question: String,
+struct TagBody {
+    request: Value,
     #[serde(default)]
-    max_tokens: Option<i32>,
+    frame_b64: Option<String>,
 }
 
-
-fn find_local_gguf(model_id: &str) -> anyhow::Result<(PathBuf, Option<PathBuf>, bool)> {
-    let raw = wire::take(tl_core::ffi::tl_models_installed());
-    let envelope: Value = serde_json::from_str(raw.as_str().unwrap_or("{}"))?;
-    let list = envelope.get("ok").and_then(Value::as_array).ok_or_else(|| anyhow::anyhow!("models unavailable"))?;
-    let m = list.iter().find(|x| x.get("id").and_then(Value::as_str) == Some(model_id))
-        .ok_or_else(|| anyhow::anyhow!("models.external.err.noModel"))?;
-    let format = m.get("format").and_then(Value::as_str).unwrap_or("");
-    anyhow::ensure!(format == "gguf", "only gguf local models are supported");
-    let dir = PathBuf::from(m.get("path").and_then(Value::as_str).unwrap_or(""));
-    let weights_name = m.get("weights").and_then(Value::as_str).filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("models.external.err.noModel"))?;
-    let weights = dir.join(weights_name);
-    let projector = m.get("projector").and_then(Value::as_str).filter(|s| !s.is_empty()).map(|p| dir.join(p));
-    let vision = m.get("vision").and_then(Value::as_bool).unwrap_or(false);
-    Ok((weights, projector, vision))
-}
-
-async fn ai_describe(State(cfg): State<Shared>, Json(req): Json<LocalDescribeRequest>) -> Response {
+async fn ai_tag(State(cfg): State<Shared>, Json(body): Json<TagBody>) -> Response {
     let cache = cfg.dir("cache");
-    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-        let (weights, projector, _vision) = find_local_gguf(&req.model_id)?;
-        let bytes = base64::engine::general_purpose::STANDARD.decode(&req.image_b64)?;
-        let tmp = cache.join(format!("ai-frame-{:016x}.jpg", rand::random::<u64>()));
-        std::fs::write(&tmp, &bytes)?;
-        struct Cleanup(PathBuf);
-        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
-        let _guard = Cleanup(tmp.clone());
-        llama::describe(&weights, projector.as_deref(), &tmp, &req.system, &req.question, req.max_tokens.unwrap_or(160))
+    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<Value> {
+        struct Cleanup(Option<PathBuf>);
+        impl Drop for Cleanup { fn drop(&mut self) { if let Some(p) = &self.0 { let _ = std::fs::remove_file(p); } } }
+        let mut request = body.request;
+        let mut guard = Cleanup(None);
+        if let Some(b64) = body.frame_b64 {
+            let bytes = base64::engine::general_purpose::STANDARD.decode(b64)?;
+            let tmp = cache.join(format!("ai-frame-{:016x}.jpg", rand::random::<u64>()));
+            std::fs::write(&tmp, &bytes)?;
+            request["image"] = Value::from(tmp.to_string_lossy().into_owned());
+            guard.0 = Some(tmp);
+        }
+        let json = c(Path::new(&request.to_string()));
+        let answer = wire::take(tl_core::ffi::tl_ai_tag(json.as_ptr()));
+        drop(guard);
+        Ok(answer)
     }).await;
     match res {
-        Ok(Ok(text)) => Json(json!({ "ok": text })).into_response(),
+        Ok(Ok(v)) => Json(v).into_response(),
         Ok(Err(e)) => Json(json!({ "error": format!("{e:#}") })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 async fn ai_unload() -> Response {
-    let _ = tokio::task::spawn_blocking(llama::unload_all).await;
+    let _ = tokio::task::spawn_blocking(|| tl_core::ffi::tl_ai_unload()).await;
     StatusCode::NO_CONTENT.into_response()
 }
 

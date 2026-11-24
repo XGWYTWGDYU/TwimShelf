@@ -29,6 +29,8 @@ SCALARS = {
     "double": "double",
 }
 
+# what only the Apple apps call (it takes C function pointers, which this file does not declare)
+APPLE_ONLY = {"tl_ai_set_mlx"}
 DECL = re.compile(r"^\s*([A-Za-z_][\w ]*?\s*\**)\s*\b(tl_\w+)\s*\(([^)]*)\)\s*;")
 
 
@@ -60,6 +62,8 @@ def generate():
         if not m:
             continue
         ret, name, params = m.groups()
+        if name in APPLE_ONLY:
+            continue
         rtype = cs_type(ret, "return")
         args = []
         params = params.strip()

@@ -48,6 +48,22 @@ actor AIEngine {
     static var isSupported: Bool { MLXRuntime.isSupported }
     private var runtime: MLXRuntime { MLXRuntime.shared }
 
+    /// The installed folder of a built-in model, checked against this device's memory first.
+    private func modelDir(_ repo: String) throws -> URL {
+        guard Self.isSupported else { throw EngineError.simulator }
+        guard let dir = Core.installedModels().first(where: { $0.id == repo })?.url else { throw EngineError.notInstalled(repo) }
+        if let e = Self.memoryCheck(repo) { throw e }
+        return dir
+    }
+
+    private static func mapped(_ e: Error, _ repo: String) -> Error {
+        switch e as? MLXRuntime.RuntimeError {
+        case .simulator?: EngineError.simulator
+        case .notInstalled?: EngineError.notInstalled(repo)
+        case nil: e
+        }
+    }
+
     /// Releases the models (after the running inference, never during it).
     func unloadAll() async { await runtime.unloadAll() }
 
@@ -69,7 +85,9 @@ actor AIEngine {
             }
             for round in 1...2 {
                 let image = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.8)).cropped(to: CGRect(x: 0, y: 0, width: 448, height: 448))
-                _ = try await tags(for: image, repo: model.id)
+                let file = FileManager.default.temporaryDirectory.appendingPathComponent("tl-audit.jpg")
+                try ExternalAI.jpeg(image)?.write(to: file)
+                _ = try await Self.tags(path: file.path, kind: "photo", repo: model.id)
                 await record("round \(round) after inference")
                 try await Task.sleep(nanoseconds: 35_000_000_000)
                 await record("round \(round) after idle")
@@ -145,52 +163,43 @@ actor AIEngine {
         }
     }
 
-    /// Post text for the model: @mentions and links removed, trimmed to 300 characters. Author
-    /// name and handle are never passed.
-    nonisolated static func cleanContext(_ text: String?) -> String? {
-        guard var t = text else { return nil }
-        t = t.replacingOccurrences(of: #"https?://\S+"#, with: "", options: .regularExpression)
-        t = t.replacingOccurrences(of: #"@[A-Za-z0-9_]{1,15}"#, with: "", options: .regularExpression)
-        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return nil }
-        return t.count > 300 ? String(t.prefix(300)) + "…" : t
-    }
+    /// MLX as the core's on-device engine (the core asks it, through TLLocalAI.CoreBridge), once.
+    nonisolated static let registered: Void = { tl_ai_set_mlx(CoreBridge.describe, CoreBridge.free, CoreBridge.memory) }()
 
-    /// The installed folder of a built-in model, checked against this device's memory first.
-    private func modelDir(_ repo: String) throws -> URL {
-        guard Self.isSupported else { throw EngineError.simulator }
-        guard let dir = Core.installedModels().first(where: { $0.id == repo })?.url else { throw EngineError.notInstalled(repo) }
-        if let e = Self.memoryCheck(repo) { throw e }
-        return dir
-    }
+    /// How a model of `bytes` fits this device (the core's advice): recommended, usable, tooBig, noGpu.
+    nonisolated static func fit(_ bytes: UInt64) -> String { _ = registered; return Core.aiFit(bytes) }
 
-    private static func mapped(_ e: Error, _ repo: String) -> Error {
-        if let t = e as? ModelInput.TagsError { return t == .noTags ? EngineError.noTags : EngineError.badReply }
-        return switch e as? MLXRuntime.RuntimeError {
-        case .simulator?: EngineError.simulator
-        case .notInstalled?: EngineError.notInstalled(repo)
-        case nil: e
-        }
-    }
-
-    /// Tags for one image. The model also sees the post text, the media's current tags and the
-    /// library's existing tags, so it keeps fitting tags and reuses existing names verbatim.
-    func tags(for image: CIImage, repo: String, postText: String? = nil, existing: [String] = [], vocabulary: [String] = []) async throws -> [String] {
-        // an external model runs elsewhere: no GPU gate, works in the simulator too
+    /// [model] as the core takes it: an installed model by its id, or a service with its key.
+    nonisolated static func modelRef(_ repo: String) -> [String: Any] {
         if let m = ExternalModels.find(repo) {
-            return try await ExternalAI.tags(for: image, model: m, postText: postText, existing: existing, vocabulary: vocabulary)
+            return ["kind": "external", "id": m.id, "url": m.url, "model": m.model, "key": m.apiKey as Any]
         }
-        let p = ModelPrompts.prompt(forModel: repo)
-        let question = p.question(existing: existing, vocabulary: vocabulary, postText: postText)
-        do {
-            return try Self.parseTags(try await runtime.respond(modelDir: try modelDir(repo), system: p.system, question: question, image: image))
-        } catch { throw Self.mapped(error, repo) }
+        return ["kind": "local", "id": repo]
     }
 
-    /// The reply as tags, or the reason it gives none (shown, and counted as a failed analysis).
-    static func parseTags(_ raw: String) throws -> [String] {
-        do { return try ModelInput.parseTags(raw) }
-        catch let e as ModelInput.TagsError { throw e == .noTags ? EngineError.noTags : EngineError.badReply }
+    /// Tags for the picture of a media (a photo as it is, a frame of a video) from `repo`: the core
+    /// prepares the picture, asks the model and reads the tags out of its reply. The model also sees
+    /// the post text, the media's current tags and the library's, so it keeps fitting tags and
+    /// reuses existing names verbatim.
+    nonisolated static func tags(path: String, kind: String, repo: String, postText: String? = nil, existing: [String] = [], vocabulary: [String] = []) async throws -> [String] {
+        _ = registered
+        var picture = path
+        var frame: URL?
+        if kind == "video" {
+            guard let img = ModelInput.stillImage(path: path, kind: kind), let jpg = ExternalAI.jpeg(img) else { throw Core.AIFailure(kind: "unreadable", status: nil, detail: "") }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("tl-frame-\(UUID().uuidString).jpg")
+            try jpg.write(to: url)
+            picture = url.path
+            frame = url
+        }
+        defer { if let frame { try? FileManager.default.removeItem(at: frame) } }
+        let job = "tag-\(UUID().uuidString)"
+        let request: [String: Any] = ["job": job, "model": modelRef(repo), "image": picture, "existing": existing, "vocabulary": vocabulary, "post_text": postText as Any]
+        return try await withTaskCancellationHandler {
+            try await Task.detached(priority: .utility) { try Core.aiTag(request) }.value
+        } onCancel: {
+            Core.aiCancel(job)
+        }
     }
 
     // MARK: Embeddings

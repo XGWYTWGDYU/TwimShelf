@@ -2,6 +2,7 @@
 // and the whole library when asked. Pause, resume and cancel; three failures in a row stop a run
 // (and give the attempts back, so the media are tried again later); progress for the activity panel.
 using Microsoft.UI.Dispatching;
+using System.Text.Json.Nodes;
 using TwimShelf.Core;
 using static TwimShelf.Services.Strings;
 
@@ -75,18 +76,17 @@ public sealed class AutoTagger
         return m is { Vision: true } ? new TaggingModel(m.Id, LocalModels.Instance.Title(m), null) : null;
     }
 
-    Task<List<string>> Infer(TaggingModel model, byte[] jpeg, IReadOnlyList<string> existing, IReadOnlyList<string> vocabulary, string? text, CancellationToken cancel)
+    /// The tags for the prepared picture, from the core (which asks the model).
+    async Task<List<string>> Infer(TaggingModel model, byte[] jpeg, IReadOnlyList<string> existing, IReadOnlyList<string> vocabulary, string? text, CancellationToken cancel)
     {
-        if (model.External != null) return _ai.Tags(model.External, jpeg, existing, vocabulary, text, cancel);
-        return Local(model.Id, jpeg, existing, vocabulary, text);
-    }
-
-    async Task<List<string>> Local(string id, byte[] jpeg, IReadOnlyList<string> existing, IReadOnlyList<string> vocabulary, string? text)
-    {
-        var prompt = _models.PromptFor(id);
-        try { return await LocalModels.Instance.Tags(id, jpeg, prompt.System, prompt.Question(existing, vocabulary, text)); }
-        catch (ExternalFailure) { throw; }
-        catch (Exception e) { throw new ExternalFailure(ExternalFailureKind.Transport, detail: e.Message); }
+        var tmp = Path.Combine(Path.GetTempPath(), $"tl-tag-{Guid.NewGuid():N}.jpg");
+        await File.WriteAllBytesAsync(tmp, jpeg, cancel);
+        try
+        {
+            var reference = model.External != null ? await _ai.Service(model.External) : new JsonObject { ["kind"] = "local", ["id"] = model.Id };
+            return await ExternalAI.CoreTags(reference, tmp, existing, vocabulary, text, cancel);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
     }
 
     /// asked: someone asked for it just now (a switch, another try), which ends a 停止标记.

@@ -1138,3 +1138,79 @@ pub extern "C" fn tl_ext_clients() -> *mut c_char { with(|l| Ok(crate::extension
 /// Unbinds a browser. `{"ok": whether it was bound}`
 #[no_mangle]
 pub extern "C" fn tl_ext_remove(id: *const c_char) -> *mut c_char { with(|l| crate::extension::remove(&l, &s(id))) }
+
+// ---------------------------------------------------------------------------------------------
+// tagging with a vision model (see ai/mod.rs): every app asks the core, the core asks the model
+
+/// `{"ok": …}`, or `{"error": message, "ai": {kind, status?, detail}}` for the apps to tell why.
+fn respond_ai<T: serde::Serialize>(f: impl FnOnce() -> anyhow::Result<T>) -> *mut c_char {
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| Err(anyhow::anyhow!(tr!("ffi.internal", msg = ""))));
+    match r {
+        Ok(v) => respond_with(Ok(v)),
+        Err(e) => match e.downcast_ref::<crate::ai::error::AiError>() {
+            Some(a) => out(serde_json::json!({ "error": a.to_string(), "ai": a }).to_string()),
+            None => respond_with::<()>(Err(e)),
+        },
+    }
+}
+
+fn models_dir() -> std::path::PathBuf {
+    current_library().map(|l| l.models_dir()).unwrap_or_else(|| std::env::temp_dir().join("twimshelf-models"))
+}
+
+/// Where `tl_llama` and its backends are (empty: next to the program, or by name on Android).
+#[no_mangle]
+pub extern "C" fn tl_ai_set_engine_dir(dir: *const c_char) { guard((), || crate::ai::engine::set_dir(&s(dir))) }
+
+/// The Apple apps: MLX as the on-device engine (see ai/engine.rs for the two functions), and the
+/// memory their GPU has for a model (Metal's recommended working set).
+#[no_mangle]
+pub extern "C" fn tl_ai_set_mlx(describe: crate::ai::engine::MlxDescribe, free: crate::ai::engine::MlxFree, memory: u64) {
+    guard((), || { crate::ai::engine::set_mlx(describe, free); crate::ai::devices::set_memory(memory); })
+}
+
+/// The tags for one picture. `request_json`: a `TagRequest` (ai/mod.rs). `{"ok": {tags, device?, ms}}`.
+/// Blocks until the model answers: call it off the app's main thread.
+#[no_mangle]
+pub extern "C" fn tl_ai_tag(request_json: *const c_char) -> *mut c_char {
+    respond_ai(|| {
+        let req: crate::ai::TagRequest = serde_json::from_str(&s(request_json))?;
+        let lib = current_library();
+        let setting = |k: &str| lib.as_ref().and_then(|l| l.db().setting(k).ok().flatten());
+        Ok(crate::ai::tag(&models_dir(), setting, &req)?)
+    })
+}
+
+/// Calls off the tagging job named `job`.
+#[no_mangle]
+pub extern "C" fn tl_ai_cancel(job: *const c_char) { guard((), || crate::ai::error::cancel(&s(job))) }
+
+/// The models a service offers. `service_json`: `{url, model?, key?}`. `{"ok": [names]}`
+#[no_mangle]
+pub extern "C" fn tl_ai_service_models(service_json: *const c_char) -> *mut c_char {
+    respond_ai(|| {
+        let service: crate::ai::external::Service = serde_json::from_str(&s(service_json))?;
+        let cancel = crate::ai::error::Cancel::default();
+        Ok(crate::download::runtime().block_on(crate::ai::external::models(&service, &cancel))?)
+    })
+}
+
+/// The default prompt in a language (`zh-Hans`, `en`, …; empty: the app's).
+#[no_mangle]
+pub extern "C" fn tl_ai_default_prompt(lang: *const c_char) -> *mut c_char {
+    respond(|| Ok(crate::ai::Prompt::default_in(&s(lang))))
+}
+
+/// What this device has for on-device AI: `{"ok": {engine, gpus, memory, chosen}}`.
+#[no_mangle]
+pub extern "C" fn tl_ai_hardware() -> *mut c_char { respond(|| Ok(crate::ai::hardware(&models_dir()))) }
+
+/// How a model of `bytes` fits this device: "recommended", "usable", "tooBig" or "noGpu".
+#[no_mangle]
+pub extern "C" fn tl_ai_fit(bytes: u64) -> *mut c_char {
+    respond(|| Ok(crate::ai::devices::fit(bytes, crate::ai::devices::memory())))
+}
+
+/// Frees the on-device model now.
+#[no_mangle]
+pub extern "C" fn tl_ai_unload() { guard((), crate::ai::engine::unload) }
