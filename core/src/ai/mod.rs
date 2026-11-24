@@ -177,18 +177,45 @@ pub struct Hardware {
     pub memory: Option<u64>,
     /// The GPU chosen among several, when there is a choice.
     pub chosen: Option<String>,
+    /// Android: who made the chip and which it is (`ro.soc.manufacturer`, `ro.soc.model`, e.g.
+    /// "QTI", "SM8975"), for what the app says about on-device AI there.
+    pub soc: Option<Soc>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Soc {
+    pub manufacturer: String,
+    pub model: String,
+}
+
+#[cfg(target_os = "android")]
+fn soc() -> Option<Soc> {
+    use std::ffi::{c_char, c_int, CStr, CString};
+    extern "C" { fn __system_property_get(name: *const c_char, value: *mut c_char) -> c_int; }
+    let get = |key: &str| {
+        let k = CString::new(key).ok()?;
+        let mut v = [0 as c_char; 92]; // PROP_VALUE_MAX
+        unsafe { __system_property_get(k.as_ptr(), v.as_mut_ptr()) };
+        let s = unsafe { CStr::from_ptr(v.as_ptr()) }.to_string_lossy().trim().to_string();
+        (!s.is_empty()).then_some(s)
+    };
+    let manufacturer = get("ro.soc.manufacturer")?;
+    Some(Soc { manufacturer, model: get("ro.soc.model").unwrap_or_default() })
+}
+
+#[cfg(not(target_os = "android"))]
+fn soc() -> Option<Soc> { None }
 
 pub fn hardware(models_dir: &Path) -> Hardware {
     if engine::has_mlx() {
-        return Hardware { engine: true, gpus: Vec::new(), memory: devices::memory(), chosen: None };
+        return Hardware { engine: true, gpus: Vec::new(), memory: devices::memory(), chosen: None, soc: None };
     }
     let gpus = devices::gpus();
     let chosen = if devices::chooses() && gpus.len() > 1 { devices::remembered(models_dir, &gpus) }
         else if devices::chooses() { gpus.first().map(|d| d.name.clone()) }
         else { devices::mobile_gpu(&gpus).map(|d| d.name.clone()) };
     let memory = devices::memory();
-    Hardware { engine: engine::available(), gpus, memory, chosen }
+    Hardware { engine: engine::available(), gpus, memory, chosen, soc: soc() }
 }
 
 #[cfg(test)]

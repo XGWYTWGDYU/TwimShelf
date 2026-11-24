@@ -1536,6 +1536,64 @@
         }
       }
     },
+    "ai.mobile.qualcomm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On Snapdragon (Adreno) GPUs, llama.cpp's Vulkan mode can't run inference correctly, so models run in OpenCL mode. In this mode, though, a large part of the image encoding can only be done on the CPU. On the 8EE6, each picture takes 10–30 seconds. On-device models aren't recommended on Qualcomm devices; tags that computers on the same sync account make sync to this device."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Snapdragon（Adreno）GPU では、llama.cpp の Vulkan モードでは正しく推論できないため、モデルは OpenCL モードで動作します。ただしこのモードでは、画像エンコードのかなりの部分を CPU でしか実行できません。8EE6 では 1 枚あたり 10〜30 秒かかります。Qualcomm デバイスでのオンデバイスモデルの使用はおすすめしません。同じ同期アカウントのコンピュータが付けたタグは、このデバイスに同期されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在骁龙（Adreno）GPU 上，llama.cpp 的 Vulkan 模式无法正常推理，所以模型以 OpenCL 模式运行。但在这个模式下，图像编码有相当一部分只能在CPU上完成。在8EE6上，每张图片需要10-30秒。不建议在Qualcomm设备上使用设备端模型，同一同步账户中的电脑生成标签会同步到这台设备。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在驍龍（Adreno）GPU 上，llama.cpp 的 Vulkan 模式無法正常推理，所以模型以 OpenCL 模式執行。但在這個模式下，圖像編碼有相當一部分只能在CPU上完成。在8EE6上，每張圖片需要10-30秒。不建議在Qualcomm裝置上使用裝置端模型，同一同步帳號中的電腦產生的標籤會同步到這台裝置。"
+          }
+        }
+      }
+    },
+    "ai.mobile.untested" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This device's processor hasn't been tested. llama.cpp will run in standard Vulkan mode; llama's support on Android devices is incomplete, and errors may occur."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスのプロセッサは未テストです。llama.cpp は標準の Vulkan モードで動作します。Android での llama のサポートは不完全なため、エラーが起きる可能性があります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前设备的处理器未经测试，llama.cpp将以标准的vulkan模式运行，llama在安卓设备上的支持不完善，可能发生错误。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前裝置的處理器未經測試，llama.cpp將以標準的vulkan模式執行，llama在Android裝置上的支援不完善，可能發生錯誤。"
+          }
+        }
+      }
+    },
     "app.checking" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19112,25 +19170,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Export as ZIP (Apple Devices Only)…"
+            "value" : "Export as ZIP…"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ZIP として書き出す（Apple デバイスのみ）…"
+            "value" : "ZIP として書き出す…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "导出为 ZIP（仅限 Apple 设备）…"
+            "value" : "导出为 ZIP…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "匯出為 ZIP（僅限 Apple 裝置）…"
+            "value" : "匯出為 ZIP…"
           }
         }
       }

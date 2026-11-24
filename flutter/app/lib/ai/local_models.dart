@@ -40,6 +40,9 @@ class LocalModels extends ChangeNotifier {
   /// The GPU llama.cpp runs models on (e.g. "Vulkan0 (Mali-G720)"); null on Apple devices, and
   /// where there is none (on-device AI is then off).
   String? devices;
+  /// Android: which chips the app has been tried on, as the AI page tells: Qualcomm (OpenCL, where
+  /// encoding pictures is partly on the processor), MediaTek (not yet), any other (untried).
+  AndroidChip chip = AndroidChip.none;
   List<ModelInfo> installed = const [];
   ModelDownloadStatus? download;
   Timer? _poll;
@@ -69,6 +72,13 @@ class LocalModels extends ChangeNotifier {
         final gpus = (hw['gpus'] as List? ?? const []).cast<Map<String, dynamic>>();
         final chosen = gpus.where((g) => g['name'] == hw['chosen']).firstOrNull ?? gpus.firstOrNull;
         devices = chosen == null ? null : '${chosen['name']} (${chosen['description']})';
+        if (OS.isAndroid) {
+          final maker = '${(hw['soc'] as Map?)?['manufacturer'] ?? ''}'.toLowerCase();
+          final adreno = gpus.any((g) => g['backend'] == 'OpenCL' || '${g['description']}'.contains('Adreno'));
+          chip = maker.contains('qti') || maker.contains('qualcomm') || adreno
+              ? AndroidChip.qualcomm
+              : maker.contains('mediatek') ? AndroidChip.mediatek : AndroidChip.untested;
+        }
         supported = hw['engine'] == true && gpus.isNotEmpty;
       } catch (_) {
         supported = false;
@@ -156,3 +166,6 @@ class LocalModelError implements Exception {
   @override
   String toString() => message;
 }
+
+/// The chip of an Android device, as far as on-device AI there goes.
+enum AndroidChip { none, qualcomm, mediatek, untested }

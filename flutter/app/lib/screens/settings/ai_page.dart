@@ -67,22 +67,11 @@ class AiPage extends StatelessWidget {
               bottom: false,
               child: ListView(padding: EdgeInsets.only(top: 8, bottom: 8 + MediaQuery.paddingOf(context).bottom), children: [
                 // a phone or tablet (all this app runs on): tagging is better left to the
-                // computers of the account, whose tags arrive here by sync
-                Padding(
-                  key: const ValueKey('ai-mobile-banner'),
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(12)),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Icon(Icons.info_outline, size: 20, color: scheme.onSurfaceVariant),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text(L('ai.mobile.banner'), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant))),
-                      ]),
-                    ),
-                  ),
-                ),
+                // computers of the account, whose tags arrive here by sync; and on Android, what
+                // is known of its chip
+                _notice(context, 'ai-mobile-banner', L('ai.mobile.banner')),
+                if (local.chip == AndroidChip.qualcomm) _notice(context, 'ai-chip-banner', L('ai.mobile.qualcomm')),
+                if (local.chip == AndroidChip.untested) _notice(context, 'ai-chip-banner', L('ai.mobile.untested')),
                 if (taggers.isEmpty)
                   SettingsSection(children: [
                     ListTile(leading: const Icon(Icons.auto_awesome_outlined), title: Text(L('models.none.title')), subtitle: Text(L('models.none.message'))),
@@ -766,4 +755,24 @@ class _FailuresTileState extends State<_FailuresTile> {
           trailing: Text('${_failures.length}'),
           onTap: _show,
         );
+}
+
+/// A note atop the page, in its own tinted box.
+Widget _notice(BuildContext context, String key, String text) {
+  final scheme = Theme.of(context).colorScheme;
+  return Padding(
+    key: ValueKey(key),
+    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+    child: DecoratedBox(
+      decoration: BoxDecoration(color: scheme.surfaceContainerHigh, borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.info_outline, size: 20, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant))),
+        ]),
+      ),
+    ),
+  );
 }
