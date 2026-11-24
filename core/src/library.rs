@@ -109,17 +109,22 @@ pub struct FeedFilter {
     #[serde(default)] pub exclude_recent: bool,
     /// No loose media ("-外部导入").
     #[serde(default)] pub exclude_loose: bool,
+    /// A search of conditions only, without words to find ("共同", "用户", "标签 我的"): the
+    /// media must have something in one of these fields: a tag of an origin the search counts
+    /// (the scope, or `origins`), post text, an author. All off: nothing matches.
+    /// `rules::require_matches` is the same condition.
+    #[serde(default)] pub require: Option<SearchFields>,
 }
 
 impl FeedFilter {
     /// Whether anything here picks media by what they are about (rather than where they are).
     fn content(&self) -> bool {
         self.author.as_ref().is_some_and(|a| !a.trim().is_empty()) || !self.labels.is_empty() || self.review != crate::rules::Review::Any
-            || self.exclude_terms.iter().any(|t| !t.trim().is_empty()) || self.origins.is_some()
+            || self.exclude_terms.iter().any(|t| !t.trim().is_empty()) || self.origins.is_some() || self.require.is_some()
     }
     /// Only the filters on the media themselves (type, place, state), not the search.
     fn media_filters(&self) -> FeedFilter {
-        FeedFilter { author: None, labels: vec![], review: crate::rules::Review::Any, origins: None, ..self.clone() }
+        FeedFilter { author: None, labels: vec![], review: crate::rules::Review::Any, origins: None, require: None, ..self.clone() }
     }
 }
 

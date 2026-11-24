@@ -204,6 +204,19 @@ class TokenQuery {
     );
   }
 
+  /// With no words to find, what the field and tag-origin capsules alone ask for (the core's
+  /// `FeedFilter::require`, as in SearchQuery.swift): 标签 / 贴文 / 用户 something in those
+  /// fields, 我的 / AI / 共同 / 全部 (also with a minus) a tag that counts. null: nothing of the
+  /// kind (the other conditions narrow the media without words anyway).
+  SearchFields? get require {
+    if (_terms.isNotEmpty) return null;
+    if (_fields.isNotEmpty) return searchFields;
+    if (_scopes.isNotEmpty || _excludedScopes.isNotEmpty) {
+      return SearchFields(tags: !_excludedFields.contains(SearchField.tags), text: false, author: false);
+    }
+    return null;
+  }
+
   List<int>? get origins {
     if (_excludedScopes.isEmpty) return null;
     final mask = switch (scope) {
@@ -251,6 +264,7 @@ class TokenQuery {
       'exclude_folders': _excludedFolders,
       'exclude_recent': _excludeRecent,
       'exclude_loose': _excludeExternal,
+      'require': require?.toJson(),
     });
     return FeedFilter.fromJson(json);
   }

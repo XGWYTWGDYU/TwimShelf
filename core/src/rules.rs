@@ -128,6 +128,16 @@ pub fn search_matches(fields: (bool, bool, bool), origins: &[u8], tags: &[(&str,
     terms.iter().all(|w| hit(w)) && !exclude.iter().any(|w| hit(w))
 }
 
+/// What a search of conditions only (no words) asks of a media (`FeedFilter::require`, the SQL of
+/// `Store::feed_filtered`): something in one of the required fields: a tag with an allowed origin,
+/// post text, an author (name or handle). Nothing required: nothing matches. Unlike words, the
+/// fields are taken as they are (tags are not implied when text and author are off).
+pub fn require_matches(fields: (bool, bool, bool), origins: &[u8], tags: &[(&str, u8)], text: &str, author: &[&str]) -> bool {
+    (fields.0 && tags.iter().any(|(_, o)| origins.contains(&(o & 3))))
+        || (fields.1 && !text.trim().is_empty())
+        || (fields.2 && author.iter().any(|a| !a.trim().is_empty()))
+}
+
 /// Review filter of the feed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]

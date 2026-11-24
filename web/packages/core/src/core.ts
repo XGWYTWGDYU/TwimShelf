@@ -55,7 +55,7 @@ export function feedRequest(q: FeedQuery): FeedRequest {
     filter: {
       author: null, labels: [], review: 'any', bad_only: false, folder: null, loose_only: false,
       album_only: false, recent_only: false, kind: null, exclude_terms: [], origins: null,
-      exclude_folders: [], exclude_recent: false, exclude_loose: false, ...q.filter,
+      exclude_folders: [], exclude_recent: false, exclude_loose: false, require: null, ...q.filter,
     },
   };
 }

@@ -1028,6 +1028,15 @@ impl Store {
             args.push(name.clone());
             sql += &format!(" AND NOT {}", in_folder_sql(args.len()));
         }
+        // conditions without words: something in one of the required fields (`rules::require_matches`)
+        if let Some(r) = f.require {
+            let mut parts: Vec<String> = vec![];
+            if r.tags { parts.push(format!("EXISTS(SELECT 1 FROM (SELECT raw.media_id, c.label, max(raw.origin & 1) | max(raw.origin & 2) AS origin FROM tag_media raw JOIN tag_c c ON c.raw_id=raw.tag_id GROUP BY raw.media_id, c.id) tm JOIN tag t ON t.label=tm.label WHERE tm.media_id=m.id AND {origin_ok})")); }
+            if r.text { parts.push("trim(coalesce(p.text,''))!=''".into()); }
+            if r.author { parts.push("(trim(coalesce(p.author_name,''))!='' OR trim(coalesce(p.screen_name,''))!='')".into()); }
+            if parts.is_empty() { return Ok(vec![]); }
+            sql += &format!(" AND ({})", parts.join(" OR "));
+        }
         let fields = if !fields.text && !fields.author { crate::library::SearchFields { tags: true, text: false, author: false } } else { fields };
         // words with a minus: the media must not contain any of them in a searched field
         // ("contains" only: tags that contain the word, the text, the author)

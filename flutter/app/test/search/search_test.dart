@@ -18,6 +18,7 @@ Map<String, Object?> expected(
   List<int>? origins,
   String scope = 'both',
   Map<String, Object?> filter = const {},
+  Map<String, bool>? require,
 }) => {
   'terms': terms,
   'scope': scope,
@@ -43,6 +44,7 @@ Map<String, Object?> expected(
     'exclude_folders': <String>[],
     'exclude_recent': false,
     'exclude_loose': false,
+    'require': require,
     ...filter,
   },
   'whole_posts': false,
@@ -53,6 +55,7 @@ void main() {
   setUp(() async {
     await L10n.load(locale: const Locale('zh', 'CN'));
   });
+  const tagsOnly = {'tags': true, 'text': false, 'author': false};
   final cases = <String, Map<String, Object?>>{
     '用户 al': expected(['al'], tags: false, text: false),
     '猫': expected(['猫']),
@@ -68,9 +71,49 @@ void main() {
     '我的 猫': expected(['猫'], text: false, author: false, scope: 'mine'),
     'AI 猫': expected(['猫'], text: false, author: false, scope: 'ai'),
     '猫 -贴文': expected(['猫'], text: false),
-    '-共同': expected([], origins: [1, 2]),
+    '-共同': expected([], origins: [1, 2], require: tagsOnly),
     '-全部': expected([], exclude: ['全部']),
   };
+  // conditions alone (no words): each still asks the core for everything it stands for
+  final alone = <String, Map<String, Object?>>{
+    '标签': expected([], text: false, author: false, require: tagsOnly),
+    '贴文': expected([], tags: false, author: false, require: {'tags': false, 'text': true, 'author': false}),
+    '用户': expected([], tags: false, text: false, require: {'tags': false, 'text': false, 'author': true}),
+    '贴文 用户': expected([], tags: false, require: {'tags': false, 'text': true, 'author': true}),
+    '标签 -标签': expected([], tags: false, text: false, author: false, require: {'tags': false, 'text': false, 'author': false}),
+    '我的': expected([], text: false, author: false, scope: 'mine', require: tagsOnly),
+    'AI': expected([], text: false, author: false, scope: 'ai', require: tagsOnly),
+    '共同': expected([], text: false, author: false, scope: 'common', require: tagsOnly),
+    '全部': expected([], require: tagsOnly),
+    '-我的': expected([], origins: [2], require: tagsOnly),
+    '-AI': expected([], origins: [1], require: tagsOnly),
+    '共同 照片': expected([], text: false, author: false, scope: 'common', require: tagsOnly, filter: {'kind': 'photo'}),
+    '共同 -猫': expected([], text: false, author: false, scope: 'common', require: tagsOnly, exclude: ['猫']),
+    '-用户': expected([], author: false),
+    '-标签': expected([], tags: false),
+    '视频': expected([], filter: {'kind': 'video'}),
+    '-视频': expected([], filter: {'kind': 'photo'}),
+    '最近': expected([], filter: {'recent_only': true}),
+    '-最近': expected([], filter: {'exclude_recent': true}),
+    '外部导入': expected([], filter: {'loose_only': true}),
+    '-外部导入': expected([], filter: {'exclude_loose': true}),
+    '文件夹 旅行': expected([], filter: {'folder': '旅行'}),
+    '-文件夹 旅行': expected([], filter: {'exclude_folders': ['旅行']}),
+    '相册': expected([], filter: {'album_only': true}),
+    '已认可': expected([], filter: {'review': 'reviewed'}),
+    '未认可': expected([], filter: {'review': 'unreviewed'}),
+    '损坏': expected([], filter: {'bad_only': true}),
+  };
+  for (final entry in alone.entries) {
+    test('condition alone: ${entry.key}', () {
+      final query = TokenQuery.parse(entry.key);
+      expect(query.request().toJson(), entry.value);
+      expect(query.isContradictory, isFalse);
+    });
+  }
+  test('words take the place of require', () {
+    expect(TokenQuery.parse('共同 猫').request().filter.require, isNull);
+  });
   for (final entry in cases.entries) {
     test('Swift request: ${entry.key}', () {
       final query = TokenQuery.parse(entry.key);

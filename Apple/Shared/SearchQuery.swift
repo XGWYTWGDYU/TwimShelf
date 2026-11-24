@@ -158,6 +158,17 @@ struct TokenQuery: Equatable {
         return f
     }
 
+    /// With no words to find, what the field and tag-origin capsules alone ask for (the core's
+    /// `FeedFilter::require`): 标签 / 贴文 / 用户 something in those fields, 我的 / AI / 共同 /
+    /// 全部 (also with a minus) a tag that counts. nil: nothing of the kind (the other conditions
+    /// narrow the media without words anyway).
+    var require: SearchFields? {
+        guard terms.isEmpty else { return nil }
+        if !fields.isEmpty { return searchFields }
+        if !scopes.isEmpty || !excludedScopes.isEmpty { return SearchFields(tags: !excludedFields.contains(.tags), text: false, author: false) }
+        return nil
+    }
+
     /// "共同" wins (the narrowest); "我的" with "AI" is either; none = either.
     var scope: SearchScope {
         if scopes.contains(.common) { return .common }
@@ -204,6 +215,7 @@ struct TokenQuery: Equatable {
         f.excludeFolders = excludedFolders
         f.excludeRecent = excludeRecent
         f.excludeLoose = excludeExternal
+        f.require = require
         return f
     }
 

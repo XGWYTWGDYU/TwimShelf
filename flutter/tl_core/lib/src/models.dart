@@ -273,7 +273,8 @@ class FeedFilter implements JsonModel {
       List<int>? origins,
       List<String> exclude_folders = const [],
       this.exclude_recent = false,
-      this.exclude_loose = false})
+      this.exclude_loose = false,
+      this.require})
       : labels = List<String>.unmodifiable(labels.map((v) => v)),
         exclude_terms = List<String>.unmodifiable(exclude_terms.map((v) => v)),
         origins = origins == null
@@ -295,6 +296,7 @@ class FeedFilter implements JsonModel {
   final List<String> exclude_folders;
   final bool exclude_recent;
   final bool exclude_loose;
+  final SearchFields? require;
   factory FeedFilter.fromJson(Map<String, dynamic> json) => FeedFilter(
         author: json['author'] == null ? null : json['author'] as String,
         labels: json['labels'] == null
@@ -331,6 +333,9 @@ class FeedFilter implements JsonModel {
         exclude_loose: json['exclude_loose'] == null
             ? false
             : json['exclude_loose'] as bool,
+        require: json['require'] == null
+            ? null
+            : SearchFields.fromJson(json['require'] as Map<String, dynamic>),
       );
   @override
   Map<String, dynamic> toJson() => {
@@ -348,6 +353,7 @@ class FeedFilter implements JsonModel {
         'exclude_folders': exclude_folders.map((v) => v).toList(),
         'exclude_recent': exclude_recent,
         'exclude_loose': exclude_loose,
+        'require': require == null ? null : require!.toJson(),
       };
 }
 

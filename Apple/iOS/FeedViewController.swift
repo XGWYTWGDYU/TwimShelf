@@ -995,7 +995,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         var req = FeedRequest(terms: terms, scope: query.scope, newestFirst: LibraryPrefs.feedByAdded, fuzzy: fuzzy, fields: fields, filter: currentFilter, wholePosts: grouped)
         // a search that asks for something and its opposite finds nothing, without asking the core
         // the search tab's page shows cards only for a search (the suggestions before it)
-        let contradictory = query.isContradictory || (role == .search && isUnfiltered)
+        let contradictory = query.isContradictory || (role == .search && nothingAsked)
         let needsVectors = !contradictory && fuzzy && (fields.tags || fields.text || !fields.author) && !terms.isEmpty && ModelStore.shared.activeEmbedderId != nil && AIEngine.isSupported
         reloadWork.submit { [weak self] isCurrent in
             guard let self, isCurrent() else { return }
@@ -1030,6 +1030,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private var savedBrowse: CGPoint?
     private var lastUnfiltered = true
     var isUnfiltered: Bool { terms.isEmpty && currentFilter.isEmpty && !query.isContradictory }
+    /// The search tab's page has no capsule to show results for (a condition alone, even one that
+    /// narrows nothing such as "-用户", is a search; a folder still to be picked is not).
+    var nothingAsked: Bool { searchKeys.allSatisfy { $0 == TokenQuery.pendingFolder || $0 == TokenQuery.minus + TokenQuery.pendingFolder } }
 
     private func apply(_ items: [FeedItem], keepPosition: Bool) {
         // a search closed from its results: the cards it showed fade into 浏览's
@@ -1082,7 +1085,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         if allItems.isEmpty {
             emptyLabel.text = isUnfiltered ? L("feed.empty.library") : L("feed.empty.noMatch")
         }
-        emptyLabel.isHidden = !allItems.isEmpty || (role == .search && isUnfiltered)
+        emptyLabel.isHidden = !allItems.isEmpty || (role == .search && nothingAsked)
         DispatchQueue.main.async { self.updateInlinePlayback() }
     }
 

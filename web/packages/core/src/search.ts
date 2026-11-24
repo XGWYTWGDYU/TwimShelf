@@ -170,6 +170,16 @@ export class TokenQuery {
     return { tags: has('tags', true), text: has('text', !tagsOnly), author: has('author', !tagsOnly) };
   }
 
+  /** With no words to find, what the field and tag-origin capsules alone ask for (the core's
+   *  `FeedFilter::require`, as in SearchQuery.swift): 标签 / 贴文 / 用户 something in those fields,
+   *  我的 / AI / 共同 / 全部 (also with a minus) a tag that counts. null: nothing of the kind. */
+  get require(): SearchFields | null {
+    if (this.terms.length > 0) return null;
+    if (this.fields.size > 0) return this.searchFields;
+    if (this.scopes.size > 0 || this.exScopes.size > 0) return { tags: !this.exFields.has('tags'), text: false, author: false };
+    return null;
+  }
+
   get origins(): number[] | null {
     if (this.exScopes.size === 0) return null;
     const mask = { common: 4, mine: 1, ai: 2, both: 3 }[this.scope];
@@ -202,6 +212,7 @@ export class TokenQuery {
     f.exclude_folders = this.exFolders;
     f.exclude_recent = this.exRecent;
     f.exclude_loose = this.exExternal;
+    f.require = this.require;
     return f;
   }
 

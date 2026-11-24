@@ -76,6 +76,7 @@ export interface FeedFilter {
   exclude_folders: string[];
   exclude_recent: boolean;
   exclude_loose: boolean;
+  require?: SearchFields | null;
 }
 
 export interface FeedRequest {

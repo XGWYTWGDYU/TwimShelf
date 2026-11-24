@@ -146,6 +146,9 @@ struct FeedFilter: Codable, Equatable {
     var excludeFolders: [String] = []
     var excludeRecent = false
     var excludeLoose = false
+    /// Conditions without words ("共同", "用户"): something in one of these fields (a tag that
+    /// counts, post text, an author). All off: nothing.
+    var require: SearchFields? = nil
     var isEmpty: Bool { self == FeedFilter() }
 }
 

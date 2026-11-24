@@ -180,6 +180,20 @@ public sealed partial class TokenQuery
         }
     }
 
+    /// With no words to find, what the field and tag-origin capsules alone ask for (the core's
+    /// `FeedFilter::require`, as in SearchQuery.swift): 标签 / 贴文 / 用户 something in those
+    /// fields, 我的 / AI / 共同 / 全部 (also with a minus) a tag that counts. null: nothing of the kind.
+    public SearchFields? Require
+    {
+        get
+        {
+            if (_terms.Count > 0) return null;
+            if (_fields.Count > 0) return Fields;
+            if (_scopes.Count > 0 || _excludedScopes.Count > 0) return new SearchFields { Tags = !_excludedFields.Contains(SearchField.Tags), Text = false, Author = false };
+            return null;
+        }
+    }
+
     public List<int>? Origins
     {
         get
@@ -220,6 +234,7 @@ public sealed partial class TokenQuery
         f.ExcludeFolders = [.. _excludedFolders];
         f.ExcludeRecent = _excludeRecent;
         f.ExcludeLoose = _excludeExternal;
+        f.Require = Require;
         return f;
     }
 

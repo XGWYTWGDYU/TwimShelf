@@ -106,6 +106,9 @@ public sealed class FeedFilter
     public List<string> ExcludeFolders { get; set; } = [];
     public bool ExcludeRecent { get; set; }
     public bool ExcludeLoose { get; set; }
+    /// Conditions without words ("共同", "用户"): something in one of these fields (a tag that
+    /// counts, post text, an author). All off: nothing.
+    public SearchFields? Require { get; set; }
 }
 
 public sealed class FeedRequest
