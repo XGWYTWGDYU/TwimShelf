@@ -57,7 +57,7 @@
   "ai.err.simulator": "The iOS Simulator doesn't support Metal inference; run on a real device or a Mac.",
   "ai.err.unreadable": "Couldn't read this file",
   "ai.mobile.banner": "Tagging with on-device models isn't recommended on phones and tablets: it's slow and drains the battery. Tags that computers on the same sync account make sync to this device.",
-  "ai.mobile.qualcomm": "On Snapdragon (Adreno) GPUs, llama.cpp's Vulkan mode can't run inference correctly, so models run in OpenCL mode. In this mode, though, a large part of the image encoding can only be done on the CPU. On the 8EE6, each picture takes 10–30 seconds. On-device models aren't recommended on Qualcomm devices; tags that computers on the same sync account make sync to this device.",
+  "ai.mobile.qualcomm": "On Snapdragon (Adreno) GPUs, llama.cpp's Vulkan mode can't run inference correctly, so models run in OpenCL mode. In this mode, though, a large part of the image encoding can only be done on the CPU. On the 8EE6, each picture takes 10–30 seconds. On-device models aren't recommended on Qualcomm devices; tags that computers on the same sync account make sync to this device. Alibaba's MNN couldn't answer about pictures in its official sample app, generated out of control on text questions, and produced very poor output with the same model; routes such as ExecuTorch and LiteRT-LM have model-ecosystem problems.",
   "ai.mobile.untested": "This device's processor hasn't been tested. llama.cpp will run in standard Vulkan mode; llama's support on Android devices is incomplete, and errors may occur.",
   "app.checking": "Checking the library, one moment…",
   "app.openFailed": "Couldn't Open the Library",

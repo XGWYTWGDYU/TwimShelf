@@ -1542,25 +1542,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "On Snapdragon (Adreno) GPUs, llama.cpp's Vulkan mode can't run inference correctly, so models run in OpenCL mode. In this mode, though, a large part of the image encoding can only be done on the CPU. On the 8EE6, each picture takes 10–30 seconds. On-device models aren't recommended on Qualcomm devices; tags that computers on the same sync account make sync to this device."
+            "value" : "On Snapdragon (Adreno) GPUs, llama.cpp's Vulkan mode can't run inference correctly, so models run in OpenCL mode. In this mode, though, a large part of the image encoding can only be done on the CPU. On the 8EE6, each picture takes 10–30 seconds. On-device models aren't recommended on Qualcomm devices; tags that computers on the same sync account make sync to this device. Alibaba's MNN couldn't answer about pictures in its official sample app, generated out of control on text questions, and produced very poor output with the same model; routes such as ExecuTorch and LiteRT-LM have model-ecosystem problems."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Snapdragon（Adreno）GPU では、llama.cpp の Vulkan モードでは正しく推論できないため、モデルは OpenCL モードで動作します。ただしこのモードでは、画像エンコードのかなりの部分を CPU でしか実行できません。8EE6 では 1 枚あたり 10〜30 秒かかります。Qualcomm デバイスでのオンデバイスモデルの使用はおすすめしません。同じ同期アカウントのコンピュータが付けたタグは、このデバイスに同期されます。"
+            "value" : "Snapdragon（Adreno）GPU では、llama.cpp の Vulkan モードでは正しく推論できないため、モデルは OpenCL モードで動作します。ただしこのモードでは、画像エンコードのかなりの部分を CPU でしか実行できません。8EE6 では 1 枚あたり 10〜30 秒かかります。Qualcomm デバイスでのオンデバイスモデルの使用はおすすめしません。同じ同期アカウントのコンピュータが付けたタグは、このデバイスに同期されます。Alibaba の MNN は公式サンプルアプリで画像について回答できず、テキストの質問では生成が止まらなくなり、同じモデルでも生成品質が非常に低いものでした。ExecuTorch や LiteRT-LM などの方式にはモデルのエコシステムの問題があります。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在骁龙（Adreno）GPU 上，llama.cpp 的 Vulkan 模式无法正常推理，所以模型以 OpenCL 模式运行。但在这个模式下，图像编码有相当一部分只能在CPU上完成。在8EE6上，每张图片需要10-30秒。不建议在Qualcomm设备上使用设备端模型，同一同步账户中的电脑生成标签会同步到这台设备。"
+            "value" : "在骁龙（Adreno）GPU 上，llama.cpp 的 Vulkan 模式无法正常推理，所以模型以 OpenCL 模式运行。但在这个模式下，图像编码有相当一部分只能在CPU上完成。在8EE6上，每张图片需要10-30秒。不建议在Qualcomm设备上使用设备端模型，同一同步账户中的电脑生成标签会同步到这台设备。阿里MNN在官方实例程序中无法就图片作答，在文本问题中出现失控生成情况，且在相同模型下生成质量极低，ExecuTorch和LiteRT-LM等路线存在模型生态问题。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在驍龍（Adreno）GPU 上，llama.cpp 的 Vulkan 模式無法正常推理，所以模型以 OpenCL 模式執行。但在這個模式下，圖像編碼有相當一部分只能在CPU上完成。在8EE6上，每張圖片需要10-30秒。不建議在Qualcomm裝置上使用裝置端模型，同一同步帳號中的電腦產生的標籤會同步到這台裝置。"
+            "value" : "在驍龍（Adreno）GPU 上，llama.cpp 的 Vulkan 模式無法正常推理，所以模型以 OpenCL 模式執行。但在這個模式下，圖像編碼有相當一部分只能在CPU上完成。在8EE6上，每張圖片需要10-30秒。不建議在Qualcomm裝置上使用裝置端模型，同一同步帳號中的電腦產生的標籤會同步到這台裝置。阿里MNN在官方範例程式中無法就圖片作答，在文字問題中出現失控生成情況，且在相同模型下生成品質極低，ExecuTorch和LiteRT-LM等路線存在模型生態問題。"
           }
         }
       }

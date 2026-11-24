@@ -51,7 +51,7 @@
   "ai.err.simulator": "iOS 模擬器不支援 Metal 推理，請在實機或 Mac 上執行。",
   "ai.err.unreadable": "無法讀取這個檔案",
   "ai.mobile.banner": "不建議在手機和平板上用本機模型加標籤：速度慢，也很耗電。同一同步帳號裡的電腦加的標籤會同步到這台裝置。",
-  "ai.mobile.qualcomm": "在驍龍（Adreno）GPU 上，llama.cpp 的 Vulkan 模式無法正常推理，所以模型以 OpenCL 模式執行。但在這個模式下，圖像編碼有相當一部分只能在CPU上完成。在8EE6上，每張圖片需要10-30秒。不建議在Qualcomm裝置上使用裝置端模型，同一同步帳號中的電腦產生的標籤會同步到這台裝置。",
+  "ai.mobile.qualcomm": "在驍龍（Adreno）GPU 上，llama.cpp 的 Vulkan 模式無法正常推理，所以模型以 OpenCL 模式執行。但在這個模式下，圖像編碼有相當一部分只能在CPU上完成。在8EE6上，每張圖片需要10-30秒。不建議在Qualcomm裝置上使用裝置端模型，同一同步帳號中的電腦產生的標籤會同步到這台裝置。阿里MNN在官方範例程式中無法就圖片作答，在文字問題中出現失控生成情況，且在相同模型下生成品質極低，ExecuTorch和LiteRT-LM等路線存在模型生態問題。",
   "ai.mobile.untested": "目前裝置的處理器未經測試，llama.cpp將以標準的vulkan模式執行，llama在Android裝置上的支援不完善，可能發生錯誤。",
   "app.checking": "正在檢查資料庫，請稍候…",
   "app.openFailed": "無法開啟資料庫",
