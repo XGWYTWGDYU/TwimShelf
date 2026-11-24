@@ -26,12 +26,12 @@ endif()
 
 set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)   # its tools (mtmd, the vision part) need it
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)   # its tools (mtmd, the vision part) need it, and tl_llama its Jinja chat templates
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS ON CACHE BOOL "" FORCE)   # mtmd (the vision part) lives under tools/
-set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)    # nothing here downloads: llama-common needs no HTTPS
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)        # binaries run on other machines than the builder
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
   set(GGML_CPU_ALL_VARIANTS ON CACHE BOOL "" FORCE)
@@ -145,7 +145,7 @@ if(NOT TL_LLAMA_CLANG)
   FetchContent_MakeAvailable(llama)
 
   add_library(tl_llama SHARED tl_llama.cpp)
-  target_link_libraries(tl_llama PRIVATE llama mtmd ggml)
+  target_link_libraries(tl_llama PRIVATE llama mtmd ggml llama-common)
   if(ANDROID)
     target_link_libraries(tl_llama PRIVATE log)
   endif()
@@ -155,7 +155,7 @@ if(NOT TL_LLAMA_CLANG)
 
   # every library the plugin needs at run time, for the platform CMake files to bundle: the
   # backends are separate modules (which CPU variants exist depends on the processor family)
-  set(_libs tl_llama llama mtmd ggml ggml-base)
+  set(_libs tl_llama llama mtmd ggml ggml-base llama-common)
   foreach(b ggml-cpu ggml-vulkan ggml-opencl ggml-cuda)
     if(TARGET ${b})
       list(APPEND _libs ${b})
@@ -202,7 +202,7 @@ set(_vk OFF)
 if(TL_LLAMA_VULKAN AND DEFINED ENV{VULKAN_SDK})
   set(_vk ON)
 endif()
-set(_dlls llama ggml ggml-base ggml-cpu mtmd)
+set(_dlls llama ggml ggml-base ggml-cpu mtmd llama-common)
 if(_vk)
   list(APPEND _dlls ggml-vulkan)
 endif()
@@ -210,7 +210,7 @@ set(_products "")
 foreach(d ${_dlls})
   list(APPEND _products "${_bin}/bin/${d}.dll")
 endforeach()
-set(_implibs "${_bin}/lib/llama.lib" "${_bin}/lib/ggml.lib" "${_bin}/lib/ggml-base.lib" "${_bin}/lib/mtmd.lib")
+set(_implibs "${_bin}/lib/llama.lib" "${_bin}/lib/ggml.lib" "${_bin}/lib/ggml-base.lib" "${_bin}/lib/mtmd.lib" "${_bin}/lib/llama-common.lib")
 include(ExternalProject)
 ExternalProject_Add(llama_clang
   SOURCE_DIR "${_src}"
@@ -219,10 +219,10 @@ ExternalProject_Add(llama_clang
     "-DCMAKE_MAKE_PROGRAM=${_ninja}" "-DCMAKE_C_COMPILER=${_clang}" "-DCMAKE_CXX_COMPILER=${_clang}"
     -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF
     -DLLAMA_BUILD_COMMON=ON -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
-    -DLLAMA_BUILD_TOOLS=ON -DLLAMA_CURL=OFF -DGGML_VULKAN=${_vk}
+    -DLLAMA_BUILD_TOOLS=ON -DLLAMA_OPENSSL=OFF -DGGML_VULKAN=${_vk}
     "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${_bin}/bin" "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${_bin}/bin"
     "-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${_bin}/lib"
-  BUILD_COMMAND cmd /c call "${_vcvars}" >nul && "${CMAKE_COMMAND}" --build "${_bin}" --target llama mtmd ggml-cpu
+  BUILD_COMMAND cmd /c call "${_vcvars}" >nul && "${CMAKE_COMMAND}" --build "${_bin}" --target llama mtmd ggml-cpu llama-common
   INSTALL_COMMAND ""
   # its thousands of warnings go to log files; shown here only when it fails
   LOG_CONFIGURE ON LOG_BUILD ON LOG_MERGED_STDOUTERR ON LOG_OUTPUT_ON_FAILURE ON
@@ -236,7 +236,7 @@ endif()
 
 add_library(tl_llama SHARED tl_llama.cpp)
 add_dependencies(tl_llama llama_clang)
-target_include_directories(tl_llama PRIVATE "${_src}/include" "${_src}/ggml/include" "${_src}/tools/mtmd")
+target_include_directories(tl_llama PRIVATE "${_src}/include" "${_src}/ggml/include" "${_src}/tools/mtmd" "${_src}/common" "${_src}/vendor")
 target_link_libraries(tl_llama PRIVATE ${_implibs})
 target_compile_features(tl_llama PRIVATE cxx_std_17)
 target_compile_definitions(tl_llama PRIVATE TL_LLAMA_BUILD)

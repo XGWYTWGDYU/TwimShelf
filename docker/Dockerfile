@@ -48,7 +48,7 @@ RUN --mount=type=cache,id=llama-gpu,target=/src/llama-build \
     cmake --build /src/llama-build --target tl_llama && \
     mkdir -p /llama && \
     find /src/llama-build -maxdepth 4 \( -type f -o -type l \) \
-      \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
+      \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libllama-common.so*' -o -name 'libggml*.so*' \) \
       -exec cp -P {} /llama/ \; && \
     cp -P /usr/local/cuda/lib64/libcudart.so.12* /usr/local/cuda/lib64/libcublas.so.12* /usr/local/cuda/lib64/libcublasLt.so.12* /llama/ && \
     test -e /llama/libggml-vulkan.so && test -e /llama/libggml-cuda.so

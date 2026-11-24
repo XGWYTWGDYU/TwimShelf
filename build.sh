@@ -231,10 +231,10 @@ build_llama_linux() {   # build_llama_linux <output directory>
   cmake --build "$build" --target tl_llama
   rm -rf "$out" && mkdir -p "$out"
   find "$build" -maxdepth 4 -type f -name 'lib*.so*' \
-    \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
+    \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libllama-common.so*' -o -name 'libggml*.so*' \) \
     -exec cp -P {} "$out/" \;
   find "$build" -maxdepth 4 -type l -name 'lib*.so*' \
-    \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
+    \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libllama-common.so*' -o -name 'libggml*.so*' \) \
     -exec cp -P {} "$out/" \;
   [[ $vk == OFF || -e "$out/libggml-vulkan.so" ]] || fail "llama.cpp's Vulkan backend was not built (see $build)"
   if [[ $cuda == ON ]]; then
