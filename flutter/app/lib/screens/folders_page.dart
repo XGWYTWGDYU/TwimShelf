@@ -14,7 +14,7 @@ import '../app/jobs.dart';
 import '../widgets/text_menu.dart';
 import '../platform/os.dart';
 
-/// 文件夹: the user's folders as covers, then the media kinds and the other collections — the
+/// 文件夹: the user's folders, then one list of the media kinds and the other collections — the
 /// way to every place where the window has no sidebar.
 class FoldersPage extends StatelessWidget {
   const FoldersPage({super.key, required this.library, required this.onOpen, this.foldersOnly = false});
@@ -62,36 +62,40 @@ class FoldersPage extends StatelessWidget {
             child: ListView(
               padding: EdgeInsets.only(top: 4, bottom: 24 + MediaQuery.paddingOf(context).bottom),
               children: [
-                SettingsSection(title: L('folders.mine'), footer: folders.isEmpty ? L('folders.empty.hint') : null, children: [
-                  if (folders.isEmpty)
-                    ListTile(
-                      leading: const SettingsIcon(Icons.create_new_folder_outlined),
-                      title: Text(L('search.noFolders')),
-                      onTap: () => _newFolder(context),
-                    ),
-                  for (final f in folders)
-                    _FolderRow(library: library, folder: f, cacheDir: '${library.directory}${OS.pathSeparator}.covers', onOpen: () => onOpen(Place.folder(f.name))),
-                ]),
-                if (!foldersOnly) ...[
-                  SettingsSection(title: L('sidebar.mediaTypes'), children: [
-                    for (final (p, n) in [(Place.photos, overview?.photos), (Place.videos, overview?.videos)])
-                      MascotPress(
-                        p.mascotIcon,
-                        key: ValueKey(p.id),
-                        onPressed: () => onOpen(p),
-                        builder: (context, mascot, press) => ListTile(
-                          key: ValueKey('kind-${p.id}'),
-                          leading: SettingsIcon(p.icon, mascot: mascot),
-                          title: Text(p.title),
-                          subtitle: n == null ? null : Text('$n'),
-                          trailing: chevron(),
-                          onTap: press,
-                        ),
+                // no folders: no section for them (the button at the top makes one), except where it is all the page has
+                if (folders.isNotEmpty || foldersOnly)
+                  SettingsSection(title: L('folders.mine'), footer: folders.isEmpty ? L('folders.empty.hint') : null, children: [
+                    if (folders.isEmpty)
+                      ListTile(
+                        leading: const SettingsIcon(Icons.create_new_folder_outlined),
+                        title: Text(L('search.noFolders')),
+                        onTap: () => _newFolder(context),
                       ),
+                    for (final f in folders)
+                      _FolderRow(library: library, folder: f, cacheDir: '${library.directory}${OS.pathSeparator}.covers', onOpen: () => onOpen(Place.folder(f.name))),
                   ]),
+                // photos and videos lead the list of the other collections, rows like theirs
+                if (!foldersOnly)
                   ListenableBuilder(
                     listenable: Prefs.instance,
                     builder: (context, _) => SettingsSection(title: L('grid.more'), children: [
+                      for (final (p, n) in [(Place.photos, overview?.photos), (Place.videos, overview?.videos)])
+                        MascotPress(
+                          p.mascotIcon,
+                          key: ValueKey(p.id),
+                          onPressed: () => onOpen(p),
+                          builder: (context, mascot, press) => ListTile(
+                            key: ValueKey('kind-${p.id}'),
+                            leading: SettingsIcon(p.icon, mascot: mascot),
+                            title: Text(p.title),
+                            // the count beside the chevron: rows as high as the others
+                            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                              if (n != null) Text('$n', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                              chevron(),
+                            ]),
+                            onTap: press,
+                          ),
+                        ),
                       for (final p in Place.offered)
                         ListTile(
                           key: ValueKey('more-${p.id}'),
@@ -102,7 +106,6 @@ class FoldersPage extends StatelessWidget {
                         ),
                     ]),
                   ),
-                ],
               ],
             ),
           ),

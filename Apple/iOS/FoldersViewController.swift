@@ -3,10 +3,10 @@ import UIKit
 // MARK: - Folders page
 
 /// The L("place.folders") tab, laid out like the Photos app's Collections: the folders as large covers in
-/// a sideways-scrolling shelf (two rows once there are more than four), the media types, and a
-/// list of the other collections (loose media, unreviewed, damaged, bin).
+/// a sideways-scrolling shelf (two rows once there are more than four), then one plain list: the
+/// media types and the other collections (loose media, unreviewed, damaged, bin).
 final class FoldersViewController: UIViewController, UICollectionViewDelegate {
-    enum Section: Int { case folders, kinds, more }
+    enum Section: Int { case folders, more }
     enum More: String { case loose, album, unreviewed, reviewed, bad, trash }
     enum Item: Hashable {
         case folder(FolderOverview.Folder)
@@ -71,18 +71,22 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
             switch section {
             case .folders:
                 let n = self.dataSource.snapshot().numberOfItems(inSection: .folders)
-                if self.dataSource.snapshot().itemIdentifiers(inSection: .folders).first == .empty {
-                    let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .estimated(120)))
-                    let group = NSCollectionLayoutGroup.vertical(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .estimated(120)), subitems: [item])
+                // a little more than two covers per screen on a phone: the next one peeks in
+                let w = width > 700 ? 190 : floor((width - side * 2 - 14) / 2.18)
+                let rows = n > 4 ? 2 : 1
+                let cellH = w + 46
+                if self.dataSource.snapshot().itemIdentifiers(inSection: .folders).last == .empty {
+                    // no folders: the new-folder tile, and beside it how folders come about,
+                    // centred on the tile's square
+                    let tile = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .absolute(w), heightDimension: .absolute(cellH)))
+                    let hint = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .absolute(max(width - side * 2 - w - 16, 80)), heightDimension: .absolute(w)))
+                    let group = NSCollectionLayoutGroup.horizontal(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(cellH)), subitems: [tile, hint])
+                    group.interItemSpacing = .fixed(16)
                     let s = NSCollectionLayoutSection(group: group)
                     s.contentInsets = .init(top: 4, leading: side, bottom: 24, trailing: side)
                     s.boundarySupplementaryItems = [header]
                     return s
                 }
-                // a little more than two covers per screen on a phone: the next one peeks in
-                let w = width > 700 ? 190 : floor((width - side * 2 - 14) / 2.18)
-                let rows = n > 4 ? 2 : 1
-                let cellH = w + 46
                 let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(cellH)))
                 let group = NSCollectionLayoutGroup.vertical(layoutSize: .init(widthDimension: .absolute(w), heightDimension: .absolute(cellH * CGFloat(rows) + CGFloat(rows - 1) * 14)),
                                                              repeatingSubitem: item, count: rows)
@@ -90,14 +94,6 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
                 let s = NSCollectionLayoutSection(group: group)
                 s.orthogonalScrollingBehavior = .continuousGroupLeadingBoundary
                 s.interGroupSpacing = 14
-                s.contentInsets = .init(top: 4, leading: side, bottom: 24, trailing: side)
-                s.boundarySupplementaryItems = [header]
-                return s
-            case .kinds:
-                let item = NSCollectionLayoutItem(layoutSize: .init(widthDimension: .fractionalWidth(0.5), heightDimension: .absolute(76)))
-                let group = NSCollectionLayoutGroup.horizontal(layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(76)), repeatingSubitem: item, count: 2)
-                group.interItemSpacing = .fixed(12)
-                let s = NSCollectionLayoutSection(group: group)
                 s.contentInsets = .init(top: 4, leading: side, bottom: 24, trailing: side)
                 s.boundarySupplementaryItems = [header]
                 return s
@@ -116,8 +112,6 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
         }
     }
 
-    private static let cardPadding = NSDirectionalEdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14)
-
     private func configureDataSource() {
         let folderCell = UICollectionView.CellRegistration<FolderCoverCell, Item> { cell, _, item in
             switch item {
@@ -127,44 +121,34 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
             }
         }
         let emptyCell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
-            var c = UIListContentConfiguration.subtitleCell()
-            c.image = UIImage(systemName: "folder.badge.plus")
-            c.imageProperties.tintColor = .systemTeal
-            c.text = L("search.noFolders")
-            c.secondaryText = L("folders.empty.hint")
-            c.secondaryTextProperties.color = .secondaryLabel
-            // padding of its own: a list cell outside a list takes the collection's margins less
-            // its own position, which is nothing where the card starts at the margin
-            c.directionalLayoutMargins = Self.cardPadding
+            var c = UIListContentConfiguration.cell()
+            c.text = L("folders.empty.hint")
+            c.textProperties.font = .preferredFont(forTextStyle: .subheadline)
+            c.textProperties.color = .secondaryLabel
+            c.directionalLayoutMargins = .zero
             cell.contentConfiguration = c
-            var bg = UIBackgroundConfiguration.listGroupedCell()
-            bg.cornerRadius = 14
-            cell.backgroundConfiguration = bg
+            cell.backgroundConfiguration = .clear()
         }
+        // photos and videos: rows of the list below like the other collections, with their counts
         let kindCell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
             guard case let .kind(k, n) = item else { return }
-            var c = UIListContentConfiguration.subtitleCell()
-            c.image = UIImage(systemName: k == .video ? "video.fill" : "photo.fill")
-            c.imageProperties.tintColor = k == .video ? .systemPink : .systemBlue
+            var c = UIListContentConfiguration.valueCell()
+            c.image = UIImage(systemName: k == .video ? "video" : "photo")
+            c.imageProperties.tintColor = .label
             c.text = k == .video ? L("place.videos") : L("place.photos")
-            c.textProperties.font = .preferredFont(forTextStyle: .headline)
             c.secondaryText = "\(n)"
-            c.secondaryTextProperties.color = .secondaryLabel
-            c.directionalLayoutMargins = Self.cardPadding
             cell.contentConfiguration = c
-            var bg = UIBackgroundConfiguration.listGroupedCell()
-            bg.cornerRadius = 14
-            cell.backgroundConfiguration = bg
+            cell.accessories = [.disclosureIndicator()]
             cell.accessibilityIdentifier = "kind-" + k.rawValue
         }
         let moreCell = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
             guard case let .more(m, detail) = item else { return }
             var c = UIListContentConfiguration.valueCell()
-            let (title, symbol, color) = Self.moreInfo(m)
+            let (title, symbol) = Self.moreInfo(m)
             c.text = title
             c.secondaryText = detail
             c.image = UIImage(systemName: symbol)
-            c.imageProperties.tintColor = color
+            c.imageProperties.tintColor = .label
             cell.contentConfiguration = c
             cell.accessories = [.disclosureIndicator()]
             cell.accessibilityIdentifier = "more-" + m.rawValue
@@ -183,7 +167,6 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
             case .folders:
                 let n = self.overview?.folders.count ?? 0
                 v.configure(title: L("folders.mine"), detail: n > 0 ? "\(n)" : nil, action: n > 4 ? L("search.kw.all.word") : nil) { [weak self] in self?.showAllFolders() }
-            case .kinds: v.configure(title: L("sidebar.mediaTypes"), detail: nil, action: nil, nil)
             case .more: v.configure(title: L("grid.more"), detail: nil, action: nil, nil)
             }
             v.listInsets = s == .more
@@ -191,14 +174,14 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
         dataSource.supplementaryViewProvider = { cv, kind, ip in cv.dequeueConfiguredReusableSupplementary(using: header, for: ip) }
     }
 
-    private static func moreInfo(_ m: More) -> (String, String, UIColor) {
+    private static func moreInfo(_ m: More) -> (String, String) {
         switch m {
-        case .loose: (L("place.loose"), "square.dashed", .systemIndigo)
-        case .album: (L("place.album"), "photo.on.rectangle", .systemTeal)
-        case .unreviewed: (L("place.unreviewed"), "seal", .systemOrange)
-        case .reviewed: (L("place.reviewed"), "checkmark.seal", .systemGreen)
-        case .bad: (L("place.bad"), "exclamationmark.triangle", .systemRed)
-        case .trash: (L("place.trash"), "trash", .systemGray)
+        case .loose: (L("place.loose"), "square.dashed")
+        case .album: (L("place.album"), "photo.on.rectangle")
+        case .unreviewed: (L("place.unreviewed"), "seal")
+        case .reviewed: (L("place.reviewed"), "checkmark.seal")
+        case .bad: (L("place.bad"), "exclamationmark.triangle")
+        case .trash: (L("place.trash"), "trash")
         }
     }
 
@@ -223,22 +206,28 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
         let countChanged = o?.folders.count != overview?.folders.count
         overview = o
         var snap = NSDiffableDataSourceSnapshot<Section, Item>()
-        snap.appendSections(foldersOnly ? [.folders] : [.folders, .kinds, .more])
         let folders = o?.folders ?? []
-        snap.appendItems(folders.isEmpty ? [.empty] : folders.map(Item.folder) + [.newFolder], toSection: .folders)
+        // no folders: no section for them (+ at the top makes one), except where it is all the page has
+        if !folders.isEmpty {
+            snap.appendSections([.folders])
+            snap.appendItems(folders.map(Item.folder) + [.newFolder], toSection: .folders)
+        } else if foldersOnly {
+            snap.appendSections([.folders])
+            snap.appendItems([.newFolder, .empty], toSection: .folders)
+        }
+        if !foldersOnly { snap.appendSections([.more]) }
         if !foldersOnly { appendKindsAndMore(&snap, o) }
         // progress updates arrive every second: only touch the page when something changed
         guard snap.itemIdentifiers != lastApplied || countChanged else { return }
         lastApplied = snap.itemIdentifiers
         // the header shows the count (and L("search.kw.all.word")): refresh it when the number of folders changed
-        if countChanged && dataSource.snapshot().numberOfSections > 0 { snap.reloadSections([.folders]) }
+        if countChanged && dataSource.snapshot().sectionIdentifiers.contains(.folders) && snap.sectionIdentifiers.contains(.folders) { snap.reloadSections([.folders]) }
         finishApply(snap)
     }
 
     private func appendKindsAndMore(_ snap: inout NSDiffableDataSourceSnapshot<Section, Item>, _ o: FolderOverview?) {
-        snap.appendItems([.kind(.photo, o?.photos ?? 0), .kind(.video, o?.videos ?? 0)], toSection: .kinds)
         let stats = ActivityCenter.shared.stats
-        var more: [Item] = [.more(.loose, nil), .more(.album, nil), .more(.unreviewed, nil), .more(.reviewed, nil)]
+        var more: [Item] = [.kind(.photo, o?.photos ?? 0), .kind(.video, o?.videos ?? 0), .more(.loose, nil), .more(.album, nil), .more(.unreviewed, nil), .more(.reviewed, nil)]
         if LibraryPrefs.aboutExtras { more.append(.more(.bad, (stats?.bad ?? 0) > 0 ? "\(stats?.bad ?? 0)" : nil)) }
         let trashed = stats?.trashed ?? 0
         more.append(.more(.trash, trashed > 0 ? "\(trashed)" : nil))
@@ -258,7 +247,7 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
         case .folder(let f): open(MediaGridViewController(title: f.name, filter: FeedFilter(folder: f.name), folder: f.name))
         case .newFolder, .empty: createFolder()
         case .kind(let k, _):
-            if Mascot.isOn, let cell = cv.cellForItem(at: ip), let normal = UIImage(systemName: k == .video ? "video.fill" : "photo.fill") {
+            if Mascot.isOn, let cell = cv.cellForItem(at: ip), let normal = UIImage(systemName: k == .video ? "video" : "photo") {
                 kindPress?.cancel()
                 kindPress = MascotPulse(k == .video ? "video" : "image", side: 32, normal: normal, show: { [weak cell, weak cv] image in
                     // the cell may have gone on to show another row
