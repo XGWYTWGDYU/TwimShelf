@@ -16,6 +16,13 @@ option(TL_LLAMA_OPENCL "build the OpenCL backend (Adreno GPUs, on Android)" OFF)
 option(TL_LLAMA_CUDA "build the CUDA backend instead of Vulkan (NVIDIA)" OFF)
 option(TL_LLAMA_VULKAN_HEADERS "build against the Vulkan and SPIR-V headers pinned below, not the system's (Linux: a distribution's can be too old for llama.cpp)" OFF)
 
+# downloads keep their archives' timestamps: an option of CMake 3.24 on, which an older one (Ubuntu
+# 22.04: 3.22) would take for part of the URL
+set(TL_EXTRACT_TIMESTAMP)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+  set(TL_EXTRACT_TIMESTAMP DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+endif()
+
 set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)   # its tools (mtmd, the vision part) need it
@@ -69,13 +76,13 @@ include(FetchContent)
 if(GGML_VULKAN AND (ANDROID OR TL_LLAMA_VULKAN_HEADERS))
   FetchContent_Declare(vulkan_headers
     URL "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/vulkan-sdk-1.4.335.0.tar.gz"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    ${TL_EXTRACT_TIMESTAMP})
   FetchContent_Populate(vulkan_headers)
   include_directories(BEFORE "${vulkan_headers_SOURCE_DIR}/include")
   # the backend asks for this package by its config file, which only a Vulkan SDK install has
   FetchContent_Declare(spirv_headers
     URL "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.335.0.tar.gz"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    ${TL_EXTRACT_TIMESTAMP})
   FetchContent_Populate(spirv_headers)
   include_directories(BEFORE "${spirv_headers_SOURCE_DIR}/include")
   file(WRITE "${CMAKE_BINARY_DIR}/spirv-headers-config/SPIRV-HeadersConfig.cmake"
@@ -87,11 +94,11 @@ endif()
 if(ANDROID AND TL_LLAMA_OPENCL)
   FetchContent_Declare(opencl_headers
     URL "https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v2026.05.29.tar.gz"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    ${TL_EXTRACT_TIMESTAMP})
   FetchContent_Populate(opencl_headers)
   FetchContent_Declare(opencl_loader
     URL "https://github.com/KhronosGroup/OpenCL-ICD-Loader/archive/refs/tags/v2026.05.29.tar.gz"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    ${TL_EXTRACT_TIMESTAMP})
   FetchContent_Populate(opencl_loader)
   set(_cl_build "${CMAKE_BINARY_DIR}/opencl-loader")
   if(NOT EXISTS "${_cl_build}/libOpenCL.so")
@@ -127,7 +134,7 @@ else()
   FetchContent_Declare(llama
     URL "https://github.com/ggml-org/llama.cpp/archive/refs/tags/${TL_LLAMA_TAG}.tar.gz"
     PATCH_COMMAND "${CMAKE_COMMAND}" -DSRC=<SOURCE_DIR> -P "${CMAKE_CURRENT_LIST_DIR}/patch_opencl.cmake"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    ${TL_EXTRACT_TIMESTAMP}
     ${_llama_exclude})
 endif()
 # Windows on ARM: llama.cpp's CPU code needs clang there ("MSVC is not supported for ARM"),
@@ -179,7 +186,7 @@ if(TL_LLAMA_SOURCE)
 else()
   FetchContent_Declare(llama_arm
     URL "https://github.com/ggml-org/llama.cpp/archive/refs/tags/${TL_LLAMA_TAG}.tar.gz"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    ${TL_EXTRACT_TIMESTAMP}
     SOURCE_SUBDIR do-not-add)
   FetchContent_MakeAvailable(llama_arm)
   set(_src "${llama_arm_SOURCE_DIR}")
