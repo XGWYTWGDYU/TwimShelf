@@ -169,7 +169,7 @@ async function coreTag(model: ModelRef, opts: {
   if (reply.ai?.kind === 'cancelled') throw new DOMException('Aborted', 'AbortError');
   const key = reply.ai ? aiMessages[reply.ai.kind] ?? 'common.notDone' : reply.error ?? 'common.notDone';
   const status = reply.ai?.status;
-  throw Object.assign(new Error(key === 'models.external.err.status' ? L(key, status) : key), { status });
+  throw Object.assign(new Error(key === 'models.external.err.status' ? L(key, status ?? 0) : key), { status });
 }
 
 export async function testModel(model: ExternalModel, key: string, clear: boolean) {

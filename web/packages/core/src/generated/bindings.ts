@@ -140,6 +140,5 @@ export class CoreBindings {
   tl_ai_service_models(a0: string | null): Promise<string | null> { return this.t.call('tl_ai_service_models', [a0]) as Promise<string | null>; }
   tl_ai_default_prompt(a0: string | null): Promise<string | null> { return this.t.call('tl_ai_default_prompt', [a0]) as Promise<string | null>; }
   tl_ai_hardware(): Promise<string | null> { return this.t.call('tl_ai_hardware', []) as Promise<string | null>; }
-  tl_ai_fit(a0: number): Promise<string | null> { return this.t.call('tl_ai_fit', [a0]) as Promise<string | null>; }
   tl_ai_unload(): Promise<void> { return this.t.call('tl_ai_unload', []) as Promise<void>; }
 }

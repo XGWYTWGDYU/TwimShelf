@@ -57,8 +57,12 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
     private lazy var mobileBanner: UIView = {
         let icon = UIImageView(image: UIImage(systemName: "info.circle"))
         icon.tintColor = .secondaryLabel
+        icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .subheadline)
+        icon.contentMode = .scaleAspectFit
         icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.setContentCompressionResistancePriority(.required, for: .horizontal)
         icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 20).isActive = true
         let label = UILabel()
         label.text = L("ai.mobile.banner")
         label.font = .preferredFont(forTextStyle: .subheadline)

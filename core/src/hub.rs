@@ -50,16 +50,33 @@ const CLAIMS: &[&str] = &["abliterated", "uncensored", "unfiltered", "derestrict
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceProfile {
+    /// The memory a model has to fit in: the GPU's (Windows, Linux, Android), all of it on the Apple
+    /// devices, whose GPU shares it.
     pub memory_bytes: Option<u64>,
     pub free_bytes: Option<u64>,
     /// Phones and tablets: the system ends an app well before all the memory is in use.
     pub mobile: bool,
+    /// The GPU models run on, as the engine names it (none on the Apple devices: MLX's own).
+    #[serde(default)]
+    pub gpu: Option<String>,
+    /// No GPU the engine can run a model on: on-device models are off here.
+    #[serde(default)]
+    pub no_gpu: bool,
 }
 
 pub fn device(models_dir: &Path) -> DeviceProfile { DeviceProfile { free_bytes: crate::storage::free_space(models_dir), ..memory_profile() } }
 
-/// The device without its disk: all a catalog entry's fit depends on.
-pub fn memory_profile() -> DeviceProfile { DeviceProfile { memory_bytes: physical_memory(), free_bytes: None, mobile: cfg!(any(target_os = "ios", target_os = "android")) } }
+/// The device without its disk: all a catalog entry's fit depends on. Models run on the GPU only:
+/// what counts is the largest GPU's memory, or, on the Apple devices, the memory the GPU shares.
+pub fn memory_profile() -> DeviceProfile {
+    let mobile = cfg!(any(target_os = "ios", target_os = "android"));
+    if cfg!(target_vendor = "apple") {
+        return DeviceProfile { memory_bytes: physical_memory(), free_bytes: None, mobile, gpu: None, no_gpu: false };
+    }
+    let gpus = crate::ai::devices::gpus();
+    let best = gpus.iter().max_by_key(|d| d.total);
+    DeviceProfile { memory_bytes: best.map(|d| d.total).filter(|&m| m > 0), free_bytes: None, mobile, gpu: best.map(|d| d.description.clone()), no_gpu: best.is_none() }
+}
 
 #[cfg(unix)]
 fn physical_memory() -> Option<u64> {
@@ -77,11 +94,16 @@ fn physical_memory() -> Option<u64> {
     (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then_some(m.total_phys)
 }
 
-/// How a download of `bytes` fits this device: `recommended`, `usable`, `tooLarge` or `unknown`.
-/// The memory a loaded model takes is the sum the engines check before they load one.
+/// The memory a model of `bytes` (its files) takes loaded: the weights, a quarter more for the
+/// context and the picture's encoder, and half a gigabyte.
+pub fn need(bytes: u64) -> u64 { bytes.saturating_add(bytes / 4).saturating_add(500_000_000) }
+
+/// How a download of `bytes` fits this device: `recommended`, `usable`, `tooLarge`, `noGpu` or
+/// `unknown`.
 pub fn tier(bytes: u64, d: &DeviceProfile) -> &'static str {
+    if d.no_gpu { return "noGpu"; }
     let Some(memory) = d.memory_bytes else { return "unknown" };
-    let need = bytes as u128 + bytes as u128 / 4 + 500_000_000;
+    let need = need(bytes) as u128;
     let (good, possible) = if d.mobile { (60, 75) } else { (60, 85) };
     if need * 100 <= memory as u128 * good { "recommended" } else if need * 100 <= memory as u128 * possible { "usable" } else { "tooLarge" }
 }
@@ -483,7 +505,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn device_with(memory_gb: u64, mobile: bool) -> DeviceProfile { DeviceProfile { memory_bytes: Some(memory_gb * 1_000_000_000), free_bytes: Some(100_000_000_000), mobile } }
+    fn device_with(memory_gb: u64, mobile: bool) -> DeviceProfile { DeviceProfile { memory_bytes: Some(memory_gb * 1_000_000_000), free_bytes: Some(100_000_000_000), mobile, gpu: None, no_gpu: false } }
 
     fn gguf_repo(id: &str, arch: &str, total: u64, files: &[&str]) -> Value {
         json!({"id": id, "gated": false, "downloads": 5, "likes": 1, "sha": "f982a07559d4a2f6c8744d840bf6fccab30eea96", "tags": ["gguf", "license:apache-2.0"],
@@ -499,7 +521,8 @@ mod tests {
         assert_eq!(tier(5_770_000_000, &device_with(8, true)), "tooLarge");
         assert_eq!(tier(5_770_000_000, &device_with(10, false)), "usable");
         assert_eq!(tier(20_000_000_000, &device_with(16, false)), "tooLarge");
-        assert_eq!(tier(1, &DeviceProfile { memory_bytes: None, free_bytes: None, mobile: false }), "unknown");
+        assert_eq!(tier(1, &DeviceProfile { memory_bytes: None, free_bytes: None, mobile: false, gpu: None, no_gpu: false }), "unknown");
+        assert_eq!(tier(1, &DeviceProfile { memory_bytes: None, free_bytes: None, mobile: false, gpu: None, no_gpu: true }), "noGpu");
     }
 
     #[test]
@@ -614,7 +637,7 @@ mod tests {
 
     #[test]
     fn a_full_disk_is_said_before_the_download() {
-        let d = DeviceProfile { memory_bytes: Some(16_000_000_000), free_bytes: Some(1_000_000_000), mobile: false };
+        let d = DeviceProfile { memory_bytes: Some(16_000_000_000), free_bytes: Some(1_000_000_000), mobile: false, gpu: None, no_gpu: false };
         let (v, ..) = offer("gguf", &info("a/m", "gguf"), &[entry("m.gguf", 2_000_000_000), entry("mmproj.gguf", 1)], None, &d);
         assert!(!v[0].enough_space);
     }

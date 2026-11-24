@@ -509,8 +509,5 @@ internal static unsafe partial class Native
     internal static partial nint tl_ai_hardware();
 
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
-    internal static partial nint tl_ai_fit(ulong @bytes);
-
-    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial void tl_ai_unload();
 }

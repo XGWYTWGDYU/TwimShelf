@@ -219,10 +219,15 @@ build_llama_linux() {   # build_llama_linux <output directory>
   local extra=()
   [[ -n "${TL_LLAMA_SOURCE:-}" ]] && extra+=("-DTL_LLAMA_SOURCE=$TL_LLAMA_SOURCE")
   local vk=OFF; have glslc && vk=ON
+  # CUDA beside Vulkan where the toolkit is installed (NVIDIA): its runtime and cuBLAS go along, so
+  # users need only the driver. A release always has it (TL_REQUIRE_CUDA in CI): one app for every GPU.
+  local cuda=OFF nvcc; nvcc=$(command -v nvcc || ls /usr/local/cuda/bin/nvcc 2>/dev/null || true)
+  if [[ -n "$nvcc" ]]; then cuda=ON; extra+=("-DCMAKE_CUDA_COMPILER=$nvcc")
+  elif [[ -n "${TL_REQUIRE_CUDA:-}" ]]; then fail "The CUDA toolkit (nvcc) is required"; fi
   # The packaged libraries sit together, so resolve them relative to each other.
   cmake -S "$ROOT/flutter/tl_llama/src" -B "$build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH='$ORIGIN' \
-    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$build/lib" -DTL_LLAMA_VULKAN=$vk -DTL_LLAMA_VULKAN_HEADERS=ON "${extra[@]}"
+    -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$build/lib" -DTL_LLAMA_VULKAN=$vk -DTL_LLAMA_VULKAN_HEADERS=ON -DTL_LLAMA_CUDA=$cuda "${extra[@]}"
   cmake --build "$build" --target tl_llama
   rm -rf "$out" && mkdir -p "$out"
   find "$build" -maxdepth 4 -type f -name 'lib*.so*' \
@@ -232,6 +237,11 @@ build_llama_linux() {   # build_llama_linux <output directory>
     \( -name 'libtl_llama.so*' -o -name 'libllama.so*' -o -name 'libmtmd.so*' -o -name 'libggml*.so*' \) \
     -exec cp -P {} "$out/" \;
   [[ $vk == OFF || -e "$out/libggml-vulkan.so" ]] || fail "llama.cpp's Vulkan backend was not built (see $build)"
+  if [[ $cuda == ON ]]; then
+    [[ -e "$out/libggml-cuda.so" ]] || fail "llama.cpp's CUDA backend was not built (see $build)"
+    local lib; lib="$(dirname "$(dirname "$(readlink -f "$nvcc")")")/lib64"
+    cp -P "$lib"/libcudart.so.12* "$lib"/libcublas.so.12* "$lib"/libcublasLt.so.12* "$out/"
+  fi
 }
 
 # the desktop app: React + the server binary in Electron

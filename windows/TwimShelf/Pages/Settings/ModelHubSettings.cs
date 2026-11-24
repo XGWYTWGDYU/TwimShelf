@@ -84,7 +84,11 @@ public sealed partial class ModelHubSettings : SettingsSubpage
         unc.Click += (_, _) => { _uncensored = unc.IsChecked == true; _ = Run(true); };
         Card(L("hub.title"), null, "", Detach.Owned(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _search, fit, unc } }, _search));
         var unknown = L("hub.unknown");
-        var lines = new List<string> { L("hub.device", _device?.MemoryBytes is { } m ? Memory(m) : unknown, _device?.FreeBytes is { } f ? Size(f) : unknown) };
+        // what models run on here: the GPU and its memory
+        var free = _device?.FreeBytes is { } f ? Size(f) : unknown;
+        var memory = _device?.MemoryBytes is { } m ? Memory(m) : unknown;
+        var lines = new List<string> { _device?.NoGpu == true ? L("hub.device.noGpu", free)
+            : _device?.Gpu is { } gpu ? L("hub.device.gpu", gpu, memory, free) : L("hub.device", memory, free) };
         if (!string.IsNullOrEmpty(Local.Devices)) lines.Add(L("models.local.devices", Local.Devices));
         lines.Add(L("hub.device.footer"));
         Footer(string.Join('\n', lines));

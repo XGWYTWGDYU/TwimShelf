@@ -1205,12 +1205,6 @@ pub extern "C" fn tl_ai_default_prompt(lang: *const c_char) -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn tl_ai_hardware() -> *mut c_char { respond(|| Ok(crate::ai::hardware(&models_dir()))) }
 
-/// How a model of `bytes` fits this device: "recommended", "usable", "tooBig" or "noGpu".
-#[no_mangle]
-pub extern "C" fn tl_ai_fit(bytes: u64) -> *mut c_char {
-    respond(|| Ok(crate::ai::devices::fit(bytes, crate::ai::devices::memory())))
-}
-
 /// Frees the on-device model now.
 #[no_mangle]
 pub extern "C" fn tl_ai_unload() { guard((), crate::ai::engine::unload) }

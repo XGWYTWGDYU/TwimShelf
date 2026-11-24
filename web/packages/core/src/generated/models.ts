@@ -188,9 +188,13 @@ export interface CatalogEntry {
 }
 
 export interface HubDevice {
+  /** The GPU's memory (Android), or all of it on Apple devices, whose GPU shares it. */
   memory_bytes?: number | null;
   free_bytes?: number | null;
   mobile: boolean;
+  /** The GPU models run on; [no_gpu]: none, on-device models are off here. */
+  gpu?: string | null;
+  no_gpu: boolean;
 }
 
 export interface HubRepo {

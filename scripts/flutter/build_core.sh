@@ -71,9 +71,11 @@ case "$platform" in
     [[ -d "$ANDROID_NDK_HOME" ]] || fail "Install NDK $ndk_version using sdkmanager --sdk_root=$ANDROID_HOME 'ndk;$ndk_version' (ask before downloads over 500 MB)"
     NM=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-nm -type f -print -quit)
     [[ -x "$NM" ]] || fail 'NDK llvm-nm not found'
-    targets aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-    cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 31 rustc --locked --lib "${flags[@]}" --features heif --crate-type cdylib
-    for entry in arm64-v8a:aarch64-linux-android armeabi-v7a:armv7-linux-androideabi x86_64:x86_64-linux-android; do
+    # 64-bit ARM only (Qualcomm and MediaTek phones and tablets)
+    targets aarch64-linux-android
+    cargo ndk -t arm64-v8a --platform 31 rustc --locked --lib "${flags[@]}" --features heif --crate-type cdylib
+    rm -rf "$DEST/android/src/main/jniLibs/armeabi-v7a" "$DEST/android/src/main/jniLibs/x86_64"
+    for entry in arm64-v8a:aarch64-linux-android; do
       abi=${entry%%:*}; target=${entry#*:}
       mkdir -p "$DEST/android/src/main/jniLibs/$abi"
       cp "$CARGO_TARGET_DIR/$target/$profile/libtl_core.so" "$DEST/android/src/main/jniLibs/$abi/"

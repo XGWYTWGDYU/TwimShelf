@@ -355,6 +355,8 @@ public static unsafe class TlCore
     public static void SyncPairCancel() => Native.tl_sync_pair_cancel();
     public static void SyncJoin(string host, int port, string code) => Done(Native.tl_sync_join(host, (ushort)port, code));
     public static void SyncReset() => Native.tl_sync_reset();
+    public static ulong ModelExportZip(string id, string outPath) => (ulong)OkLong(Native.tl_model_export_zip(id, outPath));
+    public static ModelInfo ModelImport(string path) => Ok(Native.tl_model_import(path), J.ModelInfo);
     public static List<ModelInfo> SyncPeerModels(string host, int port) => Ok(Native.tl_sync_peer_models(host, (ushort)port), J.ListModelInfo);
     public static void SyncPullModel(string host, int port, string id, string label, ulong total) => Done(Native.tl_sync_pull_model(host, (ushort)port, id, label, total));
     public static void DiscoveryStart(string serviceType, string deviceName, string deviceKind = "") => Done(Native.tl_discovery_start(serviceType, deviceName, deviceKind));
@@ -451,9 +453,6 @@ public static unsafe class TlCore
 
     /// What this device has for on-device AI: {engine, gpus, memory, chosen}.
     public static JsonElement AiHardware() => Ok(Native.tl_ai_hardware());
-
-    /// How a model of `bytes` fits this device: recommended, usable, tooBig or noGpu.
-    public static string AiFit(ulong bytes) => OkString(Native.tl_ai_fit(bytes));
 
     public static void AiUnload() => Native.tl_ai_unload();
 

@@ -55,33 +55,7 @@ pub fn remember(models_dir: &Path, choice: &Choice) {
 /// Chooses again at the next job (the chosen GPU failed).
 pub fn forget(models_dir: &Path) { let _ = std::fs::remove_file(choice_file(models_dir)); }
 
-// ---- whether a model fits ----
-
-/// How well a model fits a device's memory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Fit {
-    /// Room to spare.
-    Recommended,
-    /// It fits, with little left.
-    Usable,
-    /// It does not fit.
-    TooBig,
-    /// No GPU to run it on.
-    NoGpu,
-}
-
-const GIB: u64 = 1 << 30;
-
-/// The memory a model of `bytes` (weights and projector) needs while it tags: the files, a tenth
-/// more for the context and the activations, and 1 GiB for the picture's encoder.
-pub fn need(bytes: u64) -> u64 { bytes + bytes / 10 + GIB }
-
-pub fn fit(bytes: u64, memory: Option<u64>) -> Fit {
-    let Some(memory) = memory.filter(|&m| m > 0) else { return Fit::NoGpu };
-    let n = need(bytes);
-    if memory >= n + n / 2 { Fit::Recommended } else if memory >= n { Fit::Usable } else { Fit::TooBig }
-}
+// ---- memory ----
 
 /// The memory the app reports for its own GPU (Apple: Metal's recommended working set).
 static MEMORY: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
@@ -99,14 +73,6 @@ mod tests {
 
     fn dev(name: &str, backend: &str, total: u64) -> Device {
         Device { name: name.into(), backend: backend.into(), description: format!("{name} gpu"), kind: "gpu".into(), free: total, total, id: String::new() }
-    }
-
-    #[test]
-    fn fits() {
-        assert_eq!(fit(3 * GIB, Some(32 * GIB)), Fit::Recommended);
-        assert_eq!(fit(5 * GIB, Some(8 * GIB)), Fit::Usable);
-        assert_eq!(fit(20 * GIB, Some(8 * GIB)), Fit::TooBig);
-        assert_eq!(fit(GIB, None), Fit::NoGpu);
     }
 
     #[test]

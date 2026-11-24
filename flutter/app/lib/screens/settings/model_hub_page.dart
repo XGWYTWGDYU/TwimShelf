@@ -238,7 +238,12 @@ class _ModelHubPageState extends State<ModelHubPage> {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: Text(
                     [
-                      L('hub.device', [d?.memory_bytes == null ? unknown : _memory(d!.memory_bytes!), d?.free_bytes == null ? unknown : _size(d!.free_bytes!)]),
+                      // what models run on here: the GPU and its memory (Apple devices: the memory the GPU shares)
+                      d?.no_gpu == true
+                          ? L('hub.device.noGpu', [d?.free_bytes == null ? unknown : _size(d!.free_bytes!)])
+                          : d?.gpu != null
+                              ? L('hub.device.gpu', [d!.gpu!, d.memory_bytes == null ? unknown : _memory(d.memory_bytes!), d.free_bytes == null ? unknown : _size(d.free_bytes!)])
+                              : L('hub.device', [d?.memory_bytes == null ? unknown : _memory(d!.memory_bytes!), d?.free_bytes == null ? unknown : _size(d!.free_bytes!)]),
                       if (local.devices != null && local.devices!.isNotEmpty) L('models.local.devices', [local.devices!]),
                       L('hub.device.footer'),
                     ].join('\n'),

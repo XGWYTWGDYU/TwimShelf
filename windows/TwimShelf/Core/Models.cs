@@ -234,6 +234,9 @@ public sealed class HubDevice
     public long? MemoryBytes { get; init; }
     public long? FreeBytes { get; init; }
     public bool Mobile { get; init; }
+    /// The GPU models run on; NoGpu: none, on-device models are off here.
+    public string? Gpu { get; init; }
+    public bool NoGpu { get; init; }
 }
 
 public sealed class HubRepo

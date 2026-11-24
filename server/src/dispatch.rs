@@ -143,7 +143,6 @@ pub fn call(name: &str, args: &Args) -> anyhow::Result<Value> {
         "tl_ai_service_models" => { let a0 = args.c_str(0)?; take(ffi::tl_ai_service_models(args.ptr(&a0))) },
         "tl_ai_default_prompt" => { let a0 = args.c_str(0)?; take(ffi::tl_ai_default_prompt(args.ptr(&a0))) },
         "tl_ai_hardware" => {  take(ffi::tl_ai_hardware()) },
-        "tl_ai_fit" => {  take(ffi::tl_ai_fit(args.int::<u64>(0)?)) },
         "tl_ai_unload" => {  ffi::tl_ai_unload(); Value::Null },
         _ => anyhow::bail!("no such function: {name}"),
     })
@@ -287,6 +286,5 @@ pub const NAMES: &[&str] = &[
     "tl_ai_service_models",
     "tl_ai_default_prompt",
     "tl_ai_hardware",
-    "tl_ai_fit",
     "tl_ai_unload",
 ];

@@ -160,8 +160,20 @@ jobs:
           retention-days: 30
 
   electron-linux:
-    # the Linux desktop app: the React front end (web/) in Electron
-    runs-on: ubuntu-24.04
+    # the Linux desktop app: the React front end (web/) in Electron, amd64 and arm64
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            cuda: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            cuda: sbsa
+    runs-on: ${{ matrix.runner }}
+    env:
+      TL_REQUIRE_CUDA: '1'
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install   # the one in rust-toolchain.toml
@@ -178,22 +190,36 @@ jobs:
             ~/.cargo/git
             build/cache/npm
             build/cache/electron
-          key: deps-electron-linux-${{ hashFiles('Cargo.lock', 'web/package-lock.json') }}
-          restore-keys: deps-electron-linux-
-      # the on-device AI's GPU backend (Vulkan); without glslc build.sh builds the CPU one only
-      - name: Vulkan headers and shader compiler
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glslc libvulkan-dev spirv-headers
+          key: deps-electron-linux-${{ matrix.arch }}-${{ hashFiles('Cargo.lock', 'web/package-lock.json') }}
+          restore-keys: deps-electron-linux-${{ matrix.arch }}-
+      # the on-device AI's GPU backends: Vulkan (AMD, Intel) and CUDA (NVIDIA, NVIDIA's own repository)
+      - name: Vulkan headers and shader compiler, CUDA toolkit
+        run: |
+          curl -fsSLo /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/${{ matrix.cuda }}/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i /tmp/cuda-keyring.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends glslc libvulkan-dev spirv-headers cuda-nvcc-12-9 cuda-cudart-dev-12-9 libcublas-dev-12-9
+          echo /usr/local/cuda-12.9/bin >> "$GITHUB_PATH"
       - name: Build
         run: ./build.sh --yes electron-linux
       - uses: actions/upload-artifact@v4
         with:
-          name: electron-linux
+          name: electron-linux-${{ matrix.arch }}
           path: build/apps/*
           if-no-files-found: error
           retention-days: 30
 
   windows:
-    runs-on: windows-2025
+    # x64 and ARM64, each built on its own kind of machine (build.ps1 builds for the one it runs on)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - run: git config --system core.longpaths true
       - uses: actions/checkout@v4
@@ -210,20 +236,30 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.nuget/packages
-          key: deps-windows-${{ hashFiles('Cargo.lock', 'windows/TwimShelf/TwimShelf.csproj') }}
-          restore-keys: deps-windows-
+          key: deps-windows-${{ matrix.arch }}-${{ hashFiles('Cargo.lock', 'windows/TwimShelf/TwimShelf.csproj') }}
+          restore-keys: deps-windows-${{ matrix.arch }}-
       - name: Vulkan SDK (GPU support for on-device AI)
         run: |
           Invoke-WebRequest https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe -OutFile "$env:RUNNER_TEMP\vulkan_sdk.exe"
           Start-Process "$env:RUNNER_TEMP\vulkan_sdk.exe" -Wait -ArgumentList '--root','C:\VulkanSDK','--accept-licenses','--default-answer','--confirm-command','install'
           "VULKAN_SDK=C:\VulkanSDK" >> $env:GITHUB_ENV
           "C:\VulkanSDK\Bin" >> $env:GITHUB_PATH
+      # NVIDIA's CUDA (x64; no CUDA for Windows on ARM): its runtime and cuBLAS go into the app
+      - name: CUDA toolkit
+        if: matrix.arch == 'x64'
+        uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: '12.9.1'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "visual_studio_integration"]'
       - name: Build
+        env:
+          TL_REQUIRE_CUDA: ${{ matrix.arch == 'x64' && '1' || '' }}
         run: powershell -ExecutionPolicy Bypass -File build.ps1 -Yes windows
       - name: Smoke test (install, first start, install again, uninstall)
         shell: pwsh
         run: |
-          $setup = (Get-ChildItem build/apps/TwimShelf-*-windows-x64-setup.exe | Select-Object -First 1).FullName
+          $setup = (Get-ChildItem build/apps/TwimShelf-*-windows-${{ matrix.arch }}-setup.exe | Select-Object -First 1).FullName
           $dir = "$env:LOCALAPPDATA\Programs\TwimShelf"
           $entry = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\TwimShelf'
           function Install {
@@ -257,7 +293,7 @@ jobs:
           'smoke test passed'
       - uses: actions/upload-artifact@v4
         with:
-          name: windows
+          name: windows-${{ matrix.arch }}
           path: build/apps/*
           if-no-files-found: error
           retention-days: 30

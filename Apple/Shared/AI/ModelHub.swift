@@ -91,6 +91,8 @@ enum ModelHub {
         // as the device is sold: 24 GB, not 25.77
         let memory = d?.memoryBytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory) } ?? L("hub.unknown")
         let free = d?.freeBytes.map { ActivityCenter.bytes($0) } ?? L("hub.unknown")
+        if d?.noGpu == true { return L("hub.device.noGpu", free) }
+        if let gpu = d?.gpu { return L("hub.device.gpu", gpu, memory, free) }
         return L("hub.device", memory, free)
     }
 

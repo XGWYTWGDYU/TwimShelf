@@ -166,9 +166,6 @@ actor AIEngine {
     /// MLX as the core's on-device engine (the core asks it, through TLLocalAI.CoreBridge), once.
     nonisolated static let registered: Void = { tl_ai_set_mlx(CoreBridge.describe, CoreBridge.free, CoreBridge.memory) }()
 
-    /// How a model of `bytes` fits this device (the core's advice): recommended, usable, tooBig, noGpu.
-    nonisolated static func fit(_ bytes: UInt64) -> String { _ = registered; return Core.aiFit(bytes) }
-
     /// [model] as the core takes it: an installed model by its id, or a service with its key.
     nonisolated static func modelRef(_ repo: String) -> [String: Any] {
         if let m = ExternalModels.find(repo) {

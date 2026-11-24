@@ -771,10 +771,16 @@ class CatalogEntry {
 
 /// This device as the model store sees it (core/src/hub.rs).
 class HubDevice {
-  const HubDevice({this.memory_bytes, this.free_bytes, this.mobile = false});
-  final int? memory_bytes, free_bytes;
+  const HubDevice({this.memory_bytes, this.free_bytes, this.mobile = false, this.gpu, this.no_gpu = false});
+  /// The GPU's memory (Android), or all of it on Apple devices, whose GPU shares it.
+  final int? memory_bytes;
+  final int? free_bytes;
   final bool mobile;
-  factory HubDevice.fromJson(Map<String, dynamic> j) => HubDevice(memory_bytes: (j['memory_bytes'] as num?)?.toInt(), free_bytes: (j['free_bytes'] as num?)?.toInt(), mobile: j['mobile'] as bool? ?? false);
+  /// The GPU models run on; [no_gpu]: none, on-device models are off here.
+  final String? gpu;
+  final bool no_gpu;
+  factory HubDevice.fromJson(Map<String, dynamic> j) => HubDevice(memory_bytes: (j['memory_bytes'] as num?)?.toInt(), free_bytes: (j['free_bytes'] as num?)?.toInt(), mobile: j['mobile'] as bool? ?? false,
+      gpu: j['gpu'] as String?, no_gpu: j['no_gpu'] as bool? ?? false);
 }
 
 class HubRepo {

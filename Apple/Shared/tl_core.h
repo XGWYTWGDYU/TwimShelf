@@ -188,5 +188,4 @@ void tl_ai_cancel(const char *job);
 char *tl_ai_service_models(const char *service_json);
 char *tl_ai_default_prompt(const char *lang);
 char *tl_ai_hardware(void);
-char *tl_ai_fit(uint64_t bytes);
 void tl_ai_unload(void);

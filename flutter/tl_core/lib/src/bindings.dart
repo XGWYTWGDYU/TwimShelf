@@ -454,8 +454,6 @@ class CoreBindings {
       Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ai_default_prompt');
   late final tl_ai_hardware = library.lookupFunction<
       Pointer<Utf8> Function(), Pointer<Utf8> Function()>('tl_ai_hardware');
-  late final tl_ai_fit = library.lookupFunction<
-      Pointer<Utf8> Function(Uint64), Pointer<Utf8> Function(int)>('tl_ai_fit');
   late final tl_ai_unload =
       library.lookupFunction<Void Function(), void Function()>('tl_ai_unload');
 }

@@ -730,7 +730,7 @@ enum Core {
 
     // MARK: Model store (Hugging Face, through the core)
 
-    struct HubDevice: Decodable, Hashable { let memoryBytes: UInt64?; let freeBytes: UInt64?; let mobile: Bool }
+    struct HubDevice: Decodable, Hashable { let memoryBytes: UInt64?; let freeBytes: UInt64?; let mobile: Bool; var gpu: String? = nil; var noGpu: Bool? = nil }
     struct HubRepo: Decodable, Hashable {
         let repo: String; let format: String; let architecture: String?; let params: UInt64?; let downloads: UInt64; let likes: UInt64
         let license: String?; let sha: String?; let claimsUncensored: Bool; let estimatedBytes: UInt64?; let tier: String
@@ -824,11 +824,6 @@ enum Core {
     static func aiServiceModels(_ service: [String: Any]) throws -> [String] {
         let json = String(decoding: try JSONSerialization.data(withJSONObject: service), as: UTF8.self)
         return try aiCall(tl_ai_service_models(json)) as? [String] ?? []
-    }
-
-    /// How a model of `bytes` fits this device: recommended, usable, tooBig or noGpu.
-    static func aiFit(_ bytes: UInt64) -> String {
-        (try? aiCall(tl_ai_fit(bytes)) as? String) ?? "usable"
     }
 
     static func setting(_ key: String) -> String? { (try? decodeOk(tl_setting(key), as: String?.self)) ?? nil }

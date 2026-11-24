@@ -139,7 +139,7 @@ fn local_gguf(models_dir: &Path, model: &engine::Gguf, bytes: u64, image: &Path,
         };
     }
     // more than one GPU and no choice among them yet: this job, on each
-    let need = devices::need(bytes);
+    let need = crate::hub::need(bytes);
     let mut trials = Vec::new();
     let mut best: Option<(u64, String, Vec<String>)> = None;
     let mut first_error = None;
@@ -189,4 +189,91 @@ pub fn hardware(models_dir: &Path) -> Hardware {
         else { devices::mobile_gpu(&gpus).map(|d| d.name.clone()) };
     let memory = devices::memory();
     Hardware { engine: engine::available(), gpus, memory, chosen }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+
+    /// A service on this machine that answers like an OpenAI-compatible one, and keeps what it was
+    /// sent: the model asked, the key, whether the picture was a JPEG.
+    fn service(reply: &'static str) -> (String, std::sync::mpsc::Receiver<serde_json::Value>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(4) {
+                let mut s = stream.unwrap();
+                let mut r = BufReader::new(s.try_clone().unwrap());
+                let (mut line, mut len, mut auth) = (String::new(), 0usize, String::new());
+                r.read_line(&mut line).unwrap();
+                let path = line.split_whitespace().nth(1).unwrap_or("").to_string();
+                loop {
+                    let mut h = String::new();
+                    r.read_line(&mut h).unwrap();
+                    if h == "\r\n" || h.is_empty() { break; }
+                    let l = h.to_ascii_lowercase();
+                    if let Some(v) = l.strip_prefix("content-length:") { len = v.trim().parse().unwrap(); }
+                    if l.starts_with("authorization:") { auth = h["authorization:".len()..].trim().to_string(); }
+                }
+                let mut body = vec![0; len];
+                r.read_exact(&mut body).unwrap();
+                let answer = if path.ends_with("/models") {
+                    r#"{"data":[{"id":"first-model"}]}"#.to_string()
+                } else {
+                    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    let url = v["messages"][1]["content"][1]["image_url"]["url"].as_str().unwrap_or("");
+                    let jpeg = base64::engine::general_purpose::STANDARD.decode(url.split(',').nth(1).unwrap_or("")).unwrap_or_default();
+                    use base64::Engine;
+                    tx.send(serde_json::json!({ "model": v["model"], "auth": auth, "jpeg": jpeg.starts_with(&[0xff, 0xd8]), "question": v["messages"][1]["content"][0]["text"] })).unwrap();
+                    serde_json::json!({ "choices": [{ "message": { "content": reply } }] }).to_string()
+                };
+                write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", answer.len(), answer).unwrap();
+            }
+        });
+        (url, rx)
+    }
+
+    #[test]
+    fn a_service_tags_a_picture() {
+        let (url, sent) = service("思考中</think>[\"猫\",\"沙发\"]");
+        let req: TagRequest = serde_json::from_value(serde_json::json!({
+            "model": { "kind": "external", "id": "ext:test", "url": url, "model": "", "key": "TEST-KEY" },
+            "existing": ["旧标签"],
+        })).unwrap();
+        let none = |_: &str| None;
+        let got = tag(Path::new("/nonexistent"), none, &req).unwrap();
+        assert_eq!(got.tags, ["猫", "沙发"]);
+        let s = sent.recv().unwrap();
+        // no model named: the service's first; the key as a bearer token; a JPEG; what is known
+        assert_eq!((s["model"].as_str(), s["auth"].as_str(), s["jpeg"].as_bool()), (Some("first-model"), Some("Bearer TEST-KEY"), Some(true)));
+        assert!(s["question"].as_str().unwrap().contains("旧标签"));
+    }
+
+    #[test]
+    fn a_reply_without_tags_is_a_failed_analysis() {
+        let (url, _sent) = service("I cannot help with that.");
+        let req: TagRequest = serde_json::from_value(serde_json::json!({ "model": { "kind": "external", "url": url, "model": "m" } })).unwrap();
+        let none = |_: &str| None;
+        let e = tag(Path::new("/nonexistent"), none, &req).unwrap_err();
+        assert!(matches!(e.kind, Kind::BadTags | Kind::NoTags), "{e}");
+    }
+
+    #[test]
+    fn a_local_model_needs_a_gpu_never_the_processor() {
+        // no llama.cpp here (a plain cargo test): no GPU, so no running the model at all
+        let dir = std::env::temp_dir().join(format!("tl-nogpu-{}", rand::random::<u64>()));
+        let m = dir.join("tiny");
+        std::fs::create_dir_all(&m).unwrap();
+        let file = |n: &str| { let mut v = b"GGUF".to_vec(); v.extend([3, 0, 0, 0, 0, 0, 0, 0]); std::fs::write(m.join(n), v).unwrap(); };
+        file("w.gguf");
+        file("p.gguf");
+        std::fs::write(m.join("tl-model.json"), r#"{"format":"gguf","weights":"w.gguf","projector":"p.gguf"}"#).unwrap();
+        let req: TagRequest = serde_json::from_value(serde_json::json!({ "model": { "kind": "local", "id": "tiny" } })).unwrap();
+        let none = |_: &str| None;
+        let e = tag(&dir, none, &req).unwrap_err();
+        assert_eq!(e.kind, Kind::NoGpu);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

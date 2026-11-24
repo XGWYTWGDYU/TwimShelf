@@ -35,10 +35,12 @@ macOS 和 Linux 上用 `build.sh`，Windows 上用 `build.ps1`。脚本会构建
 | `native-macos` | 原生 Mac 版 `.dmg`（临时签名） | Apple Silicon Mac + Xcode |
 | `native-ios` | 原生 iOS 版未签名 `.ipa` | Mac + Xcode |
 | `flutter-ios` | Flutter iOS 版未签名 `.ipa` | Mac + Xcode |
-| `flutter-android` | Android `.apk`，每种 CPU 架构一个 | macOS、Linux 或 Windows |
-| `electron-linux` | Linux 桌面版 `.AppImage`（React + Electron） | Linux |
+| `flutter-android` | Android `.apk`（只有 arm64-v8a） | macOS、Linux 或 Windows |
+| `electron-linux` | Linux 桌面版 `.AppImage`（React + Electron），本机架构（amd64 或 arm64） | Linux |
 | `electron-macos` | 同一个桌面版的 Mac 测试包（不默认构建、不发布） | Mac |
-| `windows` | 原生 Windows 版 `setup.exe`（WinUI 3） | Windows 11（`build.ps1`） |
+| `windows` | 原生 Windows 版 `setup.exe`（WinUI 3），本机架构（x64 或 ARM64） | Windows 11（`build.ps1`） |
+
+本机模型只在 GPU 上运行，从不使用处理器。Windows、Linux 和 Docker 只出一种安装包，同时带 Vulkan（AMD、Intel、NVIDIA）和 CUDA（NVIDIA）两种后端，由程序选择更快的那个：装了 CUDA 工具包（Linux 的 `nvcc`、Windows 的 `CUDA_PATH`，x64）时构建脚本会带上 CUDA 后端和它的运行库，没装时只有 Vulkan，并给出提示。CI 设置 `TL_REQUIRE_CUDA`，缺少 CUDA 时直接失败，所以发布的安装包一定带 CUDA（Windows ARM64 没有 CUDA）。
 
 构建脚本无法帮你安装的前提条件：
 
@@ -200,7 +202,7 @@ Linux 桌面版是 React 前端（`web/app`，和网页版同一份代码，外�
 powershell -ExecutionPolicy Bypass -File build.ps1 windows
 ```
 
-Windows 版是原生的（`windows/TwimShelf`，WinUI 3、.NET 原生 AOT），需要 Windows 11。脚本通过 winget 询问并安装 Visual Studio 生成工具（含 C++）、Rust、`global.json` 指定的 .NET SDK 和 Vulkan SDK。不带参数时还会构建 Android 版（需要 Flutter）。更多说明见 [docs/windows-build.md](docs/windows-build.md)。
+Windows 版是原生的（`windows/TwimShelf`，WinUI 3、.NET 原生 AOT），需要 Windows 11。脚本通过 winget 询问并安装 Visual Studio 生成工具（含 C++）、Rust、`global.json` 指定的 .NET SDK 和 Vulkan SDK。CUDA 工具包需要自己安装（[NVIDIA](https://developer.nvidia.com/cuda-downloads)，约 3 GB，安装程序会设置 `CUDA_PATH`），不装时安装包里没有 CUDA 后端。在 ARM64 的 Windows 上运行时构建 ARM64 版。不带参数时还会构建 Android 版（需要 Flutter）。更多说明见 [docs/windows-build.md](docs/windows-build.md)。
 
 下载不了 llama.cpp 源码时（受限网络），先在别处取得 `flutter/tl_llama/src/CMakeLists.txt` 里写的那个版本的源码，再用 `TL_LLAMA_SOURCE` 指向它：
 
@@ -327,7 +329,9 @@ cargo test -p tl-server
 
 Release 页面没有说明文字，只包含所有安装包、`SHA256SUMS.txt`、`BUILD-INFO.json` 和 `THIRD-PARTY-NOTICES.txt`。
 
-**Linux 服务器的镜像**：每次运行都分别在 x86_64 和 arm64 的机器上构建 Docker 镜像；发布新版本时推送到 GitHub Container Registry，标签是 `ghcr.io/<owner>/twimshelf:<version>` 和 `:latest`，一个标签同时包含两种架构。镜像由工作流发布，会关联到仓库并继承仓库的可见性：公开仓库发布的镜像任何人都能直接拉取。如果在仓库所有者的 Packages 页面看到它是私有的，在该包的 Package settings › Change visibility 里改为公开。
+**架构**：Windows 版在 x64 和 ARM64 的机器上各构建一个安装包，Linux 桌面版在 amd64 和 arm64 的机器上各构建一个 AppImage，Android 只有 arm64-v8a。
+
+**Linux 服务器的镜像**：每次运行都分别在 x86_64 和 arm64 的机器上构建 Docker 镜像（同时带 Vulkan 和 CUDA）；发布新版本时推送到 GitHub Container Registry，标签是 `ghcr.io/<owner>/twimshelf:<version>` 和 `:latest`，一个标签同时包含两种架构。镜像由工作流发布，会关联到仓库并继承仓库的可见性：公开仓库发布的镜像任何人都能直接拉取。如果在仓库所有者的 Packages 页面看到它是私有的，在该包的 Package settings › Change visibility 里改为公开。
 
 **Fork 之后**：工作流可以直接运行，不需要配置任何密钥，「检查更新」会自动指向你的仓库。如果要发布，请先把 Bundle ID 和包名改成自己的。
 

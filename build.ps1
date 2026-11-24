@@ -160,7 +160,9 @@ function Build-Core-Windows {
   Copy-Item "$Cache\cargo\$RustTarget\release\tl_core.dll" "$Root\windows\TwimShelf\lib\" -Force
 }
 
-# llama.cpp for on-device AI (flutter\tl_llama\src: the C interface and its build), CPU and Vulkan
+# llama.cpp for on-device AI (flutter\tl_llama\src: the C interface and its build): Vulkan (AMD,
+# Intel, NVIDIA), and CUDA beside it on x64 where the CUDA toolkit is installed (NVIDIA; its runtime
+# and cuBLAS go into the app, so users need only the driver). Models never run on the processor.
 function Build-Llama-Windows {
   $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
   $cmake = "$vs\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
@@ -168,11 +170,22 @@ function Build-Llama-Windows {
   # TL_LLAMA_SOURCE: a local llama.cpp checkout of the tag in tl_llama/src/CMakeLists.txt (no download)
   $source = @()
   if ($env:TL_LLAMA_SOURCE) { $source += "-DTL_LLAMA_SOURCE=$($env:TL_LLAMA_SOURCE -replace '\\', '/')" }
+  $cuda = (-not $Arm) -and $env:CUDA_PATH -and (Test-Path "$env:CUDA_PATH\bin\nvcc.exe")
+  if ($cuda) { $source += '-DTL_LLAMA_CUDA=ON'; Say "llama.cpp: with CUDA ($env:CUDA_PATH)" }
+  elseif (-not $Arm) {
+    # a release always has it (TL_REQUIRE_CUDA in CI): one app for every GPU
+    if ($env:TL_REQUIRE_CUDA) { Fail 'The CUDA toolkit is required (CUDA_PATH)' }
+    Say 'llama.cpp: no CUDA toolkit (CUDA_PATH), so no CUDA backend: NVIDIA cards use Vulkan'
+  }
   & $cmake -S "$Root\flutter\tl_llama\src" -B $build -G 'Visual Studio 17 2022' -A $(if ($Arm) { 'ARM64' } else { 'x64' }) -Wno-dev @source | Out-Null
   if ($LASTEXITCODE) { Fail 'Configuring llama.cpp failed' }
   & $cmake --build $build --config Release --target tl_llama --parallel
   if ($LASTEXITCODE) { Fail 'Building llama.cpp failed' }
   Get-ChildItem $build -Recurse -Filter *.dll | Where-Object { $_.FullName -match '\\Release\\' } | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
+  if ($cuda) {
+    # CUDA's runtime and cuBLAS, which ggml-cuda.dll loads (CUDA 12: in bin, or bin\x64 from 13 on)
+    Get-ChildItem "$env:CUDA_PATH\bin" -Recurse -Include 'cudart64_*.dll', 'cublas64_*.dll', 'cublasLt64_*.dll' | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
+  }
 }
 
 function Build-Windows {
@@ -218,11 +231,11 @@ function Build-Android {
   $v = Version
   if (-not (Have cargo-ndk)) { if (Ask 'Install cargo-ndk (cargo install cargo-ndk)?') { cargo install cargo-ndk } }
   $env:CARGO_TARGET_DIR = "$Cache\cargo"
-  rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android | Out-Null
+  rustup target add aarch64-linux-android | Out-Null
   $env:CMAKE = "$env:ANDROID_HOME\cmake\3.31.6\bin\cmake.exe"
-  Push-Location "$Root\core"; cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 31 -o "$Root\flutter\tl_core\android\src\main\jniLibs" rustc --locked --lib --release --features heif --crate-type cdylib; $failed = $LASTEXITCODE; Pop-Location
+  Push-Location "$Root\core"; cargo ndk -t arm64-v8a --platform 31 -o "$Root\flutter\tl_core\android\src\main\jniLibs" rustc --locked --lib --release --features heif --crate-type cdylib; $failed = $LASTEXITCODE; Pop-Location
   if ($failed) { Fail 'Building the Rust core failed' }
-  Push-Location "$Root\flutter\app"; & $Flutter pub get; & $Flutter build apk --release --split-per-abi (Defines); $failed = $LASTEXITCODE; Pop-Location
+  Push-Location "$Root\flutter\app"; & $Flutter pub get; & $Flutter build apk --release --split-per-abi --target-platform android-arm64 (Defines); $failed = $LASTEXITCODE; Pop-Location
   if ($failed) { Fail 'Building the app failed' }
   Get-ChildItem "$Root\flutter\app\build\app\outputs\flutter-apk\app-*-release.apk" | ForEach-Object {
     $abi = $_.Name -replace 'app-(.*)-release.apk', '$1'

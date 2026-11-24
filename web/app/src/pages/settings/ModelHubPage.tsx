@@ -184,11 +184,12 @@ export default function ModelHubPage() {
   }
 
   const unknown = L('hub.unknown');
-  const deviceLine = L(
-    'hub.device',
-    dev?.memory_bytes != null ? formatMemory(dev.memory_bytes) : unknown,
-    dev?.free_bytes != null ? size(dev.free_bytes) : unknown,
-  );
+  // what models run on here (the server): the GPU and its memory
+  const freeText = dev?.free_bytes != null ? size(dev.free_bytes) : unknown;
+  const memoryText = dev?.memory_bytes != null ? formatMemory(dev.memory_bytes) : unknown;
+  const deviceLine = dev?.no_gpu ? L('hub.device.noGpu', freeText)
+    : dev?.gpu ? L('hub.device.gpu', dev.gpu, memoryText, freeText)
+    : L('hub.device', memoryText, freeText);
 
   return (
     <SettingsScreen title={L('hub.title')} parent="ai">

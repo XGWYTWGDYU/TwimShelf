@@ -75,9 +75,6 @@ class Core {
   /// free, total}], memory, chosen}`. No GPU: on-device AI is off (never the processor).
   static Map<String, dynamic> aiHardware() => _read(_bindings.tl_ai_hardware()) as Map<String, dynamic>;
 
-  /// How a model of [bytes] fits this device: `recommended`, `usable`, `tooBig` or `noGpu`.
-  static String aiFit(int bytes) => _read(_bindings.tl_ai_fit(bytes)) as String;
-
   /// Frees the on-device model now.
   static void aiUnload() => _bindings.tl_ai_unload();
   static NStr _string(String? value, NArena arena) => toNStr(value, arena);

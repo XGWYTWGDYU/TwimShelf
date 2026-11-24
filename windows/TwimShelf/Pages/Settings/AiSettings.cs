@@ -128,6 +128,15 @@ public sealed partial class AiSettings : SettingsSubpage
                 if (Ai.Models.ActiveTaggerId == model.Id) await Ai.Models.SetActiveTagger(null);
             };
             ex.Items.Add(del);
+            var export = new SettingsCard { Header = L("models.exportZip"), HeaderIcon = Icon("\uEDE1"), IsClickEnabled = true };
+            export.Click += async (_, _) =>
+            {
+                var to = await Pickers.SaveFile(W, m.Id + ".zip", ("ZIP", ".zip"));   // i18n-exempt: file type name
+                if (to == null) return;
+                try { await Local.Export(m.Id, to); }
+                catch (Exception e) { await Dialogs.Alert(W, L("models.exportZip"), e.Message); }
+            };
+            ex.Items.Add(export);
             Add(ex);
         }
         Nav(L("models.addExternalEllipsis"), L("mac.models.external.hint"), "", () => new ExternalModelSettings(_library, ExternalModel.Create(), true), "ai-add");
@@ -202,6 +211,68 @@ public sealed partial class AiSettings : SettingsSubpage
         var footer = new List<string> { L("models.local.footer.gguf") };
         if (!string.IsNullOrEmpty(Local.Devices)) footer.Add(L("models.local.devices", Local.Devices));
         Footer(string.Join('\n', footer));
+        TransferSection();
+    }
+
+    /// Models between devices of the same kind: import a ZIP, pull one from another device of the
+    /// account (the core keeps the GGUF ones). Export is on each model.
+    void TransferSection()
+    {
+        Header(L("models.appleOnly"));
+        var import = new Button { Content = L("models.import.button") };
+        import.Click += async (_, _) =>
+        {
+            var path = await Pickers.OpenFile(W, ".zip");
+            if (path == null) return;
+            import.IsEnabled = false;
+            try { await Local.Import(path); await Dialogs.Alert(W, L("models.import.button"), L("models.imported")); }
+            catch (Exception e) { await Dialogs.Alert(W, L("models.import.button"), e.Message); }
+            finally { import.IsEnabled = true; }
+        };
+        Card(L("models.import.button"), null, "\uE8B5", import);
+        var query = new Button { Content = _querying ? L("models.peers.querying") : L("models.peers.query"), IsEnabled = !_querying };
+        query.Click += async (_, _) => await QueryPeers();
+        Card(L("models.peers.query"), _offers == null ? null : _offers.Count == 0 ? L("models.peers.nothing") : null, "\uE8F1", query);
+        foreach (var (peer, model) in _offers ?? [])
+        {
+            var pull = new SettingsCard { Header = Local.Title(model), Description = $"{peer.Name} · {Size(model.Bytes)}", HeaderIcon = Icon("\uE896"), IsClickEnabled = true };
+            pull.Click += async (_, _) => await Pull(peer, model);
+            Add(pull);
+        }
+        Footer(L("models.appleOnly.footer"));
+    }
+
+    bool _querying;
+    List<(DiscoveredPeer Peer, ModelInfo Model)>? _offers;
+
+    async Task QueryPeers()
+    {
+        _querying = true;
+        Build();
+        var have = Local.Installed.Select(m => m.Id).ToHashSet();
+        var offers = new List<(DiscoveredPeer Peer, ModelInfo Model)>();
+        foreach (var p in _library.Sync.AccountPeers.Where(p => p.Reachable))
+        {
+            try
+            {
+                foreach (var m in await TlCore.Run(() => TlCore.SyncPeerModels(p.Host!, p.Port!.Value)))
+                    if (!have.Contains(m.Id) && !offers.Any(o => o.Model.Id == m.Id)) offers.Add((p, m));
+            }
+            catch { }
+        }
+        _offers = offers;
+        _querying = false;
+        Build();
+    }
+
+    async Task Pull(DiscoveredPeer peer, ModelInfo model)
+    {
+        if (!await Dialogs.Confirm(W, L("models.pull.title", peer.Name), L("models.pull.message", Local.Title(model), Size(model.Bytes)), L("models.pull"))) return;
+        _offers?.RemoveAll(o => o.Model.Id == model.Id);
+        Local.Watch();
+        try { await TlCore.Run(() => TlCore.SyncPullModel(peer.Host!, peer.Port!.Value, model.Id, Local.Title(model), (ulong)model.Bytes)); }
+        catch (Exception e) { await Dialogs.Alert(W, L("models.pull.failed"), e.Message); }
+        await Local.Refresh();
     }
 
     /// 这台设备无法分析: the media given up on, why, and another try for all of them.

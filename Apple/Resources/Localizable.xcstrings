@@ -11537,6 +11537,64 @@
         }
       }
     },
+    "hub.device.gpu" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPU %1$@ · %2$@ graphics memory · %3$@ free"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPU %1$@ · ビデオメモリ %2$@ · 空き容量 %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显卡 %1$@ · 显存 %2$@ · 可用空间 %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示卡 %1$@ · 顯示記憶體 %2$@ · 可用空間 %3$@"
+          }
+        }
+      }
+    },
+    "hub.device.noGpu" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No GPU that can run on-device models · %1$@ free"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンデバイスモデルを実行できる GPU がありません · 空き容量 %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有能运行本机模型的显卡 · 可用空间 %1$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有能執行本機模型的顯示卡 · 可用空間 %1$@"
+          }
+        }
+      }
+    },
     "hub.device.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12112,6 +12170,35 @@
         }
       }
     },
+    "hub.tier.noGpu" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No GPU"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPU なし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可用的显卡"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有可用的顯示卡"
+          }
+        }
+      }
+    },
     "hub.tier.recommended" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12159,13 +12246,13 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "内存可能不足"
+            "value" : "内存或显存可能不足"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "記憶體可能不足"
+            "value" : "記憶體或顯示記憶體可能不足"
           }
         }
       }
