@@ -97,6 +97,9 @@ fn candidates() -> Vec<PathBuf> {
 
 fn llama() -> Option<&'static Llama> {
     LLAMA.get_or_init(|| unsafe {
+        // Windows on ARM: its GPUs are Qualcomm's, which this app does not run models on (and
+        // llama.cpp's backends there are untried): no on-device AI; services still tag
+        if cfg!(all(target_os = "windows", target_arch = "aarch64")) { return None; }
         for path in candidates() {
             if path.components().count() > 1 && !path.exists() { continue; }
             let lib = sys::open(&path);

@@ -38,6 +38,7 @@ public sealed class LocalModels
             var hw = await TlCore.Run(TlCore.AiHardware);
             var gpus = hw.GetProperty("gpus").EnumerateArray().Select(g => $"{g.GetProperty("name").GetString()} ({g.GetProperty("description").GetString()})").ToList();
             Devices = gpus.Count == 0 ? null : string.Join(", ", gpus);
+            // (Windows on ARM: never; its GPUs are Qualcomm's, see core/src/ai/engine.rs)
             Supported = hw.GetProperty("engine").GetBoolean() && gpus.Count > 0;
         }
         catch { Supported = false; }

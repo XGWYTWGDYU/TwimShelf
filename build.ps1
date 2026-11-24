@@ -189,10 +189,12 @@ function Build-Llama-Windows {
 }
 
 function Build-Windows {
-  Need-VisualStudio; Need-Rust; Need-DotNet; Need-Vulkan
+  Need-VisualStudio; Need-Rust; Need-DotNet; if (-not $Arm) { Need-Vulkan }
   $v = Version
   Build-Core-Windows
-  Build-Llama-Windows
+  # Windows on ARM has no on-device AI (Qualcomm GPUs): no llama.cpp in that app, services only
+  if ($Arm) { Remove-Item "$Root\windows\TwimShelf\lib\*" -Include 'tl_llama.dll', 'llama*.dll', 'ggml*.dll', 'mtmd.dll', 'cudart64_*.dll', 'cublas*.dll' -Force -ErrorAction SilentlyContinue }
+  else { Build-Llama-Windows }
   # the app, published with Native AOT (it carries the Windows App SDK; nothing to install first)
   $publish = "$Cache\windows\publish-$Arch"
   Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
@@ -262,7 +264,7 @@ if (-not $Check) { New-Item -ItemType Directory -Force -Path "$Cache\sdk", "$Cac
 $env:PUB_CACHE = "$Cache\pub"; $env:GRADLE_USER_HOME = "$Cache\gradle"
 if ($Check) {
   foreach ($t in $Targets) {
-    switch ($t) { 'windows' { Need-VisualStudio; Need-Rust; Need-DotNet; Need-Vulkan } 'flutter-android' { Need-Rust; Need-Flutter; Need-Android } }
+    switch ($t) { 'windows' { Need-VisualStudio; Need-Rust; Need-DotNet; if (-not $Arm) { Need-Vulkan } } 'flutter-android' { Need-Rust; Need-Flutter; Need-Android } }
   }
   if ($Missing) { Say "Missing: $($Missing -join ', ')"; exit 1 }
   Say "Everything needed for $($Targets -join ', ') is here"; exit 0

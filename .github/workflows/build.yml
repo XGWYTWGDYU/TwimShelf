@@ -238,7 +238,8 @@ jobs:
             ~/.nuget/packages
           key: deps-windows-${{ matrix.arch }}-${{ hashFiles('Cargo.lock', 'windows/TwimShelf/TwimShelf.csproj') }}
           restore-keys: deps-windows-${{ matrix.arch }}-
-      - name: Vulkan SDK (GPU support for on-device AI)
+      - name: Vulkan SDK (GPU support for on-device AI; none on ARM64, which has no on-device AI)
+        if: matrix.arch == 'x64'
         run: |
           Invoke-WebRequest https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe -OutFile "$env:RUNNER_TEMP\vulkan_sdk.exe"
           Start-Process "$env:RUNNER_TEMP\vulkan_sdk.exe" -Wait -ArgumentList '--root','C:\VulkanSDK','--accept-licenses','--default-answer','--confirm-command','install'

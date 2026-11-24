@@ -40,7 +40,7 @@ macOS 和 Linux 上用 `build.sh`，Windows 上用 `build.ps1`。脚本会构建
 | `electron-macos` | 同一个桌面版的 Mac 测试包（不默认构建、不发布） | Mac |
 | `windows` | 原生 Windows 版 `setup.exe`（WinUI 3），本机架构（x64 或 ARM64） | Windows 11（`build.ps1`） |
 
-本机模型只在 GPU 上运行，从不使用处理器。Windows、Linux 和 Docker 只出一种安装包，同时带 Vulkan（AMD、Intel、NVIDIA）和 CUDA（NVIDIA）两种后端，由程序选择更快的那个：装了 CUDA 工具包（Linux 的 `nvcc`、Windows 的 `CUDA_PATH`，x64）时构建脚本会带上 CUDA 后端和它的运行库，没装时只有 Vulkan，并给出提示。CI 设置 `TL_REQUIRE_CUDA`，缺少 CUDA 时直接失败，所以发布的安装包一定带 CUDA（Windows ARM64 没有 CUDA）。
+本机模型只在 GPU 上运行，从不使用处理器。Windows、Linux 和 Docker 只出一种安装包，同时带 Vulkan（AMD、Intel、NVIDIA）和 CUDA（NVIDIA）两种后端，由程序选择更快的那个：装了 CUDA 工具包（Linux 的 `nvcc`、Windows 的 `CUDA_PATH`，x64）时构建脚本会带上 CUDA 后端和它的运行库，没装时只有 Vulkan，并给出提示。CI 设置 `TL_REQUIRE_CUDA`，缺少 CUDA 时直接失败，所以发布的安装包一定带 CUDA。Windows ARM64 版没有本机模型（这类设备的显卡是高通的），不构建 llama.cpp，外部模型照常可用。
 
 构建脚本无法帮你安装的前提条件：
 
@@ -202,7 +202,7 @@ Linux 桌面版是 React 前端（`web/app`，和网页版同一份代码，外�
 powershell -ExecutionPolicy Bypass -File build.ps1 windows
 ```
 
-Windows 版是原生的（`windows/TwimShelf`，WinUI 3、.NET 原生 AOT），需要 Windows 11。脚本通过 winget 询问并安装 Visual Studio 生成工具（含 C++）、Rust、`global.json` 指定的 .NET SDK 和 Vulkan SDK。CUDA 工具包需要自己安装（[NVIDIA](https://developer.nvidia.com/cuda-downloads)，约 3 GB，安装程序会设置 `CUDA_PATH`），不装时安装包里没有 CUDA 后端。在 ARM64 的 Windows 上运行时构建 ARM64 版。不带参数时还会构建 Android 版（需要 Flutter）。更多说明见 [docs/windows-build.md](docs/windows-build.md)。
+Windows 版是原生的（`windows/TwimShelf`，WinUI 3、.NET 原生 AOT），需要 Windows 11。脚本通过 winget 询问并安装 Visual Studio 生成工具（含 C++）、Rust、`global.json` 指定的 .NET SDK 和 Vulkan SDK。CUDA 工具包需要自己安装（[NVIDIA](https://developer.nvidia.com/cuda-downloads)，约 3 GB，安装程序会设置 `CUDA_PATH`），不装时安装包里没有 CUDA 后端。在 ARM64 的 Windows 上运行时构建 ARM64 版（没有本机模型，不需要 Vulkan SDK 和 CUDA）。不带参数时还会构建 Android 版（需要 Flutter）。更多说明见 [docs/windows-build.md](docs/windows-build.md)。
 
 下载不了 llama.cpp 源码时（受限网络），先在别处取得 `flutter/tl_llama/src/CMakeLists.txt` 里写的那个版本的源码，再用 `TL_LLAMA_SOURCE` 指向它：
 
