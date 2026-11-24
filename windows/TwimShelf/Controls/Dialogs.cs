@@ -62,17 +62,30 @@ public static class Dialogs
     }
 
     /// One of several actions: its index, or -1 when cancelled.
+    /// The actions are buttons of their own, one under the other and as wide as the dialog: in
+    /// the dialog's own button row each gets a third of it, and a longer label is cut off.
     public static async Task<int> Choose(Window w, string title, string message, params string[] actions)
     {
-        var d = new ContentDialog
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
+        var d = new ContentDialog { Title = title, Content = panel, CloseButtonText = L("common.cancel") };
+        var chosen = -1;
+        for (var i = 0; i < actions.Length; i++)
         {
-            Title = title,
-            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
-            PrimaryButtonText = actions.Length > 0 ? actions[0] : "",
-            SecondaryButtonText = actions.Length > 1 ? actions[1] : "",
-            CloseButtonText = L("common.cancel"),
-        };
-        return await ShowAsync(w, d) switch { ContentDialogResult.Primary => 0, ContentDialogResult.Secondary => 1, _ => -1 };
+            var index = i;
+            var b = new Button
+            {
+                Content = new TextBlock { Text = actions[i], TextWrapping = TextWrapping.Wrap },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Padding = new Thickness(12, 8, 12, 8),
+            };
+            if (i == 0) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+            b.Click += (_, _) => { chosen = index; d.Hide(); };
+            panel.Children.Add(b);
+        }
+        await ShowAsync(w, d);
+        return chosen;
     }
 
     public static async Task Alert(Window w, string title, string? message = null)
