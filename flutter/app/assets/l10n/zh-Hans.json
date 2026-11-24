@@ -389,7 +389,7 @@
   "hub.detail.versions": "版本",
   "hub.detail.versions.footer": "这里的大小是实际下载大小，已包含视觉部分。下载的文件固定在当前版本，并校验完整性。",
   "hub.device": "内存 %1$@ · 可用空间 %2$@",
-  "hub.device.footer": "是否适合是按内存估算的，实际速度取决于设备。",
+  "hub.device.footer": "是否适合是按显存估算的（Apple 设备按与显卡共享的内存），实际速度取决于设备。",
   "hub.device.gpu": "显卡 %1$@ · 显存 %2$@ · 可用空间 %3$@",
   "hub.device.noGpu": "没有能运行本机模型的显卡 · 可用空间 %1$@",
   "hub.device.title": "这台设备",

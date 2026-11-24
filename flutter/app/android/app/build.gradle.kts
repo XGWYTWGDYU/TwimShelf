@@ -33,8 +33,6 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // 64-bit ARM phones and tablets only (Qualcomm and MediaTek): no 32-bit ARM, no x86
-        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     // a release keystore when the build has one (android/key.properties, written by the release

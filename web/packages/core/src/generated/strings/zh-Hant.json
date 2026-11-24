@@ -389,7 +389,7 @@
   "hub.detail.versions": "版本",
   "hub.detail.versions.footer": "這裡的大小是實際下載大小，已包含視覺部分。下載的檔案固定在目前版本，並校驗完整性。",
   "hub.device": "記憶體 %1$@ · 可用空間 %2$@",
-  "hub.device.footer": "是否適合是依記憶體估算的，實際速度取決於裝置。",
+  "hub.device.footer": "是否適合是依顯示記憶體估算的（Apple 裝置依與顯示卡共用的記憶體），實際速度取決於裝置。",
   "hub.device.gpu": "顯示卡 %1$@ · 顯示記憶體 %2$@ · 可用空間 %3$@",
   "hub.device.noGpu": "沒有能執行本機模型的顯示卡 · 可用空間 %1$@",
   "hub.device.title": "這台裝置",

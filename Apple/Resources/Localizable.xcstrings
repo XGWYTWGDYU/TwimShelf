@@ -11514,25 +11514,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fit is estimated from memory. Actual speed depends on the device."
+            "value" : "Fit is estimated from the graphics memory (on Apple devices, the memory the GPU shares). Actual speed depends on the device."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "適合度はメモリからの推定です。実際の速度はデバイスによって異なります。"
+            "value" : "適合度はビデオメモリ（Apple デバイスでは GPU と共有するメモリ）からの推定です。実際の速度はデバイスによって異なります。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "是否适合是按内存估算的，实际速度取决于设备。"
+            "value" : "是否适合是按显存估算的（Apple 设备按与显卡共享的内存），实际速度取决于设备。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "是否適合是依記憶體估算的，實際速度取決於裝置。"
+            "value" : "是否適合是依顯示記憶體估算的（Apple 裝置依與顯示卡共用的記憶體），實際速度取決於裝置。"
           }
         }
       }

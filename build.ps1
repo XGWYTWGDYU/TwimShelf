@@ -235,6 +235,8 @@ function Build-Android {
   $env:CMAKE = "$env:ANDROID_HOME\cmake\3.31.6\bin\cmake.exe"
   Push-Location "$Root\core"; cargo ndk -t arm64-v8a --platform 31 -o "$Root\flutter\tl_core\android\src\main\jniLibs" rustc --locked --lib --release --features heif --crate-type cdylib; $failed = $LASTEXITCODE; Pop-Location
   if ($failed) { Fail 'Building the Rust core failed' }
+  # what an older build left there (other architectures) is not copied out again
+  Remove-Item "$Root\flutter\app\build\app\outputs\flutter-apk\app-*-release.apk*" -Force -ErrorAction SilentlyContinue
   Push-Location "$Root\flutter\app"; & $Flutter pub get; & $Flutter build apk --release --split-per-abi --target-platform android-arm64 (Defines); $failed = $LASTEXITCODE; Pop-Location
   if ($failed) { Fail 'Building the app failed' }
   Get-ChildItem "$Root\flutter\app\build\app\outputs\flutter-apk\app-*-release.apk" | ForEach-Object {

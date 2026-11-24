@@ -294,7 +294,9 @@ build_target() {
       need_rust; need_flutter; need_android
       [[ $OS == Darwin ]] && android_key
       PATH="$ANDROID_HOME/cmake/$ANDROID_CMAKE/bin:$PATH" core_for android
-      # 64-bit ARM only (Qualcomm and MediaTek phones and tablets)
+      # 64-bit ARM only (Qualcomm and MediaTek phones and tablets); what an older build left there
+      # (other architectures) is not copied out again
+      rm -f "$ROOT"/flutter/app/build/app/outputs/flutter-apk/app-*-release.apk*
       (cd "$ROOT/flutter/app" && "$FLUTTER" pub get && "$FLUTTER" build apk --release --split-per-abi --target-platform android-arm64 $(flutter_defines))
       for f in "$ROOT"/flutter/app/build/app/outputs/flutter-apk/app-*-release.apk; do
         abi=$(basename "$f" | sed -E 's/app-(.*)-release.apk/\1/')
