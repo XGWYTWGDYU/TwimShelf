@@ -7,7 +7,7 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 
 const SVG = {
   macos: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5V15H4zM2 17h20v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z" fill="currentColor"/>',
-  windows: '<path d="M3 5.5l7.5-1v7H3zm8.5-1.2L21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zm8.5 0H21V21l-9.5-1.3z" fill="currentColor"/>',
+  windows: '<path d="M3 3h8.5v8.5H3zm9.5 0H21v8.5h-8.5zM3 12.5h8.5V21H3zm9.5 0H21V21h-8.5z" fill="currentColor"/>',
   linux: '<path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm2.3 4.2 2.6 1.8-2.6 1.8.9 1.2 4.3-3-4.3-3zM12 13v1.5h5V13z" fill="currentColor"/><path d="M8 19h8v1.5H8z" fill="currentColor"/>',
   server: '<path d="M4 4h16a1 1 0 0 1 1 1v5H3V5a1 1 0 0 1 1-1zm-1 8h18v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zm3-5.5v1.5h2V6.5zm0 8v1.5h2v-1.5z" fill="currentColor"/>',
   unlink: '<path d="M9.5 6.5 11 5a4.2 4.2 0 0 1 6 6l-1.5 1.5M14.5 17.5 13 19a4.2 4.2 0 0 1-6-6l1.5-1.5M4 4l16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',

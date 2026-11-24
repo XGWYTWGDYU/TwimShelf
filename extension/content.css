@@ -29,30 +29,56 @@
 @keyframes tl-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .tl-spin { animation-duration: 3s; } }
 
-/* the device menu and the notes, in X's light or dark look */
+/* the device menu and the notes: Material 3 Expressive menus as Chrome's own, light or dark by X's
+   theme (light, dim, lights out), opening on a spring from the button */
 .tl-pop {
+  --tl-surface: #f0f4f9; --tl-on-surface: #1f1f1f; --tl-on-variant: #444746; --tl-hover: rgba(31, 31, 31, .08); --tl-press: rgba(31, 31, 31, .12);
+  --tl-selected: #c2e7ff; --tl-on-selected: #001d35; --tl-primary: #0b57d0; --tl-on-primary: #fff;
+  --tl-spring: linear(0, 0.08, 0.263, 0.48, 0.685, 0.852, 0.973, 1.048, 1.085, 1.095, 1.086, 1.069, 1.048, 1.029, 1.013, 1.002, 0.995, 0.992, 0.991, 0.992, 0.994, 0.996, 0.997, 1);
   position: fixed; z-index: 2147483647;
   min-width: 200px; max-width: 300px;
-  padding: 6px;
-  border-radius: 14px;
-  background: #fff; color: #0f1419;
-  box-shadow: rgba(101, 119, 134, .2) 0 0 15px, rgba(101, 119, 134, .15) 0 0 3px 1px;
-  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+  padding: 8px 4px;
+  border-radius: 16px;
+  background: var(--tl-surface); color: var(--tl-on-surface);
+  box-shadow: 0 2px 6px 2px rgba(0, 0, 0, .15), 0 1px 2px rgba(0, 0, 0, .3);
+  font: 14px/20px "Google Sans Text", "Google Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+  letter-spacing: .01em;
+  transform-origin: 50% 0;
+  animation: tl-open 360ms var(--tl-spring) both;
 }
-.tl-pop-title { padding: 8px 10px 6px; font-size: 13px; color: rgb(83, 100, 113); }
+.tl-pop.tl-above { transform-origin: 50% 100%; }
+@keyframes tl-open { from { opacity: 0; transform: scale(.85, .6); } 30% { opacity: 1; } }
+.tl-pop-title { padding: 6px 12px 8px; font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: .02em; color: var(--tl-on-variant); }
 .tl-item {
-  all: unset; box-sizing: border-box; width: 100%;
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-  padding: 10px; border-radius: 10px; cursor: pointer;
+  all: unset; box-sizing: border-box; width: 100%; min-height: 48px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 0 12px; border-radius: 4px; cursor: pointer;
+  font-size: 14px; font-weight: 500;
+  transition: border-radius 360ms var(--tl-spring), background-color .2s;
 }
-.tl-item:hover, .tl-item:focus-visible { background: rgba(15, 20, 25, .06); }
-.tl-kind { font-size: 13px; color: rgb(83, 100, 113); white-space: nowrap; }
-.tl-bubble { padding: 12px 14px; font-size: 14px; }
+.tl-item + .tl-item { margin-top: 2px; }
+.tl-item:first-of-type { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+.tl-item:last-child { border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
+.tl-item:hover { background: var(--tl-hover); border-radius: 12px; }
+.tl-item:focus-visible { background: var(--tl-selected); color: var(--tl-on-selected); border-radius: 12px; }
+.tl-item:active { background: var(--tl-press); }
+.tl-kind { font-size: 12px; line-height: 16px; font-weight: 400; letter-spacing: .03em; color: var(--tl-on-variant); white-space: nowrap; }
+.tl-item:focus-visible .tl-kind { color: inherit; }
+.tl-bubble { padding: 16px 16px 14px 20px; border-radius: 20px; font-size: 14px; }
 .tl-action {
-  all: unset; cursor: pointer; display: inline-block; margin-top: 10px;
-  padding: 6px 14px; border-radius: 9999px; background: #0f1419; color: #fff; font-weight: 600; font-size: 14px;
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; margin-top: 12px; height: 40px; padding: 0 20px;
+  border-radius: 9999px; background: var(--tl-primary); color: var(--tl-on-primary); font-weight: 500; font-size: 14px;
+  transition: border-radius 360ms var(--tl-spring);
 }
-.tl-pop.tl-dark { background: #000; color: #e7e9ea; box-shadow: rgba(255, 255, 255, .2) 0 0 15px, rgba(255, 255, 255, .15) 0 0 3px 1px; }
-.tl-dark .tl-item:hover, .tl-dark .tl-item:focus-visible { background: rgba(231, 233, 234, .1); }
-.tl-dark .tl-pop-title, .tl-dark .tl-kind { color: rgb(113, 118, 123); }
-.tl-dark .tl-action { background: #eff3f4; color: #0f1419; }
+.tl-action:hover { box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 1px 3px 1px rgba(0, 0, 0, .15); }
+.tl-action:active { border-radius: 12px; }
+.tl-action:focus-visible { outline: 3px solid var(--tl-primary); outline-offset: 2px; }
+.tl-pop.tl-dark {
+  --tl-surface: #282a2c; --tl-on-surface: #e3e3e3; --tl-on-variant: #c4c7c5; --tl-hover: rgba(227, 227, 227, .08); --tl-press: rgba(227, 227, 227, .12);
+  --tl-selected: #004a77; --tl-on-selected: #c2e7ff; --tl-primary: #a8c7fa; --tl-on-primary: #062e6f;
+  box-shadow: 0 2px 6px 2px rgba(0, 0, 0, .15), 0 1px 2px rgba(0, 0, 0, .3), inset 0 0 0 1px rgba(255, 255, 255, .06);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-pop { animation: none; }
+  .tl-item, .tl-action { transition: none; }
+}

@@ -110,6 +110,7 @@
     let left = Math.min(Math.max(8, b.left + b.width / 2 - w / 2), innerWidth - w - 8);
     let top = b.bottom + 6;
     if (top + h > innerHeight - 8) top = b.top - h - 6;
+    pop.classList.toggle("tl-above", top < b.top); // it opens from the button, up or down
     pop.style.left = `${left}px`;
     pop.style.top = `${Math.max(8, top)}px`;
     setTimeout(() => document.addEventListener("pointerdown", function away(e) {

@@ -14,7 +14,7 @@ let pumping = false;
 
 async function badge(tasks) {
   const n = Object.values(tasks).filter((x) => ACTIVE.has(x.state)).length;
-  await chrome.action.setBadgeBackgroundColor({ color: "#1d9bf0" });
+  await chrome.action.setBadgeBackgroundColor({ color: "#0b57d0" });
   await chrome.action.setBadgeText({ text: n ? String(n) : "" });
 }
 
