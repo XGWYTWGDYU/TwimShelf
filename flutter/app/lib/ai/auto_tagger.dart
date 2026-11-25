@@ -468,6 +468,9 @@ class AutoTagger extends ChangeNotifier {
     title = L(titleKey, [model.title]);
     _post();
     final runStart = _now().millisecondsSinceEpoch ~/ 1000 - 1;
+    // the grid shows the tags as they come: after each picture, at most once a second (a slow
+    // on-device model takes seconds a picture), and at least every 12 (a fast service)
+    var shown = _now();
     var first = true,
         after = job.resumeAfter,
         sinceVocabulary = 10,
@@ -608,8 +611,9 @@ class AutoTagger extends ChangeNotifier {
           _handled++;
           if (job.scope == TaggingScope.all) _after = media.media_id;
           _post();
-          if (changed >= 12) {
+          if (changed >= 12 || _now().difference(shown) >= const Duration(seconds: 1)) {
             changed = 0;
+            shown = _now();
             if (!_closed) onChanged?.call();
           }
         }

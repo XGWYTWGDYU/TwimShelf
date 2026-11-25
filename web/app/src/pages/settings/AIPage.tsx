@@ -16,7 +16,7 @@ import { useAsync, useInterval, useStore } from '../../lib/hooks';
 import { libraryVersion } from '../../lib/library';
 import {
   activeTagger, autoTag, defaultPrompt, deleteModel, endpoint, externalModels,
-  getPrompt, localAIInfo, modelTitle, promptFields, runTagging, saveModel, selectTagger,
+  checkAutoTagging, getPrompt, localAIInfo, modelTitle, promptFields, runTagging, saveModel, selectTagger,
   setAuto, setSetting, stopTagging, tagging, testModel, unloadLocalModels, type ExternalModel, type Prompt,
 } from './aiTagging';
 import { MODEL_SOURCES, ModelProgress } from './ModelHubPage';
@@ -59,6 +59,8 @@ export default function AIPage() {
     () => core.read<ModelInfo[]>(core.b.tl_models_installed()),
     [version, status.data?.repo, status.data?.finished],
   );
+  // a model that came in starts tagging (and becomes the tagger when there is none)
+  useEffect(() => { if (installed.data) checkAutoTagging(); }, [installed.data]);
   const syncState = useAsync(async () => {
     const [s, d] = await Promise.all([
       core.read<SyncStatus>(core.b.tl_sync_status()).catch(() => null),

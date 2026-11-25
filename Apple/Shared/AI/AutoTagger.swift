@@ -189,6 +189,9 @@ final class AutoTagger {
         guard let epoch = try? Core.epoch() else { return }
         let name = ModelStore.shared.displayName(job.model)
         var changedSinceReload = 0
+        // the grid shows the tags as they come: after each picture, at most once a second (a model
+        // on the device takes a second or more a picture), and at least every 12 (a fast service)
+        var shownAt = Date()
         done = 0
         switch job.scope {
         case .untagged: let c = Core.aiCounts(); total = c.total - c.done; title = L("ai.activity.new", name)
@@ -304,7 +307,11 @@ final class AutoTagger {
                 if job.scope == .all { currentAfter = m.mediaId }
                 changedSinceReload += 1
                 post()
-                if changedSinceReload >= 12 { changedSinceReload = 0; NotificationCenter.default.post(name: .libraryChanged, object: self) }
+                if changedSinceReload >= 12 || Date().timeIntervalSince(shownAt) >= 1 {
+                    changedSinceReload = 0
+                    shownAt = Date()
+                    NotificationCenter.default.post(name: .libraryChanged, object: self)
+                }
             }
         }
         if changedSinceReload > 0 { NotificationCenter.default.post(name: .libraryChanged, object: self) }

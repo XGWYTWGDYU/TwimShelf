@@ -97,7 +97,8 @@ class LibraryModel extends ChangeNotifier {
     try {
       await LocalModels.instance.start();
       // a tagger is chosen when one is installed and none is, or the chosen one has gone
-      void adopt() => unawaited(m.aiModels.adoptInstalled(LocalModels.instance).catchError((Object _) {}));
+      // and a model that came in (downloaded, imported, pulled) tags what waits, when tagging is on
+      void adopt() => unawaited(m.aiModels.adoptInstalled(LocalModels.instance).then((_) => m.tagger.startIfEnabled()).catchError((Object _) {}));
       LocalModels.instance.addListener(adopt);
       adopt();
     } catch (_) {}

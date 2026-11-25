@@ -139,6 +139,7 @@ void main() {
     TaggingImageLoader? load,
     TaggingInference? infer,
     void Function()? changed,
+    DateTime Function()? now,
   }) {
     final value = AutoTagger(
       models: models,
@@ -147,7 +148,7 @@ void main() {
       core: core,
       imageLoader: load ?? (_) async => '/synthetic/picture.jpg',
       infer: infer ?? (_, _, _, _, _, _) async => ['cat'],
-      now: () => DateTime.fromMillisecondsSinceEpoch(100000),
+      now: now ?? () => DateTime.fromMillisecondsSinceEpoch(100000),
       onChanged: changed,
     );
     runners.add(value);
@@ -188,6 +189,27 @@ void main() {
       expect(value.outcome, 'succeeded');
     },
   );
+  test('a slow model shows each picture\'s tags while the run goes on, not all at its end', () async {
+    // an on-device model on a phone: about six seconds a picture, ten pictures
+    final core = FakeCore(List.generate(10, media));
+    var clock = DateTime.fromMillisecondsSinceEpoch(100000);
+    final shownBefore = <int>[];
+    late AutoTagger value;
+    value = runner(
+      core,
+      now: () => clock,
+      changed: () => shownBefore.add(core.applied.length),
+      infer: (_, _, _, _, _, _) async {
+        clock = clock.add(const Duration(seconds: 6));
+        return ['cat'];
+      },
+    );
+    value.start(const TaggingJob(model: 'ext:test'));
+    await value.settled;
+    expect(core.applied, hasLength(10));
+    // the grid reloaded after every picture, each time with that picture's tags written
+    expect(shownBefore, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
   test(
     'autotag preference, model availability and already analysed skips',
     () async {

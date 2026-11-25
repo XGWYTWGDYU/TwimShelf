@@ -1,4 +1,4 @@
-import { L, store, type MediaRef, type ModelInfo, type TagCount } from '@twimshelf/core';
+import { L, store, type CatalogEntry, type MediaRef, type ModelInfo, type TagCount } from '@twimshelf/core';
 import { core } from '../../lib/core';
 import { libraryChanged, libraryVersion } from '../../lib/library';
 import { info as serverInfo, readSecret, serverFetch, updateSecrets } from './serverFiles';
@@ -297,14 +297,38 @@ export function stopTagging() {
   abort?.abort();
 }
 
+/** A tagger when there is none or the chosen one has gone: of the on-device models installed, the
+ *  one that asks least of the machine, as the other apps choose (the person can choose another). */
+export async function adoptInstalled(): Promise<void> {
+  const current = activeTagger.get();
+  const choices = await allTaggers();
+  if (current && choices.some((c) => c.id === current)) return;
+  const local = choices.filter((c) => c.kind === 'local');
+  if (!local.length) {
+    if (current) selectTagger('');
+    return;
+  }
+  const catalog = await core.read<CatalogEntry[]>(core.b.tl_model_catalog('gguf')).catch(() => [] as CatalogEntry[]);
+  const asks = (id: string) => catalog.find((c) => c.folder === id)?.recommend_gb ?? 1 << 30;
+  local.sort((a, b) => asks(a.id) - asks(b.id));
+  selectTagger(local[0].id);
+}
+
+/** Tags what waits when tagging is on, after choosing a tagger if a model came in (downloaded,
+ *  imported, pulled) and none was chosen. Also called by the pages that see a download end. */
+export function checkAutoTagging() {
+  // a run going on already (its own refreshes come here every second)
+  if (abort) return;
+  void adoptInstalled().catch(() => {}).finally(() => {
+    if (autoTag.get() && activeTagger.get() && Date.now() >= retryAfter) void runTagging({ automatic: true });
+  });
+}
+
 export function enableAutoTagging() {
   if (interval !== undefined) return;
-  const tick = () => {
-    if (autoTag.get() && activeTagger.get() && Date.now() >= retryAfter) void runTagging({ automatic: true });
-  };
-  interval = window.setInterval(tick, 15_000);
-  unsubLib = libraryVersion.subscribe(tick);
-  tick();
+  interval = window.setInterval(checkAutoTagging, 15_000);
+  unsubLib = libraryVersion.subscribe(checkAutoTagging);
+  checkAutoTagging();
 }
 
 interface ResolvedRunner {
@@ -383,6 +407,9 @@ export async function runTagging(opts: {
     let after = '';
     let processed = 0;
     let consecutiveFail = 0;
+    // the grid shows the tags as they come: after each picture, at most once a second (a model on
+    // the server's GPU takes seconds a picture)
+    let shownAt = Date.now();
     tagging.set({ running: true, mode, modelName: runner.name, done: 0, total, currentPath: null, currentKind: '', error: '' });
 
     const processBatch = async (batch: MediaRef[]) => {
@@ -412,6 +439,7 @@ export async function runTagging(opts: {
           consecutiveFail = 0;
           done++;
           tagging.set({ running: true, mode, modelName: runner.name, done, total: Math.max(total, done), currentPath: item.path, currentKind: item.kind, error: '' });
+          if (Date.now() - shownAt >= 1000) { shownAt = Date.now(); libraryChanged(); }
         } catch (error) {
           const reason = error instanceof Error ? error.message : 'common.notDone';
           if (await core.read<number>(core.b.tl_epoch()) !== epoch) return false;

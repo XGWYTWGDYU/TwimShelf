@@ -13,6 +13,7 @@ import { change, LoadState, useTask } from '../../components/libraryControls';
 import { choose } from '../../components/pickers';
 import { core } from '../../lib/core';
 import { useAsync, useInterval } from '../../lib/hooks';
+import { checkAutoTagging } from './aiTagging';
 import { openExternal, size } from './serverFiles';
 import {
   ActivityRow, Banner, Card, CardRow, ChipButton, IconTile,
@@ -119,6 +120,8 @@ export default function ModelHubPage() {
     () => core.read<ModelInfo[]>(core.b.tl_models_installed()),
     [status.data?.finished, status.data?.repo],
   );
+  // a model that came in starts tagging (and becomes the tagger when there is none)
+  useEffect(() => { if (installed.data) checkAutoTagging(); }, [installed.data]);
   useInterval(status.reload, status.loading ? null : 1500);
 
   async function runSearch(q: string, unc: boolean, nextToken: string | null) {

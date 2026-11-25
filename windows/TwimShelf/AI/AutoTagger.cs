@@ -231,6 +231,9 @@ public sealed class AutoTagger
         var first = true;
         var after = job.ResumeAfter;
         int sinceVocabulary = 10, changed = 0;
+        // the grid shows the tags as they come: after each picture, at most once a second (a model
+        // on the GPU takes seconds a picture), and at least every 12 (a fast service)
+        var shown = System.Diagnostics.Stopwatch.StartNew();
         var vocabulary = new List<string>();
         var failed = new List<string>();
         // pictures that could not be prepared, one after the other, before any success: a few are
@@ -341,9 +344,10 @@ public sealed class AutoTagger
                     _handled++;
                     if (job.Scope == TaggingScope.All) _after = media.MediaId;
                     Post();
-                    if (changed >= 12)
+                    if (changed >= 12 || shown.Elapsed >= TimeSpan.FromSeconds(1))
                     {
                         changed = 0;
+                        shown.Restart();
                         if (!_closed) _ui.TryEnqueue(() => _onChanged?.Invoke());
                     }
                 }
@@ -395,12 +399,18 @@ public sealed class AiTagging
         {
             await a.Local.Start();
             // a tagger is chosen when one is installed and none is, or the chosen one has gone
-            void Adopt() => _ = a.Models.AdoptInstalled(a.Local);
+            // and a model that came in (downloaded, imported, pulled) tags what waits, when tagging is on
+            void Adopt() => _ = AdoptAndStart(a);
             a.Local.Changed += Adopt;
             Adopt();
         }
         catch { }
         return a;
+    }
+
+    static async Task AdoptAndStart(AiTagging a)
+    {
+        try { await a.Models.AdoptInstalled(a.Local); await a.Tagger.StartIfEnabled(); } catch { }
     }
 
     public Task StartIfEnabled() => Tagger.StartIfEnabled();

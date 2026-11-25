@@ -83,9 +83,16 @@ final class ModelStore {
 
     private(set) var installed: [Core.ModelInfo] = []
 
+    private var loaded = false
+
     func reload() {
+        let before = Set(installed.map(\.id))
         installed = Core.installedModels()
         adoptInstalled()
+        // a model that came in (downloaded, imported, pulled) tags what waits, when tagging is on;
+        // not the first read at launch, which the app starts tagging after on its own
+        if loaded, !Set(installed.map(\.id)).isSubset(of: before) { Task { @MainActor in AutoTagger.shared.startIfEnabled() } }
+        loaded = true
     }
 
     var taggers: [Core.ModelInfo] { installed.filter(\.vision) }
