@@ -37,7 +37,7 @@ fi
 FLUTTER="$FLUTTER_ROOT/bin/flutter"
 export PUB_CACHE="$CACHE/pub"
 
-# config.yaml: the name, bundle id, icon and build location this build gets
+# config.yaml: the name, bundle id and build location this build gets
 python3 "$ROOT/scripts/apply.py" flutter || fail "Applying config.yaml failed"
 
 # Dart packages (writes the Generated.xcconfig Xcode reads next)

@@ -2,9 +2,6 @@
 # scripts/apply.py 读取时逐项覆盖，不会改写任何一个文件；提交时也只会看到公开的 config.yaml。
 # 下面每一项都是可选的。
 
-# 自己的图标（相对路径以项目根目录为准；.local/ 不进 Git，适合放这类文件）
-# icon: .local/icon.png
-
 # build:
 #   dir: ~/Builds/TwimShelf                  # 构建缓存和安装包放在别处
 

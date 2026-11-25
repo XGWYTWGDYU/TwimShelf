@@ -15,8 +15,8 @@ const product = (() => {
   try { return require('./product.json'); } catch { return {}; }
 })();
 
-// what the app is called, its version and icon: config.yaml, written to product.json and icon.png by
-// scripts/apply.py (every build does that first)
+// what the app is called and its version: config.yaml, written to product.json by scripts/apply.py;
+// icon.png is committed beside this file
 const name = product.name || 'TwimShelf';
 const icon = path.join(__dirname, 'icon.png');
 app.setName(name);
@@ -368,8 +368,7 @@ ipcMain.on('desktop-meta', (e) => {
     updateRepo: product.updateRepo || process.env.TL_UPDATE_REPO || '',
     appVersion: product.version || app.getVersion(),
     arch: process.arch === 'arm64' ? 'arm64' : 'x64',
-    // this app's icon (config.yaml's, or config.local.yaml's own: scripts/apply.py desktop), for the
-    // page's About; the web app's own copy is the repository's
+    // the desktop app's own bundled icon for the About page
     icon: fs.existsSync(icon) ? `data:image/png;base64,${fs.readFileSync(icon).toString('base64')}` : '',
   };
 });

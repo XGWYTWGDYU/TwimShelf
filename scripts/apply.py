@@ -4,16 +4,15 @@
   python3 scripts/apply.py            everything
   python3 scripts/apply.py native     the native Apple apps only (Xcode's pre-build step)
   python3 scripts/apply.py flutter    the Flutter app only (iOS and Android)
-  python3 scripts/apply.py desktop    the desktop app only (web/electron: name, id, version, icon)
-  python3 scripts/apply.py generate   only the generated files below (no links, icons or projects)
+  python3 scripts/apply.py desktop    the desktop app only (web/electron: name, id, version)
+  python3 scripts/apply.py generate   only the generated files below (no links or projects)
   python3 scripts/apply.py versions [--check]   only the version, in the files in git that carry it
   python3 scripts/apply.py get flutter.share_extension    one value (for build scripts)
-  python3 scripts/apply.py get icon_set                   the AppIcon set the apps use
   python3 scripts/apply.py where cache|apps|build         a build location (absolute)
 
 config.yaml holds the public values. config.local.yaml beside it (not in git, see
 config.local.example.yaml) overrides any of them on this computer: your ids, team, signing
-identity, share extensions, build location and icon. The two are merged when read; neither file
+identity, share extensions, and build location. The two are merged when read; neither file
 is written, and nothing made from them is committed.
 
 Writes small generated files that the projects read (never edits code; none of them is in git):
@@ -21,8 +20,8 @@ Writes small generated files that the projects read (never edits code; none of t
   flutter/app/ios/Flutter/Identity.xcconfig   Flutter iOS
   flutter/app/android/identity.properties     Android: applicationId, share target
   flutter/app/lib/app/identity.g.dart         Dart: the app's name
-  web/electron/product.json, icon.png         the desktop app (React + Electron): name, id,
-                                              version and build number, its icon
+  web/electron/product.json                   the desktop app (React + Electron): name, id,
+                                              version and build number
   windows/TwimShelf/product.json              the native Windows app's setup: version, "send to"
 config.yaml's version into the files in git that carry one (flutter/app/pubspec.yaml,
 server/Cargo.toml with Cargo.lock, extension/manifest.json, web/electron/package.json): commit them
@@ -33,20 +32,15 @@ the build location (build.dir: <dir>/cache for every cache, <dir>/apps for packa
       BuildLocation.xcconfig (the Rust core's cache for Xcode builds; not committed)
   links from the Flutter projects' build folders (build, .dart_tool, .gradle, Pods, .cxx, the
       Rust core libraries) into <dir>/cache
-and, when they changed, the icons: icon.png makes the native AppIcon set (committed: the web app's
-and the browser extension's icons come from it); an icon of your own (`icon:` in
-config.local.yaml) makes AppIconLocal beside it, which the apps then use. Every Flutter icon comes
-from the set the apps use.
-Only the Python standard library is used, plus Pillow when icons have to be made.
+Each platform carries its own committed icons; apply.py does not generate or swap icons.
+Only the Python standard library is used.
 """
-import getpass, hashlib, json, os, plistlib, re, shutil, struct, subprocess, sys
+import getpass, hashlib, json, os, plistlib, re, shutil, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FLUTTER = ROOT / 'flutter/app'
 STATE = ROOT / 'Apple/.applied.json'
-ICON = 'icon.png'   # the repository's icon: the source of the committed AppIcon set
-ICONS = 'Apple/Resources/Assets.xcassets'
 
 
 def scalar(value):
@@ -102,17 +96,6 @@ def load_config():
     c = load_yaml(ROOT / 'config.yaml')
     local = ROOT / 'config.local.yaml'
     return merge(c, load_yaml(local)) if local.exists() else c
-
-
-def icon_source(c):
-    """The icon the apps get: config.local.yaml's `icon:`, else the repository's icon.png."""
-    p = Path(os.path.expanduser(str(c.get('icon') or ICON)))
-    return (p if p.is_absolute() else ROOT / p).resolve()
-
-
-def icon_set(c):
-    """The AppIcon set the apps use (relative to the root): the committed one for icon.png."""
-    return f"{ICONS}/{'AppIcon' if icon_source(c) == (ROOT / ICON).resolve() else 'AppIconLocal'}.appiconset"
 
 
 def write(path, text):
@@ -251,7 +234,7 @@ def mac_signing(team, identity=''):
 
 
 def native(c):
-    """Apple/Identity.xcconfig: ids, version, signing, app groups, icon, share extensions."""
+    """Apple/Identity.xcconfig: ids, version, signing, app groups, share extensions."""
     n = c['native']
     check_id('native.bundle_id', n['bundle_id'])
     share_ios, share_mac = bool(n.get('share_extension_ios')), bool(n.get('share_extension_mac'))
@@ -267,7 +250,6 @@ def native(c):
         f"MARKETING_VERSION = {c['version']}",
         f"CURRENT_PROJECT_VERSION = {c['build_number']}",
         f"TL_TEAM = {team}",
-        f"TL_APP_ICON = {Path(icon_set(c)).stem}",
         f"TL_APP_GROUP_IOS = {group_ios}",
         f"TL_IOS_ENTITLEMENTS = {'Apple/iOS/TwimShelf.entitlements' if share_ios else ''}",
         f"TL_APP_GROUP_MAC = {group_mac}",
@@ -297,27 +279,6 @@ def native_project(state):
     subprocess.check_call(['xcodegen', 'generate', '--quiet'], cwd=ROOT)
     state['project'] = stamp
     print('config: TwimShelf.xcodeproj made from project.yml')
-
-
-def app_icon_sets(c):
-    """The AppIcon set made from icon.png (committed), and AppIconLocal from an icon of your own;
-    each made again only when its source changed, so most builds need no image library."""
-    tool = ROOT / 'scripts/flutter/make_icons.py'
-    local = ROOT / ICONS / 'AppIconLocal.appiconset'
-    for source, folder in (((ROOT / ICON).resolve(), ROOT / ICONS / 'AppIcon.appiconset'),
-                           (icon_source(c), local)):
-        if folder == local and icon_set(c) != f'{ICONS}/AppIconLocal.appiconset':
-            shutil.rmtree(local, ignore_errors=True)   # back to the repository's icon
-            continue
-        if not source.exists():
-            sys.exit(f'config: the icon {source} does not exist')
-        stamp = folder / 'source.sha256'
-        current = hashlib.sha256(source.read_bytes()).hexdigest()
-        if not stamp.exists() or stamp.read_text().strip() != current:
-            r = subprocess.run([sys.executable, str(tool), '--app-icon', str(source), '--set', str(folder)])
-            if r.returncode != 0:
-                sys.exit('config: the AppIcon set could not be made (scripts/flutter/make_icons.py)')
-            stamp.write_text(current + '\n')
 
 
 def flutter(c):
@@ -352,8 +313,8 @@ def flutter(c):
 def desktop(c):
     """The desktop app (web/electron, React + Electron): what it is called, its application id
     (menu entry, icon name, window class; on Linux also where the Flutter app it replaces kept its
-    library), the version and build number it shows (About, the packages) and its icon: the AppIcon
-    set the apps use, so an icon of your own reaches it too. Neither file is in git."""
+    library), and the version and build number it shows (About, the packages). product.json is not
+    in git; web/electron/icon.png is committed directly."""
     if not (ROOT / 'web/electron/package.json').exists():
         return
     d = c.get('desktop', {})
@@ -362,17 +323,12 @@ def desktop(c):
                'version': str(c['version']), 'buildNumber': str(c['build_number']),
                'updateRepo': os.environ.get('TL_UPDATE_REPO', '')}
     write('web/electron/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
-    icon = ROOT / icon_set(c) / 'mac-512.png'
-    target = ROOT / 'web/electron/icon.png'
-    if icon.exists() and (not target.exists() or target.read_bytes() != icon.read_bytes()):
-        target.write_bytes(icon.read_bytes())
 
 
 def windows(c):
     """The native Windows app (windows/TwimShelf): what its setup installs (product.json, beside the
-    program as payload.json), its icon (Assets/AppIcon.ico and .png, from the AppIcon set), and its
-    build folders and the core's library in build.dir. Nothing where the sources have no Windows
-    app (the Docker image copies only what it builds)."""
+    program as payload.json), and its build folders and the core's library in build.dir. Nothing
+    where the sources have no Windows app (the Docker image copies only what it builds)."""
     if not (ROOT / 'windows/TwimShelf/TwimShelf.csproj').exists():
         return
     w = c.get('windows', {})
@@ -380,27 +336,6 @@ def windows(c):
                'executable': 'TwimShelf.exe', 'file': 'TwimShelf', 'version': str(c['version']),
                'sendTo': bool(w.get('share_extension', True))}
     write('windows/TwimShelf/product.json', json.dumps(product, indent=2, ensure_ascii=False) + '\n')
-    source = ROOT / icon_set(c)
-    images = []
-    for size in (16, 24, 32, 48, 64, 128, 256):
-        f = source / ('mac-%d.png' % size)
-        if f.exists():
-            images.append((size, f.read_bytes()))
-    if images:
-        offset = 6 + 16 * len(images)
-        entries, blobs = [], []
-        for size, data in images:
-            entries.append(struct.pack('<BBBBHHII', size % 256, size % 256, 0, 0, 1, 32, len(data), offset))
-            blobs.append(data)
-            offset += len(data)
-        assets = ROOT / 'windows/TwimShelf/Assets'
-        assets.mkdir(parents=True, exist_ok=True)
-        ico = struct.pack('<HHH', 0, 1, len(images)) + b''.join(entries + blobs)
-        if not (assets / 'AppIcon.ico').exists() or (assets / 'AppIcon.ico').read_bytes() != ico:
-            (assets / 'AppIcon.ico').write_bytes(ico)
-        png = (source / 'mac-256.png').read_bytes()
-        if not (assets / 'AppIcon.png').exists() or (assets / 'AppIcon.png').read_bytes() != png:
-            (assets / 'AppIcon.png').write_bytes(png)
     cache = locations(c)['cache']
     link('windows/TwimShelf/bin', cache / 'windows' / 'bin')
     link('windows/TwimShelf/obj', cache / 'windows' / 'obj')
@@ -440,19 +375,6 @@ def versions(c, check=False):
     return stale
 
 
-def flutter_icons(c, state):
-    """Every icon of the Flutter apps, from the set the apps use (and the committed web and
-    extension icons from the committed set); made again when a source changed or one is missing."""
-    tool = ROOT / 'scripts/flutter/make_icons.py'
-    env = dict(os.environ, TL_ICON_SET=str(ROOT / icon_set(c)))
-    stamp = file_hash(f'{icon_set(c)}/icon-1024.png') + file_hash(f'{ICONS}/AppIcon.appiconset/icon-1024.png') + file_hash('scripts/flutter/make_icons.py')
-    if state.get('flutter_icon') != stamp or subprocess.run([sys.executable, str(tool), '--check'], stdout=subprocess.DEVNULL, env=env).returncode != 0:
-        r = subprocess.run([sys.executable, str(tool)], env=env)
-        if r.returncode != 0:
-            sys.exit('config: the Flutter icons could not be made (scripts/flutter/make_icons.py)')
-        state['flutter_icon'] = stamp
-
-
 def main():
     c = load_config()
     which = sys.argv[1] if len(sys.argv) > 1 else 'all'
@@ -460,9 +382,6 @@ def main():
         print(locations(c)[sys.argv[2]])
         return
     if which == 'get':
-        if sys.argv[2] == 'icon_set':
-            print(ROOT / icon_set(c))
-            return
         v = c
         for k in sys.argv[2].split('.'):
             v = v[k]
@@ -486,13 +405,8 @@ def main():
         native_project(state)
     paths(c)
     hooks()
-    if which in ('all', 'native', 'flutter'):
-        app_icon_sets(c)
     if which in ('all', 'flutter'):
         flutter(c)
-        flutter_icons(c, state)
-    if which == 'desktop':
-        app_icon_sets(c)       # (with 'all' already made above)
     if which in ('all', 'desktop'):
         desktop(c)
     if which in ('all', 'windows'):

@@ -328,8 +328,8 @@ export function AboutPage() {
         aria-label={L('web.appName')}
         onClick={handleIconTap}
       >
-        {/* the desktop app's own icon (config.local.yaml can give it another); else the repository's */}
-        <img src={window.twimshelf?.appIcon || new URL('../../../../../icon.png', import.meta.url).href} alt="" width="128" height="128" />
+        {/* Electron passes its own bundled icon; the web app serves its own public icon */}
+        <img src={window.twimshelf?.appIcon || './icons/Icon-512.png'} alt="" width="128" height="128" />
       </button>
       <div className="about-title">{L('web.appName')}</div>
       <div className="about-tagline">{L('about.tagline')}</div>

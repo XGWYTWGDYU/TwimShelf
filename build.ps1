@@ -1,9 +1,9 @@
-# One step from a fresh checkout to installable packages, on Windows 11 (the Android app also
+﻿# One step from a fresh checkout to installable packages, on Windows 11 (the Android app also
 # builds on Windows 10).
 #
 #   powershell -ExecutionPolicy Bypass -File build.ps1                    windows + android
 #   powershell -ExecutionPolicy Bypass -File build.ps1 windows            the native Windows app (WinUI 3)
-# Each build applies config.yaml first (names, ids, icons, share).
+# Each build applies config.yaml first (names, ids, share).
 #   … -Check     only check the tools      … -Yes     install what is missing without asking
 #
 # Each missing tool is named with what installing it takes; nothing is installed without a yes.
@@ -212,7 +212,7 @@ function Build-Windows {
   Push-Location $stage; & "$env:SystemRoot\System32\tar.exe" -cf "$Cache\setup\payload.tar" payload; Pop-Location
   $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
   $obj = "$Cache\setup\stub"; New-Item -ItemType Directory -Force $obj | Out-Null
-  # the setup file's own icon: the app's (scripts\apply.py made it from the AppIcon set)
+  # the setup file's own icon: the Windows app's own Assets\AppIcon.ico
   Copy-Item "$Root\windows\TwimShelf\Assets\AppIcon.ico" "$obj\app_icon.ico" -Force
   $vcvars = if ($Arm) { 'vcvarsarm64.bat' } else { 'vcvars64.bat' }
   cmd /c "`"$vs\VC\Auxiliary\Build\$vcvars`" && cd /d `"$Root\windows\Setup\stub`" && rc /nologo /i `"$obj`" /fo `"$obj\setup_stub.res`" setup_stub.rc && cl /nologo /std:c++17 /O2 /EHsc /DUNICODE /D_UNICODE /Fo`"$obj\\`" /Fe`"$obj\setup_stub.exe`" setup_stub.cpp `"$obj\setup_stub.res`" /link /SUBSYSTEM:WINDOWS shell32.lib user32.lib"
@@ -249,7 +249,7 @@ function Build-Android {
 }
 
 if (-not $Targets) { $Targets = @('windows', 'flutter-android') }
-# config.yaml first: the names, ids and icons, and where builds go
+# config.yaml first: the names and ids, and where builds go
 Need-Winget python 'Python 3' 'Python.Python.3.12'
 # -Check only looks: nothing is generated or made (where only reads config.yaml)
 if (-not $Check) {

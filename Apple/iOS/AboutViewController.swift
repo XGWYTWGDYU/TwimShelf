@@ -83,7 +83,10 @@ final class AboutViewController: FormViewController {
     /// The icon the system shows for this app.
     private static var appIcon: UIImage? {
         let icons = (Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any])?["CFBundlePrimaryIcon"] as? [String: Any]
-        return ((icons?["CFBundleIconFiles"] as? [String])?.last).flatMap { UIImage(named: $0) }
+        if let name = (icons?["CFBundleIconFiles"] as? [String])?.last, let img = UIImage(named: name) {
+            return img
+        }
+        return UIImage(named: "AppIcon")
     }
 
     @objc private func iconTapped() {

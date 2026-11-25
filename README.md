@@ -1,4 +1,4 @@
-<p align="center"><img src="Apple/Resources/Assets.xcassets/AppIcon.appiconset/mac-256.png" width="128" alt="TwimShelf"></p>
+<p align="center"><img src="web/electron/icon.png" width="128" alt="TwimShelf"></p>
 
 <h1 align="center">TwimShelf</h1>
 
@@ -6,7 +6,7 @@
 
 TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心作者删帖或注销，还可以使用AI标记媒体，在局域网进行p2p同步
 
-后端基于rust，Apple平台和Windows有原生前端（Windows 版基于 WinUI 3）；Linux 桌面版和网页版是 React 前端（桌面版基于 Electron），布局和功能与原生版一致；Android 是 Flutter 前端，基于MD3+MD3E设计
+后端基于rust，Apple平台和Windows有原生前端（Windows 版基于 WinUI 3）；Linux 桌面版和网页版是 React 前端（桌面版基于 Electron），布局和功能与原生版一致；Android 是 Flutter 前端，基于MD3E设计
 
 ## 介绍
 
@@ -20,7 +20,35 @@ TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心
 
 ## 注意
 
-程序目前处于早期预览状态，可能存在未知的问题。Linux平台未经验证，Windows平台验证较少，也未在MTK设备上进行本地AI推理验证
+程序目前处于早期预览状态，可能存在未知的问题
+
+## 关于本地 AI 功能
+
+- **安卓版本**：在天玑 9600 Pro、骁龙 8EE6、骁龙 8E 上通过测试，分别使用 llama+Vulkan 和 OpenCL
+- **Linux 版本**：在 NVIDIA 5090、NVIDIA 3090 上通过测试，分别使用 llama+CUDA 和 Vulkan
+- **Mac 版本**：在 Apple M3、Apple M4 上通过测试，使用 MLX
+- **iOS 版本**：在 Apple M3、Apple A19 上通过测试，使用 MLX
+- **Windows 版本**：在 AMD 6650 XT、RX 580 上通过测试，使用 llama+Vulkan
+
+上述测试主要使用的是 Qwen 2.5 模型，Apple 设备使用 MLX 模型，其余均为 GGUF 模型，所有非 Apple 桌面设备都是 x64 构建。
+
+由于高通方面和 llama.cpp 对高通设备的支持不完全，Vulkan 无法正常推理，应用程序不得不使用 OpenCL，但它也无法完全运行在 GPU 上，速度极慢，在 8EE6 上测得 3 tokens/s 的成绩，prefill 速度更惊人。阿里 MNN 等方案经评估无法使用，具体情况请在 App 内部查看，总之不建议在高通 GPU 上使用该功能。
+在 9600 Pro 设备上的测试显示推理速度偏慢。
+
+对于安卓端未提到的处理器平台，都使用 Vulkan 模式，但未经验证。对于 Windows 和 Linux，应用程序不在 NVIDIA、AMD、Intel 之外的 GPU 上进行推理；如果存在多个 GPU，程序会自动使用真实任务进行基准测试，当 GPU 被移除时，会自动 fallback 到剩余 GPU 中最快的一块。所有版本的程序都拒绝 fallback 到 CPU，经测试，即便是数十个核心的服务器 CPU，体验也不佳。验证时使用的所有操作系统版本都是当下最新的大版本。WOA 设备由于硬件特殊且我没有对应设备，本地 AI 功能已被关闭。应用程序也不对老设备的运行效率和可靠性作出保证。
+
+对于 NVIDIA GPU，应用程序将直接使用 CUDA 加速，这能获得更好的速度。所有 Apple 设备都被限定为仅使用 GPU，这对 M6 设备而言可能是体验降级。
+
+Apple 设备之间可以互传模型，GGUF 设备之间也可以。
+
+下载应用后建议首先修改提示词，对于小模型而言，贴切内容类型的提示词效果有明显改善。
+
+如果在少量媒体中观察到大量不必要标签，这是模型智能程度影响所致。
+
+## 关于 UI
+程序在 Windows、iPhone、iPad、Mac 上具有原生 UI，在 Android 设备上具有原生体验，在 Linux 和 Web 上采用 Web 技术，实际资源占用等方面不存在缺陷
+
+所有的原生版本和 Flutter 版本都在真实设备上进行相对全面的测试。因设备差异，不保证在用户的设备上绝对不会出错。Linux 的 Electron 版本在 Chrome OS 上进行过初步观察，不存在明显问题。Web 和 Electron 共享绝大部分前端代码，经测试无明显问题。
 
 
 ## 支持的平台
@@ -93,7 +121,7 @@ cd TwimShelf
 
 Windows 上运行 `powershell -ExecutionPolicy Bypass -File build.ps1`。详细说明、Xcode 的用法和常见问题见 **[构建指南](BUILDING.md)**。
 
-Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都集中在 [`config.yaml`](config.yaml) 里修改。图标来自根目录的 `icon.png`。只在自己电脑上用的值（自己的团队、Bundle ID、图标等）写进不进 Git 的 `config.local.yaml`，见[构建指南](BUILDING.md#本机配置configlocalyaml)。
+Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都集中在 [`config.yaml`](config.yaml) 里修改。各平台应用图标各自独立存放在对应的项目目录中。只在自己电脑上用的值（自己的团队、Bundle ID 等）写进不进 Git 的 `config.local.yaml`，见[构建指南](BUILDING.md#本机配置configlocalyaml)。
 
 ## 源码结构
 
@@ -108,7 +136,7 @@ Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都�
 | `server` | Linux 服务器：把核心通过 HTTP 提供给网页版，以及登录、文件、视频封面 |
 | `docker` | Docker 镜像和 compose 示例 |
 | `extension` | Chromium 浏览器扩展（独立项目，构建脚本不处理它） |
-| `scripts` | 配置生成、图标、打包和检查脚本 |
+| `scripts` | 配置生成、打包和检查脚本 |
 | `.github/workflows` | 自动构建和发布 |
 
 ## 参与贡献

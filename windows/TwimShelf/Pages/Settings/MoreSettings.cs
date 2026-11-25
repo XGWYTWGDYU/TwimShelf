@@ -90,7 +90,7 @@ public sealed partial class StorageSettings(LibraryModel library) : SettingsSubp
                 object? content = new TextBlock { Text = Format.Bytes(g.Bytes), VerticalAlignment = VerticalAlignment.Center };
                 if (Clearable.Contains(g.Key))
                 {
-                    var tick = new CheckBox { IsChecked = _selected.Contains(g.Key), Content = Format.Bytes(g.Bytes) };
+                    var tick = new CheckBox { IsChecked = _selected.Contains(g.Key), Content = Format.Bytes(g.Bytes), MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Right };
                     var key = g.Key;
                     tick.Click += (_, _) => { if (tick.IsChecked == true) _selected.Add(key); else _selected.Remove(key); Build(); };
                     content = tick;

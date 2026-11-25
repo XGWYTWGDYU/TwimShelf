@@ -60,3 +60,4 @@ flutter:
     - assets/l10n/
     - assets/ai/
     - assets/app_icon.png
+    - assets/app_icon_dark.png

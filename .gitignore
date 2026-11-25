@@ -36,7 +36,6 @@ __pycache__/
 /TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/*
 !/TwimShelf.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 /Apple/Identity.xcconfig
-/Apple/Resources/Assets.xcassets/AppIconLocal.appiconset/
 /flutter/app/ios/Flutter/Identity.xcconfig
 /flutter/app/android/identity.properties
 /flutter/app/lib/app/identity.g.dart
@@ -52,14 +51,8 @@ __pycache__/
 *.keystore
 
 
-# icons: made from Apple/Resources/Assets.xcassets/AppIcon.appiconset by scripts/flutter/make_icons.py
-/flutter/app/android/app/src/main/res/mipmap-*/*.png
-/flutter/app/ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png
-/flutter/app/assets/app_icon.png
-
-# the native Windows app: made by scripts/apply.py (product.json, the icon) or links into build.dir
+# the native Windows app: made by scripts/apply.py (product.json) or links into build.dir
 /windows/TwimShelf/product.json
-/windows/TwimShelf/Assets/AppIcon.*
 /windows/TwimShelf/bin
 /windows/TwimShelf/obj
 /windows/TwimShelf/lib

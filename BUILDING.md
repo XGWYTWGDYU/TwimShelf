@@ -92,7 +92,7 @@ open flutter/app/ios/Runner.xcworkspace
 
 选择 `Runner` scheme 点击运行即可。scheme 的预处理步骤会准备好配置、Dart 依赖、Rust 核心和 CocoaPods；Flutter SDK、Rust、CocoaPods 和 CMake 需要先装好（`./build.sh --check flutter-ios`）。这些步骤的输出在 `build/cache/logs/xcode-prepare.log` 里。
 
-签名方式和原生版相同：Mac 版不需要账号，iOS 真机在 `Runner` target 里选择自己的 Team。
+签名方式和原生版相同：iOS 真机在 `Runner` target 里选择自己的 Team。
 
 ### 不通过 Xcode
 
@@ -192,7 +192,7 @@ security add-generic-password -s "TwimShelf Android release key" -a twimshelf -w
 ./build.sh electron-linux
 ```
 
-Linux 桌面版是 React 前端（`web/app`，和网页版同一份代码，外观和功能一样）装在 Electron 里（`web/electron`），自带服务器程序，只在本机 127.0.0.1 上运行。脚本需要 Rust 和 `.node-version` 指定的 Node（缺少时询问并下载）。应用的名称、ID（`desktop.app_id`）、版本号和图标都来自 `config.yaml`，由 `scripts/apply.py desktop` 写进 `web/electron/product.json` 和 `icon.png`（都不进 Git）。数据放在 `~/.local/share/TwimShelf`；从原来的 Flutter Linux 版升级时，原来的资料库会被找到并继续使用。
+Linux 桌面版是 React 前端（`web/app`，和网页版同一份代码，外观和功能一样）装在 Electron 里（`web/electron`），自带服务器程序，只在本机 127.0.0.1 上运行。脚本需要 Rust 和 `.node-version` 指定的 Node（缺少时询问并下载）。应用的名称、ID（`desktop.app_id`）和版本号来自 `config.yaml`，由 `scripts/apply.py desktop` 写进 `web/electron/product.json`（不进 Git）；图标直接放在 `web/electron/icon.png`。数据放在 `~/.local/share/TwimShelf`；从原来的 Flutter Linux 版升级时，原来的资料库会被找到并继续使用。
 
 在 Mac 上可以用 `./build.sh electron-macos` 打一个同样的测试包（`TwimShelf Electron.app`，不签名、不发布），只用来在 Mac 上检查桌面版的界面。
 
@@ -215,7 +215,7 @@ $env:TL_LLAMA_SOURCE = 'D:\src\llama.cpp-0.8.0'
 
 Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都在根目录的 [`config.yaml`](config.yaml) 里，代码里用到它们的地方都引用这里。这里写的是公开的默认值。应用名称 TwimShelf 直接写在代码里，不在配置中。改完之后不需要手动做什么，`build.sh`、`build.ps1` 和 Xcode 的构建按钮都会先按它重新生成配置（`scripts/apply.py`）。
 
-由配置生成的文件都不进 Git：原生版的 Xcode 工程、各个 `Identity.xcconfig`、`identity.properties`、`identity.cmake`、`identity.g.dart`、`product.json`。新克隆下来先运行一次 `./build.sh --configure`。
+由配置生成的文件都不进 Git：原生版的 Xcode 工程、各个 `Identity.xcconfig`、`identity.properties`、`identity.g.dart`、`product.json`。新克隆下来先运行一次 `./build.sh --configure`。
 
 | 配置项 | 含义 |
 | --- | --- |
@@ -232,7 +232,7 @@ Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都�
 | `native.development_team`、`flutter.development_team` | 开发团队，默认留空 |
 | `native.mac_signing_identity` | Mac 版指定签名身份，默认留空 |
 
-**换图标**：替换 `icon.png`（只想在自己电脑上换，见下一节的 `icon`）。要求是正方形 PNG，自带圆角和透明边，建议 1024×1024 以上。各平台的图标都会自动生成：Mac 版直接缩放，iOS 和 Android 版取图案部分并铺满。第一次生成时需要 Pillow，脚本会自动下载到构建缓存里，不会安装到系统。
+**图标**：各平台使用各自独立的图标文件，直接保存在仓库对应位置（Apple 原生：`Apple/Resources/AppIcon.icon`；Windows：`windows/TwimShelf/Assets/AppIcon.{ico,png}`；Android / Flutter：`flutter/app/android/...`、`flutter/app/ios/...`、`flutter/app/assets/`；浏览器扩展：`extension/icons/`；网页版与 Linux 桌面版：`web/app/public/`、`web/electron/icon.png`）。
 
 **分发自己的版本**：请把 Bundle ID 和包名都改成自己的。
 
@@ -241,11 +241,10 @@ Bundle ID 和包名、版本号、签名、分享扩展开关和构建位置都�
 自己电脑上和公开默认值不同的东西，写在根目录的 `config.local.yaml` 里（不进 Git；把 [`config.local.example.yaml`](config.local.example.yaml) 复制过去改）。读取配置时它逐项覆盖 `config.yaml`，不会改写任何文件，所以提交时只会看到公开的值：
 
 - 自己的 Bundle ID、开发团队、Mac 签名身份、分享扩展开关、构建目录
-- `icon`：自己的图标。它生成 `AppIconLocal` 图标集（不进 Git），各个应用改用它；提交进 Git 的 AppIcon 图标集、网页版和扩展的图标始终来自 `icon.png`
 - `android`：本机的 Android 发布密钥（见 [Android](#android)）
 - `private`：提交前额外要拦下的文字，比如自己的名字和邮箱
 
-`.local/` 目录同样不进 Git，适合放自己的图标这类文件。
+`.local/` 目录同样不进 Git，适合放本机工具和私有文档。
 
 构建一次之后，Git 会使用仓库里的 `.githooks`：提交和推送前，`scripts/check_private.py` 检查改动里有没有 `config.local.yaml` 里的这些值，有就拦下。
 
@@ -325,7 +324,7 @@ cargo test -p tl-server
 
 只改文档（`*.md`、`docs/`）的推送不会触发构建。
 
-**发布新版本**：提高 `config.yaml` 里的 `version` 和 `build_number`，运行一次 `python3 scripts/apply.py versions`（任何一次构建也会做），它把版本号写进 `flutter/app/pubspec.yaml`、`server/Cargo.toml`、`Cargo.lock` 和 `extension/manifest.json`；把这几个文件和 `config.yaml` 一起提交，推送到 `main`。版本号没写齐时 CI 的检查会失败。
+**发布新版本**：提高 `config.yaml` 里的 `version` 和 `build_number`，运行一次 `python3 scripts/apply.py versions`（任何一次构建也会做），它把版本号写进 `flutter/app/pubspec.yaml`、`server/Cargo.toml`、`Cargo.lock`、`extension/manifest.json` 和 `web/electron/package.json`；把这几个文件和 `config.yaml` 一起提交，推送到 `main`。版本号没写齐时 CI 的检查会失败。
 
 Release 页面没有说明文字，只包含所有安装包、`SHA256SUMS.txt`、`BUILD-INFO.json` 和 `THIRD-PARTY-NOTICES.txt`。
 

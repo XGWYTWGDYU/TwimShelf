@@ -7,7 +7,7 @@
 #                              NVIDIA GPUs alike)
 #   ./build.sh --list          the targets and where each can be built
 #   ./build.sh --check         only check the tools; install nothing, build nothing
-#   ./build.sh --configure     only apply config.yaml (names, ids, icons, share extension)
+#   ./build.sh --configure     only apply config.yaml (names, ids, share extension)
 #
 # Each build applies config.yaml first.
 #
@@ -255,7 +255,7 @@ build_electron() {   # build_electron <linux|mac>
     llama_dir="$CACHE/llama-linux-out"
     build_llama_linux "$llama_dir"
   fi
-  # name, id, version, build number and icon from config.yaml (product.json, icon.png)
+  # name, id, version and build number from config.yaml (product.json)
   python3 "$ROOT/scripts/apply.py" desktop
   ELECTRON_OUT="$CACHE/electron-out"; local out=$ELECTRON_OUT; rm -rf "$out"
   (cd "$ROOT/web/electron" && TL_SERVER_BIN="$CACHE/cargo-target/release/twimshelf-server" TL_WEB_DIST="$ROOT/web/app/dist" \

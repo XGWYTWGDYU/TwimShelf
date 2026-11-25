@@ -8,7 +8,7 @@ packages:
   # swift-transformers)
   TLLocalAI: { path: Apple/TLLocalAI }
 # The Xcode project is made from this file (scripts/apply.py runs XcodeGen; it is not in git).
-# bundle ids, version, team, app groups, icon, share extensions: from config.yaml (scripts/apply.py)
+# bundle ids, version, team, app groups, share extensions: from config.yaml (scripts/apply.py)
 configFiles:
   Debug: Apple/Identity.xcconfig
   Release: Apple/Identity.xcconfig
@@ -24,12 +24,11 @@ settings:
     TL_UPDATE_REPO: ""
     SWIFT_STRICT_CONCURRENCY: minimal
 targetTemplates:
-  # the icon: AppIcon (icon.png), or AppIconLocal when config.local.yaml names an icon of your own
-  # (on each target: XcodeGen's presets set it per target)
+  # Apple native icon: Apple/Resources/AppIcon.icon (Icon Composer bundle: Light, Dark, Tinted)
   Icon:
     settings:
       base:
-        ASSETCATALOG_COMPILER_APPICON_NAME: $(TL_APP_ICON)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   App:
     templates: [Icon]
     dependencies:
@@ -41,7 +40,16 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "18.0"
-    sources: [Apple/Shared, Apple/iOS, Apple/Resources, Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift]
+    sources:
+      - Apple/Shared
+      - Apple/iOS
+      - path: Apple/Resources
+        excludes: [AppIcon.icon]
+      - path: Apple/Resources/AppIcon.icon
+        type: file
+        buildPhase: resources
+      - Apple/ShareExtension/ShareCollector.swift
+      - Apple/ShareExtension/ShareSheet.swift
     # the share extension is always built; config.yaml decides whether it is signed and embedded
     dependencies: [{ target: TwimShelf-iOSShare, embed: true, codeSign: true }]
     settings:
@@ -90,7 +98,16 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "15.0"
-    sources: [Apple/Shared, Apple/macOS, Apple/Resources, Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift]
+    sources:
+      - Apple/Shared
+      - Apple/macOS
+      - path: Apple/Resources
+        excludes: [AppIcon.icon]
+      - path: Apple/Resources/AppIcon.icon
+        type: file
+        buildPhase: resources
+      - Apple/ShareExtension/ShareCollector.swift
+      - Apple/ShareExtension/ShareSheet.swift
     dependencies: [{ target: TwimShelf-macOSShare, embed: true, codeSign: true }]
     settings:
       configs:
@@ -134,7 +151,16 @@ targets:
     platform: iOS
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
     deploymentTarget: "18.0"
-    sources: [Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift, Apple/ShareExtension/InfoPlist.xcstrings, Apple/ShareExtension/iOS, Apple/Shared/L10n.swift, Apple/Resources/Localizable.xcstrings, Apple/Resources/Assets.xcassets]   # the icon in the share menu
+    sources:
+      - Apple/ShareExtension/ShareCollector.swift
+      - Apple/ShareExtension/ShareSheet.swift
+      - Apple/ShareExtension/InfoPlist.xcstrings
+      - Apple/ShareExtension/iOS
+      - Apple/Shared/L10n.swift
+      - Apple/Resources/Localizable.xcstrings
+      - path: Apple/Resources/AppIcon.icon   # the icon in the share menu
+        type: file
+        buildPhase: resources
     settings:
       base:
         CODE_SIGN_STYLE: Automatic
@@ -165,7 +191,16 @@ targets:
     platform: macOS
     preBuildScripts: [{ name: Build Rust core, script: "\"$SRCROOT/scripts/build_core.sh\"", basedOnDependencyAnalysis: false }]
     deploymentTarget: "15.0"
-    sources: [Apple/ShareExtension/ShareCollector.swift, Apple/ShareExtension/ShareSheet.swift, Apple/ShareExtension/InfoPlist.xcstrings, Apple/ShareExtension/macOS, Apple/Shared/L10n.swift, Apple/Resources/Localizable.xcstrings, Apple/Resources/Assets.xcassets]   # the icon in the share menu
+    sources:
+      - Apple/ShareExtension/ShareCollector.swift
+      - Apple/ShareExtension/ShareSheet.swift
+      - Apple/ShareExtension/InfoPlist.xcstrings
+      - Apple/ShareExtension/macOS
+      - Apple/Shared/L10n.swift
+      - Apple/Resources/Localizable.xcstrings
+      - path: Apple/Resources/AppIcon.icon   # the icon in the share menu
+        type: file
+        buildPhase: resources
     settings:
       configs:
         Debug: { PRODUCT_BUNDLE_IDENTIFIER: $(TL_BUNDLE_ID).mac.debug.share, TL_URL_SCHEME: twimshelf-debug }
@@ -229,7 +264,7 @@ schemes:
   TwimShelf-iOS:
     build:
       targets: { TwimShelf-iOS: all, TwimShelf-iOSUITests: [test] }
-      # config.yaml first (names, ids, icons): Xcode reads the generated settings after this
+      # config.yaml first (names, ids): Xcode reads the generated settings after this
       preActions:
         - script: python3 "$SRCROOT/scripts/apply.py" native
           settingsTarget: TwimShelf-iOS
@@ -237,7 +272,7 @@ schemes:
   TwimShelf-macOS:
     build:
       targets: { TwimShelf-macOS: all }
-      # config.yaml first (names, ids, icons): Xcode reads the generated settings after this
+      # config.yaml first (names, ids): Xcode reads the generated settings after this
       preActions:
         - script: python3 "$SRCROOT/scripts/apply.py" native
           settingsTarget: TwimShelf-macOS

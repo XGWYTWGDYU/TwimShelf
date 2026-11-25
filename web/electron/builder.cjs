@@ -1,7 +1,6 @@
 // electron-builder's settings for the desktop app (build.sh electron-linux / electron-macos).
 // build.sh passes the server binary (TL_SERVER_BIN) and the built React app (TL_WEB_DIST);
-// scripts/apply.py writes product.json (name, id, version, build number) and icon.png from
-// config.yaml first.
+// scripts/apply.py writes product.json (name, id, version, build number) from config.yaml first.
 const path = require('node:path');
 const product = require('./product.json');
 
