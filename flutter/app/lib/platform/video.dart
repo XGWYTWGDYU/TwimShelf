@@ -382,13 +382,19 @@ class VideoSession extends ChangeNotifier {
 
       final resumeFrom = _position > Duration.zero ? _position : null;
       var seekDone = resumeFrom == null;
+      // The first frame worth showing is this video's own, after the seek: a reused player still
+      // holds the last video's last frame, and the file opens on its frame 0 (at the last video's
+      // size) before the seek lands. Played past the place it resumes at (or looped round to the
+      // start, when that place was near the end), it is there.
+      final shownFrom = (resumeFrom ?? Duration.zero) + const Duration(milliseconds: 30);
+      bool settled(Duration p) => p > shownFrom || (resumeFrom != null && p + const Duration(milliseconds: 500) < resumeFrom);
 
       _posSub?.cancel();
       _posSub = v.position.listen((p) {
         if (_playback != v) return;
         if (seekDone && p > Duration.zero) {
           _position = p;
-          if (!_firstFrameReady) {
+          if (!_firstFrameReady && settled(p)) {
             final st = v!.surfaceController.player.state;
             if ((st.width ?? 0) > 0 && (st.height ?? 0) > 0) {
               _firstFrameReady = true;
@@ -498,12 +504,18 @@ class VideoSessionView extends StatelessWidget {
                 : poster != null
                     ? IgnorePointer(child: Image(image: localFileImage(poster), fit: BoxFit.contain, gaplessPlayback: true))
                     : (fallback ?? const SizedBox.expand()),
+          // mounted from the start (its texture takes the frames), shown from this video's first
+          // frame after the seek: before it, a reused player shows the last video's last frame,
+          // then this one's frame 0 at the wrong size (the frame or poster under it stays meanwhile)
           if (v != null)
-            VideoSurface(
-              controller: v.surfaceController,
-              controls: NoVideoControls,
-              resumeUponEnteringForegroundMode: true,
-              fill: Colors.transparent,
+            Opacity(
+              opacity: session.firstFrameReady ? 1 : 0,
+              child: VideoSurface(
+                controller: v.surfaceController,
+                controls: NoVideoControls,
+                resumeUponEnteringForegroundMode: true,
+                fill: Colors.transparent,
+              ),
             ),
           if (showPlayBadgeWhenStopped && v == null && frame == null)
             const Center(child: Icon(Icons.play_circle_outline, color: Colors.white70, size: 56)),
