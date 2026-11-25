@@ -138,10 +138,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                     child: Row(children: [
-                      Expanded(child: _Stat(value: s.posts, label: L('common.posts'), icon: Icons.chat_bubble, color: Colors.blue)),
-                      Expanded(child: _Stat(value: s.photos, label: L('search.kw.photo.word'), icon: Icons.photo, color: Colors.orange)),
-                      Expanded(child: _Stat(value: s.videos, label: L('place.videos'), icon: Icons.smart_display, color: Colors.pink)),
-                      Expanded(child: _Stat(value: s.tags, label: L('common.tags'), icon: Icons.sell, color: Colors.purple)),
+                      Expanded(child: _Stat(value: s.posts, label: L('common.posts'), icon: Icons.chat_bubble)),
+                      Expanded(child: _Stat(value: s.photos, label: L('search.kw.photo.word'), icon: Icons.photo)),
+                      Expanded(child: _Stat(value: s.videos, label: L('place.videos'), icon: Icons.smart_display)),
+                      Expanded(child: _Stat(value: s.tags, label: L('common.tags'), icon: Icons.sell)),
                     ]),
                   ),
               ]),
@@ -342,18 +342,18 @@ class _CookieSectionState extends State<CookieSection> {
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat({required this.value, required this.label, required this.icon, required this.color});
+  const _Stat({required this.value, required this.label, required this.icon});
   final int value;
   final String label;
   final IconData icon;
-  final Color color;
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       FittedBox(fit: BoxFit.scaleDown, child: Text('$value', style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w700))),
       Row(children: [
-        Icon(icon, size: 14, color: color),
+        // the scheme's primary: Material You's colour (the wallpaper's on Android, or the one chosen)
+        Icon(icon, size: 14, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: 4),
         Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant))),
       ]),
