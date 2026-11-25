@@ -379,6 +379,13 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             self.morphing = false
             self.updateExitButton()
         }
+        // the × comes in while the field is still growing, not after the spring has settled
+        // (that is well past its 0.42 s, and the × then took another 0.3 s to appear)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, self.morphing, !self.searchFolded else { return }
+            self.morphing = false
+            self.updateExitButton()
+        }
         UIView.animate(withDuration: 0.14, delay: 0, options: [.curveEaseOut]) {
             self.browseChrome.alpha = 0
             self.browseActions.alpha = 0
@@ -760,11 +767,18 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         var height: CGFloat
         var item: CGSize
         /// Before the bar has been seen (the sidebar shown from the start): a navigation bar's.
+        /// A phone, which has no bar up there to match, gets smaller ones (an iPad's are left as
+        /// they are: in the wide layout they are the tab bar's own, `TabletRootController.tabBarMetrics`).
         static var fallback: ActionMetrics {
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                return ActionMetrics(top: 0, height: 38, item: CGSize(width: 38, height: 32))
+            }
             let bar = UINavigationBar().sizeThatFits(CGSize(width: 1000, height: 1000)).height
             return ActionMetrics(top: 0, height: bar, item: CGSize(width: bar, height: bar - 8))
         }
     }
+
+    private static var phone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
 
     func setActionMetrics(_ m: ActionMetrics) {
         guard isViewLoaded, m != actionMetrics else { return }
@@ -793,7 +807,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         ] {
             var config = UIButton.Configuration.plain()
             config.image = UIImage(systemName: symbol)
-            config.preferredSymbolConfigurationForImage = .init(pointSize: 17, weight: .medium)
+            config.preferredSymbolConfigurationForImage = .init(pointSize: Self.phone ? 15 : 17, weight: .medium)
             config.cornerStyle = .capsule
             config.baseForegroundColor = .label
             button.configuration = config
@@ -806,6 +820,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         var searchConfig: UIButton.Configuration
         if #available(iOS 26.0, *) { searchConfig = .glass() } else { searchConfig = .gray() }
         searchConfig.image = UIImage(systemName: "magnifyingglass")
+        if Self.phone { searchConfig.preferredSymbolConfigurationForImage = .init(pointSize: 15, weight: .medium) }
         searchConfig.cornerStyle = .capsule
         searchConfig.baseForegroundColor = .label
         browseSearchButton.configuration = searchConfig
