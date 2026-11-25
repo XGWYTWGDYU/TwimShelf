@@ -4,7 +4,7 @@
 // opens the viewer; a two-finger sideways swipe over it turns the page; a pill searches for its
 // tag, right-click gives its menu, "+" adds a tag.
 import { memo, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Play, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { cardAspectRatio, L, type FeedItem } from '@twimshelf/core';
 import { cachedThumb, sideFor, thumb } from '../../lib/thumbs';
 import { core } from '../../lib/core';
@@ -109,7 +109,6 @@ export const PostCard = memo(function PostCard({ post, width, onOpen, onContext,
         <div key={m.media_id} className={`card-page${leaving ? ' in-' + leaving.dir : ''}${shake ? ' shake' + (shake % 2) : ''}`} data-current-media>
           <Picture item={m} width={width} />
           {m.kind === 'video' && <CardVideo item={m} />}
-          {m.kind === 'video' && <span className="card-play"><Play size={18} fill="currentColor" strokeWidth={0} /></span>}
         </div>
         {m.bad && <span className="card-bad">{L('card.badge.damaged')}</span>}
         {many && <span className="card-counter">{page + 1}/{post.media.length}</span>}
@@ -193,39 +192,92 @@ function Picture({ item, width }: { item: FeedItem; width: number }) {
   return url ? <img className={fade ? 'fade-in' : undefined} src={url} alt="" draggable={false} decoding="async" /> : null;
 }
 
-/** A card's video plays muted while at least half of it is on screen; it keeps its place. */
+/** A card's video follows native iOS InlineVideos' 3-state rhythm: plays muted when >= 50% in view,
+ *  pauses in place on its current frame while 0%..50% in view (or while the viewer is open), and
+ *  unloads only after leaving the viewport completely (0%). */
 function CardVideo({ item }: { item: FeedItem }) {
   const video = useRef<HTMLVideoElement>(null);
-  const [on, setOn] = useState(false);
   const back = useStore(handedBack);
   const covered = useStore(viewerState) != null;
-  const [seen, setSeen] = useState(false);
-  useEffect(() => setOn(seen && !covered), [seen, covered]);
+  const [inView, setInView] = useState(false);
+  const [wantsPlay, setWantsPlay] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const seekingRef = useRef(false);
+
   useEffect(() => {
     const el = video.current!.parentElement!;
-    const io = new IntersectionObserver(([e]) => setSeen(e.intersectionRatio >= 0.5), { threshold: [0, 0.5, 1] });
+    const io = new IntersectionObserver(
+      ([e]) => {
+        setInView(e.intersectionRatio > 0);
+        setWantsPlay(e.intersectionRatio >= 0.5);
+      },
+      { threshold: [0, 0.5] },
+    );
     io.observe(el);
     return () => io.disconnect();
   }, []);
+
+  // Only start loading once >= 50% visible; stay loaded (paused on current frame) while partially
+  // visible so scrolling back resumes in 0 ms; unload once completely out of view (0%).
+  useEffect(() => {
+    if (!inView) {
+      setLoaded(false);
+    } else if (wantsPlay && !covered) {
+      setLoaded(true);
+    }
+  }, [inView, wantsPlay, covered]);
+
   useEffect(() => {
     const v = video.current!;
-    if (on) {
-      if (v.readyState >= 1 && Math.abs(v.currentTime - position(item.media_id)) > 0.5) v.currentTime = position(item.media_id);
+    if (!loaded) {
+      v.pause();
+      if (v.currentTime > 0) savePosition(item.media_id, v.currentTime);
+      v.classList.remove('playing');
+      seekingRef.current = false;
+      return;
+    }
+    if (wantsPlay && !covered) {
+      const target = position(item.media_id);
+      if (v.readyState >= 1 && Math.abs(v.currentTime - target) > 0.5) {
+        seekingRef.current = target > 0;
+        v.currentTime = target;
+      }
       void v.play().catch(() => {});
     } else {
       v.pause();
       if (v.currentTime > 0) savePosition(item.media_id, v.currentTime);
     }
-  }, [on, item.media_id]);
+  }, [loaded, wantsPlay, covered, item.media_id]);
+
   useEffect(() => {
-    if (back?.id === item.media_id && video.current) video.current.currentTime = back.at;
-  }, [back, item.media_id]);
+    if (back?.id === item.media_id && video.current && loaded) {
+      video.current.currentTime = back.at;
+    }
+  }, [back, item.media_id, loaded]);
+
   return (
     <video ref={video} className="card-video" muted loop playsInline preload="metadata" disablePictureInPicture disableRemotePlayback
-      src={on ? core.fileUrl(item.path) : undefined}
-      onLoadedMetadata={(e) => { e.currentTarget.currentTime = position(item.media_id); }}
-      onTimeUpdate={(e) => savePosition(item.media_id, e.currentTarget.currentTime)}
-      onPlaying={(e) => e.currentTarget.classList.add('playing')}
+      src={loaded ? core.fileUrl(item.path) : undefined}
+      onLoadedMetadata={(e) => {
+        const saved = position(item.media_id);
+        if (saved > 0) {
+          seekingRef.current = true;
+          e.currentTarget.currentTime = saved;
+        } else {
+          seekingRef.current = false;
+        }
+      }}
+      onSeeked={(e) => {
+        seekingRef.current = false;
+        if (loaded) e.currentTarget.classList.add('playing');
+      }}
+      onTimeUpdate={(e) => {
+        const t = e.currentTarget.currentTime;
+        if (t > 0) savePosition(item.media_id, t);
+      }}
+      onPlaying={(e) => {
+        if (!seekingRef.current && loaded) e.currentTarget.classList.add('playing');
+      }}
       onContextMenu={(e) => e.preventDefault()} />
   );
 }

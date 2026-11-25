@@ -40,6 +40,8 @@ public sealed partial class InlineVideo : Grid
     string? _boundPath;
     string? _lentPath;
     bool _cardOnScreen;
+    bool _pausedInPlace;
+    TimeSpan _revealFrom;
 
     public InlineVideo()
     {
@@ -110,6 +112,7 @@ public sealed partial class InlineVideo : Grid
             v._element.Visibility = Visibility.Collapsed;
             v._player = null;
             v._path = null;
+            v._pausedInPlace = false;
             v._lentPath = key;
             _lentFrom = v;
             Services.Diagnostics.Log($"video: lent live card player at {p.PlaybackSession.Position.TotalSeconds:0.00} s");
@@ -196,6 +199,7 @@ public sealed partial class InlineVideo : Grid
         _player = p;
         _path = key;
         _boundPath = key;
+        _pausedInPlace = false;
         Playing.Add(this);
         try
         {
@@ -210,15 +214,39 @@ public sealed partial class InlineVideo : Grid
     }
 
     public bool IsPlaying(string path) =>
-        _player != null && string.Equals(_path, KeyOf(path), StringComparison.OrdinalIgnoreCase);
+        _player != null && !_pausedInPlace && string.Equals(_path, KeyOf(path), StringComparison.OrdinalIgnoreCase);
+
+    /// Partially visible card (< 50% in view): pause in place keeping the current video frame
+    /// visible so nudging back into view resumes in 0 ms without reopening or flashing the poster.
+    public void PauseInPlace()
+    {
+        if (_player == null || _pausedInPlace) return;
+        _pausedInPlace = true;
+        try
+        {
+            var pos = _player.PlaybackSession.Position;
+            if (!string.IsNullOrEmpty(_path) && pos > TimeSpan.Zero) SavePosition(_path, pos);
+            _player.Pause();
+        }
+        catch { }
+    }
 
     public void Play(string path)
     {
         var key = KeyOf(path);
         _boundPath = key;
-        if (_player != null && string.Equals(_path, key, StringComparison.OrdinalIgnoreCase)) return;
+        if (_player != null && string.Equals(_path, key, StringComparison.OrdinalIgnoreCase))
+        {
+            if (_pausedInPlace)
+            {
+                _pausedInPlace = false;
+                try { _player.Play(); } catch { }
+            }
+            return;
+        }
         Stop();
         _path = key;
+        _pausedInPlace = false;
 
         // Instant resume from parked pool if this video was recently paused on screen or in viewer.
         if (TakeParked(key) is { } parked)
@@ -247,8 +275,10 @@ public sealed partial class InlineVideo : Grid
         _player = p;
         Playing.Add(this);
 
+        _revealFrom = TimeSpan.Zero;
         if (PeekPosition(key) is { } from)
         {
+            _revealFrom = from;
             void Opened(MediaPlayer m, object _)
             {
                 m.MediaOpened -= Opened;
@@ -266,6 +296,13 @@ public sealed partial class InlineVideo : Grid
     void FirstFrame(MediaPlaybackSession s, object _)
     {
         if (s.Position <= TimeSpan.Zero) return;
+        if (_revealFrom > TimeSpan.Zero)
+        {
+            var dur = s.NaturalDuration;
+            var nearEnd = dur > TimeSpan.Zero && _revealFrom >= dur - TimeSpan.FromMilliseconds(600);
+            var reached = s.Position >= _revealFrom || (nearEnd && s.Position >= TimeSpan.FromMilliseconds(50));
+            if (!reached) return;
+        }
         s.PositionChanged -= FirstFrame;
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -280,6 +317,8 @@ public sealed partial class InlineVideo : Grid
         if (p == null) return;
         _player = null;
         _path = null;
+        _pausedInPlace = false;
+        _revealFrom = TimeSpan.Zero;
         Playing.Remove(this);
         try { p.PlaybackSession.PositionChanged -= FirstFrame; } catch { }
         _element.Visibility = Visibility.Collapsed;

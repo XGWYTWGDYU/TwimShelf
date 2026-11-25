@@ -76,9 +76,10 @@ public sealed partial class MasonryView : UserControl
         Scroll.ViewChanged += (_, _) =>
         {
             InlineVideo.Held = true;
+            // Throttle inline video updates to every 80 ms while scrolling (matching native iOS's
+            // 0.08 s cadence) instead of waiting until scrolling completely stops.
             _settle ??= MakeSettle();
-            _settle.Stop();
-            _settle.Start();
+            if (!_settle.IsRunning) _settle.Start();
             Layout();
         };
         Scroll.SizeChanged += (_, _) => Layout();
@@ -324,7 +325,8 @@ public sealed partial class MasonryView : UserControl
             Canvas.SetTop(c, TopPadding + _offset[i]);
             var visibleTop = Math.Max(_offset[i], top);
             var visibleBottom = Math.Min(_offset[i] + _extent[i], top + Scroll.ViewportHeight);
-            c.SetOnScreen(visibleBottom - visibleTop >= _extent[i] * 0.5);
+            var visibleHeight = visibleBottom - visibleTop;
+            c.SetVisibility(visibleHeight > 0, visibleHeight >= _extent[i] * 0.5);
         }
 
         var placed = _offset.Count;
@@ -344,11 +346,11 @@ public sealed partial class MasonryView : UserControl
 
     Microsoft.UI.Dispatching.DispatcherQueueTimer? _settle;
 
-    /// The scroll rested a moment: the videos in view start.
+    /// Re-checks inline video playback every 80 ms during scroll (matching native iOS).
     Microsoft.UI.Dispatching.DispatcherQueueTimer MakeSettle()
     {
         var t = DispatcherQueue.CreateTimer();
-        t.Interval = TimeSpan.FromMilliseconds(300);
+        t.Interval = TimeSpan.FromMilliseconds(80);
         t.IsRepeating = false;
         t.Tick += (_, _) =>
         {

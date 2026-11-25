@@ -23,9 +23,6 @@
 .card-missing { background: repeating-linear-gradient(45deg, var(--bg-subtle), var(--bg-subtle) 8px, transparent 8px, transparent 16px); }
 .card-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; }
 .card-video.playing { opacity: 1; }
-/* play.circle.fill, 40, white at 90 % */
-.card-play { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); color: rgba(0, 0, 0, 0.55); display: grid; place-items: center; padding-left: 3px; pointer-events: none; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2); }
-.card-video.playing ~ .card-play { display: none; }
 /* the counter: 11 semibold digits, white on black 55 %, 8 rounded, 10 from the top right */
 .card-counter { position: absolute; top: 10px; right: 10px; z-index: 3; height: 17px; padding: 0 6px; border-radius: 8px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 11px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; pointer-events: none; }
 .card-bad { position: absolute; top: 10px; left: 10px; z-index: 3; height: 17px; padding: 0 4px; border-radius: 8px; background: rgba(255, 59, 48, 0.85); color: #fff; font-size: 11px; font-weight: 700; line-height: 17px; white-space: pre; pointer-events: none; }

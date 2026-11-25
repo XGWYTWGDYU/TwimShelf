@@ -49,8 +49,8 @@ public sealed partial class ViewerVideoPage : Grid
     readonly Border _hud;
     readonly TextBlock _hudText = new()
     {
-        Foreground = new SolidColorBrush(Colors.White),
-        FontSize = 15,
+        Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xF5, 255, 255, 255)),
+        FontSize = 14,
         FontWeight = FontWeights.SemiBold,
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center,
@@ -91,14 +91,24 @@ public sealed partial class ViewerVideoPage : Grid
         _hud = new Border
         {
             Child = _hudText,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB8, 0x1C, 0x1C, 0x1C)),
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x1A, 255, 255, 255)),
+            RequestedTheme = ElementTheme.Dark,
+            Background = new AcrylicBrush
+            {
+                TintColor = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20),
+                TintOpacity = 0.72,
+                TintLuminosityOpacity = 0.78,
+                FallbackColor = Windows.UI.Color.FromArgb(0xE0, 0x24, 0x24, 0x24),
+            },
+            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x28, 255, 255, 255)),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(14, 7, 14, 7),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(16, 9, 16, 9),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 56, 0, 0),
+            Margin = new Thickness(0, 48, 0, 0),
+            Shadow = new ThemeShadow(),
+            Translation = new System.Numerics.Vector3(0, 0, 32),
+            OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) },
             Opacity = 0,
             IsHitTestVisible = false,
         };

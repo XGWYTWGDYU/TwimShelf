@@ -28,6 +28,7 @@ public sealed partial class PostCard : UserControl
     public Action<FeedItem>? Open { get; set; }
     public Action<int>? PageChanged { get; set; }
     public CardMenuHost? Host { get; set; }
+    public bool InView { get; private set; }
     public bool OnScreen { get; private set; }
 
     readonly Border _card;
@@ -465,24 +466,41 @@ public sealed partial class PostCard : UserControl
         catch { return null; }
     }
 
-    /// The card is on screen (half or more) or left it: its video plays or stops.
-    public void SetOnScreen(bool on)
+    /// Updates visibility in the 3-state model matching native iOS InlineVideos:
+    /// >= 50% plays, 0%..50% pauses in place on its current frame, 0% stops and parks.
+    public void SetVisibility(bool inView, bool wantsPlay)
     {
-        if (on == OnScreen) return;
-        OnScreen = on;
-        _video.SetCardOnScreen(on);
+        if (inView == InView && wantsPlay == OnScreen) return;
+        InView = inView;
+        OnScreen = wantsPlay;
+        _video.SetCardOnScreen(inView);
         UpdateVideo();
     }
 
-    /// Its video plays or stops for where the card is now (and waits while the feed is scrolling).
+    /// The card is on screen (half or more) or left it: its video plays or stops.
+    public void SetOnScreen(bool on) => SetVisibility(on, on);
+
+    /// Its video plays, pauses in place, or stops for where the card is now.
     public void UpdateVideo()
     {
         if (Media.Count == 0) return;
         var item = Media[Page];
-        _video.BindPath(item.IsVideo ? item.Path : null, OnScreen);
-        // while the feed scrolls nothing starts, but what plays goes on (stopping it here also cut off
-        // the player the viewer had just given back: closing the viewer lays the feed out again)
-        if (item.IsVideo && OnScreen && !Viewer.IsOpen) { if (!InlineVideo.Held || _video.IsPlaying(item.Path)) _video.Play(item.Path); }
+        _video.BindPath(item.IsVideo ? item.Path : null, InView);
+        if (item.IsVideo && !Viewer.IsOpen)
+        {
+            if (OnScreen)
+            {
+                if (!InlineVideo.Held || _video.IsPlaying(item.Path)) _video.Play(item.Path);
+            }
+            else if (InView)
+            {
+                _video.PauseInPlace();
+            }
+            else
+            {
+                _video.Stop();
+            }
+        }
         else _video.Stop();
     }
 
@@ -498,6 +516,7 @@ public sealed partial class PostCard : UserControl
         _video.Stop();
         _video.BindPath(null, false);
         SetMediaHidden(false);
+        InView = false;
         OnScreen = false;
     }
 }
