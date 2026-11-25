@@ -16,11 +16,22 @@ Future<(LibraryStats, FolderOverview)> loadCounts() => coreRunAsync(() => (Core.
 
 Future<List<FeedItem>> loadFeed(FeedRequest request) => coreRunAsync(() => Core.feed(request));
 
-Future<List<FeedItem>> loadBin() => coreRunAsync(() => Core.trashList()
-    .map((t) => FeedItem(
-        media_id: t.media_id, post_id: t.post_id, ordinal: t.ordinal, kind: t.kind, path: t.path,
-        text: t.text, author_name: t.author_name, screen_name: t.screen_name, url: t.url, tags: t.tags))
-    .toList());
+/// When each media went into the bin (ms since the epoch), as it was last read: a tile's menu
+/// says how long it has left there.
+final binTrashedAt = <String, int>{};
+
+Future<List<FeedItem>> loadBin() async {
+  final list = await coreRunAsync(Core.trashList);
+  binTrashedAt
+    ..clear()
+    ..addAll({for (final t in list) t.media_id: t.trashed_at_ms});
+  return [
+    for (final t in list)
+      FeedItem(
+          media_id: t.media_id, post_id: t.post_id, ordinal: t.ordinal, kind: t.kind, path: t.path,
+          text: t.text, author_name: t.author_name, screen_name: t.screen_name, url: t.url, tags: t.tags),
+  ];
+}
 
 Future<CookieCheck> checkCookies(String auth, String ct0) => coreRunAsync(() => Core.checkCookies(auth, ct0));
 

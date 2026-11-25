@@ -20,6 +20,10 @@ Future<void> showMediaMenu(
   required FeedItem item,
   required Offset position,
   Place? place,
+  /// Selects this tile (the grid's selection begins with it), or takes it out again; null where
+  /// there is nothing to select.
+  VoidCallback? onSelect,
+  bool selected = false,
 }) async {
   final inBin = place == Place.trash;
   final loose = item.post_id.startsWith('loose:');
@@ -39,11 +43,18 @@ Future<void> showMediaMenu(
     position: RelativeRect.fromRect(overlay.globalToLocal(position) & const Size(1, 1), Offset.zero & overlay.size),
     popUpAnimationStyle: menuAnimation,
     items: [
+      // how long it has left in the bin, as the other apps say it (not something to tap)
+      if (inBin && _daysLeft(item) != null) ...[
+        PopupMenuItem<VoidCallback>(enabled: false, child: Row(children: [const Icon(Icons.schedule, size: 20), const SizedBox(width: 12), Text(_daysLeft(item)!)])),
+        const PopupMenuDivider(),
+      ],
+      if (onSelect != null) entry(selected ? Icons.radio_button_unchecked : Icons.check_circle_outline, selected ? L('common.deselect') : L('common.select'), onSelect),
       if (inBin) ...[
         entry(Icons.restore, L('common.restore'), () => runMediaAction(context, library, ActionKind.restore, media: [item.media_id], done: (n) => L('trash.restored', [n]))),
         entry(Icons.delete_forever_outlined, L('common.deletePermanently'), () => purgeMedia(context, library, [item.media_id]), danger: true),
       ] else ...[
-        entry(Icons.dynamic_feed_outlined, L('grid.revealPost'), () => library.reveal(item), key: 'menu-reveal'),
+        // where it is in 浏览: a loose media on its own, a post's media with its post
+        entry(Icons.dynamic_feed_outlined, loose ? L('grid.revealMedia') : L('grid.revealPost'), () => library.reveal(item), key: 'menu-reveal'),
         entry(Icons.sell_outlined, L('card.menu.tagMedia'), () => showTagPicker(context, library, item)),
         if (!loose) entry(Icons.sell, L('card.menu.tagPost'), () => showTagPicker(context, library, item, wholePost: true)),
         entry(Icons.create_new_folder_outlined, L('common.addToFolder'), () => addToFolder(context, library, [item])),
@@ -155,4 +166,14 @@ Future<void> addToFolder(BuildContext context, LibraryModel library, List<FeedIt
   final loose = items.where((i) => i.post_id.startsWith('loose:')).map((i) => i.media_id).toList();
   final posts = items.where((i) => !i.post_id.startsWith('loose:')).map((i) => i.post_id).toSet().toList();
   runMediaAction(context, library, ActionKind.folderAdd, media: loose, posts: posts, folder: folder, done: (_) => L('tags.toFolder.done', [folder]));
+}
+
+/// How long [item] has left in the bin, or null when that is not known.
+String? _daysLeft(FeedItem item) {
+  final at = binTrashedAt[item.media_id];
+  if (at == null || at <= 0) return null;
+  final keep = Core.trashKeepDays();
+  if (keep == 0) return L('trash.keepForever');
+  final d = keep - (DateTime.now().millisecondsSinceEpoch - at) / 86400000;
+  return d < 1 ? L('trash.deletingSoon') : L('trash.daysLeft', [d.ceil()]);
 }

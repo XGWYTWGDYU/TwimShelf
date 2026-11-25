@@ -6,7 +6,7 @@ import { Ellipsis, FolderMinus, FolderPlus, Minus, Plus, Trash2, Undo2 } from 'l
 import { KEYWORDS, keywordWord, L, quoteSearchWord, type ExportReport, type FeedItem, type TrashItem } from '@twimshelf/core';
 import { Toolbar, ToolButton, ToolGroup, ToolSegment } from '../../components/Toolbar';
 import { openMenu, openMenuBelow, type MenuEntry } from '../../components/Menu';
-import { alertMessage, choose, prompt } from '../../components/pickers';
+import { alertMessage, choose, openTagPicker, prompt } from '../../components/pickers';
 import { toast } from '../../components/toast';
 import { action, binChanged, binSnapshot, offerUndo, undo } from '../../lib/actions';
 import { onCommand, setMenuState } from '../../lib/commands';
@@ -195,15 +195,20 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
     }
     const loose = first.post_id.startsWith('loose:');
     m.push({ label: loose ? L('grid.revealMedia') : L('grid.revealPost'), run: () => revealInBrowse(first) });
+    // tags and folders, as on a card in 浏览 (the same in every app)
+    m.push({ label: L('card.menu.tagMedia'), run: () => void openTagPicker({ item: first, post: entry, initialScope: 'media' }).then(libraryChanged) });
+    if (!loose) m.push({ label: L('card.menu.tagPost'), run: () => void openTagPicker({ item: first, post: entry, initialScope: 'post' }).then(libraryChanged) });
+    m.push({ label: L('common.addToFolder'), children: addToFolderMenu(ids) });
     if (folder) m.push({ label: L('common.removeFromFolder'), run: async () => { await action('folder_remove', { media: ids, folder }).catch(() => null); libraryChanged(); } });
     m.push('separator');
-    if (entry.length === 1) m.push({ label: L('grid.trashMedia'), run: () => void trash({ media: ids }) });
+    m.push({ label: L('grid.trashMedia'), run: () => void trash({ media: ids }) });
     if (!loose) m.push({ label: L('grid.trashPost'), run: () => void trash({ posts: [first.post_id] }) });
     return m;
   };
 
-  const addToFolderMenu = (): MenuEntry[] => {
-    const ids = selectedIds;
+  /** The folders `media` can go into (the selection when none given), and a new one. */
+  const addToFolderMenu = (media?: string[]): MenuEntry[] => {
+    const ids = media ?? selectedIds;
     const m: MenuEntry[] = (folders.get()?.folders ?? []).filter((f) => f.name !== folder).map((f) => ({ label: f.name, run: () => void addTo(ids, f.name) }));
     if (m.length) m.push('separator');
     m.push({ label: L('common.newFolderEllipsis'), run: async () => { const n = (await prompt(L('common.newFolder'), { placeholder: L('common.folderName') }))?.trim(); if (n) void addTo(ids, n); } });

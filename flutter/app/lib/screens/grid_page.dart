@@ -343,7 +343,13 @@ class _GridPageState extends State<GridPage> {
                   },
                   onLongPress: (i, at) {
                     HapticFeedback.mediumImpact();
-                    showMediaMenu(context, library: widget.library, item: items[i], position: at, place: widget.place);
+                    final id = items[i].media_id;
+                    showMediaMenu(context, library: widget.library, item: items[i], position: at, place: widget.place,
+                        selected: _selected?.contains(id) ?? false,
+                        onSelect: () => setState(() {
+                              final s = _selected ??= <String>{};
+                              s.contains(id) ? s.remove(id) : s.add(id);
+                            }));
                   },
                   onOpen: (i) {
                     if (selected != null) {

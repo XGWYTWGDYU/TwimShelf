@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 
 /// The media of one folder or collection as a square grid, like an album in Photos.
 ///  * With "按帖子分组" on, a post is one tile (its first media) with a count badge.
@@ -196,6 +197,19 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
                 self?.grid.afterMenuCloses { self?.onRevealPost?(first) }
             })
         }
+        // tags and folders, as on a card in 浏览 (the same in every app)
+        if let first = entry.first {
+            acts.append(UIAction(title: L("card.menu.tagMedia"), image: UIImage(systemName: "tag")) { [weak self] _ in
+                self?.grid.afterMenuCloses { self?.showTagPicker(first, wholePost: false) }
+            })
+            if !first.isLoose {
+                acts.append(UIAction(title: L("card.menu.tagPost"), image: UIImage(systemName: "square.stack")) { [weak self] _ in
+                    self?.grid.afterMenuCloses { self?.showTagPicker(first, wholePost: true) }
+                })
+            }
+        }
+        acts.append(UIMenu(title: L("common.addToFolder"), image: UIImage(systemName: "folder.badge.plus"),
+                           children: [UIDeferredMenuElement.uncached { [weak self] done in done(self?.addToFolderItems(ids) ?? []) }]))
         if let folder {
             acts.append(UIAction(title: L("common.removeFromFolder"), image: UIImage(systemName: "folder.badge.minus")) { [weak self] _ in
                 // the grid closes the gap once the menu has flown back to the tile
@@ -208,11 +222,9 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         // "the whole post" goes by post id, so media this grid does not show (a video while only
         // photos are listed, say) go to the bin too
         let done = { UINotificationFeedbackGenerator().notificationOccurred(.success); NotificationCenter.default.post(name: .libraryChanged, object: nil) }
-        if entry.count == 1 {
-            acts.append(UIAction(title: L("grid.trashMedia"), image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
-                self?.grid.afterMenuCloses { _ = try? Core.trash(media: ids); done() }
-            })
-        }
+        acts.append(UIAction(title: L("grid.trashMedia"), image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+            self?.grid.afterMenuCloses { _ = try? Core.trash(media: ids); done() }
+        })
         if let first = entry.first, !first.isLoose, case let post = first.postId {
             acts.append(UIAction(title: L("grid.trashPost"), subtitle: L("grid.trashPost.detail"), image: UIImage(systemName: "trash.square"), attributes: .destructive) { [weak self] _ in
                 self?.grid.afterMenuCloses { _ = try? Core.trash(post: post); done() }
@@ -388,8 +400,9 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         present(sheet, animated: true)
     }
 
-    private func addToFolderItems() -> [UIMenuElement] {
-        let ids = selectedMedia.map(\.mediaId)
+    /// The folders to add `media` to (the selection when nil), and a new one.
+    private func addToFolderItems(_ media: [String]? = nil) -> [UIMenuElement] {
+        let ids = media ?? selectedMedia.map(\.mediaId)
         var acts: [UIMenuElement] = Core.folders().filter { $0.name != folder }.map { f in
             UIAction(title: f.name, image: UIImage(systemName: "folder")) { [weak self] _ in self?.add(ids, to: f.name) }
         }
@@ -404,6 +417,23 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
             self?.present(a, animated: true)
         })
         return acts
+    }
+
+    /// The tag picker for `item` (or its whole post), as on a card in 浏览.
+    private func showTagPicker(_ item: FeedItem, wholePost: Bool) {
+        guard let scope = try? Core.postScope(item.postId) else { notice(L("post.unreadable.title")); return }
+        let model = TagPickerModel(media: item, scope: scope, wholePost: wholePost)
+        let host = UIHostingController(rootView: AnyView(EmptyView()))
+        host.rootView = AnyView(TagPickerView(model: model) { [weak host] in
+            host?.dismiss(animated: true)
+            NotificationCenter.default.post(name: .libraryChanged, object: nil)
+        })
+        host.view.backgroundColor = .clear
+        if let sheet = host.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(host, animated: true)
     }
 
     private func add(_ ids: [String], to name: String) {

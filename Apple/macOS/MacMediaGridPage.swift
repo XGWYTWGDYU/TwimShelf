@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// A collection shown beside the sidebar (a folder, 图片, 视频, 最近添加, the recycle bin, …), as on iOS
 /// (`MediaGridViewController`): the zoomable grid (`MacMediaGridView`) and nothing else — the
@@ -177,6 +178,14 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
         if let first = entry.first, onRevealPost != nil {
             m.addItem(ClosureMenuItem(first.isLoose ? L("grid.revealMedia") : L("grid.revealPost")) { [weak self] in self?.onRevealPost?(first) })
         }
+        // tags and folders, as on a card in 浏览 (the same in every app)
+        if let first = entry.first {
+            m.addItem(ClosureMenuItem(L("card.menu.tagMedia")) { [weak self] in self?.showTagPicker(first, wholePost: false) })
+            if !first.isLoose { m.addItem(ClosureMenuItem(L("card.menu.tagPost")) { [weak self] in self?.showTagPicker(first, wholePost: true) }) }
+        }
+        let addTo = NSMenuItem(title: L("common.addToFolder"), action: nil, keyEquivalent: "")
+        addTo.submenu = addToFolderMenu(ids)
+        m.addItem(addTo)
         if let folder {
             m.addItem(ClosureMenuItem(L("common.removeFromFolder")) {
                 _ = try? Core.removeFromFolder(folder, media: ids)
@@ -184,12 +193,10 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
             })
         }
         m.addItem(.separator())
-        if entry.count == 1 {
-            m.addItem(ClosureMenuItem(L("grid.trashMedia")) { [weak self] in
-                guard let receipt = try? Core.action(.trash, media: ids), receipt.count > 0 else { return }
-                self?.afterTrash(receipt)
-            })
-        }
+        m.addItem(ClosureMenuItem(L("grid.trashMedia")) { [weak self] in
+            guard let receipt = try? Core.action(.trash, media: ids), receipt.count > 0 else { return }
+            self?.afterTrash(receipt)
+        })
         // "the whole post" goes by post id, so media this grid does not show go to the bin too
         if let first = entry.first, !first.isLoose {
             let post = first.postId
@@ -199,6 +206,31 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
             })
         }
         return m
+    }
+
+    private var tagPopover: NSPopover?
+
+    /// The tag picker for `item` (or its whole post), from its tile, as on a card in 浏览.
+    private func showTagPicker(_ item: FeedItem, wholePost: Bool) {
+        guard let scope = try? Core.postScope(item.postId) else { macAlert(window, L("post.unreadable.title"), L("common.tryAgain")); return }
+        let model = TagPickerModel(media: item, scope: scope, wholePost: wholePost)
+        model.onChange = { NotificationCenter.default.post(name: .libraryChanged, object: nil) }
+        let pop = NSPopover()
+        let host = NSHostingController(rootView: TagPickerView(model: model) { [weak pop] in pop?.performClose(nil) })
+        host.view.frame = NSRect(x: 0, y: 0, width: 360, height: 480)
+        pop.contentViewController = host
+        pop.contentSize = NSSize(width: 360, height: 480)
+        pop.behavior = .transient
+        pop.animates = true
+        let rect = grid.viewerSourceFrame(for: item.mediaId).map { convert($0, from: nil) } ?? NSRect(x: bounds.midX, y: bounds.midY, width: 1, height: 1)
+        pop.show(relativeTo: rect, of: self, preferredEdge: .maxY)
+        tagPopover = pop
+        // released when it closes (it holds the picker and the whole tag list)
+        var token: NSObjectProtocol?
+        token = NotificationCenter.default.addObserver(forName: NSPopover.didCloseNotification, object: pop, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if self?.tagPopover === pop { self?.tagPopover = nil } }
+            if let token { NotificationCenter.default.removeObserver(token) }
+        }
     }
 
     private func afterTrash(_ receipt: Core.ActionReceipt) {
@@ -305,8 +337,9 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
     private func updateSelectionUI() { onStateChanged?() }
 
     /// The folders the selection can go into (the toolbar's 加入文件夹 menu).
-    func addToFolderMenu() -> NSMenu {
-        let ids = selectedMedia.map(\.mediaId)
+    /// The folders `media` can go into (the selection when nil: the toolbar's 加入文件夹 menu).
+    func addToFolderMenu(_ media: [String]? = nil) -> NSMenu {
+        let ids = media ?? selectedMedia.map(\.mediaId)
         let m = NSMenu()
         for f in Core.folders() where f.name != folder { m.addItem(ClosureMenuItem(f.name) { [weak self] in self?.add(ids, to: f.name) }) }
         if !m.items.isEmpty { m.addItem(.separator()) }
