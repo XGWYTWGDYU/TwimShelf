@@ -767,18 +767,18 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         var height: CGFloat
         var item: CGSize
         /// Before the bar has been seen (the sidebar shown from the start): a navigation bar's.
-        /// A phone, which has no bar up there to match, gets smaller ones (an iPad's are left as
-        /// they are: in the wide layout they are the tab bar's own, `TabletRootController.tabBarMetrics`).
+        /// A phone, which has no bar up there to match, gets them at 80 % of that (an iPad's are left
+        /// as they are: in the wide layout they are the tab bar's own, `TabletRootController.tabBarMetrics`).
         static var fallback: ActionMetrics {
-            if UIDevice.current.userInterfaceIdiom == .phone {
-                return ActionMetrics(top: 0, height: 38, item: CGSize(width: 38, height: 32))
-            }
             let bar = UINavigationBar().sizeThatFits(CGSize(width: 1000, height: 1000)).height
-            return ActionMetrics(top: 0, height: bar, item: CGSize(width: bar, height: bar - 8))
+            let k: CGFloat = FeedViewController.phone ? FeedViewController.phoneScale : 1
+            return ActionMetrics(top: 0, height: (bar * k).rounded(), item: CGSize(width: (bar * k).rounded(), height: ((bar - 8) * k).rounded()))
         }
     }
 
-    private static var phone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+    fileprivate static var phone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
+    /// 浏览's buttons on a phone: 80 % of the size they have elsewhere.
+    fileprivate static let phoneScale: CGFloat = 0.8
 
     func setActionMetrics(_ m: ActionMetrics) {
         guard isViewLoaded, m != actionMetrics else { return }
@@ -807,7 +807,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         ] {
             var config = UIButton.Configuration.plain()
             config.image = UIImage(systemName: symbol)
-            config.preferredSymbolConfigurationForImage = .init(pointSize: Self.phone ? 15 : 17, weight: .medium)
+            config.preferredSymbolConfigurationForImage = .init(pointSize: 17 * (Self.phone ? Self.phoneScale : 1), weight: .medium)
             config.cornerStyle = .capsule
             config.baseForegroundColor = .label
             button.configuration = config
@@ -820,7 +820,7 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         var searchConfig: UIButton.Configuration
         if #available(iOS 26.0, *) { searchConfig = .glass() } else { searchConfig = .gray() }
         searchConfig.image = UIImage(systemName: "magnifyingglass")
-        if Self.phone { searchConfig.preferredSymbolConfigurationForImage = .init(pointSize: 15, weight: .medium) }
+        if Self.phone { searchConfig.preferredSymbolConfigurationForImage = .init(pointSize: 17 * Self.phoneScale, weight: .medium) }
         searchConfig.cornerStyle = .capsule
         searchConfig.baseForegroundColor = .label
         browseSearchButton.configuration = searchConfig
