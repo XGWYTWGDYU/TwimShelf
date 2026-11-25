@@ -40,6 +40,14 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         navigationItem.largeTitleDisplayMode = .never
+        // no name and nothing frosted at the top (iPhone and iPad): the buttons float over the
+        // grid. The title stays the page's own (the back button's menu, VoiceOver).
+        navigationItem.titleView = UIView()
+        let clear = UINavigationBarAppearance()
+        clear.configureWithTransparentBackground()
+        navigationItem.standardAppearance = clear
+        navigationItem.scrollEdgeAppearance = clear
+        navigationItem.compactAppearance = clear
         // full height (it scrolls under the bars), but within the safe area at the sides: a tab
         // rail or a notch in landscape would cover its outer columns
         grid.translatesAutoresizingMaskIntoConstraints = false

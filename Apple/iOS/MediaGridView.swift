@@ -71,6 +71,8 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.alwaysBounceVertical = true
         scrollView.delegate = self
+        // nothing frosted at the top: the grid runs up under the bar as it is
+        if #available(iOS 26.0, *) { scrollView.topEdgeEffect.isHidden = true }
         scrollView.accessibilityIdentifier = "mediaGrid"
         addSubview(scrollView)
         footerLabel.font = .preferredFont(forTextStyle: .footnote)
