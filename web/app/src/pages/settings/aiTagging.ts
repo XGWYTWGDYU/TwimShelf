@@ -177,7 +177,8 @@ export async function testModel(model: ExternalModel, key: string, clear: boolea
 }
 
 export const activeTagger = store(localStorage.getItem(selectionKey) ?? '');
-export const autoTag = store(localStorage.getItem(autoKey) === 'true');
+// on until turned off, as in every other app
+export const autoTag = store(localStorage.getItem(autoKey) !== 'false');
 
 export interface TaggingState {
   running: boolean;

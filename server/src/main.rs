@@ -184,10 +184,18 @@ fn apply_cookies(cfg: &Config) {
     }
 }
 
+/// A core function's answer (`wire::take`: its JSON text) as JSON. Fields read from the text itself
+/// are all missing: on-device AI looked off, and every tag the page asked for looked failed.
+fn core_json(answer: Value) -> Value {
+    answer.as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(answer)
+}
+
 async fn info(State(cfg): State<Shared>) -> Json<Value> {
     let d = |n: &str| cfg.dir(n).to_string_lossy().into_owned();
     // on-device AI: a GPU the engine runs models on (never the processor)
-    let hardware: Value = tokio::task::spawn_blocking(|| wire::take(tl_core::ffi::tl_ai_hardware())).await.unwrap_or(Value::Null);
+    // the core answers with JSON text: read it (as text, every field below was missing, and
+    // on-device AI looked off on every server and desktop app)
+    let hardware = core_json(tokio::task::spawn_blocking(|| wire::take(tl_core::ffi::tl_ai_hardware())).await.unwrap_or(Value::Null));
     let gpus: Vec<String> = hardware["ok"]["gpus"].as_array().map(|g| g.iter().map(|d| format!("{} ({})", d["name"].as_str().unwrap_or(""), d["description"].as_str().unwrap_or(""))).collect()).unwrap_or_default();
     let local_ai_supported = hardware["ok"]["engine"].as_bool().unwrap_or(false) && !gpus.is_empty();
     let local_ai_devices = (!gpus.is_empty()).then(|| gpus.join(", "));
@@ -570,9 +578,10 @@ async fn ai_tag(State(cfg): State<Shared>, Json(body): Json<TagBody>) -> Respons
             guard.0 = Some(tmp);
         }
         let json = c(Path::new(&request.to_string()));
+        // the core answers with JSON text: the page reads it as JSON (`ok`, `ai`, `error`)
         let answer = wire::take(tl_core::ffi::tl_ai_tag(json.as_ptr()));
         drop(guard);
-        Ok(answer)
+        Ok(core_json(answer))
     }).await;
     match res {
         Ok(Ok(v)) => Json(v).into_response(),
@@ -871,5 +880,20 @@ mod tests {
         assert_eq!(request(&reopened, "DELETE", "/api/secrets", Body::empty(), true).await.status(), StatusCode::NO_CONTENT);
         assert_eq!(config(&dir).secrets.read(["sync.key", "ct0"]).unwrap(), [None, None]);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod core_answer_tests {
+    use super::*;
+
+    #[test]
+    fn a_core_answer_is_read_as_json() {
+        let hardware = core_json(Value::String(r#"{"ok":{"engine":true,"gpus":[{"name":"CUDA0"}]}}"#.into()));
+        assert_eq!(hardware["ok"]["engine"], true);
+        assert_eq!(hardware["ok"]["gpus"][0]["name"], "CUDA0");
+        let tagged = core_json(Value::String(r#"{"ok":{"tags":["cat"]}}"#.into()));
+        assert_eq!(tagged["ok"]["tags"][0], "cat");
+        assert_eq!(core_json(Value::Null), Value::Null);
     }
 }
