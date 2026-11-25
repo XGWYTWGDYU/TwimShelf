@@ -103,7 +103,7 @@ void main() {
   });
 
   testWidgets('a repo shows each version, what is not offered, and asks before downloading', (t) async {
-    const detail = HubDetail(repo: _good, pageUrl: 'https://huggingface.co/x/y', revision: 'f982a07559d4a2f6c8744d840bf6fccab30eea96', variants: [
+    const detail = HubDetail(repo: _good, page_url: 'https://huggingface.co/x/y', revision: 'f982a07559d4a2f6c8744d840bf6fccab30eea96', variants: [
       HubVariant(label: 'Q4_K_M', weights: 'm-Q4_K_M.gguf', projector: 'mmproj.gguf', bytes: 2800000000, tier: 'recommended', suggested: true, folder: 'a--fits-GGUF--m-Q4_K_M'),
       HubVariant(label: 'F32', weights: 'm-f32.gguf', projector: 'mmproj.gguf', bytes: 90000000000, tier: 'tooLarge', enough_space: false, folder: 'a--fits-GGUF--m-f32'),
     ], skipped: [HubSkipped(name: 'x-00001-of-00002.gguf', reason: 'split')]);
@@ -123,7 +123,7 @@ void main() {
   });
 
   testWidgets('a repo that cannot be installed says why', (t) async {
-    const detail = HubDetail(repo: _good, pageUrl: 'https://huggingface.co/x/y', revision: 'x', problem: 'not a vision model');
+    const detail = HubDetail(repo: _good, page_url: 'https://huggingface.co/x/y', revision: 'x', problem: 'not a vision model');
     await t.pumpWidget(MaterialApp(home: ModelHubRepoPage(local: LocalModels.forTest(const []), api: _FakeApi(detail: detail), repo: 'a/fits-GGUF')));
     await t.pump();
     await t.pump();

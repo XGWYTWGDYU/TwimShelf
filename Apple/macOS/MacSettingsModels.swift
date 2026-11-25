@@ -101,6 +101,8 @@ final class ModelsModel: ObservableObject {
     @Published var remoteError: String?
     private var remotePeers = ""
     @Published var remoteState = "idle"     // idle | loading | done
+    /// Where models come from (`Core.modelSource`).
+    @Published var source = Core.modelSource()
     private var wasDownloading = false
 
     /// A model download that ended: a failure is said (the list is re-read elsewhere).
@@ -446,6 +448,14 @@ struct ModelsPageView: View {
                 CardRow(symbol: "square.grid.2x2.fill", color: .blue, title: L("hub.title"), detail: L("hub.entry.detail")) {
                     Button(L("hub.open")) { env.open(L("hub.title"), MacSettingsPages.modelHub()) }
                         .accessibilityIdentifier("openModelHub")
+                }
+                RowDivider()
+                CardRow(symbol: "arrow.down.circle.fill", color: .green, title: L("models.source"), detail: L("models.source.footer")) {
+                    Picker("", selection: Binding(get: { m.source }, set: { m.source = $0; Core.setModelSource($0) })) {
+                        ForEach(ModelHub.sources, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .accessibilityIdentifier("modelSource")
                 }
             }
         }

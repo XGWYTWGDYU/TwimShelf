@@ -38,7 +38,7 @@ struct ModelHubPageView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                TextField(L("hub.search.placeholder"), text: $hub.query)
+                TextField(L("hub.search.placeholder", ModelHub.sourceName), text: $hub.query)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { hub.search() }
                     .accessibilityIdentifier("hubSearch")
@@ -98,7 +98,7 @@ struct ModelHubPageView: View {
 
     private var results: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeading(hub.browsing ? L("hub.popular") : L("hub.results"), note: L("hub.results.footer"))
+            SectionHeading(hub.browsing ? L("hub.popular") : L("hub.results"), note: L("hub.results.footer", ModelHub.sourceName))
             if let e = hub.error {
                 HStack(alignment: .top, spacing: 10) {
                     Banner(text: e)
@@ -226,7 +226,7 @@ struct ModelHubRepoPageView: View {
     private var about: some View {
         Card(spacing: 10) {
             CardRow(symbol: "cube.fill", color: .indigo, title: repo, detail: L("hub.unverified.footer")) {
-                Button(L("hub.detail.openPage")) { if let u = ModelHub.pageURL(repo) { NSWorkspace.shared.open(u) } }
+                Button(L("hub.detail.openPage", ModelHub.sourceName)) { if let u = ModelHub.pageURL(repo) { NSWorkspace.shared.open(u) } }
             }
             if let d = detail {
                 FlowLayout(spacing: 5) {

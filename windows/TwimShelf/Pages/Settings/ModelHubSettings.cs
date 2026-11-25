@@ -13,7 +13,7 @@ namespace TwimShelf.Pages;
 
 public sealed partial class ModelHubSettings : SettingsSubpage
 {
-    readonly TextBox _search = new() { PlaceholderText = L("hub.search.placeholder"), MinWidth = 280 };
+    readonly TextBox _search = new() { PlaceholderText = L("hub.search.placeholder", LocalModels.SourceName), MinWidth = 280 };
     HubDevice? _device;
     List<HubRepo> _items = [];
     List<HubHidden> _hidden = [];
@@ -143,7 +143,7 @@ public sealed partial class ModelHubSettings : SettingsSubpage
             foreach (var h in _hidden) ex.Items.Add(new SettingsCard { Header = h.Repo, Description = h.Reason });
             Add(ex);
         }
-        Footer(L("hub.results.footer"));
+        Footer(L("hub.results.footer", LocalModels.SourceName));
     }
 }
 
@@ -175,7 +175,7 @@ public sealed partial class ModelHubRepoSettings(string repo) : SettingsSubpage
         if (d != null) Card(L("hub.detail.license"), null, null, new TextBlock { Text = d.Repo.License ?? L("hub.unknown") });
         if (d != null) Card(L("hub.detail.downloads"), null, null, new TextBlock { Text = d.Repo.Downloads.ToString("N0") });
         if (d?.Repo.ClaimsUncensored == true) Card(L("hub.claim"), null, "");
-        Action(L("hub.detail.openPage"), null, "", () => _ = Windows.System.Launcher.LaunchUriAsync(new Uri("https://huggingface.co/" + repo)));
+        if (d != null) Action(L("hub.detail.openPage", LocalModels.SourceName), null, "", () => _ = Windows.System.Launcher.LaunchUriAsync(new Uri(d.PageUrl)));
         Footer(L("hub.unverified.footer"));
         if (_error != null)
         {

@@ -19,7 +19,7 @@ import {
   getPrompt, localAIInfo, modelTitle, promptFields, runTagging, saveModel, selectTagger,
   setAuto, setSetting, stopTagging, tagging, testModel, unloadLocalModels, type ExternalModel, type Prompt,
 } from './aiTagging';
-import { ModelProgress } from './ModelHubPage';
+import { MODEL_SOURCES, ModelProgress } from './ModelHubPage';
 import { exportFile, readSecret, removeFile, size, upload } from './serverFiles';
 import {
   ActivityRow, Banner, Card, CardRow, IconTile, Pill, PlaceholderEditor,
@@ -54,6 +54,7 @@ export default function AIPage() {
   const counts = useAsync(() => core.read<[number, number]>(core.b.tl_ai_counts()), [version, activity.done, activity.running]);
   const failures = useAsync(() => core.read<AiFailure[]>(core.b.tl_ai_failures()), [version, activity.running]);
   const status = useAsync(() => core.read<ModelDownloadStatus | null>(core.b.tl_model_status()), []);
+  const source = useAsync(() => core.read<string>(core.b.tl_model_source()), []);
   const installed = useAsync(
     () => core.read<ModelInfo[]>(core.b.tl_models_installed()),
     [version, status.data?.repo, status.data?.finished],
@@ -566,6 +567,20 @@ export default function AIPage() {
             title={L('hub.title')}
             detail={L('hub.entry.detail')}
             trailing={<Button onClick={() => settings('model-hub')}>{L('hub.open')}</Button>}
+          />
+          <RowDivider />
+          <CardRow
+            icon={<Download size={15} strokeWidth={2} />}
+            color="green"
+            title={L('models.source')}
+            detail={L('models.source.footer')}
+            trailing={
+              <SegmentedControl
+                value={source.data ?? 'huggingface'}
+                onChange={(v) => void core.read(core.b.tl_set_model_source(v)).then(source.reload, source.reload)}
+                options={MODEL_SOURCES}
+              />
+            }
           />
         </Card>
       </SectionGroup>

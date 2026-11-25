@@ -96,7 +96,10 @@ enum ModelHub {
         return L("hub.device", memory, free)
     }
 
-    static func pageURL(_ repo: String) -> URL? { URL(string: "https://huggingface.co/" + repo) }
+    /// Where models come from, as the AI page offers them.
+    static let sources = [("huggingface", "Hugging Face"), ("modelscope", "ModelScope")]
+    static var sourceName: String { let s = Core.modelSource(); return sources.first { $0.0 == s }?.1 ?? s }
+    static func pageURL(_ repo: String) -> URL? { URL(string: (Core.modelSource() == "modelscope" ? "https://modelscope.cn/models/" : "https://huggingface.co/") + repo) }
 
     static func isDownloading(_ repo: String) -> Bool { Core.modelStatus().map { $0.running && $0.repo == repo } ?? false }
     static var isBusy: Bool { Core.modelStatus()?.running ?? false }

@@ -14,6 +14,9 @@ public sealed class LocalModels
     public event Action? Changed;
 
     public const string Format = "gguf";
+    /// Where models come from, as the AI page offers them (the core keeps the choice).
+    public static readonly (string Id, string Name)[] Sources = [("huggingface", "Hugging Face"), ("modelscope", "ModelScope")];
+    public static string SourceName { get { var s = TlCore.ModelSource(); return Sources.FirstOrDefault(x => x.Id == s).Name ?? s; } }
     public List<CatalogEntry> Catalog { get; private set; } = [];
     public bool Supported { get; private set; }
     /// The GPU models run on (e.g. "CUDA0 (NVIDIA GeForce RTX 4070)"), or the GPUs it chooses among;

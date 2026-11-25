@@ -21,6 +21,15 @@ import {
 
 const format = 'gguf';
 
+/** Where models come from, as the AI page offers them (the core keeps the choice). */
+export const MODEL_SOURCES = [
+  { value: 'huggingface', label: 'Hugging Face' },
+  { value: 'modelscope', label: 'ModelScope' },
+];
+export function sourceName(id: string | null | undefined): string {
+  return MODEL_SOURCES.find((s) => s.value === id)?.label ?? 'Hugging Face';
+}
+
 function tierColor(tier: string): TileColor {
   switch (tier) {
     case 'recommended': return 'green';
@@ -94,6 +103,8 @@ export default function ModelHubPage() {
   const generation = useRef(0);
   const task = useTask();
 
+  const source = useAsync(() => core.read<string>(core.b.tl_model_source()), []);
+  const site = sourceName(source.data);
   const catalog = useAsync(async () => {
     const [entries, dev, interrupted] = await Promise.all([
       core.read<CatalogEntry[]>(core.b.tl_model_catalog(format)),
@@ -198,7 +209,7 @@ export default function ModelHubPage() {
           <TextField
             value={draft}
             onChange={setDraft}
-            placeholder={L('hub.search.placeholder')}
+            placeholder={L('hub.search.placeholder', site)}
             onEnter={() => {
               const q = draft.trim();
               setQuery(q);
@@ -304,7 +315,7 @@ export default function ModelHubPage() {
         )
       )}
 
-      <SectionGroup title={browsing ? L('hub.popular') : L('hub.results')} note={L('hub.results.footer')}>
+      <SectionGroup title={browsing ? L('hub.popular') : L('hub.results')} note={L('hub.results.footer', site)}>
         {searchError && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Banner text={searchError} icon={<TriangleAlert size={15} />} color="orange" />
@@ -441,8 +452,8 @@ function ModelHubRepoScreen({ repo, status, installed, busy, reloadStatus, onBac
           title={<span className="selectable">{repo}</span>}
           detail={L('hub.unverified.footer')}
           trailing={
-            <Button onClick={() => openExternal(`https://huggingface.co/${repo.split('/').map(encodeURIComponent).join('/')}`)}>
-              {L('hub.detail.openPage')}
+            <Button disabled={!d} onClick={() => d && openExternal(d.page_url)}>
+              {L('hub.detail.openPage', d && d.page_url.startsWith('https://modelscope.cn/') ? 'ModelScope' : 'Hugging Face')}
             </Button>
           }
         />

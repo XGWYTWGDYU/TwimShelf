@@ -208,6 +208,13 @@ public sealed partial class AiSettings : SettingsSubpage
         else if (Local.Download is { Running: false, Error: { } err })
             Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Error, Title = L("models.downloadFailed"), Message = err });
         Nav(L("hub.title"), L("hub.entry.detail"), "", () => new ModelHubSettings(), "local-store");
+        var source = new Segmented { MinWidth = 240 };
+        foreach (var (_, name) in LocalModels.Sources) source.Items.Add(new SegmentedItem { Content = name });
+        var current = TlCore.ModelSource();
+        source.SelectedIndex = Array.FindIndex(LocalModels.Sources, x => x.Id == current);
+        // by index: a value kept in Tag does not come back through WinRT (AOT)
+        source.SelectionChanged += (_, _) => { if (source.SelectedIndex is var i and >= 0) TlCore.SetModelSource(LocalModels.Sources[i].Id); };
+        Card(L("models.source"), L("models.source.footer"), "", source);
         var footer = new List<string> { L("models.local.footer.gguf") };
         if (!string.IsNullOrEmpty(Local.Devices)) footer.Add(L("models.local.devices", Local.Devices));
         Footer(string.Join('\n', footer));

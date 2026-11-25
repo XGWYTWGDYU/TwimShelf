@@ -721,6 +721,9 @@ enum Core {
     struct MediaRef: Codable, Hashable { let mediaId: String; let path: String; let kind: String; var text: String? = nil }
 
     static func setModelsDirectory(_ url: URL) { try? callUnit(tl_set_models_dir(url.path)) }
+    /// Where models come from: `huggingface` or `modelscope` (kept beside the models).
+    static func modelSource() -> String { (try? call(tl_model_source(), as: String.self)) ?? "huggingface" }
+    static func setModelSource(_ name: String) { try? callUnit(tl_set_model_source(name)) }
     static func modelStatus() -> ModelDownloadStatus? { (try? call(tl_model_status(), as: ModelDownloadStatus?.self)) ?? nil }
     static func cancelModelDownload() { tl_model_cancel() }
     /// A model download left unfinished by a quit or crash; downloading it again continues.

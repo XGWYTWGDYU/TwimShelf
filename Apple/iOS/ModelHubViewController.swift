@@ -25,7 +25,7 @@ final class ModelHubViewController: FormViewController, UISearchBarDelegate {
         navigationItem.largeTitleDisplayMode = .never
         let search = UISearchController(searchResultsController: nil)
         search.obscuresBackgroundDuringPresentation = false
-        search.searchBar.placeholder = L("hub.search.placeholder")
+        search.searchBar.placeholder = L("hub.search.placeholder", ModelHub.sourceName)
         search.searchBar.autocapitalizationType = .none
         search.searchBar.autocorrectionType = .no
         search.searchBar.delegate = self
@@ -107,7 +107,7 @@ final class ModelHubViewController: FormViewController, UISearchBarDelegate {
             rows.append(.button(L("hub.overMemory", hub.overMemory), icon: .init("memorychip", .systemGray), id: "over") { [weak self] in self?.hub.onlyFit = false })
         }
         if hub.canLoadMore { rows.append(.button(L("hub.more"), icon: .init("ellipsis.circle", .systemBlue), id: "more") { [weak self] in self?.hub.loadMore() }) }
-        s.append(Section(id: "results", header: hub.browsing ? L("hub.popular") : L("hub.results"), footer: L("hub.results.footer"), rows: rows))
+        s.append(Section(id: "results", header: hub.browsing ? L("hub.popular") : L("hub.results"), footer: L("hub.results.footer", ModelHub.sourceName), rows: rows))
         if !hub.hidden.isEmpty {
             // never left out silently: which ones, and why
             var rows: [Row] = [.expander(L("hub.hidden", hub.hidden.count), expanded: showHidden, icon: .init("eye.slash", .systemGray), id: "hidden") { [weak self] in
@@ -178,7 +178,7 @@ final class ModelHubRepoViewController: FormViewController {
             about.append(.value(L("hub.detail.downloads"), "\(d.repo.downloads)", id: "downloads"))
             if d.repo.claimsUncensored { about.append(.value(L("hub.claim"), nil, icon: .init("tag", .systemPurple), id: "claim")) }
         }
-        about.append(.button(L("hub.detail.openPage"), icon: .init("safari", .systemBlue), id: "page") { [repo] in
+        about.append(.button(L("hub.detail.openPage", ModelHub.sourceName), icon: .init("safari", .systemBlue), id: "page") { [repo] in
             if let u = ModelHub.pageURL(repo) { UIApplication.shared.open(u) }
         })
         s.append(Section(id: "about", footer: L("hub.unverified.footer"), rows: about))

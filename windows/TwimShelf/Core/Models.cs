@@ -292,6 +292,8 @@ public sealed class HubSkipped
 public sealed class HubDetail
 {
     public HubRepo Repo { get; init; } = new();
+    /// The repo's page on the site it comes from.
+    public string PageUrl { get; init; } = "";
     public string Revision { get; init; } = "";
     public List<HubVariant> Variants { get; init; } = [];
     public List<HubSkipped> Skipped { get; init; } = [];

@@ -402,6 +402,9 @@ public static unsafe class TlCore
 
     public static void SetModelsDirectory(string dir) => Done(Native.tl_set_models_dir(dir));
     public static List<CatalogEntry> ModelCatalog(string format) => Ok(Native.tl_model_catalog(format), J.ListCatalogEntry);
+    /// Where models come from: <c>huggingface</c> or <c>modelscope</c> (kept beside the models).
+    public static string ModelSource() => OkString(Native.tl_model_source());
+    public static void SetModelSource(string name) => Done(Native.tl_set_model_source(name));
     public static HubDevice? HubDevice() => OkOrNull(Native.tl_hub_device(), J.HubDevice);
     public static HubPage HubSearch(string format, string query, bool uncensored, string? next) =>
         Ok(Native.tl_hub_search(Json(new JsonObject { ["format"] = format, ["query"] = query, ["uncensored"] = uncensored, ["next"] = next })), J.HubPage);

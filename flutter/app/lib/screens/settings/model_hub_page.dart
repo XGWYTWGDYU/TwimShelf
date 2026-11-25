@@ -362,7 +362,7 @@ class _ModelHubRepoPageState extends State<ModelHubRepoPage> {
                   ListTile(
                     leading: const Icon(Icons.open_in_new),
                     title: Text(L('hub.detail.openPage', [widget.local.sourceName])),
-                    onTap: d == null ? null : () => launchUrl(Uri.parse(d.pageUrl), mode: LaunchMode.externalApplication),
+                    onTap: d == null ? null : () => launchUrl(Uri.parse(d.page_url), mode: LaunchMode.externalApplication),
                   ),
                 ]),
                 _DownloadState(local: local, repo: widget.repo),

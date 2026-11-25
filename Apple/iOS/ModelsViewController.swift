@@ -173,9 +173,14 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
         })
         s.append(Section(id: "external", header: L("models.external"), rows: ext))
 
-        s.append(Section(id: "store", header: L("models.available"), rows: [
+        s.append(Section(id: "store", header: L("models.available"), footer: L("models.source.footer"), rows: [
             .navigation(L("hub.title"), detail: L("hub.entry.detail"), icon: .init("square.grid.2x2.fill", .systemBlue), id: "n:hub") { [weak self] in
                 self?.navigationController?.pushViewController(ModelHubViewController(), animated: true)
+            },
+            .menu(L("models.source"), value: ModelHub.sourceName, icon: .init("arrow.down.circle.fill", .systemGreen), id: "m:source") {
+                let current = Core.modelSource()
+                return UIMenu(children: ModelHub.sources.map { id, name in
+                    UIAction(title: name, state: id == current ? .on : .off) { [weak self] _ in Core.setModelSource(id); self?.build() } })
             },
         ]))
         if SyncService.shared.hasAccount {

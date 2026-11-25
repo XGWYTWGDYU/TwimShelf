@@ -857,17 +857,17 @@ class HubSkipped {
 }
 
 class HubDetail {
-  const HubDetail({required this.repo, required this.pageUrl, required this.revision, this.variants = const [], this.skipped = const [], this.problem});
+  const HubDetail({required this.repo, required this.page_url, required this.revision, this.variants = const [], this.skipped = const [], this.problem});
   final HubRepo repo;
   /// The repo's page on the site it comes from.
-  final String pageUrl;
+  final String page_url;
   final String revision;
   final List<HubVariant> variants;
   final List<HubSkipped> skipped;
   final String? problem;
   factory HubDetail.fromJson(Map<String, dynamic> j) => HubDetail(
         repo: HubRepo.fromJson(j['repo'] as Map<String, dynamic>),
-        pageUrl: j['page_url'] as String,
+        page_url: j['page_url'] as String,
         revision: j['revision'] as String,
         variants: (j['variants'] as List).map((v) => HubVariant.fromJson(v as Map<String, dynamic>)).toList(),
         skipped: (j['skipped'] as List).map((v) => HubSkipped.fromJson(v as Map<String, dynamic>)).toList(),
