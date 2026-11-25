@@ -87,10 +87,24 @@ public sealed partial class MasonryView : UserControl
     /// A new list (or the same cards in a new order): placed again from the top.
     public void SetCards(List<List<FeedItem>> cards, bool keepOffset = false)
     {
+        // where the position stays (the library changed: a sync, a download), the cards on screen
+        // whose media are still there stay too, at their new places: recycled and drawn again,
+        // they all flashed with each change a sync brought
+        var kept = new Dictionary<string, PostCard>();
+        if (keepOffset)
+            foreach (var (i, c) in _live)
+                if (i < _cards.Count) kept[KeyOf(i)] = c;
         _cards = cards;
         Forget();
-        foreach (var c in _live.Values) Recycle(c);
         _live.Clear();
+        if (kept.Count > 0)
+            for (var i = 0; i < cards.Count; i++)
+                if (kept.Remove(KeyOf(i), out var c))
+                {
+                    _live[i] = c;
+                    c.Bind(cards[i], PageOf(KeyOf(i)), Marks, Highlight == cards[i][0].PostId);
+                }
+        foreach (var c in kept.Values) Recycle(c);
         if (!keepOffset) Scroll.ChangeView(null, 0, null, true);
         _footerText.Text = L(Grouped ? "feed.end.posts" : "feed.end.media", cards.Count);
         Layout();

@@ -377,11 +377,18 @@ public sealed partial class PostCard : UserControl
         PageChanged?.Invoke(p);
     }
 
+    /// The file this card shows (or is loading): bound again to the same (a library change, new
+    /// marks), it keeps its picture instead of going blank while it loads again, which made every
+    /// card flash.
+    string? _shownPath;
+
     void LoadMedia()
     {
+        var item = Media[Page];
+        if (item.Path == _shownPath) return;
+        _shownPath = item.Path;
         _loading?.Cancel();
         var cancel = _loading = new CancellationTokenSource();
-        var item = Media[Page];
         _image.Source = null;
         _video.Stop();
         _video.BindPath(item.IsVideo ? item.Path : null, OnScreen);
@@ -482,6 +489,7 @@ public sealed partial class PostCard : UserControl
     public void Recycle()
     {
         _loading?.Cancel();
+        _shownPath = null;
         _swipe.Reset();
         _hovering = false;
         ShowArrows(false);

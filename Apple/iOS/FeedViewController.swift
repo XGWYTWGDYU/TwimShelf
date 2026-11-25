@@ -1114,20 +1114,27 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         guard !old.isEmpty, !entries.isEmpty, collectionView.numberOfSections == 1,
               collectionView.numberOfItems(inSection: 0) == old.count else { return false }
         let oldKeys = old.map(entryKey), newKeys = entries.map(entryKey)
-        let keep = Set(newKeys)
-        guard oldKeys.filter({ keep.contains($0) }) == newKeys else { return false }   // additions or a new order
+        let keep = Set(newKeys), had = Set(oldKeys)
+        // what stays keeps its order (a new order reloads); what came in (a sync, a download) is
+        // inserted, so the cards already there are not loaded again: a reload made them all flash
+        guard oldKeys.filter({ keep.contains($0) }) == newKeys.filter({ had.contains($0) }) else { return false }
         let removed = oldKeys.indices.filter { !keep.contains(oldKeys[$0]) }
-        if !removed.isEmpty {
-            let ips = removed.map { IndexPath(item: $0, section: 0) }
+        let added = newKeys.indices.filter { !had.contains(newKeys[$0]) }
+        if !removed.isEmpty || !added.isEmpty {
             // The grid finishes any pending layout before a batch, asking for cells at their old
             // places: they have to get the old entries, or a card moves up showing the next one's.
             let fresh = entries
             entries = old
             collectionView.layoutIfNeeded()
-            collectionView.performBatchUpdates {
-                entries = fresh
-                collectionView.deleteItems(at: ips)
+            let batch = {
+                self.collectionView.performBatchUpdates {
+                    self.entries = fresh
+                    self.collectionView.deleteItems(at: removed.map { IndexPath(item: $0, section: 0) })
+                    self.collectionView.insertItems(at: added.map { IndexPath(item: $0, section: 0) })
+                }
             }
+            // a card taken away goes as before; cards coming in (a sync brings many) just appear
+            if added.isEmpty { batch() } else { UIView.performWithoutAnimation(batch) }
         }
         // changed cards: refresh the visible ones in place
         let oldByKey = Dictionary(old.map { (entryKey($0), $0) }, uniquingKeysWith: { a, _ in a })
@@ -1871,10 +1878,26 @@ final class FeedMasonryLayout: UICollectionViewLayout {
         passes = cv.numberOfSections
         let count = passes > 0 ? cv.numberOfItems(inSection: 0) : 0
         let m = metrics(cv)
-        if dirty || plan?.metrics != m || plan?.frames.count != count {
+        if !dirty, let old = plan, old.frames.count == count, old.metrics != m, old.metrics.columns == m.columns, old.metrics.columnWidth > 0 {
+            // Only the width moves (the sidebar coming or going, a rotation): every frame of that
+            // animation has a width of its own, and measuring every card's text again at each one
+            // stalled a large library. The cards keep their columns, their heights scaled; once
+            // the width rests they are measured at it.
+            let k = m.columnWidth / old.metrics.columnWidth
+            plan = FeedMasonry(count: count, metrics: m, keeping: old) { i, _ in old.frames[i].height * k }
+            measureWhenSettled()
+        } else if dirty || plan?.metrics != m || plan?.frames.count != count {
             plan = FeedMasonry(count: count, metrics: m) { [weak self] i, w in self?.height?(i, w) ?? w * 1.25 }
             dirty = false
         }
+    }
+
+    private var settle: DispatchWorkItem?
+    private func measureWhenSettled() {
+        settle?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.invalidateHeights() }
+        settle = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
     }
 
     override var collectionViewContentSize: CGSize {

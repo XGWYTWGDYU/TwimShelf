@@ -597,20 +597,26 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         guard !old.isEmpty, !entries.isEmpty, collection.numberOfSections == 1,
               collection.numberOfItems(inSection: 0) == old.count else { return false }
         let oldKeys = old.map(entryKey), newKeys = entries.map(entryKey)
-        let keep = Set(newKeys)
-        guard oldKeys.filter({ keep.contains($0) }) == newKeys else { return false }
-        let removed = oldKeys.indices.filter { !keep.contains(oldKeys[$0]) }
-        if !removed.isEmpty {
-            let ips = Set(removed.map { IndexPath(item: $0, section: 0) })
+        let keep = Set(newKeys), had = Set(oldKeys)
+        // what stays keeps its order (a new order reloads); what came in (a sync, a download) is
+        // inserted, so the cards already there are not loaded again: a reload made them all flash
+        guard oldKeys.filter({ keep.contains($0) }) == newKeys.filter({ had.contains($0) }) else { return false }
+        let removed = Set(oldKeys.indices.filter { !keep.contains(oldKeys[$0]) }.map { IndexPath(item: $0, section: 0) })
+        let added = Set(newKeys.indices.filter { !had.contains(newKeys[$0]) }.map { IndexPath(item: $0, section: 0) })
+        if !removed.isEmpty || !added.isEmpty {
             // The grid finishes any pending layout before a batch, asking for cards at their old
             // places: they have to get the old entries, or a card moves up showing the next one's.
             let fresh = entries
             entries = old
             collection.layoutSubtreeIfNeeded()
-            collection.animator().performBatchUpdates({
-                entries = fresh
-                collection.deleteItems(at: ips)
-            })
+            let batch = {
+                self.entries = fresh
+                self.collection.deleteItems(at: removed)
+                self.collection.insertItems(at: added)
+            }
+            // a card taken away goes as before (animated); cards coming in (a sync brings many) just appear
+            if added.isEmpty { collection.animator().performBatchUpdates(batch) }
+            else { collection.performBatchUpdates(batch) }
         }
         let oldByKey = Dictionary(old.map { (entryKey($0), $0) }, uniquingKeysWith: { a, _ in a })
         for ip in collection.indexPathsForVisibleItems() where ip.item < entries.count && oldByKey[entryKey(entries[ip.item])] != entries[ip.item] {

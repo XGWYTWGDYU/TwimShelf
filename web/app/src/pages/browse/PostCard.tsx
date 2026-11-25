@@ -185,7 +185,10 @@ function Picture({ item, width }: { item: FeedItem; width: number }) {
     // a picture decoded later fades in, instead of popping onto an empty card
     thumb(item, side, 0, 'whole').then((u) => { if (live) { setFade(true); setUrl(u); } }, () => live && setFailed(true));
     return () => { live = false; };
-  }, [item, side]);
+    // the media, not the object: a library change (a sync) brings the same media as new objects,
+    // and a picture then loaded again (blank meanwhile) made the card flash
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.media_id, item.path, side]);
   if (failed) return <div className="card-missing" />;
   return url ? <img className={fade ? 'fade-in' : undefined} src={url} alt="" draggable={false} decoding="async" /> : null;
 }
