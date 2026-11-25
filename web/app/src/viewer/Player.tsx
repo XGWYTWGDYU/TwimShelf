@@ -4,7 +4,7 @@
 // (the pointer too). Double-click plays or pauses; press and hold plays at 2.5×; Space, ↑ ↓
 // (volume) and F come from the viewer. Loops at the end.
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Pause, Play, Share, X } from 'lucide-react';
+import { Pause, PictureInPicture2, Play, Share, X } from 'lucide-react';
 import { L, type FeedItem } from '@twimshelf/core';
 import { core } from '../lib/core';
 import { openMenuBelow } from '../components/Menu';
@@ -37,7 +37,9 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
     const [hasFrame, setHasFrame] = useState(false);
     const [speed, setSpeed] = useState(1);
     const [shown, setShown] = useState(true);
+    const [pip, setPip] = useState(false);
     const [hud, setHud] = useState<{ text: string; sticky: boolean } | null>(null);
+    const canPip = typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;
     const scrubbing = useRef(false);
     const hideTimer = useRef<number>(0);
     const hudTimer = useRef<number>(0);
@@ -96,7 +98,16 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
       v.volume = savedVolume;
       wake();
       // leaving (closed, or another page): the card goes on from here
+      const onEnterPip = () => setPip(true);
+      const onLeavePip = () => setPip(false);
+      v.addEventListener('enterpictureinpicture', onEnterPip);
+      v.addEventListener('leavepictureinpicture', onLeavePip);
       return () => {
+        v.removeEventListener('enterpictureinpicture', onEnterPip);
+        v.removeEventListener('leavepictureinpicture', onLeavePip);
+        if (document.pictureInPictureElement === v) {
+          void document.exitPictureInPicture().catch(() => {});
+        }
         window.clearTimeout(hideTimer.current);
         window.clearTimeout(hudTimer.current);
         window.clearTimeout(holdTimer.current);
@@ -166,11 +177,26 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
       }
     };
 
+    const togglePip = useCallback(async () => {
+      const v = video.current;
+      if (!v || !canPip) return;
+      try {
+        if (document.pictureInPictureElement === v) {
+          await document.exitPictureInPicture();
+        } else {
+          await v.requestPictureInPicture();
+        }
+      } catch {
+        flash(L('viewer.pipFailed'));
+      }
+      wake();
+    }, [canPip, flash, wake]);
+
     const frac = d > 0 ? Math.min(1, t / d) : 0;
     return (
       <div className="player" onMouseMove={wake} onMouseDown={down} onMouseUp={up} onMouseLeave={up}>
         <video ref={video} className="player-video" src={core.fileUrl(item.path)} poster={poster} autoPlay playsInline loop
-          disablePictureInPicture controlsList="nodownload nofullscreen noremoteplayback" disableRemotePlayback
+          controlsList="nodownload nofullscreen noremoteplayback" disableRemotePlayback
           onLoadedMetadata={(e) => { const v = e.currentTarget; setD(v.duration); const at = position(item.media_id); if (at > 0 && at < v.duration) v.currentTime = at; }}
           onLoadedData={() => setHasFrame(true)}
           onPlaying={() => setHasFrame(true)}
@@ -196,6 +222,11 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
               if (v && !v.paused) v.playbackRate = r;
               wake();
             } })))}>{speedText(speed)}</button>
+          {canPip && (
+            <button className="player-btn" aria-label={L('viewer.pip')} aria-pressed={pip} title={L('viewer.pip')} onClick={() => void togglePip()}>
+              <PictureInPicture2 size={15} strokeWidth={2.2} />
+            </button>
+          )}
           <button className="player-btn" aria-label={L('viewer.share')} title={L('viewer.share')} onClick={(e) => onShare(e.currentTarget)}><Share size={15} strokeWidth={2.2} /></button>
           <button className="player-btn" aria-label={L('viewer.close')} title={L('viewer.close')} onClick={onClose}><X size={16} strokeWidth={2.4} /></button>
         </div>

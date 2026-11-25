@@ -73,6 +73,8 @@ class _BrowsePageState extends State<BrowsePage> {
   @override
   void initState() {
     super.initState();
+    // Match native iOS's 80 ms inline-video visibility check interval instead of the 500 ms default.
+    VisibilityDetectorController.instance.updateInterval = const Duration(milliseconds: 80);
     widget.library.shuffleRequest.addListener(_shuffle);
     widget.library.addListener(_changed);
     Prefs.instance.addListener(_prefsChanged);
@@ -929,7 +931,8 @@ class _FeedVideoState extends State<_FeedVideo> {
     widget.item,
     cacheDir: widget.library.thumbs.cacheDir,
   );
-  bool _visible = false;
+  bool _inView = false;
+  bool _wantsPlay = false;
 
   @override
   void didUpdateWidget(_FeedVideo old) {
@@ -945,9 +948,10 @@ class _FeedVideoState extends State<_FeedVideo> {
   }
 
   void _sync() {
-    if (_visible && widget.current) {
+    if (_inView && widget.current) {
       _session.attachCard(
         this,
+        playing: _wantsPlay,
         item: widget.item,
         cacheDir: widget.library.thumbs.cacheDir,
       );
@@ -970,15 +974,17 @@ class _FeedVideoState extends State<_FeedVideo> {
     return VisibilityDetector(
       key: ValueKey('feed-video-${widget.item.media_id}'),
       onVisibilityChanged: (info) {
-        final visible = info.visibleFraction >= 0.5;
-        if (visible == _visible || !mounted) return;
-        if (!visible && (VideoSession.isViewerOpen || ViewerPage.activeMediaId.value == widget.item.media_id)) return;
-        _visible = visible;
+        final inView = info.visibleFraction > 0;
+        final wantsPlay = info.visibleFraction >= 0.5;
+        if ((inView == _inView && wantsPlay == _wantsPlay) || !mounted) return;
+        if (!wantsPlay && (VideoSession.isViewerOpen || ViewerPage.activeMediaId.value == widget.item.media_id)) return;
+        _inView = inView;
+        _wantsPlay = wantsPlay;
         _sync();
       },
       child: ValueListenableBuilder<String?>(
         valueListenable: ViewerPage.activeMediaId,
-        child: VideoSessionView(session: _session),
+        child: VideoSessionView(session: _session, showPlayBadgeWhenStopped: false),
         builder: (context, activeId, child) => Opacity(
           opacity: activeId == widget.item.media_id ? 0 : 1,
           child: child,

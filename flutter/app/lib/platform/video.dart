@@ -17,6 +17,7 @@ import 'system_random.dart';
 import '../app/prefs.dart';
 import 'os.dart';
 import 'files.dart';
+import 'pip.dart';
 
 export 'package:media_kit_video/media_kit_video.dart'
     show Video, VideoController, NoVideoControls;
@@ -183,6 +184,9 @@ class VideoSession extends ChangeNotifier {
   /// Returns the shared [VideoSession] for [item] and warms its poster in [cacheDir].
   static VideoSession forItem(FeedItem item, {String? cacheDir}) {
     final s = of(item.path);
+    if (item.width > 0 && item.height > 0) {
+      s._expectedAspect = item.width / item.height;
+    }
     if (cacheDir != null) s._ensurePoster(item, cacheDir);
     return s;
   }
@@ -247,13 +251,27 @@ class VideoSession extends ChangeNotifier {
   bool _firstFrameReady = false;
   bool get firstFrameReady => _firstFrameReady;
 
+  /// Display aspect ratio (width / height) of this video from core metadata, when known.
+  double? _expectedAspect;
+
   Object? _error;
   Object? get error => _error;
 
   final Set<Object> _cardOwners = {};
+  final Set<Object> _playingCardOwners = {};
   final Set<Object> _viewerOwners = {};
   StreamSubscription<Duration>? _posSub;
+  VoidCallback? _rectListener;
+  VideoPlayback? _rectPlayback;
   Future<VideoPlayback?>? _openingFuture;
+
+  void _clearRectListener() {
+    if (_rectListener != null && _rectPlayback != null) {
+      _rectPlayback!.surfaceController.rect.removeListener(_rectListener!);
+    }
+    _rectListener = null;
+    _rectPlayback = null;
+  }
 
   bool get inViewer => _viewerOwners.isNotEmpty;
   bool get hasVisibleCard => _cardOwners.isNotEmpty;
@@ -300,13 +318,20 @@ class VideoSession extends ChangeNotifier {
     }
   }
 
-  void attachCard(Object owner, {FeedItem? item, String? cacheDir}) {
+  void attachCard(Object owner, {bool playing = true, FeedItem? item, String? cacheDir}) {
+    if (item != null && item.width > 0 && item.height > 0) {
+      _expectedAspect = item.width / item.height;
+    }
     if (item != null && cacheDir != null) _ensurePoster(item, cacheDir);
-    if (_cardOwners.add(owner)) _sync();
+    final addedView = _cardOwners.add(owner);
+    final changedPlay = playing ? _playingCardOwners.add(owner) : _playingCardOwners.remove(owner);
+    if (addedView || changedPlay) _sync();
   }
 
   void detachCard(Object owner) {
-    if (_cardOwners.remove(owner)) _sync();
+    final removedView = _cardOwners.remove(owner);
+    final removedPlay = _playingCardOwners.remove(owner);
+    if (removedView || removedPlay) _sync();
   }
 
   Future<VideoPlayback?> attachViewer(Object owner) {
@@ -342,11 +367,12 @@ class VideoSession extends ChangeNotifier {
 
   Future<VideoPlayback?> _sync({bool notify = true}) {
     final wantViewer = _viewerOwners.isNotEmpty;
-    final wantCard = !_viewerOpen && _cardOwners.isNotEmpty;
+    final wantCardPlay = !_viewerOpen && _playingCardOwners.isNotEmpty;
+    final keepCardPaused = !_viewerOpen && _cardOwners.isNotEmpty;
     final heldForOpeningViewer = _viewerOpen && _viewerOpeningPath == path;
-    final wantPlay = wantViewer || wantCard || heldForOpeningViewer;
+    final wantKeepAlive = wantViewer || keepCardPaused || heldForOpeningViewer;
 
-    if (!wantPlay) {
+    if (!wantKeepAlive) {
       if (_playback != null) {
         unawaited(_stopPlayback(captureFrame: _firstFrameReady));
       }
@@ -358,10 +384,23 @@ class VideoSession extends ChangeNotifier {
       if (_openingFuture != null) return _openingFuture!;
       if (wantViewer) {
         unawaited(existing.enterViewer().catchError((Object _) {}));
-      } else if (wantCard) {
+      } else if (wantCardPlay) {
         unawaited(existing.returnToCard().catchError((Object _) {}));
+      } else if (keepCardPaused) {
+        // Partially visible (< 50%): pause in place on the current frame (as native InlineVideos),
+        // so scrolling back into view resumes instantly without reopening or flashing.
+        if (existing.currentPosition > Duration.zero) {
+          savePosition(existing.currentPosition, quiet: true);
+        }
+        unawaited(existing.pause().catchError((Object _) {}));
       }
       return Future.value(existing);
+    }
+
+    // Do not start decoding brand-new cards while only partially visible (< 50%), matching native
+    // so a fast fling never decodes every passing card.
+    if (!wantViewer && !wantCardPlay && !heldForOpeningViewer) {
+      return Future.value(null);
     }
 
     return _openingFuture ??= _startPlayback().whenComplete(() {
@@ -373,6 +412,7 @@ class VideoSession extends ChangeNotifier {
     VideoPlayback? v;
     _error = null;
     _firstFrameReady = false;
+    _clearRectListener();
 
     try {
       await Future<void>.value();
@@ -380,30 +420,8 @@ class VideoSession extends ChangeNotifier {
       _playback = v;
       notifyListeners();
 
+      final previousRect = v.surfaceController.rect.value;
       final resumeFrom = _position > Duration.zero ? _position : null;
-      var seekDone = resumeFrom == null;
-      // The first frame worth showing is this video's own, after the seek: a reused player still
-      // holds the last video's last frame, and the file opens on its frame 0 (at the last video's
-      // size) before the seek lands. Played past the place it resumes at (or looped round to the
-      // start, when that place was near the end), it is there.
-      final shownFrom = (resumeFrom ?? Duration.zero) + const Duration(milliseconds: 30);
-      bool settled(Duration p) => p > shownFrom || (resumeFrom != null && p + const Duration(milliseconds: 500) < resumeFrom);
-
-      _posSub?.cancel();
-      _posSub = v.position.listen((p) {
-        if (_playback != v) return;
-        if (seekDone && p > Duration.zero) {
-          _position = p;
-          if (!_firstFrameReady && settled(p)) {
-            final st = v!.surfaceController.player.state;
-            if ((st.width ?? 0) > 0 && (st.height ?? 0) > 0) {
-              _firstFrameReady = true;
-              _lastFrame = null;
-              notifyListeners();
-            }
-          }
-        }
-      });
 
       final forViewer = _viewerOwners.isNotEmpty;
       if (!forViewer) await v.setMuted(true);
@@ -415,12 +433,83 @@ class VideoSession extends ChangeNotifier {
         await v.seek(resumeFrom);
         if (_playback != v) return null;
       }
-      seekDone = true;
+
+      // Only listen for position & surface rect AFTER open() and seek() have completed: a reused
+      // player would otherwise emit stale events from the previous video, and its VideoController
+      // rect still holds the previous video's aspect ratio until libmpv reconfigures the VO.
+      final dur = v.currentDuration;
+      final nearEnd = resumeFrom != null &&
+          dur > Duration.zero &&
+          resumeFrom >= dur - const Duration(milliseconds: 600);
+      final shownFrom = (resumeFrom ?? Duration.zero) + const Duration(milliseconds: 50);
+      bool settled(Duration p) =>
+          p >= shownFrom ||
+          (nearEnd &&
+              p >= const Duration(milliseconds: 50) &&
+              p + const Duration(milliseconds: 500) < resumeFrom);
+
+      final playStartedAt = DateTime.now();
+      var positionSettled = false;
+      var revealScheduled = false;
+
+      bool surfaceReady() {
+        final rect = v!.surfaceController.rect.value;
+        if (rect == null || rect.width <= 0 || rect.height <= 0) return false;
+        final st = v.surfaceController.player.state;
+        final sw = st.width ?? 0, sh = st.height ?? 0;
+        if (sw <= 0 || sh <= 0) return false;
+        final rectAspect = rect.width / rect.height;
+        final dw = st.videoParams.dw ?? 0, dh = st.videoParams.dh ?? 0;
+        final targetAspect = _expectedAspect ?? (dw > 0 && dh > 0 ? dw / dh : sw / sh);
+        if (targetAspect > 0) {
+          final ratio = rectAspect / targetAspect;
+          if (ratio >= 0.94 && ratio <= 1.06) return true;
+        }
+        // Fallback so videos with mismatched metadata still reveal once the VO has reconfigured.
+        final elapsed = DateTime.now().difference(playStartedAt);
+        if (rect != previousRect && elapsed >= const Duration(milliseconds: 220)) return true;
+        return elapsed >= const Duration(milliseconds: 600);
+      }
+
+      void tryReveal() {
+        if (_playback != v || _firstFrameReady || revealScheduled) return;
+        if (!positionSettled || !surfaceReady()) return;
+        revealScheduled = true;
+        // Wait one frame after the new rect is observed so VideoSurface lays out with the new
+        // aspect ratio and the GPU texture holds the post-seek frame before becoming visible.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_playback != v || _firstFrameReady) return;
+          _firstFrameReady = true;
+          _lastFrame = null;
+          _clearRectListener();
+          notifyListeners();
+        });
+      }
+
+      _rectListener = tryReveal;
+      _rectPlayback = v;
+      v.surfaceController.rect.addListener(tryReveal);
+
+      _posSub?.cancel();
+      _posSub = v.position.listen((p) {
+        if (_playback != v) return;
+        if (p > Duration.zero) {
+          if (!positionSettled && settled(p)) {
+            positionSettled = true;
+          }
+          if (positionSettled) {
+            _position = p;
+            tryReveal();
+          }
+        }
+      });
 
       if (_viewerOwners.isNotEmpty) {
         await v.enterViewer();
-      } else {
+      } else if (!_viewerOpen && _playingCardOwners.isNotEmpty) {
         await v.returnToCard();
+      } else if (!_viewerOpen && _cardOwners.isNotEmpty) {
+        await v.pause();
       }
 
       if (_playback != v) return null;
@@ -434,6 +523,7 @@ class VideoSession extends ChangeNotifier {
       return v;
     } catch (e) {
       _error = e;
+      _clearRectListener();
       if (v != null && _playback == v) {
         await _stopPlayback(captureFrame: false);
       } else {
@@ -449,6 +539,7 @@ class VideoSession extends ChangeNotifier {
     if (v == null) return;
     _posSub?.cancel();
     _posSub = null;
+    _clearRectListener();
     _playback = null;
     _firstFrameReady = false;
 
@@ -458,17 +549,23 @@ class VideoSession extends ChangeNotifier {
     }
     notifyListeners();
 
-    _idle.add(v);
-    await v.release(
-      onBeforeStop: captureFrame
-          ? () async {
-              final frame = await VideoResume.frameOf(v);
-              if (frame != null && _playback == null) {
-                saveFrame(frame);
+    try {
+      await v.release(
+        onBeforeStop: captureFrame
+            ? () async {
+                final frame = await VideoResume.frameOf(v);
+                if (frame != null && _playback == null) {
+                  saveFrame(frame);
+                }
               }
-            }
-          : null,
-    ).catchError((Object _) {});
+            : null,
+      );
+    } catch (_) {
+    } finally {
+      // Only return the player to the idle pool after pause/screenshot/stop have fully finished,
+      // so another scrolling card can never hijack a player still holding the previous video.
+      if (!v.isClosed) _idle.add(v);
+    }
   }
 }
 
@@ -479,7 +576,7 @@ class VideoSessionView extends StatelessWidget {
     super.key,
     required this.session,
     this.fill = Colors.transparent,
-    this.showPlayBadgeWhenStopped = true,
+    this.showPlayBadgeWhenStopped = false,
     this.fallback,
   });
 
@@ -498,23 +595,27 @@ class VideoSessionView extends StatelessWidget {
         final poster = session.posterPath;
         return Stack(fit: StackFit.expand, children: [
           if (fill != Colors.transparent) ColoredBox(color: fill),
-          if (v == null || !session.firstFrameReady)
-            frame != null
-                ? IgnorePointer(child: Image.memory(frame, fit: BoxFit.contain, gaplessPlayback: true))
-                : poster != null
-                    ? IgnorePointer(child: Image(image: localFileImage(poster), fit: BoxFit.contain, gaplessPlayback: true))
-                    : (fallback ?? const SizedBox.expand()),
-          // mounted from the start (its texture takes the frames), shown from this video's first
-          // frame after the seek: before it, a reused player shows the last video's last frame,
-          // then this one's frame 0 at the wrong size (the frame or poster under it stays meanwhile)
+          if (frame != null)
+            IgnorePointer(child: Image.memory(frame, fit: BoxFit.contain, gaplessPlayback: true))
+          else if (poster != null)
+            IgnorePointer(child: Image(image: localFileImage(poster), fit: BoxFit.contain, gaplessPlayback: true))
+          else if (v == null || !session.firstFrameReady)
+            fallback ?? const SizedBox.expand(),
+          // mounted from the start (its texture takes the frames), shown only after open + seek
+          // settle AND the VideoController rect matches this video's aspect ratio (so a reused
+          // player never flashes the previous video's frame or squashes this video into the old rect)
           if (v != null)
-            Opacity(
-              opacity: session.firstFrameReady ? 1 : 0,
-              child: VideoSurface(
-                controller: v.surfaceController,
-                controls: NoVideoControls,
-                resumeUponEnteringForegroundMode: true,
-                fill: Colors.transparent,
+            ValueListenableBuilder<bool>(
+              valueListenable: AndroidPip.inPip,
+              builder: (context, inPip, _) => Opacity(
+                opacity: session.firstFrameReady ? 1 : 0,
+                child: VideoSurface(
+                  controller: v.surfaceController,
+                  controls: NoVideoControls,
+                  pauseUponEnteringBackgroundMode: !inPip,
+                  resumeUponEnteringForegroundMode: true,
+                  fill: Colors.transparent,
+                ),
               ),
             ),
           if (showPlayBadgeWhenStopped && v == null && frame == null)
@@ -565,6 +666,7 @@ class VideoPlayback {
       _opening = false;
   int _generation = 0;
   Future<void> _audioTail = Future.value();
+  bool get isClosed => _closed;
   Stream<Duration> get position => _engine.position;
   Stream<Duration> get duration => _engine.duration;
   Duration get currentPosition => _engine.currentPosition;

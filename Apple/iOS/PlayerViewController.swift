@@ -882,37 +882,59 @@ final class PlayerViewController: UIViewController, UIGestureRecognizerDelegate,
     private var volumeSlider: UISlider? { volumeView.subviews.compactMap { $0 as? UISlider }.first }
 }
 
-/// Centered pill that reports gesture feedback (speed, seek target, brightness/volume level).
+/// Top-centered rounded-rectangle Liquid Glass HUD for player feedback (speed, seek, brightness, volume, lock).
 final class HUDView: UIView {
+    private let glass: UIVisualEffectView
     private let icon = UIImageView()
     private let label = UILabel()
     private let bar = UIProgressView(progressViewStyle: .bar)
     private var hideWork: DispatchWorkItem?
 
     override init(frame: CGRect) {
+        let effect: UIVisualEffect
+        if #available(iOS 26.0, *) {
+            effect = UIGlassEffect(style: .regular)
+        } else {
+            effect = UIBlurEffect(style: .systemChromeMaterialDark)
+        }
+        glass = UIVisualEffectView(effect: effect)
         super.init(frame: frame)
-        backgroundColor = UIColor.black.withAlphaComponent(0.6)
-        layer.cornerRadius = 20
-        layer.cornerCurve = .continuous
+        overrideUserInterfaceStyle = .dark
+        backgroundColor = .clear
         alpha = 0
         isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityIdentifier = "hud"
+
+        glass.overrideUserInterfaceStyle = .dark
+        glass.layer.cornerRadius = 14
+        glass.layer.cornerCurve = .continuous
+        glass.clipsToBounds = true
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glass)
+
         icon.tintColor = .white
         icon.preferredSymbolConfiguration = .init(pointSize: 15, weight: .semibold)
         label.textColor = .white
         label.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         bar.progressTintColor = .white
         bar.trackTintColor = UIColor.white.withAlphaComponent(0.25)
+        bar.layer.cornerRadius = 2.5
+        bar.clipsToBounds = true
         let stack = UIStackView(arrangedSubviews: [icon, label, bar])
         stack.spacing = 10
         stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        glass.contentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 10), stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16), stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            glass.topAnchor.constraint(equalTo: topAnchor), glass.bottomAnchor.constraint(equalTo: bottomAnchor),
+            glass.leadingAnchor.constraint(equalTo: leadingAnchor), glass.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: glass.contentView.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: glass.contentView.bottomAnchor, constant: -10),
+            stack.leadingAnchor.constraint(equalTo: glass.contentView.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: glass.contentView.trailingAnchor, constant: -16),
             bar.widthAnchor.constraint(equalToConstant: 120),
+            bar.heightAnchor.constraint(equalToConstant: 5),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }

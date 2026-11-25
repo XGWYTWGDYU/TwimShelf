@@ -463,8 +463,127 @@ struct CardLayout {
 
     let compact: Bool
 
-    init(item it: FeedItem?, width w: CGFloat, traits: UITraitCollection) {
-        let m = Metrics.of(traits)
+    /// Cached font metrics and average glyph widths per dynamic-type / compact trait combination,
+    /// used both to avoid repeated font descriptor lookups and to estimate post text heights in
+    /// pure arithmetic (microseconds per thousand cards) during layout transitions.
+    struct Estimator: @unchecked Sendable {
+        let metrics: Metrics
+        let headlineLineHeight: CGFloat
+        let bodyFont: UIFont
+        let firstLineHeight: CGFloat
+        let lineStep: CGFloat
+        let narrowWidth: CGFloat
+        let wideWidth: CGFloat
+
+        @MainActor private static var cache: [String: Estimator] = [:]
+
+        @MainActor static func of(_ traits: UITraitCollection) -> Estimator {
+            let key = traits.preferredContentSizeCategory.rawValue + (traits[CompactCardsTrait.self] ? "#compact" : "")
+            if let e = cache[key] { return e }
+            let m = Metrics.of(traits)
+            let hl = ceil(max(
+                UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traits).lineHeight,
+                UIFont.preferredFont(forTextStyle: .subheadline, compatibleWith: traits).lineHeight
+            ))
+            let body = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+            let attrs: [NSAttributedString.Key: Any] = [.font: body]
+            let unbounded = CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            let oneLine = ("Ag 文" as NSString).boundingRect(with: unbounded, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil).height
+            let twoLines = ("Ag 文\nAg 文" as NSString).boundingRect(with: unbounded, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil).height
+            let latin = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789"
+            let han = "的一是不了人我在有他这为之大来以个中上们"
+            let latinW = (latin as NSString).boundingRect(with: unbounded, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil).width
+            let hanW = (han as NSString).boundingRect(with: unbounded, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil).width
+            let e = Estimator(
+                metrics: m,
+                headlineLineHeight: hl,
+                bodyFont: body,
+                firstLineHeight: oneLine,
+                lineStep: max(body.lineHeight, twoLines - oneLine),
+                narrowWidth: latinW / CGFloat(latin.count),
+                wideWidth: hanW / CGFloat(han.count)
+            )
+            cache[key] = e
+            return e
+        }
+
+        func estimatedTextHeight(_ text: String, width: CGFloat) -> CGFloat {
+            guard width > 0 else { return ceil(firstLineHeight) + 1 }
+            let limit = width * 0.94
+            var lines = 0
+            var lineW: CGFloat = 0
+            for scalar in text.unicodeScalars {
+                if scalar == "\n" {
+                    lines += max(1, Int(ceil(lineW / limit)))
+                    lineW = 0
+                } else {
+                    lineW += scalar.value < 0x0500 ? narrowWidth : wideWidth
+                }
+            }
+            lines += lineW == 0 ? 1 : max(1, Int(ceil(lineW / limit)))
+            return ceil(firstLineHeight + CGFloat(max(0, lines - 1)) * lineStep) + 1
+        }
+
+        func estimatedCaptionHeight(item it: FeedItem?, width w: CGFloat) -> CGFloat {
+            let m = metrics
+            var y = m.captionTop
+            let inner = w - m.side * 2
+            var gap: CGFloat = 0
+            var hasHeader = false
+            if let it, it.isLoose || it.authorName != nil || it.screenName != nil {
+                y += headlineLineHeight
+                gap = m.authorGap
+                hasHeader = true
+            }
+            var hasBody = false
+            if let text = it?.text, !text.isEmpty {
+                y += gap
+                y += estimatedTextHeight(text, width: inner)
+                gap = m.linkGap
+                hasBody = true
+            }
+            let hasLink = it?.url != nil
+            if hasLink {
+                y += gap + m.linkHeight
+            }
+            if !hasHeader && !hasBody && !hasLink { y = 0 }
+            return ceil(y + m.tagsGap + m.tagsHeight + m.bottom)
+        }
+
+        /// Thread-safe exact caption height (all UIKit fonts and metrics are captured in `self`).
+        func exactCaptionHeight(hasAuthor: Bool, text: String?, hasLink: Bool, width w: CGFloat) -> CGFloat {
+            let m = metrics
+            var y = m.captionTop
+            let inner = w - m.side * 2
+            var gap: CGFloat = 0
+            if hasAuthor {
+                y += headlineLineHeight
+                gap = m.authorGap
+            }
+            var hasBody = false
+            if let text, !text.isEmpty {
+                y += gap
+                let r = (text as NSString).boundingRect(
+                    with: CGSize(width: inner, height: .greatestFiniteMagnitude),
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    attributes: [.font: bodyFont],
+                    context: nil
+                )
+                y += ceil(r.height) + 1
+                gap = m.linkGap
+                hasBody = true
+            }
+            if hasLink {
+                y += gap + m.linkHeight
+            }
+            if !hasAuthor && !hasBody && !hasLink { y = 0 }
+            return ceil(y + m.tagsGap + m.tagsHeight + m.bottom)
+        }
+    }
+
+    @MainActor init(item it: FeedItem?, width w: CGFloat, traits: UITraitCollection) {
+        let est = Estimator.of(traits)
+        let m = est.metrics
         width = w
         textSize = traits.preferredContentSizeCategory
         compact = traits[CompactCardsTrait.self]
@@ -473,14 +592,14 @@ struct CardLayout {
         let inner = w - m.side * 2
         var gap: CGFloat = 0
         if let it, it.isLoose || it.authorName != nil || it.screenName != nil {
-            let h = ceil(max(UIFont.preferredFont(forTextStyle: .headline, compatibleWith: traits).lineHeight, UIFont.preferredFont(forTextStyle: .subheadline, compatibleWith: traits).lineHeight))
+            let h = est.headlineLineHeight
             author = CGRect(x: m.side, y: y, width: inner, height: h)
             y += h
             gap = m.authorGap
         }
         if let text = it?.text, !text.isEmpty {
             y += gap
-            let h = Self.textHeight(text, width: inner, traits: traits)
+            let h = Self.textHeight(text, width: inner, font: est.bodyFont)
             body = CGRect(x: m.side, y: y, width: inner, height: h)
             y += h
             gap = m.linkGap
@@ -496,10 +615,13 @@ struct CardLayout {
     }
 
     /// The whole text's height at this width, as the card's text view lays it out.
-    static func textHeight(_ text: String, width: CGFloat, traits: UITraitCollection) -> CGFloat {
-        let f = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+    static func textHeight(_ text: String, width: CGFloat, font f: UIFont) -> CGFloat {
         let r = (text as NSString).boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: [.font: f], context: nil)
         return ceil(r.height) + 1
+    }
+
+    @MainActor static func textHeight(_ text: String, width: CGFloat, traits: UITraitCollection) -> CGFloat {
+        textHeight(text, width: width, font: Estimator.of(traits).bodyFont)
     }
 
 }

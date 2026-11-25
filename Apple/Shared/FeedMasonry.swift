@@ -130,25 +130,80 @@ struct FeedMasonry {
     }
 }
 
-/// Card heights by entry, kept while the width and text size stay the same (measuring text is
-/// the expensive part of laying out the grid).
+/// Card heights by entry, kept across recent column widths and text sizes (measuring text is
+/// the expensive part of laying out the grid). Retaining a few width buckets makes toggling
+/// between sidebar and tab-bar widths instant on subsequent switches.
 final class CardHeightCache {
-    private var heights: [String: CGFloat] = [:]
-    private var width: CGFloat = -1
+    private struct Bucket {
+        let widthBucket: Int
+        let sizeKey: String
+        var heights: [String: CGFloat]
+    }
+
+    private static let maxBuckets = 4
+    private var buckets: [Bucket] = []
+    private var activeIndex = 0
+    private var widthBucket = Int.min
     private var sizeKey = ""
 
-    /// Forgets everything when the column width or the text size changed.
+    private static func bucket(for w: CGFloat) -> Int { Int((w * 2).rounded()) }
+
+    /// Switches to the cache bucket for this column width and text size (creating one if new).
     func prepare(width w: CGFloat, sizeKey k: String) {
-        if abs(w - width) > 0.5 || k != sizeKey { heights.removeAll(keepingCapacity: true); width = w; sizeKey = k }
+        let wb = Self.bucket(for: w)
+        if wb == widthBucket && k == sizeKey && activeIndex < buckets.count { return }
+        widthBucket = wb
+        sizeKey = k
+        if let idx = buckets.firstIndex(where: { $0.widthBucket == wb && $0.sizeKey == k }) {
+            let b = buckets.remove(at: idx)
+            buckets.append(b)
+            activeIndex = buckets.count - 1
+            return
+        }
+        if buckets.count >= Self.maxBuckets { buckets.removeFirst() }
+        buckets.append(Bucket(widthBucket: wb, sizeKey: k, heights: [:]))
+        activeIndex = buckets.count - 1
+    }
+
+    func cached(_ key: String) -> CGFloat? {
+        guard activeIndex < buckets.count else { return nil }
+        return buckets[activeIndex].heights[key]
     }
 
     func height(_ key: String, _ make: () -> CGFloat) -> CGFloat {
-        if let h = heights[key] { return h }
+        if let h = cached(key) { return h }
         let h = make()
-        heights[key] = h
+        if activeIndex < buckets.count { buckets[activeIndex].heights[key] = h }
         return h
     }
 
+    /// Stores precomputed exact heights for a specific `(width, sizeKey)` bucket.
+    func store(_ values: [(String, CGFloat)], width w: CGFloat, sizeKey k: String) {
+        let wb = Self.bucket(for: w)
+        if let idx = buckets.firstIndex(where: { $0.widthBucket == wb && $0.sizeKey == k }) {
+            for (key, h) in values { buckets[idx].heights[key] = h }
+            return
+        }
+        if buckets.count >= Self.maxBuckets {
+            if activeIndex == 0 && buckets.count > 1 {
+                buckets.remove(at: 1)
+            } else {
+                buckets.removeFirst()
+                activeIndex = max(0, activeIndex - 1)
+            }
+        }
+        var dict = Dictionary<String, CGFloat>(minimumCapacity: values.count)
+        for (key, h) in values { dict[key] = h }
+        buckets.append(Bucket(widthBucket: wb, sizeKey: k, heights: dict))
+        if widthBucket == wb && sizeKey == k { activeIndex = buckets.count - 1 }
+    }
+
+    func clearAll() {
+        buckets.removeAll(keepingCapacity: true)
+        activeIndex = 0
+        widthBucket = Int.min
+        sizeKey = ""
+    }
 }
 
 extension FeedItem {

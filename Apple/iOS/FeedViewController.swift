@@ -329,6 +329,9 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             updatingInsets = true
             collectionView.contentInset = insets
             collectionView.verticalScrollIndicatorInsets = insets
+            if abs(oldInsets.left - insets.left) > 0.5 || abs(oldInsets.right - insets.right) > 0.5 {
+                masonry.invalidateLayout()
+            }
             if !collectionView.isTracking, !collectionView.isDecelerating {
                 let y: CGFloat
                 if restingAtTop {
@@ -506,6 +509,85 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         view.setNeedsLayout()
     }
 
+    private func captureScrollAnchor() -> (ip: IndexPath, screenOffset: CGFloat)? {
+        guard isViewLoaded, let cv = collectionView, !restingAtTop else { return nil }
+        let topY = cv.contentOffset.y + cv.adjustedContentInset.top
+        return cv.visibleCells
+            .compactMap { cell -> (IndexPath, CGRect)? in
+                guard let ip = cv.indexPath(for: cell), cell.frame.maxY > topY else { return nil }
+                return (ip, cell.frame)
+            }
+            .min { $0.1.minY < $1.1.minY }
+            .map { ip, frame in (ip, frame.minY - cv.contentOffset.y) }
+    }
+
+    /// Prepares the collection view for a sidebar collapse BEFORE `animator.addAnimations`:
+    /// computes the target layout at the new left inset, moves `contentOffset` to the anchor card's
+    /// new Y without animation, and shifts currently visible cells by the exact same `(dx, dy)` so
+    /// visually nothing moves yet. The subsequent `animateSidebarTransition()` inside UIKit's
+    /// animation block then glides visible cards directly into their new columns with zero vertical
+    /// drift and zero intermediate cell dequeuing.
+    func prepareSidebarTransition(leftInset: CGFloat) {
+        guard isViewLoaded, let cv = collectionView else { return }
+        let anchor = captureScrollAnchor()
+        let oldOffset = cv.contentOffset
+        UIView.performWithoutAnimation {
+            let inheritedLeft = max(0, view.safeAreaInsets.left - additionalSafeAreaInsets.left)
+            if abs(additionalSafeAreaInsets.left - leftInset) > 0.5 {
+                additionalSafeAreaInsets.left = leftInset
+            }
+            let targetInsetLeft = inheritedLeft + leftInset
+            updatingInsets = true
+            var insets = cv.contentInset
+            insets.left = targetInsetLeft
+            cv.contentInset = insets
+            cv.verticalScrollIndicatorInsets = insets
+            let targetY = masonry.prepareAnchored(
+                anchor: anchor,
+                restingAtTop: restingAtTop
+            )
+            let newOffset = CGPoint(x: -cv.adjustedContentInset.left, y: targetY)
+            let dx = newOffset.x - oldOffset.x
+            let dy = newOffset.y - oldOffset.y
+            if abs(dx) > 0.5 || abs(dy) > 0.5 {
+                cv.setContentOffset(newOffset, animated: false)
+                for cell in cv.visibleCells {
+                    cell.frame = cell.frame.offsetBy(dx: dx, dy: dy)
+                }
+            }
+            updatingInsets = false
+        }
+    }
+
+    /// Runs inside `animator.addAnimations` after `prepareSidebarTransition`: lays out the already-
+    /// anchored collection view so cards glide smoothly into the new columns.
+    func animateSidebarTransition() {
+        guard isViewLoaded, let cv = collectionView else { return }
+        view.layoutIfNeeded()
+        cv.layoutIfNeeded()
+    }
+
+    /// Re-lays out the view and cards without animation while keeping the topmost visible card
+    /// anchored at its exact screen Y (used on sidebar completion and background height refinement).
+    func relayoutPreservingAnchor() {
+        guard isViewLoaded, let cv = collectionView else { return }
+        let anchor = captureScrollAnchor()
+        UIView.performWithoutAnimation {
+            updatingInsets = true
+            view.layoutIfNeeded()
+            let targetY = masonry.prepareAnchored(
+                anchor: anchor,
+                restingAtTop: restingAtTop
+            )
+            let newOffset = CGPoint(x: -cv.adjustedContentInset.left, y: targetY)
+            if abs(cv.contentOffset.x - newOffset.x) > 0.5 || abs(cv.contentOffset.y - newOffset.y) > 0.5 {
+                cv.setContentOffset(newOffset, animated: false)
+            }
+            cv.layoutIfNeeded()
+            updatingInsets = false
+        }
+    }
+
     private func updateSortButtons() {
         let on = LibraryPrefs.feedByAdded
         var config: UIButton.Configuration = on ? .filled() : .plain()
@@ -596,6 +678,78 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private let sizesWatcher = MediaSizesWatcher()
     private var cardPages = CardPages()
     private let masonry = FeedMasonryLayout()
+    private var heightRefineTask: Task<Void, Never>?
+    private var heightRefineGen = 0
+
+    private func captionSizeKey(_ traits: UITraitCollection) -> String {
+        traits.preferredContentSizeCategory.rawValue + (traits[CompactCardsTrait.self] ? "#compact" : "")
+    }
+
+    private func captionCacheKey(_ e: [FeedItem]) -> String {
+        entryKey(e) + "#\(e.first?.cardContentKey ?? 0)"
+    }
+
+    /// Computes exact caption heights for uncached text-bearing entries off the main thread so
+    /// sidebar toggles and column-count changes never stall the UI in large libraries.
+    private func scheduleBackgroundHeightRefinement(width w: CGFloat) {
+        guard isViewLoaded, w > 0, !entries.isEmpty else { return }
+        let traits = collectionView.traitCollection
+        let sizeKey = captionSizeKey(traits)
+        cardHeights.prepare(width: w, sizeKey: sizeKey)
+        let est = CardLayout.Estimator.of(traits)
+
+        struct PendingItem: Sendable {
+            let key: String
+            let hasAuthor: Bool
+            let text: String?
+            let hasLink: Bool
+        }
+        var pending: [PendingItem] = []
+        pending.reserveCapacity(min(entries.count, 1024))
+        for e in entries {
+            let cacheKey = captionCacheKey(e)
+            if cardHeights.cached(cacheKey) != nil { continue }
+            let first = e.first
+            let hasAuthor = first.map { $0.isLoose || $0.authorName != nil || $0.screenName != nil } ?? false
+            let hasLink = first?.url != nil
+            let text = first?.text
+            if text == nil || text!.isEmpty {
+                // No post text: estimated height is already 100% exact.
+                let h = est.estimatedCaptionHeight(item: first, width: w)
+                _ = cardHeights.height(cacheKey) { h }
+            } else {
+                pending.append(PendingItem(key: cacheKey, hasAuthor: hasAuthor, text: text, hasLink: hasLink))
+            }
+        }
+        guard !pending.isEmpty else { return }
+
+        heightRefineTask?.cancel()
+        heightRefineGen += 1
+        let gen = heightRefineGen
+        let snapshotCount = entries.count
+        heightRefineTask = Task.detached(priority: .userInitiated) { [weak self] in
+            var computed: [(String, CGFloat)] = []
+            computed.reserveCapacity(pending.count)
+            for item in pending {
+                if Task.isCancelled { return }
+                let h = est.exactCaptionHeight(hasAuthor: item.hasAuthor, text: item.text, hasLink: item.hasLink, width: w)
+                computed.append((item.key, h))
+            }
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard let self, self.heightRefineGen == gen else { return }
+                self.cardHeights.store(computed, width: w, sizeKey: sizeKey)
+                guard self.entries.count == snapshotCount,
+                      abs(self.masonry.currentColumnWidth - w) < 0.5,
+                      self.captionSizeKey(self.collectionView.traitCollection) == sizeKey,
+                      !self.collectionView.isTracking,
+                      !self.collectionView.isDecelerating
+                else { return }
+                self.masonry.invalidateHeights()
+                self.relayoutPreservingAnchor()
+            }
+        }
+    }
 
     private func buildCollection() {
         let layout = masonry
@@ -604,10 +758,38 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
             let e = self.entries[i]
             // the cards' own traits (smaller on a phone in two columns: `updateCompactCards`)
             let traits = self.collectionView.traitCollection
-            self.cardHeights.prepare(width: w, sizeKey: traits.preferredContentSizeCategory.rawValue + (traits[CompactCardsTrait.self] ? "#compact" : ""))
+            self.cardHeights.prepare(width: w, sizeKey: self.captionSizeKey(traits))
             let key = self.entryKey(e)
-            let caption = self.cardHeights.height(key + "#\(e.first?.cardContentKey ?? 0)") { CardLayout(item: e.first, width: w, traits: traits).captionHeight }
+            let caption = self.cardHeights.height(self.captionCacheKey(e)) { CardLayout(item: e.first, width: w, traits: traits).captionHeight }
             return caption + cardMediaHeight(e, width: w, position: CGFloat(self.cardPages.page(of: key, count: e.count)))
+        }
+        // Hoists trait/estimator/cache bucket lookup once per prepare() pass instead of per card.
+        layout.makeFastSizer = { [weak self] w in
+            guard let self else { return { _ in (w * 1.25, true) } }
+            let traits = self.collectionView.traitCollection
+            let sizeKey = self.captionSizeKey(traits)
+            self.cardHeights.prepare(width: w, sizeKey: sizeKey)
+            let est = CardLayout.Estimator.of(traits)
+            return { [weak self] i in
+                guard let self, i < self.entries.count else { return (w * 1.25, true) }
+                let e = self.entries[i]
+                let key = self.entryKey(e)
+                let cacheKey = self.captionCacheKey(e)
+                let media = cardMediaHeight(e, width: w, position: CGFloat(self.cardPages.page(of: key, count: e.count)))
+                if let cached = self.cardHeights.cached(cacheKey) {
+                    return (cached + media, true)
+                }
+                let h = est.estimatedCaptionHeight(item: e.first, width: w)
+                let hasText = !(e.first?.text ?? "").isEmpty
+                if !hasText {
+                    _ = self.cardHeights.height(cacheKey) { h }
+                    return (h + media, true)
+                }
+                return (h + media, false)
+            }
+        }
+        layout.onApproximatePlan = { [weak self] w in
+            self?.scheduleBackgroundHeightRefinement(width: w)
         }
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -1844,11 +2026,19 @@ final class FollowedView: UIView {
 /// card in the shortest column), and the footer at the end.
 /// The placement is `FeedMasonry` (shared with the Mac).
 final class FeedMasonryLayout: UICollectionViewLayout {
-    /// The height of entry `i` at a column width.
+    /// The exact height of entry `i` at a column width.
     var height: ((Int, CGFloat) -> CGFloat)?
+    /// Builds a per-pass fast sizer (cached exact height if available, otherwise O(len) estimate)
+    /// so trait/cache-bucket setup runs once per layout pass instead of once per card.
+    var makeFastSizer: ((CGFloat) -> ((Int) -> (height: CGFloat, exact: Bool)))?
+    /// Called after `prepare()` finishes a layout that used any estimated heights, so the caller
+    /// can populate exact heights off the main thread.
+    var onApproximatePlan: ((CGFloat) -> Void)?
     private var plan: FeedMasonry?
     private var dirty = true
     private var passes = 0
+
+    var currentColumnWidth: CGFloat { plan?.metrics.columnWidth ?? 0 }
 
     /// The entries changed (new order, other text, grouping): heights are read again.
     func invalidateHeights() { dirty = true; invalidateLayout() }
@@ -1872,32 +2062,119 @@ final class FeedMasonryLayout: UICollectionViewLayout {
         return FeedMasonry.Metrics(width: width, columns: columns, side: width > 700 ? 24 : 12, columnGap: 14, rowGap: 18, footer: FeedEndView.height)
     }
 
+    /// Builds `plan` for the current `collectionView` metrics, computes the anchored target scroll Y
+    /// for `anchor`, refines ONLY the visible cards around that target Y synchronously (< 0.5 ms),
+    /// and returns the clamped target `contentOffset.y`.
+    func prepareAnchored(anchor: (ip: IndexPath, screenOffset: CGFloat)?, restingAtTop: Bool) -> CGFloat {
+        guard let cv = collectionView else { return 0 }
+        let minY = -cv.adjustedContentInset.top
+        passes = cv.numberOfSections
+        let count = passes > 0 ? cv.numberOfItems(inSection: 0) : 0
+        let m = metrics(cv)
+
+        let needsBuild = dirty || plan?.metrics != m || plan?.frames.count != count
+        var built: FeedMasonry
+        var hadApproximate = false
+        if needsBuild {
+            let keeping: FeedMasonry? = (!dirty && plan?.frames.count == count && plan?.metrics.columns == m.columns) ? plan : nil
+            if let makeFastSizer {
+                let sizer = makeFastSizer(m.columnWidth)
+                built = FeedMasonry(count: count, metrics: m, keeping: keeping) { i, _ in
+                    let r = sizer(i)
+                    if !r.exact { hadApproximate = true }
+                    return r.height
+                }
+            } else {
+                built = FeedMasonry(count: count, metrics: m, keeping: keeping) { [weak self] i, w in
+                    self?.height?(i, w) ?? w * 1.25
+                }
+            }
+        } else {
+            built = plan!
+        }
+
+        func computeTargetY(in masonry: FeedMasonry) -> CGFloat {
+            let contentH = masonry.contentHeight(passes: passes)
+            let maxY = max(minY, contentH - cv.bounds.height + cv.adjustedContentInset.bottom)
+            if restingAtTop { return minY }
+            if let anchor, anchor.ip.item < masonry.frames.count, anchor.ip.section < passes {
+                let frame = masonry.frame(item: anchor.ip.item, pass: anchor.ip.section)
+                return max(minY, min(maxY, frame.minY - anchor.screenOffset))
+            }
+            return max(minY, min(maxY, cv.contentOffset.y))
+        }
+
+        var targetY = computeTargetY(in: built)
+        if hadApproximate, let exactHeight = height, count > 0, m.columnWidth > 0 {
+            let visRect = CGRect(x: 0, y: targetY, width: max(1, m.width), height: cv.bounds.height).insetBy(dx: 0, dy: -cv.bounds.height * 0.35)
+            let visible = built.elements(in: visRect, passes: passes).items
+            var seen = Set<Int>()
+            for e in visible where seen.insert(e.item).inserted {
+                let exact = exactHeight(e.item, m.columnWidth)
+                built.resize(item: e.item, height: exact)
+            }
+            targetY = computeTargetY(in: built)
+        }
+
+        if needsBuild {
+            plan = built
+            dirty = false
+            invalidateLayout()
+            if hadApproximate, m.columnWidth > 0 {
+                let colW = m.columnWidth
+                DispatchQueue.main.async { [weak self] in
+                    self?.onApproximatePlan?(colW)
+                }
+            }
+        }
+        return targetY
+    }
+
     override func prepare() {
         super.prepare()
         guard let cv = collectionView else { return }
         passes = cv.numberOfSections
         let count = passes > 0 ? cv.numberOfItems(inSection: 0) : 0
         let m = metrics(cv)
-        if !dirty, let old = plan, old.frames.count == count, old.metrics != m, old.metrics.columns == m.columns, old.metrics.columnWidth > 0 {
-            // Only the width moves (the sidebar coming or going, a rotation): every frame of that
-            // animation has a width of its own, and measuring every card's text again at each one
-            // stalled a large library. The cards keep their columns, their heights scaled; once
-            // the width rests they are measured at it.
-            let k = m.columnWidth / old.metrics.columnWidth
-            plan = FeedMasonry(count: count, metrics: m, keeping: old) { i, _ in old.frames[i].height * k }
-            measureWhenSettled()
-        } else if dirty || plan?.metrics != m || plan?.frames.count != count {
-            plan = FeedMasonry(count: count, metrics: m) { [weak self] i, w in self?.height?(i, w) ?? w * 1.25 }
-            dirty = false
-        }
-    }
+        guard dirty || plan?.metrics != m || plan?.frames.count != count else { return }
 
-    private var settle: DispatchWorkItem?
-    private func measureWhenSettled() {
-        settle?.cancel()
-        let w = DispatchWorkItem { [weak self] in self?.invalidateHeights() }
-        settle = w
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
+        let keeping: FeedMasonry? = (!dirty && plan?.frames.count == count && plan?.metrics.columns == m.columns) ? plan : nil
+        var hadApproximate = false
+        var built: FeedMasonry
+        if let makeFastSizer {
+            let sizer = makeFastSizer(m.columnWidth)
+            built = FeedMasonry(count: count, metrics: m, keeping: keeping) { i, _ in
+                let r = sizer(i)
+                if !r.exact { hadApproximate = true }
+                return r.height
+            }
+        } else {
+            built = FeedMasonry(count: count, metrics: m, keeping: keeping) { [weak self] i, w in
+                self?.height?(i, w) ?? w * 1.25
+            }
+        }
+
+        // Immediately refine just the currently visible items synchronously (< 0.5 ms) so on-screen
+        // cards have exact caption heights on frame 0 with zero visual jump.
+        if hadApproximate, let exactHeight = height, count > 0, m.columnWidth > 0 {
+            let visRect = CGRect(origin: cv.contentOffset, size: cv.bounds.size).insetBy(dx: 0, dy: -cv.bounds.height * 0.35)
+            let visible = built.elements(in: visRect, passes: passes).items
+            var seen = Set<Int>()
+            for e in visible where seen.insert(e.item).inserted {
+                let exact = exactHeight(e.item, m.columnWidth)
+                built.resize(item: e.item, height: exact)
+            }
+        }
+
+        plan = built
+        dirty = false
+
+        if hadApproximate, m.columnWidth > 0 {
+            let colW = m.columnWidth
+            DispatchQueue.main.async { [weak self] in
+                self?.onApproximatePlan?(colW)
+            }
+        }
     }
 
     override var collectionViewContentSize: CGSize {

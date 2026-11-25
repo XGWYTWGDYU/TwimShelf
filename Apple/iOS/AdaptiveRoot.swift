@@ -551,6 +551,22 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         guard !railOnly, view.bounds.width > view.bounds.height else { return }
         changingSidebar = true
         feed.setSidebarTransitioning(true)
+        if sidebar.isHidden {
+            // Prepare the full-width layout and shift contentOffset + visible cells in lockstep
+            // BEFORE the animation starts so scrolled-down feeds never drift vertically or dequeue
+            // intermediate cards across thousands of points during the sidebar collapse.
+            feed.prepareSidebarTransition(leftInset: 0)
+            if let page = searchFeed, page.isViewLoaded {
+                page.prepareSidebarTransition(leftInset: 0)
+            }
+            animator.addAnimations { [weak self] in
+                guard let self else { return }
+                self.feed.animateSidebarTransition()
+                if let page = self.searchFeed, page.isViewLoaded {
+                    page.animateSidebarTransition()
+                }
+            }
+        }
         animator.addCompletion { [weak self] in
             guard let self else { return }
             self.changingSidebar = false
@@ -558,7 +574,10 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
                 self.layoutSearch()
                 self.view.layoutIfNeeded()
                 self.feed.setSidebarTransitioning(false)
-                self.feed.view.layoutIfNeeded()
+                self.feed.relayoutPreservingAnchor()
+                if let page = self.searchFeed, page.isViewLoaded, page.view.window != nil {
+                    page.relayoutPreservingAnchor()
+                }
             }
         }
     }

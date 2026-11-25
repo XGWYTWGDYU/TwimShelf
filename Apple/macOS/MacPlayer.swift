@@ -3,10 +3,9 @@ import AVFoundation
 import AVKit
 import SwiftUI
 
-/// Custom MP4 player shown inside the main window (no extra window, no AVPlayerView). Mouse and
-/// trackpad equivalents of the touch gestures: double-click = play/pause ·
-/// press-and-hold = 2.5× · Space / ←→ / ↑↓ / Esc / F keys. The controls (play · progress · time ·
-/// share · close · picture in picture) sit right on the video, without a bar behind them.
+/// Custom MP4 player shown inside the main window (no extra window, no AVPlayerView).
+/// Double-click = play/pause · Space / ←→ / ↑↓ / Esc / F keys. The controls (play · progress ·
+/// time · speed · share · close · picture in picture) sit right on the video, without a bar behind them.
 final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     /// Called when the user closes the player (close button or Esc).
     var onClose: (() -> Void)?
@@ -18,6 +17,7 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     private var initialSeekTime: CMTime?
     private let playerLayer = AVPlayerLayer()
     var onMediaGeometryChanged: (() -> Void)?
+    private let hudBox = NSView()
     private let hud = NSTextField(labelWithString: "")
     private let bar = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
     private let time = NSTextField(labelWithString: "0:00 / 0:00")
@@ -31,15 +31,7 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var hideTimer: Timer?
-    private var holdTimer: Timer?
-    private var boosting = false
-    private var dragMode = 0 // 0 none, 1 seek
-    private var dragStart = NSPoint.zero
-    private var startValue: Double = 0
     private var scrubbing = false
-    /// A sideways drag seeks (from a touch screen only), and ← → seek in the viewer. A Mac has no
-    /// touch gestures to turn off, so the iPhone's 视频禁用手势 is not a setting here.
-    let dragSeeks = true
     /// Shown as a page of the media viewer: no picture in picture, and the viewer handles the keys.
     var embedded = false { didSet { pipButton.isHidden = embedded || pip == nil } }
 
@@ -79,13 +71,38 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
         playerLayer.videoGravity = .resizeAspect
         layer?.addSublayer(playerLayer)
 
-        hud.font = .monospacedDigitSystemFont(ofSize: 16, weight: .semibold)
+        hudBox.wantsLayer = true
+        hudBox.appearance = NSAppearance(named: .darkAqua)
+        hudBox.alphaValue = 0
+        let hudBg: NSView
+        if #available(macOS 26.0, *) {
+            let g = NSGlassEffectView()
+            g.cornerRadius = 14
+            hudBg = g
+        } else {
+            let v = NSVisualEffectView()
+            v.material = .hudWindow
+            v.blendingMode = .withinWindow
+            v.state = .active
+            v.wantsLayer = true
+            v.layer?.cornerRadius = 14
+            v.layer?.cornerCurve = .continuous
+            v.layer?.masksToBounds = true
+            hudBg = v
+        }
+        hudBg.translatesAutoresizingMaskIntoConstraints = false
+        hudBox.addSubview(hudBg)
+        hud.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         hud.textColor = .white
         hud.alignment = .center
-        hud.wantsLayer = true
-        hud.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
-        hud.layer?.cornerRadius = 12
-        hud.alphaValue = 0
+        hud.translatesAutoresizingMaskIntoConstraints = false
+        hudBox.addSubview(hud)
+        NSLayoutConstraint.activate([
+            hudBg.topAnchor.constraint(equalTo: hudBox.topAnchor), hudBg.bottomAnchor.constraint(equalTo: hudBox.bottomAnchor),
+            hudBg.leadingAnchor.constraint(equalTo: hudBox.leadingAnchor), hudBg.trailingAnchor.constraint(equalTo: hudBox.trailingAnchor),
+            hud.topAnchor.constraint(equalTo: hudBox.topAnchor, constant: 10), hud.bottomAnchor.constraint(equalTo: hudBox.bottomAnchor, constant: -10),
+            hud.leadingAnchor.constraint(equalTo: hudBox.leadingAnchor, constant: 16), hud.trailingAnchor.constraint(equalTo: hudBox.trailingAnchor, constant: -16),
+        ])
 
         // no bar behind the controls: a soft shadow keeps them readable on bright video
         controls.wantsLayer = true
@@ -128,10 +145,9 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
         row.setCustomSpacing(16, after: time)
         row.translatesAutoresizingMaskIntoConstraints = false
         controls.addSubview(row)
-        [hud, controls].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
+        [hudBox, controls].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
         NSLayoutConstraint.activate([
-            hud.centerXAnchor.constraint(equalTo: centerXAnchor), hud.topAnchor.constraint(equalTo: topAnchor, constant: 60),
-            hud.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            hudBox.centerXAnchor.constraint(equalTo: centerXAnchor), hudBox.topAnchor.constraint(equalTo: topAnchor, constant: 48),
             controls.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24), controls.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
             controls.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20), controls.heightAnchor.constraint(equalToConstant: 44),
             row.leadingAnchor.constraint(equalTo: controls.leadingAnchor, constant: 14), row.trailingAnchor.constraint(equalTo: controls.trailingAnchor, constant: -14),
@@ -205,7 +221,6 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     func teardown() {
         // gone from the screen: no timer of this view hides the pointer afterwards
         hideTimer?.invalidate()
-        holdTimer?.invalidate()
         if !handedBack { player.pause() }
         if let t = timeObserver { player.removeTimeObserver(t); timeObserver = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
@@ -242,11 +257,11 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     }
 
     private func flash(_ text: String, sticky: Bool = false) {
-        hud.stringValue = "  \(text)  "
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.1; $0.timingFunction = .springy; hud.animator().alphaValue = 1 }
-        if !sticky { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in if self?.hud.stringValue == "  \(text)  " { self?.hideHUD() } } }
+        hud.stringValue = text
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.1; $0.timingFunction = .springy; hudBox.animator().alphaValue = 1 }
+        if !sticky { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in if self?.hud.stringValue == text { self?.hideHUD() } } }
     }
-    private func hideHUD() { NSAnimationContext.runAnimationGroup { $0.duration = 0.2; $0.timingFunction = .springy; hud.animator().alphaValue = 0 } }
+    private func hideHUD() { NSAnimationContext.runAnimationGroup { $0.duration = 0.2; $0.timingFunction = .springy; hudBox.animator().alphaValue = 0 } }
 
     private func scheduleHide() {
         hideTimer?.invalidate()
@@ -276,49 +291,12 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
         flash("\(Self.fmt(t)) / \(Self.fmt(duration))")
     }
 
-    // MARK: Mouse gestures
+    // MARK: Mouse
 
     override func mouseMoved(with event: NSEvent) { scheduleHide() }
 
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 { togglePlay(); return }
-        dragStart = convert(event.locationInWindow, from: nil)
-        dragMode = 0
-        holdTimer?.invalidate()
-        holdTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
-            guard let self, self.dragMode == 0 else { return }
-            self.boosting = true
-            self.player.rate = 2.5
-            self.flash("2.5× ▶▶", sticky: true)
-        }
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        let dx = p.x - dragStart.x, dy = p.y - dragStart.y
-        if dragMode == 0, !boosting, hypot(dx, dy) > 8 {
-            holdTimer?.invalidate()
-            // only sideways drags seek (unless that is turned off); vertical drags do nothing
-            // a drag seeks only from a touch screen (a finger); a mouse or a trackpad drag does
-            // nothing — those have the bar, the arrow keys and the speed menu
-            if abs(dx) > abs(dy), dragSeeks, event.subtype == .touch { dragMode = 1; startValue = player.currentTime().seconds; scrubbing = true }
-            else { dragMode = -1 }
-        }
-        if dragMode == 1 {
-            let span = min(max(duration, 1), 120)
-            let t = min(max(startValue + Double(dx / bounds.width) * span, 0), duration)
-            player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-            if duration > 0 { bar.doubleValue = t / duration }
-            flash("\(Self.fmt(t)) / \(Self.fmt(duration))", sticky: true)
-        }
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        holdTimer?.invalidate()
-        if boosting { boosting = false; player.rate = speed }
-        scrubbing = false
-        if dragMode != 0 || hud.alphaValue > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.hideHUD() } }
-        dragMode = 0
+        if event.clickCount == 2 { togglePlay() }
     }
 
     // MARK: Keyboard
@@ -749,8 +727,8 @@ final class MacPhotoView: NSView {
     override func keyDown(with event: NSEvent) {
         // on a video whose sideways drag seeks, ← → seek too (the arrow buttons turn the page)
         if let p = page?.player {
-            if p.dragSeeks, event.keyCode == 123 { p.seek(by: -5); return }
-            if p.dragSeeks, event.keyCode == 124 { p.seek(by: 5); return }
+            if event.keyCode == 123 { p.seek(by: -5); return }
+            if event.keyCode == 124 { p.seek(by: 5); return }
             if p.handleViewerKey(event) { return }
         }
         switch event.keyCode {

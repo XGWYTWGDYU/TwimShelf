@@ -8,6 +8,8 @@ import 'package:screen_brightness/screen_brightness.dart';
 
 import '../app/prefs.dart';
 import '../l10n/l10n.dart';
+import '../platform/os.dart';
+import '../platform/pip.dart';
 import '../platform/video.dart';
 
 /// One video of the viewer, backed by the same [VideoSession] as its feed card:
@@ -71,6 +73,8 @@ class VideoPageState extends State<VideoPage> {
   bool _controls = true;
   bool _locked = false;
   bool _lockFlash = false;
+  bool _pipSupported = false;
+  bool _inPip = false;
   Timer? _hide;
   double _volume = 100;
   final _subs = <StreamSubscription<dynamic>>[];
@@ -133,7 +137,32 @@ class VideoPageState extends State<VideoPage> {
   void initState() {
     super.initState();
     _session.addListener(_onSessionChanged);
+    if (OS.isAndroid) {
+      _inPip = AndroidPip.inPip.value;
+      AndroidPip.inPip.addListener(_onPipChanged);
+      unawaited(AndroidPip.isSupported().then((ok) {
+        if (mounted && ok != _pipSupported) setState(() => _pipSupported = ok);
+      }));
+    }
     if (widget.active) _activate();
+  }
+
+  void _onPipChanged() {
+    if (!mounted) return;
+    final inPip = AndroidPip.inPip.value;
+    if (inPip != _inPip) setState(() => _inPip = inPip);
+  }
+
+  Future<void> _enterPip() async {
+    final st = _video?.surfaceController.player.state;
+    final dw = st?.videoParams.dw ?? 0, dh = st?.videoParams.dh ?? 0;
+    final sw = st?.width ?? 0, sh = st?.height ?? 0;
+    final w = dw > 0 && dh > 0 ? dw : (sw > 0 && sh > 0 ? sw : 16);
+    final h = dw > 0 && dh > 0 ? dh : (sw > 0 && sh > 0 ? sh : 9);
+    final ok = await AndroidPip.enter(width: w, height: h);
+    if (!ok && mounted) {
+      _showHud(Icons.picture_in_picture_alt, text: L('viewer.pipFailed'));
+    }
   }
 
   void _onSessionChanged() {
@@ -423,6 +452,7 @@ class VideoPageState extends State<VideoPage> {
   @override
   void dispose() {
     _session.removeListener(_onSessionChanged);
+    if (OS.isAndroid) AndroidPip.inPip.removeListener(_onPipChanged);
     _clearPlaybackSubs();
     _hide?.cancel();
     _hudTimer?.cancel();
@@ -441,7 +471,7 @@ class VideoPageState extends State<VideoPage> {
     final v = _video;
     final total = v?.currentDuration ?? Duration.zero;
     final at = _scrubPosition ?? (v?.currentPosition ?? _session.position);
-    final showBar = _controls && !_locked && v != null;
+    final showBar = !_inPip && _controls && !_locked && v != null;
     final page = LayoutBuilder(builder: (context, box) {
       // below the turn: the turned screen's safe area
       final pad = MediaQuery.paddingOf(context);
@@ -495,7 +525,7 @@ class VideoPageState extends State<VideoPage> {
           ),
         ),
         // 没有连接耳机，已静音 · 开启声音
-        if (v != null)
+        if (v != null && !_inPip)
           ValueListenableBuilder<bool>(
             valueListenable: v.needsSpeakerConsent,
             builder: (context, ask, _) => !ask
@@ -520,7 +550,17 @@ class VideoPageState extends State<VideoPage> {
                     ),
                   ),
           ),
-        if (_hudIcon != null) Center(child: fadeWithRoute(_Hud(icon: _hudIcon!, text: _hudText, level: _hudLevel))),
+        if (_hudIcon != null && !_inPip)
+          Positioned(
+            top: pad.top + 40,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: fadeWithRoute(_Hud(icon: _hudIcon!, text: _hudText, level: _hudLevel)),
+              ),
+            ),
+          ),
         // the arrows, while the drags hold the sideways swipe
         if (gestures && showBar && widget.canPrevious)
           Positioned(left: 8 + pad.left, top: 0, bottom: 0, child: Center(child: fadeWithRoute(_RoundButton(key: const ValueKey('videoPrevious'), icon: Icons.chevron_left, tooltip: L('viewer.previous'), onPressed: () => widget.onStep(-1))))),
@@ -584,6 +624,8 @@ class VideoPageState extends State<VideoPage> {
                           const Spacer(),
                           _BarButton(key: const ValueKey('videoLock'), icon: Icons.lock_open, tooltip: L('viewer.lock'), onPressed: _toggleLock),
                           _BarButton(key: const ValueKey('videoRotate'), icon: Icons.screen_rotation, tooltip: L('viewer.rotate'), onPressed: _rotate),
+                          if (_pipSupported)
+                            _BarButton(key: const ValueKey('videoPip'), icon: Icons.picture_in_picture_alt, tooltip: L('viewer.pip'), onPressed: _enterPip),
                           Builder(
                             builder: (button) => _BarButton(key: const ValueKey('videoShare'), icon: Icons.ios_share, tooltip: L('viewer.share'), onPressed: () {
                               final box = button.findRenderObject() as RenderBox?;
@@ -600,7 +642,7 @@ class VideoPageState extends State<VideoPage> {
             ),
           ),
         // locked: only the lock, in the middle of the width at the bar's height
-        if (_locked && (_lockFlash || _controls))
+        if (!_inPip && _locked && (_lockFlash || _controls))
           Positioned(
             left: 0,
             right: 0,
@@ -647,24 +689,54 @@ class _RoundButton extends StatelessWidget {
       );
 }
 
-/// The pill in the middle: what a gesture does (speed, seek target, brightness, volume).
+/// Top-centered Material 3 Expressive HUD reporting gesture feedback (speed, seek, brightness, volume, lock).
 class _Hud extends StatelessWidget {
   const _Hud({required this.icon, this.text, this.level});
   final IconData icon;
   final String? text;
   final double? level;
+
   @override
-  Widget build(BuildContext context) => Container(
-        key: const ValueKey('hud'),
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme;
+    final scheme = base.brightness == Brightness.dark
+        ? base
+        : ColorScheme.fromSeed(seedColor: base.primary, brightness: Brightness.dark);
+    final labelStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.1,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+    return Material(
+      key: const ValueKey('hud'),
+      color: scheme.surfaceContainerHigh.withValues(alpha: 0.92),
+      elevation: 6,
+      shadowColor: Colors.black54,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.65), borderRadius: BorderRadius.circular(22)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: Colors.white, size: 20),
-          if (text != null) ...[const SizedBox(width: 8), Text(text!, style: const TextStyle(color: Colors.white, fontFeatures: [FontFeature.tabularFigures()]))],
+          Icon(icon, color: scheme.onSurface, size: 18),
+          if (text != null) ...[const SizedBox(width: 8), Text(text!, style: labelStyle)],
           if (level != null) ...[
-            const SizedBox(width: 10),
-            SizedBox(width: 120, child: LinearProgressIndicator(value: level, color: Colors.white, backgroundColor: Colors.white24, minHeight: 4)),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 120,
+              child: LinearProgressIndicator(
+                value: level,
+                color: scheme.primary,
+                backgroundColor: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(4),
+                minHeight: 6,
+              ),
+            ),
           ],
         ]),
-      );
+      ),
+    );
+  }
 }
