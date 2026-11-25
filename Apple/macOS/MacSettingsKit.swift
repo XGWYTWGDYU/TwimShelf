@@ -483,10 +483,11 @@ struct StatsStrip: View {
     let stats: LibraryStats?
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            BigStat(value: stats?.posts, name: L("common.posts"), symbol: "text.bubble.fill", color: .blue)
-            BigStat(value: stats?.photos, name: L("search.kw.photo.word"), symbol: "photo.fill", color: .orange)
-            BigStat(value: stats?.videos, name: L("place.videos"), symbol: "play.rectangle.fill", color: .pink)
-            BigStat(value: stats?.tags, name: L("common.tags"), symbol: "tag.fill", color: .purple)
+            // the icons in the system's accent colour (System Settings › Appearance)
+            BigStat(value: stats?.posts, name: L("common.posts"), symbol: "text.bubble.fill", color: .accentColor)
+            BigStat(value: stats?.photos, name: L("search.kw.photo.word"), symbol: "photo.fill", color: .accentColor)
+            BigStat(value: stats?.videos, name: L("place.videos"), symbol: "play.rectangle.fill", color: .accentColor)
+            BigStat(value: stats?.tags, name: L("common.tags"), symbol: "tag.fill", color: .accentColor)
         }
     }
 }

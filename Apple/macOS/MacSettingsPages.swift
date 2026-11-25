@@ -106,11 +106,10 @@ struct SettingsRootView: View {
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // a sheet of glass, no coloured wash behind it
         .background {
-            shape.fill(LinearGradient(colors: [Color.accentColor.opacity(0.20), Color.purple.opacity(0.10), Color.pink.opacity(0.06)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay(shape.fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
-                .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
-                .shadow(color: Color.accentColor.opacity(0.12), radius: 16, y: 6)
+            if #available(macOS 26.0, *) { Color.clear.glassEffect(.regular, in: shape) }
+            else { shape.fill(.regularMaterial).overlay(shape.strokeBorder(Color.primary.opacity(0.08))) }
         }
     }
 

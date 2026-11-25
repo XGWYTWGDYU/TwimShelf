@@ -227,11 +227,12 @@ final class StatsCardView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        let items: [(String, String, UIColor)] = [(L("common.posts"), "text.bubble.fill", .systemBlue), (L("search.kw.photo.word"), "photo.fill", .systemOrange),
-                                                  (L("place.videos"), "play.rectangle.fill", .systemPink), (L("common.tags"), "tag.fill", .systemPurple)]
-        let cols = items.map { (name, sym, color) -> UIView in
+        // the icons in the app's tint, the system's accent colour
+        let items: [(String, String)] = [(L("common.posts"), "text.bubble.fill"), (L("search.kw.photo.word"), "photo.fill"),
+                                         (L("place.videos"), "play.rectangle.fill"), (L("common.tags"), "tag.fill")]
+        let cols = items.map { (name, sym) -> UIView in
             let icon = UIImageView(image: UIImage(systemName: sym))
-            icon.tintColor = color
+            icon.tintColor = .tintColor
             icon.preferredSymbolConfiguration = .init(pointSize: 13, weight: .semibold)
             let v = UILabel()
             v.font = .systemFont(ofSize: 24, weight: .bold).rounded
