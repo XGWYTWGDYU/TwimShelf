@@ -39526,25 +39526,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Just like on Apple devices."
+            "value" : "Just like in Apple Photos."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "まるで Apple デバイスのようになめらかです。"
+            "value" : "まるで Apple の写真アプリのようです。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "就像在 Apple 设备上一样。"
+            "value" : "就像在 Apple 相册一样。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "就像在 Apple 裝置上一樣。"
+            "value" : "就像在 Apple 相簿一樣。"
           }
         }
       }

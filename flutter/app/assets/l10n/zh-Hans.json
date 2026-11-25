@@ -1340,7 +1340,7 @@
   "welcome.p1.body.mobile": "浏览界面的媒体会在每次打开应用程序时随机出现。在首页向下拉动或双击导航栏的浏览按钮即可刷新。",
   "welcome.p1.title": "每次打开，都有新发现",
   "welcome.p2.badge": "网格缩放",
-  "welcome.p2.body": "就像在 Apple 设备上一样。",
+  "welcome.p2.body": "就像在 Apple 相册一样。",
   "welcome.p2.title": "相册网格丝滑缩放",
   "welcome.p3.badge": "便捷下载",
   "welcome.p3.body": "浏览界面的快捷下载按钮支持双击文本框自动粘贴，设置下载子页面可以导入 JSON 批量下载。",

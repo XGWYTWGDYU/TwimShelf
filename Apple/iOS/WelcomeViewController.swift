@@ -166,13 +166,14 @@ private struct IOSWelcomeView: View {
             VStack(spacing: 0) {
                 // Top bar: Skip on left, step counter on right
                 HStack {
-                    if !isLast {
-                        Button(L("welcome.skip")) { dismiss() }
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Color.clear.frame(width: 48, height: 24)
-                    }
+                    // always there, hidden on the last page: swapping it for a placeholder in the same
+                    // change as the page dropped the pager's slide to the last page
+                    Button(L("welcome.skip")) { dismiss() }
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .opacity(isLast ? 0 : 1)
+                        .disabled(isLast)
+                        .accessibilityHidden(isLast)
                     Spacer()
                     Text(L("welcome.step", page + 1, total))
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -663,6 +664,7 @@ private struct IOSShuffleStage: View {
 
 private struct IOSGridZoomStage: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.welcomeTablet) private var tablet
     @State private var levelIdx = 1
     private let levels = [5, 3, 2, 3]
     private let tints: [Color] = [.blue, .indigo, .cyan, .teal, .purple, .mint]
@@ -681,7 +683,8 @@ private struct IOSGridZoomStage: View {
             GeometryReader { geo in
                 let pad: CGFloat = 3
                 let gap: CGFloat = 2
-                let topInset: CGFloat = 52
+                // under the bar with 图片: an iPad shows it below the floating tab bar, lower than a phone
+                let topInset: CGFloat = tablet ? 64 : 52
                 let side = (geo.size.width - pad * 2 - gap * CGFloat(cols - 1)) / CGFloat(cols)
                 let rows = Int(ceil((geo.size.height - topInset) / (side + gap))) + 1
                 let anchorR = max(0, min(rows - 1, rows / 2 - 1))
@@ -856,6 +859,7 @@ private struct IOSDownloadStage: View {
 // MARK: - Page 4: iPhone Settings -> AI Models + Auto-Tag Scan
 
 private struct IOSAIModelStage: View {
+    @Environment(\.welcomeTablet) private var tablet
     @Environment(\.colorScheme) private var scheme
     @State private var step = 0
 
@@ -939,7 +943,8 @@ private struct IOSAIModelStage: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .padding(.top, 56)
+            // under the bar with its title: lower on an iPad, below the floating tab bar
+            .padding(.top, tablet ? 64 : 56)
             .padding(.bottom, 56)
         }
         .animation(.spring(response: 0.48, dampingFraction: 0.8), value: step)
