@@ -4,8 +4,6 @@
 
 <p align="center">把 X 上的帖子保存到本地</p>
 
-<p align="center"><img src="docs/images/devices.webp" alt="TwimShelf 在 Mac、iPad、Android 和 iPhone 上"></p>
-
 TwimShelf  能把你喜欢的帖子媒体存储到本地资料库，不必担心作者删帖或注销，还可以使用AI标记媒体，在局域网进行p2p同步
 
 后端基于rust，Apple平台和Windows有原生前端（Windows 版基于 WinUI 3）；Linux 桌面版和网页版是 React 前端（桌面版基于 Electron），布局和功能与原生版一致；Android 是 Flutter 前端，基于MD3+MD3E设计

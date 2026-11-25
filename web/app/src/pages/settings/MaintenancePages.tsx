@@ -328,7 +328,8 @@ export function AboutPage() {
         aria-label={L('web.appName')}
         onClick={handleIconTap}
       >
-        <img src={new URL('../../../../../icon.png', import.meta.url).href} alt="" width="128" height="128" />
+        {/* the desktop app's own icon (config.local.yaml can give it another); else the repository's */}
+        <img src={window.twimshelf?.appIcon || new URL('../../../../../icon.png', import.meta.url).href} alt="" width="128" height="128" />
       </button>
       <div className="about-title">{L('web.appName')}</div>
       <div className="about-tagline">{L('about.tagline')}</div>

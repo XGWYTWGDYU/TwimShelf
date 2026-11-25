@@ -368,6 +368,9 @@ ipcMain.on('desktop-meta', (e) => {
     updateRepo: product.updateRepo || process.env.TL_UPDATE_REPO || '',
     appVersion: product.version || app.getVersion(),
     arch: process.arch === 'arm64' ? 'arm64' : 'x64',
+    // this app's icon (config.yaml's, or config.local.yaml's own: scripts/apply.py desktop), for the
+    // page's About; the web app's own copy is the repository's
+    icon: fs.existsSync(icon) ? `data:image/png;base64,${fs.readFileSync(icon).toString('base64')}` : '',
   };
 });
 

@@ -22,6 +22,8 @@ declare global {
       toggleFullScreen?: () => void;
       saveFile?: (url: string, name: string) => Promise<string | null>;
       showItemInFolder?: (path: string) => void;
+      /** The desktop app's icon (a data URL), or ''. */
+      appIcon?: string;
       getMascotEnabled?: () => Promise<boolean>;
       setMascotEnabled?: (enabled: boolean) => Promise<void>;
       getLoginItem?: () => Promise<boolean>;

@@ -20,7 +20,7 @@ final class AboutViewController: FormViewController {
         super.viewDidLoad()
         title = L("settings.about")
         navigationItem.largeTitleDisplayMode = .never
-        let image = UIImageView(image: UIImage(named: "AppIconPreview") ?? Self.appIcon)
+        let image = UIImageView(image: Self.appIcon)
         image.layer.cornerRadius = 24
         image.layer.cornerCurve = .continuous
         image.clipsToBounds = true

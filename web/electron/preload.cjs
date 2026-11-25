@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('twimshelf', {
   arch: meta.arch || 'x64',
   appVersion: meta.appVersion || '',
   updateRepo: meta.updateRepo || '',
+  /** This app's icon as a data URL (the one config.yaml or config.local.yaml gives it), or ''. */
+  appIcon: meta.icon || '',
   /** A context menu at the pointer: [{id, label, enabled, checked, danger, children}] or 'separator'.
    *  Resolves to the chosen item's id, or null when the menu was dismissed. */
   popupMenu: (items, x, y) => ipcRenderer.invoke('popup-menu', items, x, y),
