@@ -146,6 +146,11 @@ if(NOT TL_LLAMA_CLANG)
 
   add_library(tl_llama SHARED tl_llama.cpp)
   target_link_libraries(tl_llama PRIVATE llama mtmd ggml llama-common)
+  # llama.cpp's headers are UTF-8 (common/jinja has "↵" in a string): MSVC reads a file in the
+  # system's code page unless told, which on a Chinese Windows (GBK) breaks the string
+  if(MSVC)
+    target_compile_options(tl_llama PRIVATE /utf-8)
+  endif()
   if(ANDROID)
     target_link_libraries(tl_llama PRIVATE log)
   endif()
@@ -240,6 +245,8 @@ target_include_directories(tl_llama PRIVATE "${_src}/include" "${_src}/ggml/incl
 target_link_libraries(tl_llama PRIVATE ${_implibs})
 target_compile_features(tl_llama PRIVATE cxx_std_17)
 target_compile_definitions(tl_llama PRIVATE TL_LLAMA_BUILD)
+# llama.cpp's headers are UTF-8 (see above)
+target_compile_options(tl_llama PRIVATE /utf-8)
 # the platform CMake file bundles files, not targets, here
 set(TL_LLAMA_LIBRARIES tl_llama PARENT_SCOPE)
 set(TL_LLAMA_FILES ${_products} PARENT_SCOPE)
