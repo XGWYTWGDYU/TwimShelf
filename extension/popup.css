@@ -1,7 +1,7 @@
 /* The popup in Material 3 Expressive, as Chrome's own pages: M3 colour roles from Chrome's blue
    baseline (light and dark, following the system), grouped lists whose outer corners are round and
-   inner ones small, a connected button group for 下载 · 设备 whose selected button turns fully
-   round, buttons that square up while pressed, and spring motion (none with reduced motion). */
+   inner ones small, 下载 · 设备 as two equal pills on one round
+   track, buttons that square up while pressed, and spring motion (none with reduced motion). */
 :root {
   /* colour roles */
   --primary: #0b57d0; --on-primary: #fff; --primary-container: #d3e3fd; --on-primary-container: #041e49;
@@ -80,23 +80,22 @@ h1 { font-size: 22px; line-height: 28px; font-weight: 500; margin: 0; letter-spa
 .update:hover { border-radius: var(--r-xl); }
 .update:active .update-go { border-radius: var(--r-m); }
 
-/* 下载 · 设备: a connected button group; the selected one turns fully round */
-.tabs { display: flex; gap: 2px; }
+/* 下载 · 设备: two pills of the same shape on one round track; the selected one is filled */
+.tabs { display: flex; gap: 4px; padding: 4px; border-radius: var(--r-full); background: var(--surface-container); }
 .tabs > .tab {
-  flex: 1; height: 40px; padding: 0 12px; position: relative; isolation: isolate;
-  font: inherit; font-weight: 500; color: var(--on-surface-variant); background: var(--surface-container);
-  border-radius: var(--r-xs);
-  transition: border-radius var(--spring-fast-d) var(--spring-fast), background-color var(--effects-d) var(--effects), color var(--effects-d) var(--effects);
+  flex: 1; height: 36px; padding: 0 12px; position: relative; isolation: isolate;
+  font: inherit; font-weight: 500; color: var(--on-surface-variant); background: transparent;
+  border-radius: var(--r-full);
+  transition: background-color var(--effects-d) var(--effects), color var(--effects-d) var(--effects), transform var(--spring-fast-d) var(--spring-fast);
 }
-.tabs > .tab:first-child { border-radius: var(--r-full) var(--r-xs) var(--r-xs) var(--r-full); }
-.tabs > .tab:last-child { border-radius: var(--r-xs) var(--r-full) var(--r-full) var(--r-xs); }
-.tabs > .tab[aria-selected="true"] { border-radius: var(--r-full); background: var(--secondary-container); color: var(--on-secondary-container); }
+.tabs > .tab:hover:not([aria-selected="true"]) { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.tabs > .tab[aria-selected="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
 .tabs > .tab[aria-selected="true"]::before {
   content: ""; display: inline-block; width: 18px; height: 18px; margin: 0 6px 0 -4px; vertical-align: -4px; background: currentColor;
   -webkit-mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>') center / contain no-repeat;
   animation: pop-in var(--spring-fast-d) var(--spring-fast);
 }
-.tabs > .tab:active { border-radius: var(--r-s); }
+.tabs > .tab:active { transform: scale(.97); }
 .count {
   display: inline-block; min-width: 20px; margin-left: 4px; padding: 0 6px; border-radius: var(--r-full);
   font-size: 12px; line-height: 20px; font-weight: 500; background: var(--surface-highest); color: var(--on-surface-variant);
@@ -181,7 +180,6 @@ li:hover .tile .dot { border-color: var(--surface-high); }
   content: counter(step); position: absolute; left: 0; top: 0; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%;
   background: var(--primary-container); color: var(--on-primary-container); font-size: 12px; font-weight: 600; line-height: 1;
 }
-.steps li:nth-child(2)::before { border-radius: var(--r-s); }
 .steps b { color: var(--on-surface); font-weight: 500; }
 #bindForm { display: flex; gap: 8px; align-items: center; }
 .entry, .address, select {
@@ -189,10 +187,10 @@ li:hover .tile .dot { border-color: var(--surface-high); }
   box-shadow: inset 0 0 0 0 var(--primary);
   transition: box-shadow var(--effects-d) var(--effects), border-radius var(--spring-fast-d) var(--spring-fast);
 }
-.entry { flex: 1; min-width: 0; height: 56px; font-size: 22px; font-weight: 500; letter-spacing: .14em; }
+.entry { flex: 1; min-width: 0; height: 56px; padding: 0 22px; border-radius: var(--r-full); font-size: 22px; font-weight: 500; letter-spacing: .14em; }
 .entry::placeholder, .address::placeholder { color: var(--on-surface-variant); opacity: .8; letter-spacing: .01em; font-weight: 400; font-size: 14px; }
 .entry:focus, .address:focus, select:focus { box-shadow: inset 0 0 0 2px var(--primary); }
-.address { width: 100%; height: 48px; margin-top: 8px; border-radius: var(--r-m); }
+.address { width: 100%; height: 48px; margin-top: 8px; padding: 0 20px; border-radius: var(--r-full); }
 select {
   height: 40px; padding: 0 36px 0 16px; max-width: 190px; border-radius: var(--r-full); appearance: none; cursor: pointer;
   background: var(--secondary-container) no-repeat right 12px center / 18px;
@@ -221,16 +219,18 @@ select option { background: var(--surface-container); color: var(--on-surface); 
   content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; background: currentColor;
   border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%; animation: morph 1.6s var(--spring) infinite, turn 2.4s linear infinite;
 }
-.local { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; border-radius: var(--r-l); background: var(--surface); }
-.local-label { color: var(--on-surface-variant); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: .02em; width: 100%; padding-left: 4px; }
+/* the apps found on this computer: a grouped list like the devices, an icon tile and two lines */
+.local { display: flex; flex-direction: column; gap: 2px; }
+.local-label { color: var(--on-surface-variant); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: .02em; padding: 0 4px 6px; }
 .chips { display: contents; }
-/* assist chips */
-.chip {
-  display: inline-flex; align-items: center; gap: 8px; height: 32px; font-size: 14px; font-weight: 500; padding: 0 16px 0 8px;
-  border-radius: var(--r-s); box-shadow: inset 0 0 0 1px var(--outline-variant); color: var(--on-surface);
-  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-}
-.chip svg { width: 18px; height: 18px; flex: none; color: var(--primary); }
+.found { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px 8px 8px; border-radius: var(--r-xs); background: var(--surface); }
+.chips > .found:first-child { border-top-left-radius: var(--r-l); border-top-right-radius: var(--r-l); }
+.chips > .found:last-child { border-bottom-left-radius: var(--r-l); border-bottom-right-radius: var(--r-l); }
+.found-icon { width: 40px; height: 40px; border-radius: var(--r-m); display: grid; place-items: center; flex: none; background: var(--primary-container); color: var(--on-primary-container); }
+.found-icon svg { width: 20px; height: 20px; }
+.found-text { display: flex; flex-direction: column; min-width: 0; }
+.found-name { color: var(--on-surface); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.found-kind { color: var(--on-surface-variant); font-size: 12px; line-height: 16px; }
 details { margin-top: 2px; }
 summary {
   cursor: pointer; color: var(--primary); font-weight: 500; list-style: none;

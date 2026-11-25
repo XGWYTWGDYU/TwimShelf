@@ -51,10 +51,13 @@ async function renderLocal() {
   const found = await discoverLocal(devices);
   const chips = $("local");
   chips.replaceChildren(...found.map((f) => {
-    const c = el("span", "chip");
-    c.innerHTML = svg(f.platform);
-    c.append(`${f.name || "TwimShelf"} · ${kindOf(f)}`);
-    return c;
+    const row = el("div", "found");
+    const icon = el("span", "found-icon");
+    icon.innerHTML = svg(f.platform);
+    const text = el("span", "found-text");
+    text.append(el("span", "found-name", f.name || "TwimShelf"), el("span", "found-kind", kindOf(f)));
+    row.append(icon, text);
+    return row;
   }));
   $("localBox").hidden = found.length === 0;
 }
