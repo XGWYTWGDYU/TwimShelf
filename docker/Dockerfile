@@ -15,8 +15,9 @@
 
 ARG RUST_VERSION
 ARG NODE_VERSION
-# llama.cpp's CUDA backend is built with this CUDA, whose runtime and cuBLAS go into the image
-ARG CUDA_VERSION=12.9.1
+# llama.cpp's CUDA backend is built with this CUDA (major.minor), whose runtime and cuBLAS go into
+# the image
+ARG CUDA_VERSION=12.9
 
 # ---- the server: the core with HEIC/AVIF, built from pinned sources ----
 FROM rust:${RUST_VERSION}-bookworm AS server
@@ -33,12 +34,24 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build -p tl-server --release --locked && cp target/release/twimshelf-server /twimshelf-server
 
 # ---- llama.cpp (flutter/tl_llama): Vulkan and CUDA, the core picks the device ----
-# NVIDIA's development image, for amd64 and arm64 alike (the driver's library is linked through its
-# stub; the real one comes from the host through the NVIDIA Container Toolkit). The libraries find
-# each other where they lie ($ORIGIN): the core opens libtl_llama.so in /app/llama. CUDA's runtime
-# and cuBLAS go along, so the host needs only the driver.
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS llama
-RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build g++ git ca-certificates glslc libvulkan-dev && rm -rf /var/lib/apt/lists/*
+# Ubuntu 24.04 with only the parts of CUDA the build needs (its compiler, runtime and cuBLAS) from
+# NVIDIA's repository, for amd64 and arm64 alike: about a fifth of NVIDIA's development image to
+# download. The driver's library is linked through its stub; the real one comes from the host
+# through the NVIDIA Container Toolkit. The libraries find each other where they lie ($ORIGIN): the
+# core opens libtl_llama.so in /app/llama. CUDA's runtime and cuBLAS go along, so the host needs
+# only the driver.
+FROM ubuntu:24.04 AS llama
+ARG CUDA_VERSION
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && \
+    repo="$(case "$TARGETARCH" in arm64) echo sbsa;; *) echo x86_64;; esac)" && \
+    curl -fsSL -o /tmp/keyring.deb "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/$repo/cuda-keyring_1.1-1_all.deb" && \
+    dpkg -i /tmp/keyring.deb && rm /tmp/keyring.deb && apt-get update && \
+    v="$(echo "$CUDA_VERSION" | tr . -)" && \
+    apt-get install -y --no-install-recommends cmake ninja-build g++ git glslc libvulkan-dev \
+      "cuda-nvcc-$v" "cuda-cudart-dev-$v" "libcublas-dev-$v" && \
+    rm -rf /var/lib/apt/lists/* && ln -sfn "/usr/local/cuda-$CUDA_VERSION" /usr/local/cuda
+ENV PATH=/usr/local/cuda/bin:$PATH CUDACXX=/usr/local/cuda/bin/nvcc
 WORKDIR /src
 COPY flutter/tl_llama/src flutter/tl_llama/src
 RUN --mount=type=cache,id=llama-gpu,target=/src/llama-build \
