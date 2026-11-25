@@ -2,7 +2,7 @@
   "name": "twimshelf-desktop",
   "productName": "TwimShelf",
   "private": true,
-  "version": "1.5.6",
+  "version": "2.0.0",
   "description": "TwimShelf desktop app",
   "main": "main.cjs",
   "scripts": {

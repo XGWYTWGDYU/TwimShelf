@@ -1,7 +1,7 @@
 name: twimshelf
 description: "The Flutter app."
 publish_to: 'none'
-version: 1.5.6+12
+version: 2.0.0+13
 
 environment:
   sdk: ^3.13.7
