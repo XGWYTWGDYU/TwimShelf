@@ -2,7 +2,12 @@
 // (with several, a menu asks which one, unless a default is set); the button then shows how the
 // task is doing until it is done. Right-click always asks for the device.
 (() => {
-  const t = (key, ...subs) => chrome.i18n.getMessage(key, subs.map(String)) || key;
+  // After the extension is reloaded or updated, this copy of the script lives on in pages already
+  // open, but every chrome.* call of it throws ("Extension context invalidated"). It then stops
+  // adding buttons, and a click on one it added says to reload the page (a text read beforehand).
+  const alive = () => { try { return !!chrome.runtime?.id; } catch { return false; } };
+  const t = (key, ...subs) => { try { return chrome.i18n.getMessage(key, subs.map(String)) || key; } catch { return key; } };
+  const RELOADED = t("extensionReloaded");
   const MARK = "tlDone";
   /// The latest task of each post (by its canonical link), from storage.
   let byUrl = new Map();
@@ -85,13 +90,14 @@
   }
 
   async function activate(button, choose) {
+    if (!alive()) return bubble(button, RELOADED);
     const task = byUrl.get(button.dataset.url);
     // under way already: nothing to do (a click on a finished one sends it again)
     if (task && ["sending", "queued", "downloading"].includes(task.state) && !choose) return;
     const r = await ask({ type: "download", url: button.dataset.url, choose });
     if (r?.needsBinding) return bubble(button, t("needsBinding"), [{ label: t("openSetup"), run: () => ask({ type: "openSetup" }) }]);
     if (r?.needsChoice) return menu(button, r.devices);
-    if (r?.error === "reload") return bubble(button, t("extensionReloaded"));
+    if (r?.error === "reload") return bubble(button, RELOADED);
   }
 
   function closePopups() { document.querySelectorAll(".tl-pop").forEach((p) => p.remove()); }
@@ -184,10 +190,12 @@
 
   // X builds its pages as one goes: new posts are found as they appear
   let queued = false;
-  new MutationObserver(() => {
+  const watch = new MutationObserver(() => {
+    if (!alive()) return watch.disconnect();
     if (queued) return;
     queued = true;
-    requestAnimationFrame(() => { queued = false; scan(); });
-  }).observe(document.body, { childList: true, subtree: true });
+    requestAnimationFrame(() => { queued = false; if (alive()) scan(); else watch.disconnect(); });
+  });
+  watch.observe(document.body, { childList: true, subtree: true });
   scan();
 })();
