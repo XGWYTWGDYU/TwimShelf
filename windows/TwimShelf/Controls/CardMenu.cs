@@ -110,10 +110,8 @@ public static class CardMenu
         }
         groups.Add(folders);
 
-        var files = new List<MenuFlyoutItemBase>
-        {
-            I(L("windows.showInExplorer"), "", () => MediaActions.ShowInExplorer(item.Path)),
-        };
+        // (no "show in Explorer": the library's own files are not for moving or deleting by hand)
+        var files = new List<MenuFlyoutItemBase>();
         if (item.CanRedownload) files.Add(I(item.Bad == null ? L("card.menu.redownload") : L("card.menu.redownloadBad"), "", () => _ = Repair(item)));
         groups.Add(files);
 

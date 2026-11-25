@@ -26,14 +26,14 @@ public static class MediaActions
             m.Items.Add(I(L("common.deletePermanently"), "", () => _ = Purge([item.MediaId])));
             return m;
         }
-        m.Items.Add(I(L("grid.revealPost"), "", () => lib.Reveal(item)));
+        // where it is in 浏览: a loose media on its own, a post's media with its post (as the other apps)
+        m.Items.Add(I(item.IsLoose() ? L("grid.revealMedia") : L("grid.revealPost"), "", () => lib.Reveal(item)));
         m.Items.Add(I(L("card.menu.tagMedia"), "", () => _ = TagPicker.Show(item, wholePost: false)));
         if (!item.IsLoose()) m.Items.Add(I(L("card.menu.tagPost"), "", () => _ = TagPicker.Show(item, wholePost: true)));
         m.Items.Add(I(L("common.addToFolder"), "", () => _ = AddToFolder([item])));
         if (place?.Folder is { } folder)
             m.Items.Add(I(L("card.menu.removeMedia"), "", () => _ = Run(ActionKind.FolderRemove, media: [item.MediaId], folder: folder, done: _ => L("common.removeFromFolder"))));
-        m.Items.Add(new MenuFlyoutSeparator());
-        m.Items.Add(I(L("windows.showInExplorer"), "", () => ShowInExplorer(item.Path)));
+        // (no "show in Explorer": the library's own files are not for moving or deleting by hand)
         m.Items.Add(new MenuFlyoutSeparator());
         m.Items.Add(I(L("grid.trashMedia"), "", () => _ = Run(ActionKind.Trash, media: [item.MediaId], done: n => L("trash.moved", n))));
         if (!item.IsLoose()) m.Items.Add(I(L("grid.trashPost"), "", () => _ = Run(ActionKind.Trash, posts: [item.PostId], done: n => L("trash.moved", n))));
