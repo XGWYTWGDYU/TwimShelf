@@ -30,6 +30,8 @@ void tl_import_cancel(void);
 char *tl_share_stage(const char *dir, const char *urls_json, const char *route);
 char *tl_share_pack(const char *dir, const char *out_path);
 char *tl_model_catalog(const char *format);
+char *tl_model_source(void);
+char *tl_set_model_source(const char *name);
 char *tl_hub_device(void);
 char *tl_hub_search(const char *json);
 char *tl_hub_repo(const char *format, const char *repo);

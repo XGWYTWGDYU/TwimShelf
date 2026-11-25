@@ -93,6 +93,12 @@ internal static unsafe partial class Native
     internal static partial nint tl_model_catalog(string? @format);
 
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_model_source();
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_set_model_source(string? @name);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint tl_hub_device();
 
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]

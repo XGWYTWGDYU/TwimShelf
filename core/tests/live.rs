@@ -92,3 +92,43 @@ fn model_store_installs_a_pinned_revision() {
     assert_eq!(installed[0].id, "hf-internal-testing--tiny-random-bert");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The store and a download from ModelScope (`models::Source`), as from Hugging Face above; the
+/// download is a 14 MB GGUF. `cargo test --test live modelscope -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn modelscope_store_and_download() {
+    use tl_core::{hub, models};
+    let dir = std::env::temp_dir().join(format!("tl-ms-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    models::Source::ModelScope.set(&dir).unwrap();
+    assert_eq!(models::Source::of(&dir), models::Source::ModelScope);
+    for (format, known) in [("gguf", "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"), ("mlx", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit")] {
+        let p = hub::search(&dir, format, "", false, None).unwrap();
+        println!("{format}: {} offered, {} hidden", p.items.len(), p.hidden.len());
+        for r in p.items.iter().take(4) { println!("  {} {:?} {:?} {}", r.repo, r.architecture, r.params, r.tier); }
+        assert!(!p.items.is_empty());
+        let searched = hub::search(&dir, format, "qwen", false, None).unwrap();
+        println!("  'qwen': {} offered, next {:?}", searched.items.len(), searched.next);
+        if searched.next.is_some() { println!("  'qwen' next: {} offered", hub::search(&dir, format, "qwen", false, searched.next.as_deref()).unwrap().items.len()); }
+        let d = hub::detail(&dir, format, known).unwrap();
+        println!("  {known}: rev {} problem {:?} page {}", d.revision, d.problem, d.page_url);
+        for v in &d.variants { println!("    {} {} {} suggested={}", v.label, v.bytes, v.tier, v.suggested); }
+        assert!(d.problem.is_none() && !d.variants.is_empty(), "{known}");
+        let typed = hub::search(&dir, format, &format!("https://modelscope.cn/models/{known}"), false, None).unwrap();
+        assert_eq!(typed.items.iter().map(|r| r.repo.as_str()).collect::<Vec<_>>(), [known]);
+    }
+    assert!(hub::detail(&dir, "gguf", "no-such-org-tl/no-such-model").is_err());
+    let repo = "QuantFactory/tinyllama-15M-alpaca-finetuned-GGUF";
+    let weights = "tinyllama-15M-alpaca-finetuned.Q2_K.gguf";
+    hub::install(&dir, hub::InstallRequest { format: "gguf".into(), repo: repo.into(), revision: None, weights: Some(weights.into()), projector: None, bytes: 1, folder: None }).unwrap();
+    let status = loop {
+        let s = models::status().unwrap();
+        if !s.running { break s; }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    println!("{status:?}");
+    assert!(status.finished, "{:?}", status.error);
+    assert_eq!(std::fs::metadata(dir.join(format!("{}--{}", models::slug(repo), weights.trim_end_matches(".gguf"))).join(weights)).unwrap().len(), 13_717_888);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

@@ -20,6 +20,7 @@ pub mod share;
 pub mod archive;
 pub mod models;
 pub mod hub;
+pub mod modelscope;
 pub mod pet;
 pub mod catalog;
 pub mod semantic;

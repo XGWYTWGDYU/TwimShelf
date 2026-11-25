@@ -242,6 +242,8 @@ export interface HubSkipped {
 
 export interface HubDetail {
   repo: HubRepo;
+  /** The repo's page on the site it comes from. */
+  pageUrl: string;
   revision: string;
   variants: HubVariant[];
   skipped: HubSkipped[];

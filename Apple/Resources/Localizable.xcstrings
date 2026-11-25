@@ -11369,25 +11369,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "View on Hugging Face"
+            "value" : "View on %@"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hugging Face で見る"
+            "value" : "%@ で見る"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Hugging Face 上查看"
+            "value" : "在 %@ 上查看"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Hugging Face 上查看"
+            "value" : "在 %@ 上查看"
           }
         }
       }
@@ -12147,25 +12147,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "From Hugging Face, sorted by fit, then downloads. Sizes in this list are estimates, and downloads don't indicate tagging quality."
+            "value" : "From %@, sorted by fit, then downloads. Sizes in this list are estimates, and downloads don't indicate tagging quality."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hugging Face から取得し、適合度、ダウンロード数の順に並べています。一覧のサイズは推定値で、ダウンロード数はタグ付けの品質を示すものではありません。"
+            "value" : "%@ から取得し、適合度、ダウンロード数の順に並べています。一覧のサイズは推定値で、ダウンロード数はタグ付けの品質を示すものではありません。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "来自 Hugging Face，按是否适合本机排序，再按下载量排序。列表里的大小是估算值，下载量不代表打标签的质量。"
+            "value" : "来自 %@，按是否适合本机排序，再按下载量排序。列表里的大小是估算值，下载量不代表打标签的质量。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "來自 Hugging Face，依是否適合本機排序，再依下載量排序。列表裡的大小是估算值，下載量不代表加標籤的品質。"
+            "value" : "來自 %@，依是否適合本機排序，再依下載量排序。列表裡的大小是估算值，下載量不代表加標籤的品質。"
           }
         }
       }
@@ -12205,25 +12205,25 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Search Hugging Face, or paste a repository address"
+            "value" : "Search %@, or paste a repository address"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hugging Face を検索、またはリポジトリのアドレスを貼り付け"
+            "value" : "%@ を検索、またはリポジトリのアドレスを貼り付け"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "搜索 Hugging Face，或粘贴仓库地址"
+            "value" : "搜索 %@，或粘贴仓库地址"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "搜尋 Hugging Face，或貼上儲存庫位址"
+            "value" : "搜尋 %@，或貼上儲存庫位址"
           }
         }
       }
@@ -21538,6 +21538,64 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目前在 iOS 模擬器中執行，Metal 推理無法使用。模型可以管理與匯入匯出，但加標籤與語意搜尋需要在實機或 Mac 上執行。"
+          }
+        }
+      }
+    },
+    "models.source" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download models from"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデルのダウンロード元"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型下载来源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型下載來源"
+          }
+        }
+      }
+    },
+    "models.source.footer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ModelScope (modelscope.cn) has many of the same models and can be reached from mainland China. Models already downloaded stay as they are."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ModelScope（modelscope.cn）には同じモデルの多くがあり、中国本土からも利用できます。ダウンロード済みのモデルはそのまま残ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ModelScope（魔搭，modelscope.cn）有许多相同的模型，在中国大陆可以直接访问。已下载的模型不受影响。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ModelScope（魔搭，modelscope.cn）有許多相同的模型，在中國大陸可以直接存取。已下載的模型不受影響。"
           }
         }
       }

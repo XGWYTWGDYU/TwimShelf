@@ -130,6 +130,11 @@ class CoreBindings {
   late final tl_model_catalog = library.lookupFunction<
       Pointer<Utf8> Function(Pointer<Utf8>),
       Pointer<Utf8> Function(Pointer<Utf8>)>('tl_model_catalog');
+  late final tl_model_source = library.lookupFunction<Pointer<Utf8> Function(),
+      Pointer<Utf8> Function()>('tl_model_source');
+  late final tl_set_model_source = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_set_model_source');
   late final tl_hub_device = library.lookupFunction<Pointer<Utf8> Function(),
       Pointer<Utf8> Function()>('tl_hub_device');
   late final tl_hub_search = library.lookupFunction<

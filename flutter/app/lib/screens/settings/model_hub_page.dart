@@ -212,7 +212,7 @@ class _ModelHubPageState extends State<ModelHubPage> {
                     controller: _search,
                     autocorrect: false,
                     textInputAction: TextInputAction.search,
-                    decoration: InputDecoration(hintText: L('hub.search.placeholder'), prefixIcon: const Icon(Icons.search), border: const OutlineInputBorder()),
+                    decoration: InputDecoration(hintText: L('hub.search.placeholder', [widget.local.sourceName]), prefixIcon: const Icon(Icons.search), border: const OutlineInputBorder()),
                     onSubmitted: (text) {
                       _query = text;
                       _run(fresh: true);
@@ -254,7 +254,7 @@ class _ModelHubPageState extends State<ModelHubPage> {
                 _DownloadState(local: local),
                 if (_browsing)
                   SettingsSection(title: L('hub.curated'), footer: L('hub.curated.footer'), children: [for (final c in local.catalog) _curatedTile(c, scheme)]),
-                SettingsSection(title: _browsing ? L('hub.popular') : L('hub.results'), footer: L('hub.results.footer'), children: [
+                SettingsSection(title: _browsing ? L('hub.popular') : L('hub.results'), footer: L('hub.results.footer', [widget.local.sourceName]), children: [
                   for (final r in _shown) _repoTile(r, scheme),
                   if (_loading) ListTile(key: const ValueKey('hub-loading'), leading: const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)), title: Text(L('hub.loading'))),
                   if (_error != null) ...[
@@ -361,8 +361,8 @@ class _ModelHubRepoPageState extends State<ModelHubRepoPage> {
                   if (d?.repo.claims_uncensored == true) ListTile(leading: const Icon(Icons.sell_outlined), title: Text(L('hub.claim'))),
                   ListTile(
                     leading: const Icon(Icons.open_in_new),
-                    title: Text(L('hub.detail.openPage')),
-                    onTap: () => launchUrl(Uri.https('huggingface.co', '/${widget.repo}'), mode: LaunchMode.externalApplication),
+                    title: Text(L('hub.detail.openPage', [widget.local.sourceName])),
+                    onTap: d == null ? null : () => launchUrl(Uri.parse(d.pageUrl), mode: LaunchMode.externalApplication),
                   ),
                 ]),
                 _DownloadState(local: local, repo: widget.repo),

@@ -270,6 +270,22 @@ class _LocalModelsSection extends StatelessWidget {
       if (dl != null && !dl.running && dl.error != null)
         ListTile(leading: Icon(Icons.error_outline, color: scheme.error), title: Text(L('models.downloadFailed')), subtitle: Text(dl.error!)),
       ListTile(
+        key: const ValueKey('local-source'),
+        leading: const Icon(Icons.cloud_download_outlined),
+        title: Text(L('models.source')),
+        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const SizedBox(height: 8),
+          SegmentedButton<String>(
+            showSelectedIcon: false,
+            segments: [for (final e in LocalModels.sourceNames.entries) ButtonSegment(value: e.key, label: Text(e.value))],
+            selected: {local.source},
+            onSelectionChanged: (s) => local.setSource(s.first),
+          ),
+          const SizedBox(height: 6),
+          Text(L('models.source.footer')),
+        ]),
+      ),
+      ListTile(
         key: const ValueKey('local-store'),
         leading: Icon(Icons.storefront_outlined, color: scheme.primary),
         title: Text(L('hub.title')),

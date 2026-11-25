@@ -460,6 +460,15 @@ pub extern "C" fn tl_repair(media_id: *const c_char) -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn tl_set_models_dir(dir: *const c_char) -> *mut c_char { with(|l| l.set_models_dir(s(dir).into())) }
 
+/// Where models come from: `huggingface` or `modelscope` (`models::Source`), kept beside the models.
+#[no_mangle]
+pub extern "C" fn tl_model_source() -> *mut c_char { with(|l| Ok(crate::models::Source::of(&l.models_dir()).name())) }
+
+#[no_mangle]
+pub extern "C" fn tl_set_model_source(name: *const c_char) -> *mut c_char {
+    with(|l| crate::models::Source::parse(&s(name)).ok_or_else(|| anyhow::anyhow!(tr!("models.badName")))?.set(&l.models_dir()))
+}
+
 /// The models offered for download in `format` (`mlx` or `gguf`), with the folder each installs into.
 #[no_mangle]
 pub extern "C" fn tl_model_catalog(format: *const c_char) -> *mut c_char {

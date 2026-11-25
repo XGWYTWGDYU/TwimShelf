@@ -339,6 +339,11 @@ class Core {
         return (value as List).map((v) => CatalogEntry.fromJson(v as Map<String, dynamic>)).toList();
       });
   /// This device as the model store sees it.
+  /// Where models come from: `huggingface` or `modelscope`.
+  static String modelSource() => _call((arena) => _read(_bindings.tl_model_source()) as String);
+  static void setModelSource(String name) => _call((arena) {
+        _read(_bindings.tl_set_model_source(_string(name, arena)));
+      });
   static HubDevice? hubDevice() => _call((arena) {
         final value = _read(_bindings.tl_hub_device());
         return value == null ? null : HubDevice.fromJson(value as Map<String, dynamic>);

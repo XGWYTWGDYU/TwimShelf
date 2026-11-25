@@ -8,7 +8,7 @@
 //! list are estimates from the parameter count; a repo's detail has the real ones.
 use std::sync::OnceLock;
 use crate::download::runtime;
-use crate::models::slug;
+use crate::models::{slug, Source};
 use crate::net::read_limited;
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
@@ -154,6 +154,8 @@ pub struct HubSkipped { pub name: String, pub reason: String }
 #[derive(Debug, Clone, Serialize)]
 pub struct HubDetail {
     pub repo: HubRepo,
+    /// The repo's page on the site it comes from, for people to read.
+    pub page_url: String,
     pub revision: String,
     pub variants: Vec<HubVariant>,
     /// Files of the repo that are not offered, and why.
@@ -165,7 +167,8 @@ pub struct HubDetail {
 /// `org/name` from what was typed: that itself, or the address of the model's page.
 pub fn parse_repo_input(text: &str) -> Option<String> {
     let t = text.trim();
-    let rest = t.strip_prefix("https://huggingface.co/").or_else(|| t.strip_prefix("http://huggingface.co/")).or_else(|| t.strip_prefix("huggingface.co/")).unwrap_or(t);
+    let rest = ["https://huggingface.co/", "http://huggingface.co/", "huggingface.co/", "https://modelscope.cn/models/", "https://www.modelscope.cn/models/", "modelscope.cn/models/"]
+        .iter().find_map(|p| t.strip_prefix(p)).unwrap_or(t);
     let is_address = rest.len() != t.len();
     let mut parts = rest.split(['?', '#']).next()?.split('/').filter(|p| !p.is_empty());
     let (org, name) = (parts.next()?, parts.next()?);
@@ -224,15 +227,19 @@ pub fn evaluate(format: &str, m: &Value, d: &DeviceProfile) -> Result<HubRepo, H
             None => return Err(hide(tr!("hub.hidden.noArch"))),
             _ => {}
         }
+        // a ModelScope search answer does not list the files: the repo's detail looks
+        let known = m["files_unknown"] != Value::Bool(true);
         let names: Vec<&str> = m["siblings"].as_array().map(|a| a.iter().filter_map(|s| s["rfilename"].as_str()).collect()).unwrap_or_default();
         let top: Vec<&str> = names.iter().copied().filter(|n| !n.contains('/') && is_gguf(n)).collect();
-        if !names.iter().any(|n| !n.contains('/') && is_gguf(n) && is_projector(n)) { return Err(hide(tr!("hub.hidden.noVision"))); }
-        if !top.iter().any(|n| !is_projector(n) && !is_shard(n)) { return Err(hide(tr!("hub.hidden.split"))); }
+        if known && !names.iter().any(|n| !n.contains('/') && is_gguf(n) && is_projector(n)) { return Err(hide(tr!("hub.hidden.noVision"))); }
+        if known && !top.iter().any(|n| !is_projector(n) && !is_shard(n)) { return Err(hide(tr!("hub.hidden.split"))); }
         (arch, m["gguf"]["total"].as_u64())
     } else {
         let t = m["config"]["model_type"].as_str().map(str::to_string);
         match &t {
             Some(a) if !MLX_TYPES.contains(&a.as_str()) => return Err(hide(tr!("hub.hidden.arch", arch = a))),
+            // a ModelScope search answer does not say: the repo's detail reads its config.json
+            None if m["files_unknown"] == Value::Bool(true) => {}
             None => return Err(hide(tr!("hub.hidden.noArch"))),
             _ => {}
         }
@@ -290,12 +297,18 @@ static CACHE: Mutex<Option<HashMap<String, Answer>>> = Mutex::new(None);
 
 /// A GET of the API, kept a few minutes: going back and forth on a metered connection, and the
 /// API's rate limit, should not pay for what was just asked.
-fn get_json(address: &str) -> anyhow::Result<(Value, Option<String>)> {
-    if let Some(a) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|c| c.get(address)).filter(|a| a.at.elapsed() < CACHE_FOR) {
+fn get_json(address: &str) -> anyhow::Result<(Value, Option<String>)> { ask(address, None) }
+
+/// A GET, or with `request` a PUT of it (ModelScope's search), kept as `get_json` says.
+fn ask(address: &str, request: Option<&Value>) -> anyhow::Result<(Value, Option<String>)> {
+    let key = request.map_or_else(|| address.to_string(), |r| format!("{address} {r}"));
+    if let Some(a) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|c| c.get(&key)).filter(|a| a.at.elapsed() < CACHE_FOR) {
         return Ok((a.body.clone(), a.next.clone()));
     }
+    let src = if address.starts_with(crate::modelscope::BASE) { Source::ModelScope } else { Source::HuggingFace };
+    let rq = match request { Some(r) => src.client().put(address).json(r), None => src.client().get(address) };
     let (body, next) = runtime().block_on(async {
-        let resp = tokio::time::timeout(Duration::from_secs(30), crate::models::hf_client().get(address).send()).await.map_err(|_| anyhow::anyhow!(tr!("hub.err.network")))?.context(tr!("hub.err.network"))?;
+        let resp = tokio::time::timeout(Duration::from_secs(30), rq.send()).await.map_err(|_| anyhow::anyhow!(tr!("hub.err.network")))?.context(tr!("hub.err.network"))?;
         match resp.status().as_u16() {
             429 => bail!(tr!("hub.err.rateLimited")),
             401 | 403 | 404 => bail!(tr!("hub.err.notFound")),
@@ -309,7 +322,7 @@ fn get_json(address: &str) -> anyhow::Result<(Value, Option<String>)> {
     let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let c = g.get_or_insert_with(HashMap::new);
     if c.len() >= CACHE_ANSWERS { c.clear(); }
-    c.insert(address.into(), Answer { at: Instant::now(), body: body.clone(), next: next.clone() });
+    c.insert(key, Answer { at: Instant::now(), body: body.clone(), next: next.clone() });
     Ok((body, next))
 }
 
@@ -332,6 +345,7 @@ pub fn search(models_dir: &Path, format: &str, query: &str, uncensored: bool, ne
     if format != "gguf" && format != "mlx" { bail!(tr!("hub.err.answer")); }
     let d = device(models_dir);
     let q = query.trim();
+    if Source::of(models_dir) == Source::ModelScope { return ms_search(format, q, uncensored, next, &d); }
     if let Some(address) = next {
         if !is_own_page(address) { bail!(tr!("hub.err.answer")); }
         return walk(format, address.to_string(), &d);
@@ -441,24 +455,83 @@ fn offer(format: &str, repo: &HubRepo, tree: &[TreeEntry], vision: Option<bool>,
 pub fn detail(models_dir: &Path, format: &str, repo: &str) -> anyhow::Result<HubDetail> {
     if !valid_repo(repo) { bail!(tr!("hub.err.notFound")); }
     let d = device(models_dir);
-    let (body, _) = get_json(&repo_url(format, repo))?;
+    let src = Source::of(models_dir);
+    let body = if src == Source::ModelScope { ms_repo(format, repo)? } else { get_json(&repo_url(format, repo))?.0 };
     // shown even when the list would not offer it: someone who typed its address gets the reason
     let (info, hidden) = match evaluate(format, &body, &d) { Ok(r) => (r, None), Err(h) => (bare_repo(format, repo, &body), Some(h.reason)) };
     let revision = info.sha.clone().with_context(|| tr!("hub.err.answer"))?;
     if let Some(reason) = hidden {
-        return Ok(HubDetail { repo: info, revision, variants: vec![], skipped: vec![], problem: Some(reason) });
+        return Ok(HubDetail { page_url: src.page_url(repo), repo: info, revision, variants: vec![], skipped: vec![], problem: Some(reason) });
     }
-    let (tree, _) = get_json(&format!("{}/{repo}/tree/{revision}", api()))?;
+    let (tree, _) = get_json(&src.files_url(repo, &revision))?;
+    let tree = if src == Source::ModelScope { crate::modelscope::tree(&tree).context(tr!("hub.err.answer"))? } else { tree };
     let tree: Vec<TreeEntry> = serde_json::from_value(tree).context(tr!("hub.err.answer"))?;
     let vision = if format == "mlx" {
-        let (config, _) = get_json(&format!("{}/{repo}/resolve/{revision}/config.json", crate::models::hf_endpoint()))?;
+        let (config, _) = get_json(&src.file_url(repo, &revision, "config.json"))?;
         Some(config.get("vision_config").map_or(false, |v| !v.is_null()))
     } else { None };
     let (variants, skipped, problem) = offer(format, &info, &tree, vision, &d);
     let mut info = info;
     if let Some(v) = variants.iter().find(|v| v.suggested).or(variants.first()) { info.tier = v.tier; info.estimated_bytes = Some(v.bytes); }
-    Ok(HubDetail { repo: info, revision, variants, skipped, problem })
+    Ok(HubDetail { page_url: src.page_url(repo), repo: info, revision, variants, skipped, problem })
 }
+
+/// A repo's answer from ModelScope, in Hugging Face's shape, with its files (and, MLX, its
+/// config.json: its search answers do not say the architecture).
+fn ms_repo(format: &str, repo: &str) -> anyhow::Result<Value> {
+    let (info, _) = get_json(&crate::modelscope::info_url(repo))?;
+    let (files, _) = get_json(&crate::modelscope::files_url(repo, "main"))?;
+    let config = if format == "mlx" { get_json(&crate::modelscope::file_url(repo, "main", "config.json")).ok().map(|c| c.0) } else { None };
+    crate::modelscope::model(format, &info, &files, config).context(tr!("hub.err.notFound"))
+}
+
+/// The next page of a ModelScope search, as it goes to the app and comes back: `modelscope:<page>:<text>`.
+const MS_NEXT: &str = "modelscope:";
+
+fn ms_find(format: &str, text: &str, page: u32, size: u32) -> anyhow::Result<(Vec<Value>, bool)> {
+    let (v, _) = ask(&crate::modelscope::search_url(), Some(&crate::modelscope::search_body(format, text, page, size)))?;
+    crate::modelscope::search_results(format, &v, page, size).context(tr!("hub.err.answer"))
+}
+
+/// A search of ModelScope, as `search` is of Hugging Face.
+fn ms_search(format: &str, q: &str, uncensored: bool, next: Option<&str>, d: &DeviceProfile) -> anyhow::Result<HubPage> {
+    if let Some(token) = next {
+        let (page, text) = token.strip_prefix(MS_NEXT).and_then(|t| t.split_once(':')).and_then(|(p, t)| Some((p.parse::<u32>().ok().filter(|p| *p > 1)?, t)))
+            .ok_or_else(|| anyhow::anyhow!(tr!("hub.err.answer")))?;
+        return ms_walk(format, text, page, d);
+    }
+    if let Some(repo) = parse_repo_input(q) { return Ok(assemble(format, [ms_repo(format, &repo)?], d, None)); }
+    let families = if format == "gguf" { GGUF_FAMILIES } else { MLX_FAMILIES };
+    if uncensored {
+        let bases: Vec<&str> = if q.is_empty() { families.iter().copied().take(2).chain(["vl"]).collect() } else { vec![q] };
+        let mut all = vec![];
+        for base in bases {
+            for word in ["abliterated", "uncensored"] { all.extend(ms_find(format, &format!("{base} {word}"), 1, PAGE)?.0); }
+        }
+        return Ok(assemble(format, all, d, None));
+    }
+    if q.is_empty() {
+        let mut all = vec![];
+        for family in families { all.extend(ms_find(format, family, 1, PAGE / 3)?.0); }
+        return Ok(assemble(format, all, d, None));
+    }
+    ms_walk(format, q, 1, d)
+}
+
+fn ms_walk(format: &str, text: &str, first: u32, d: &DeviceProfile) -> anyhow::Result<HubPage> {
+    let mut all = HubPage { device: d.clone(), items: vec![], hidden: vec![], next: None };
+    let mut page = first;
+    for _ in 0..MAX_EMPTY_PAGES {
+        let (list, more) = ms_find(format, text, page, PAGE)?;
+        let p = assemble(format, list, d, more.then(|| format!("{MS_NEXT}{}:{text}", page + 1)));
+        all.items.extend(p.items);
+        all.hidden.extend(p.hidden);
+        all.next = p.next;
+        if all.next.is_some() && all.items.is_empty() { page += 1 } else { break }
+    }
+    Ok(all)
+}
+
 
 fn bare_repo(format: &str, repo: &str, m: &Value) -> HubRepo {
     let tags = strings(&m["tags"]);

@@ -45,6 +45,10 @@ class LocalModels extends ChangeNotifier {
   AndroidChip chip = AndroidChip.none;
   List<ModelInfo> installed = const [];
   ModelDownloadStatus? download;
+  /// Where models come from: `huggingface` or `modelscope` (the core keeps it beside the models).
+  String source = 'huggingface';
+  static const sourceNames = {'huggingface': 'Hugging Face', 'modelscope': 'ModelScope'};
+  String get sourceName => sourceNames[source] ?? source;
   Timer? _poll;
   Future<void>? _starting;
 
@@ -56,6 +60,7 @@ class LocalModels extends ChangeNotifier {
     final dir = OS.environment['TL_MODELS_DIR'] ?? '${(await getApplicationSupportDirectory()).path}${OS.pathSeparator}Models';
     await Directory(dir).create(recursive: true);
     Core.setModelsDirectory(dir);
+    source = Core.modelSource();
     if (apple) {
       try {
         supported = await _native.invokeMethod<bool>('aiSupported') ?? false;
@@ -98,6 +103,12 @@ class LocalModels extends ChangeNotifier {
     final found = await coreRunAsync(() => Core.installedModels().where((m) => m.format == wanted).toList());
     installed = found;
     download = Core.modelStatus();
+    notifyListeners();
+  }
+
+  void setSource(String name) {
+    Core.setModelSource(name);
+    source = name;
     notifyListeners();
   }
 

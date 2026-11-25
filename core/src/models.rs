@@ -140,6 +140,39 @@ pub fn hf_client() -> reqwest::Client {
         .build().expect("http client")).clone()
 }
 
+/// Where models come from: Hugging Face, or ModelScope (`crate::modelscope`), which mirrors many of
+/// the same repos and is the one reachable in mainland China. Chosen on the AI page, kept beside
+/// the models (`.model-source`); every app and the server read it from there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source { #[default] HuggingFace, ModelScope }
+
+const SOURCE_FILE: &str = ".model-source";
+
+impl Source {
+    pub fn name(self) -> &'static str { match self { Source::HuggingFace => "huggingface", Source::ModelScope => "modelscope" } }
+    pub fn parse(name: &str) -> Option<Source> { match name.trim() { "huggingface" => Some(Source::HuggingFace), "modelscope" => Some(Source::ModelScope), _ => None } }
+    /// The one chosen for `models_dir`: Hugging Face until another was.
+    pub fn of(models_dir: &Path) -> Source { fs::read_to_string(models_dir.join(SOURCE_FILE)).ok().and_then(|s| Source::parse(&s)).unwrap_or_default() }
+    pub fn set(self, models_dir: &Path) -> anyhow::Result<()> {
+        fs::create_dir_all(models_dir)?;
+        let tmp = models_dir.join(format!("{SOURCE_FILE}.partial"));
+        fs::write(&tmp, self.name())?;
+        Ok(fs::rename(tmp, models_dir.join(SOURCE_FILE))?)
+    }
+    pub fn client(self) -> reqwest::Client { if self == Source::HuggingFace { hf_client() } else { client() } }
+    pub fn files_url(self, repo: &str, revision: &str) -> String {
+        match self { Source::HuggingFace => format!("{}/api/models/{repo}/tree/{revision}", hf_endpoint()), Source::ModelScope => crate::modelscope::files_url(repo, revision) }
+    }
+    pub fn file_url(self, repo: &str, revision: &str, file: &str) -> String {
+        match self { Source::HuggingFace => format!("{}/{repo}/resolve/{revision}/{file}", hf_endpoint()), Source::ModelScope => crate::modelscope::file_url(repo, revision, file) }
+    }
+    /// The repo's page on the site, for people to read.
+    pub fn page_url(self, repo: &str) -> String {
+        match self { Source::HuggingFace => format!("https://huggingface.co/{repo}"), Source::ModelScope => crate::modelscope::page_url(repo) }
+    }
+}
+
 /// Files needed to run an MLX model; docs, images and git metadata are skipped.
 fn wanted(name: &str) -> bool {
     if !crate::rules::portable_basename(name) || name.contains("..") { return false; }
@@ -152,6 +185,15 @@ fn wanted(name: &str) -> bool {
 /// everywhere else. What it offers to take from other devices.
 pub fn local_format() -> &'static str { if cfg!(target_vendor = "apple") { "mlx" } else { "gguf" } }
 
+/// A repo's files at `revision`, as Hugging Face's tree.
+async fn tree_of(src: Source, repo: &str, revision: &str) -> anyhow::Result<Vec<TreeEntry>> {
+    or_cancel(async {
+        let v: serde_json::Value = src.client().get(src.files_url(repo, revision)).send().await?.error_for_status()?.json().await.context(tr!("models.listFailed"))?;
+        let v = if src == Source::ModelScope { crate::modelscope::tree(&v)? } else { v };
+        Ok::<_, anyhow::Error>(serde_json::from_value(v).context(tr!("models.listFailed"))?)
+    }).await?
+}
+
 #[derive(Deserialize)]
 struct TreeEntry { #[serde(rename = "type")] kind: String, path: String, size: u64, lfs: Option<Lfs> }
 #[derive(Deserialize)]
@@ -162,15 +204,14 @@ pub fn start_download(repo: String, revision: Option<String>, models_dir: PathBu
     safe_id(&slug(&repo))?;
     let operation = claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
     runtime().spawn(async move {
-        let r = download(&repo, revision.as_deref().unwrap_or("main"), &models_dir).await;
+        let r = download(Source::of(&models_dir), &repo, revision.as_deref().unwrap_or("main"), &models_dir).await;
         operation.finish(&r);
     });
     Ok(())
 }
 
-async fn download(repo: &str, revision: &str, models_dir: &Path) -> anyhow::Result<()> {
-    let tree: Vec<TreeEntry> = or_cancel(async { hf_client().get(format!("{}/api/models/{repo}/tree/{revision}", hf_endpoint()))
-        .send().await?.error_for_status()?.json().await.context(tr!("models.listFailed")) }).await??;
+async fn download(src: Source, repo: &str, revision: &str, models_dir: &Path) -> anyhow::Result<()> {
+    let tree = tree_of(src, repo, revision).await?;
     let files: Vec<ModelFile> = tree.into_iter().filter(|e| e.kind == "file" && wanted(&e.path))
         .map(|e| ModelFile { name: e.path, size: e.size, sha256: e.lfs.map(|l| l.oid) }).collect();
     if !files.iter().any(|f| f.name.ends_with(".safetensors")) { bail!(tr!("models.noWeights")); }
@@ -184,7 +225,7 @@ async fn download(repo: &str, revision: &str, models_dir: &Path) -> anyhow::Resu
     for f in &files {
         if CANCEL.load(Ordering::SeqCst) { bail!(tr!("common.cancelled")); }
         update(|s| { s.file = f.name.clone(); s.done_bytes = done; });
-        fetch_file(repo, revision, &dir, f, done).await.with_context(|| tr!("models.fileFailed", file = f.name))?;
+        fetch_file(src, repo, revision, &dir, f, done).await.with_context(|| tr!("models.fileFailed", file = f.name))?;
         done += f.size;
     }
     validate_dir(&dir)?;
@@ -194,7 +235,7 @@ async fn download(repo: &str, revision: &str, models_dir: &Path) -> anyhow::Resu
 }
 
 /// Downloads one file with HTTP Range resume, then verifies size (and sha256 for LFS files).
-async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base: u64) -> anyhow::Result<()> {
+async fn fetch_file(src: Source, repo: &str, revision: &str, dir: &Path, f: &ModelFile, base: u64) -> anyhow::Result<()> {
     let dst = dir.join(&f.name);
     if dst.exists() && fs::metadata(&dst)?.len() == f.size {
         // a file of the right length left by an earlier run is checked, when it can be
@@ -215,7 +256,7 @@ async fn fetch_file(repo: &str, revision: &str, dir: &Path, f: &ModelFile, base:
         let have = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
         if have < f.size || f.size == 0 {
             update(|s| s.done_bytes = base + have);
-            let mut rq = hf_client().get(format!("{}/{repo}/resolve/{revision}/{}", hf_endpoint(), f.name));
+            let mut rq = src.client().get(src.file_url(repo, revision, &f.name));
             if have > 0 { rq = rq.header("Range", format!("bytes={have}-")); }
             let resp = match or_cancel(rq.send()).await?.and_then(|r| r.error_for_status()) {
                 Ok(r) => r,
@@ -307,15 +348,14 @@ pub fn start_download_gguf(repo: String, revision: Option<String>, weights: Stri
     safe_id(&slug(&repo))?;
     let operation = claim(ModelDownloadStatus { repo: repo.clone(), running: true, ..Default::default() })?;
     runtime().spawn(async move {
-        let r = download_gguf(&repo, revision.as_deref().unwrap_or("main"), &weights, projector.as_deref(), &models_dir).await;
+        let r = download_gguf(Source::of(&models_dir), &repo, revision.as_deref().unwrap_or("main"), &weights, projector.as_deref(), &models_dir).await;
         operation.finish(&r);
     });
     Ok(())
 }
 
-async fn download_gguf(repo: &str, revision: &str, weights: &str, projector: Option<&str>, models_dir: &Path) -> anyhow::Result<()> {
-    let tree: Vec<TreeEntry> = or_cancel(async { hf_client().get(format!("{}/api/models/{repo}/tree/{revision}", hf_endpoint()))
-        .send().await?.error_for_status()?.json().await.context(tr!("models.listFailed")) }).await??;
+async fn download_gguf(src: Source, repo: &str, revision: &str, weights: &str, projector: Option<&str>, models_dir: &Path) -> anyhow::Result<()> {
+    let tree = tree_of(src, repo, revision).await?;
     let names: Vec<&str> = std::iter::once(weights).chain(projector).collect();
     let files: Vec<ModelFile> = names.iter().map(|n| tree.iter().find(|e| e.kind == "file" && e.path == *n)
         .map(|e| ModelFile { name: e.path.clone(), size: e.size, sha256: e.lfs.as_ref().map(|l| l.oid.clone()) })
@@ -331,7 +371,7 @@ async fn download_gguf(repo: &str, revision: &str, weights: &str, projector: Opt
     for f in &files {
         if CANCEL.load(Ordering::SeqCst) { bail!(tr!("common.cancelled")); }
         update(|s| { s.file = f.name.clone(); s.done_bytes = done; });
-        fetch_file(repo, revision, &dir, f, done).await.with_context(|| tr!("models.fileFailed", file = f.name))?;
+        fetch_file(src, repo, revision, &dir, f, done).await.with_context(|| tr!("models.fileFailed", file = f.name))?;
         if !gguf_ok(&dir.join(&f.name)) { bail!(tr!("models.fileDamaged", name = f.name)); }
         done += f.size;
     }

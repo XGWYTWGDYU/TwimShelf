@@ -49,6 +49,8 @@ export class CoreBindings {
   tl_secret_seal(a0: string | null, a1: string | null): Promise<string | null> { return this.t.call('tl_secret_seal', [a0, a1]) as Promise<string | null>; }
   tl_secret_open(a0: string | null, a1: string | null): Promise<string | null> { return this.t.call('tl_secret_open', [a0, a1]) as Promise<string | null>; }
   tl_model_catalog(a0: string | null): Promise<string | null> { return this.t.call('tl_model_catalog', [a0]) as Promise<string | null>; }
+  tl_model_source(): Promise<string | null> { return this.t.call('tl_model_source', []) as Promise<string | null>; }
+  tl_set_model_source(a0: string | null): Promise<string | null> { return this.t.call('tl_set_model_source', [a0]) as Promise<string | null>; }
   tl_hub_device(): Promise<string | null> { return this.t.call('tl_hub_device', []) as Promise<string | null>; }
   tl_hub_search(a0: string | null): Promise<string | null> { return this.t.call('tl_hub_search', [a0]) as Promise<string | null>; }
   tl_hub_repo(a0: string | null, a1: string | null): Promise<string | null> { return this.t.call('tl_hub_repo', [a0, a1]) as Promise<string | null>; }
