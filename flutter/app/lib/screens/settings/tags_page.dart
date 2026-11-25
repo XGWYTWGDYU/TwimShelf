@@ -170,7 +170,11 @@ class _TagsPageState extends State<TagsPage> {
       body: tags == null
           ? const Center(child: CircularProgressIndicator())
           : all!.isEmpty
-              ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text(L('tags.none'), style: theme.textTheme.titleMedium), Text(L('tags.none.message'))]))
+              ? Center(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 32), child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(L('tags.none'), style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
+                  const SizedBox(height: 8),
+                  Text(L('tags.none.message'), style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant), textAlign: TextAlign.center),
+                ])))
               : Column(children: [
                 filter,
                 Expanded(child: ListView.builder(
