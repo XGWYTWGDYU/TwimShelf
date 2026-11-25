@@ -61,6 +61,10 @@ class ViewerPage extends StatefulWidget {
   /// its own copy while the viewer zooms out of or back into it).
   static final activeMediaId = ValueNotifier<String?>(null);
 
+  /// The viewer that set [activeMediaId]: one opened while the last is still zooming out owns it,
+  /// and the closing one must not clear it under the new one (its tile would show twice).
+  static Object? _activeOwner;
+
   /// Pushes [ViewerPage] with a zoom transition from and back to [sourceRect].
   static Future<void> push(
     BuildContext context, {
@@ -77,8 +81,10 @@ class ViewerPage extends StatefulWidget {
       PageRouteBuilder<void>(
         opaque: false,
         barrierColor: Colors.transparent,
-        transitionDuration: const Duration(milliseconds: 280),
-        reverseTransitionDuration: const Duration(milliseconds: 250),
+        // quick, as Photos: a tap on the grid while it zooms out is answered (the closing route
+        // takes no taps), and opens the next viewer
+        transitionDuration: const Duration(milliseconds: 140),
+        reverseTransitionDuration: const Duration(milliseconds: 125),
         pageBuilder: (context, animation, secondaryAnimation) => ViewerPage(
           library: library,
           items: items,
@@ -231,9 +237,21 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
       // With a route animation, _onRouteAnimation hides it once Frame 0 has painted (anim.value > 0)
       // so the source remains visible beneath Frame 0 and never flashes a blank slot.
       if (widget.routeAnimation == null && widget.items.isNotEmpty) {
-        ViewerPage.activeMediaId.value = _item.media_id;
+        _claim(_item.media_id);
       }
     });
+  }
+
+  void _claim(String mediaId) {
+    ViewerPage._activeOwner = this;
+    ViewerPage.activeMediaId.value = mediaId;
+  }
+
+  /// Clears [ViewerPage.activeMediaId] only if this viewer set it.
+  void _release() {
+    if (ViewerPage._activeOwner != this) return;
+    ViewerPage._activeOwner = null;
+    ViewerPage.activeMediaId.value = null;
   }
 
   void _onRouteAnimation() {
@@ -241,7 +259,7 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
     if (anim == null) return;
     if (anim.status == AnimationStatus.forward || anim.status == AnimationStatus.completed) {
       if (anim.value > 0.0 && widget.items.isNotEmpty && ViewerPage.activeMediaId.value != _item.media_id) {
-        ViewerPage.activeMediaId.value = _item.media_id;
+        _claim(_item.media_id);
       }
     } else if (anim.status == AnimationStatus.reverse) {
       if (!_closing) {
@@ -253,11 +271,11 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
       // media lands on top of it (t = 4 * 0.12^3 = 0.007), BEFORE the flying layer dissolves
       // and BEFORE the route is removed from the Overlay, eliminating any 1-frame blank flash.
       if (anim.value <= 0.12 && ViewerPage.activeMediaId.value != null) {
-        ViewerPage.activeMediaId.value = null;
+        _release();
       }
     } else if (anim.status == AnimationStatus.dismissed) {
       if (ViewerPage.activeMediaId.value != null) {
-        ViewerPage.activeMediaId.value = null;
+        _release();
       }
     }
   }
@@ -412,7 +430,7 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
     widget.routeAnimation?.removeListener(_onRouteAnimation);
     scheduleMicrotask(() {
       immersivePages.value--;
-      ViewerPage.activeMediaId.value = null;
+      _release();
       VideoSession.endViewer();
     });
     _pages.dispose();
@@ -485,7 +503,7 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
               _zoomed = false;
               _turned = false;
             });
-            ViewerPage.activeMediaId.value = widget.items[i].media_id;
+            _claim(widget.items[i].media_id);
             _prepareNeighbours();
           },
           itemBuilder: (context, i) {
@@ -569,7 +587,7 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
             VideoSession.willCloseViewer();
             _video?.leaveForCard();
             if (widget.routeAnimation == null) {
-              ViewerPage.activeMediaId.value = null;
+              _release();
             }
           }
         },

@@ -1036,9 +1036,24 @@ final class PhotoViewController: UIViewController, UIPageViewControllerDataSourc
         #endif
     }
 
+    /// The system's zoom transition, at twice its speed: UIKit gives it no duration to set, so the
+    /// window's layers run faster while it lasts. Not while a finger drives it (dismissing by a drag
+    /// follows the finger), and back to normal when it ends.
+    private func quickenZoom(in window: UIWindow?) {
+        guard let window, let coordinator = transitionCoordinator, coordinator.isAnimated, !coordinator.isInteractive else { return }
+        window.layer.speed = 2
+        coordinator.animate(alongsideTransition: nil) { _ in window.layer.speed = 1 }
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if isBeingPresented { quickenZoom(in: presentingViewController?.view.window) }
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         guard isBeingDismissed else { return }
+        quickenZoom(in: view.window)
         if transitionCoordinator?.animate(alongsideTransition: nil, completion: { [weak self] context in
             if !context.isCancelled { self?.finishDismissal() }
         }) != true {
