@@ -91,7 +91,7 @@ docker run -d --name twimshelf --restart unless-stopped -p 2778:2778 -v /srv/twi
 2. 第一次的登录密码在 `docker logs twimshelf` 里。
 3. 用 `docker exec -it twimshelf twimshelf passwd` 改成自己的密码。
 
-程序在容器的 `/app`，数据都在 `/data`，端口和数据目录可以随意映射。默认只接受局域网访问；局域网同步需要 host 网络。更新时拉取新镜像、重建容器即可，数据不动。环境变量、公网访问、更新和 GPU 的说明见 [docker/README.md](docker/README.md)。
+程序在容器的 `/app`，数据都在 `/data`，端口和数据目录可以随意映射。默认只接受局域网访问；局域网同步需要 host 网络（`--network host`）。如需在容器里使用本地 AI 标记，启动时需要透传 GPU（NVIDIA 加 `--gpus all`，AMD / Intel 加 `--device /dev/dri`）。更新时拉取新镜像、重建容器即可，数据不动。环境变量、公网访问、更新和 GPU 的详细说明见 [docker/README.md](docker/README.md)。
 
 ## 浏览器扩展
 

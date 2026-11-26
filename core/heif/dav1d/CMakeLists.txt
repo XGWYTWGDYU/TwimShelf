@@ -34,6 +34,15 @@ list(TRANSFORM templates APPEND "_tmpl.c")
 
 set(includes "${CMAKE_BINARY_DIR}/gen" "${S}" "${S}/include" "${CMAKE_BINARY_DIR}/gen/dav1d")
 if(MSVC)
+  if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+    # MSVC 14.52+ (VS 18 / 2026) rejects __has_include_next on the same #if line as defined(__clang__) (C7780).
+    file(READ "${S}/include/compat/msvc/stdatomic.h" _dav1d_stdatomic)
+    string(REPLACE
+      "#if defined(__clang__) && __has_include_next(<stdatomic.h>)"
+      "#if 0"
+      _dav1d_stdatomic "${_dav1d_stdatomic}")
+    file(WRITE "${CMAKE_BINARY_DIR}/gen/stdatomic.h" "${_dav1d_stdatomic}")
+  endif()
   list(APPEND includes "${S}/include/compat/msvc")
 endif()
 foreach(depth 8 16)

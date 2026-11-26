@@ -75,7 +75,6 @@ docker exec -it twimshelf twimshelf passwd
 和 App 的不同：
 
 - 照片网格只有几档固定的缩放，没有 App 里连续的捏合缩放。
-- 本地 AI 模型只在 App 里运行，网页版使用外部模型。
 - 宠物、应用锁、系统分享菜单、快捷操作这类设备功能没有。
 - 视频封面由浏览器从视频里截取，浏览器解不了的格式没有封面。
 
@@ -103,7 +102,7 @@ docker exec -it twimshelf twimshelf passwd
 
 ## 不连外网的局域网
 
-界面需要的一切（CanvasKit、Roboto、图标）都在镜像里。中文、日文、emoji 等字体在第一次用到时由服务器从 Google Fonts 取回，保存在 `/data/cache/fonts`，之后局域网里的浏览器不再需要外网。
+网页版前端资源都打包在镜像里，局域网内不连外网也能正常访问（仅在需要下载新模型或获取外部数据时才需要联网）。
 
 ## 更新
 

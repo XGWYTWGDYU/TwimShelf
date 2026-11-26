@@ -328,7 +328,7 @@ cargo test -p tl-server
 
 Release 页面没有说明文字，只包含所有安装包、`SHA256SUMS.txt`、`BUILD-INFO.json` 和 `THIRD-PARTY-NOTICES.txt`。
 
-**架构**：Windows 版在 x64 和 ARM64 的机器上各构建一个安装包，Linux 桌面版在 amd64 和 arm64 的机器上各构建一个 AppImage，Android 只有 arm64-v8a。
+**架构**：Windows 版构建 x64 安装包，Linux 桌面版在 amd64 和 arm64 的机器上各构建一个 AppImage，Android 只有 arm64-v8a。
 
 **Linux 服务器的镜像**：每次运行都分别在 x86_64 和 arm64 的机器上构建 Docker 镜像（同时带 Vulkan 和 CUDA）；发布新版本时推送到 GitHub Container Registry，标签是 `ghcr.io/<owner>/twimshelf:<version>` 和 `:latest`，一个标签同时包含两种架构。镜像由工作流发布，会关联到仓库并继承仓库的可见性：公开仓库发布的镜像任何人都能直接拉取。如果在仓库所有者的 Packages 页面看到它是私有的，在该包的 Package settings › Change visibility 里改为公开。
 

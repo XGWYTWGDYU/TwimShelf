@@ -210,15 +210,13 @@ jobs:
           retention-days: 30
 
   windows:
-    # x64 and ARM64, each built on its own kind of machine (build.ps1 builds for the one it runs on)
+    # x64 only in CI (build.ps1 builds for the architecture it runs on)
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x64
             runner: windows-2025
-          - arch: arm64
-            runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - run: git config --system core.longpaths true
@@ -248,7 +246,7 @@ jobs:
       # NVIDIA's CUDA (x64; no CUDA for Windows on ARM): its runtime and cuBLAS go into the app
       - name: CUDA toolkit
         if: matrix.arch == 'x64'
-        uses: Jimver/cuda-toolkit@v0.2.24
+        uses: Jimver/cuda-toolkit@v0.2.36
         with:
           cuda: '12.9.1'
           method: network
