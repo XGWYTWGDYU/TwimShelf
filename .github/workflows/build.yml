@@ -78,7 +78,7 @@ jobs:
           python3 scripts/apply.py versions --check
 
   apple:
-    runs-on: macos-26
+    runs-on: xcode-27
     strategy:
       fail-fast: false
       matrix:
@@ -91,7 +91,8 @@ jobs:
           python-version: '3.12'
       - name: Use the newest Xcode on this machine
         run: |
-          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          xcode=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$xcode" ] || xcode=/Applications/Xcode.app
           sudo xcode-select -s "$xcode/Contents/Developer"
           xcodebuild -version
       - uses: actions/cache@v4
