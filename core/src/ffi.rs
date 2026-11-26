@@ -1218,8 +1218,13 @@ pub extern "C" fn tl_ai_set_mlx(describe: crate::ai::engine::MlxDescribe, free: 
 #[no_mangle]
 pub extern "C" fn tl_ai_tag(request_json: *const c_char) -> *mut c_char {
     respond_ai(|| {
-        let req: crate::ai::TagRequest = serde_json::from_str(&s(request_json))?;
+        let mut req: crate::ai::TagRequest = serde_json::from_str(&s(request_json))?;
         let lib = current_library();
+        // the library's tags, without those only this model gave (Store::own_labels): every app
+        // sends its most used tags, and a model must not be fed its own words back as the library's
+        if let Some(l) = lib.as_ref() {
+            if let Ok(own) = l.db().own_labels(req.model.id()) { req.vocabulary.retain(|t| !own.contains(t)); }
+        }
         let setting = |k: &str| lib.as_ref().and_then(|l| l.db().setting(k).ok().flatten());
         Ok(crate::ai::tag(&models_dir(), setting, &req)?)
     })
