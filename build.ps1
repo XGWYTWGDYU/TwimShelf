@@ -167,15 +167,50 @@ function Build-Llama-Windows {
   $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
   $vsMajor = [int]((& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationVersion).Split('.')[0])
   $cmake = "$vs\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
+  $ninja = "$vs\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
   $build = "$Cache\llama-win-$Arch"
   # TL_LLAMA_SOURCE: a local llama.cpp checkout of the tag in tl_llama/src/CMakeLists.txt (no download)
   $source = @()
   if ($env:TL_LLAMA_SOURCE) { $source += "-DTL_LLAMA_SOURCE=$($env:TL_LLAMA_SOURCE -replace '\\', '/')" }
   $cuda = (-not $Arm) -and $env:CUDA_PATH -and (Test-Path "$env:CUDA_PATH\bin\nvcc.exe")
+  $msvc144 = if ($cuda -and $vsMajor -ge 18) {
+    Get-ChildItem "$vs\VC\Tools\MSVC" -Directory -Filter '14.4*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+  }
   if ($cuda) {
     $source += '-DTL_LLAMA_CUDA=ON'
-    if ($vsMajor -ge 18) {
-      # CUDA 12.9 does not register MSBuild extensions into VS 18 (2026) and nvcc rejects VS 18 by default
+    Say "llama.cpp: with CUDA ($env:CUDA_PATH)"
+  }
+  elseif (-not $Arm) {
+    # a release always has it (TL_REQUIRE_CUDA in CI): one app for every GPU
+    if ($env:TL_REQUIRE_CUDA) { Fail 'The CUDA toolkit is required (CUDA_PATH)' }
+    Say 'llama.cpp: no CUDA toolkit (CUDA_PATH), so no CUDA backend: NVIDIA cards use Vulkan'
+  }
+  if ($cuda -and $vsMajor -ge 18 -and $msvc144 -and (Test-Path $ninja)) {
+    # CUDA 12.9's cudafe++ crashes (0xC0000005) on MSVC 14.52+ headers and CMake's VS 18 generator
+    # rejects pairing v145 with version=14.44; build with Ninja under vcvars64 -vcvars_ver=14.44 instead.
+    Say "llama.cpp: using Ninja + MSVC $($msvc144.Name) for CUDA"
+    $rel = "$build\Release"
+    $cfgArgs = @(
+      '-S', "$Root\flutter\tl_llama\src", '-B', $build, '-G', 'Ninja',
+      "-DCMAKE_MAKE_PROGRAM=$($ninja -replace '\\','/')",
+      '-DCMAKE_BUILD_TYPE=Release',
+      "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$($rel -replace '\\','/')",
+      "-DCMAKE_CUDA_HOST_COMPILER=$(($msvc144.FullName + '\bin\Hostx64\x64\cl.exe') -replace '\\','/')",
+      '-Wno-dev'
+    ) + $source
+    $bat = "$Cache\llama-win-$Arch.cmd"
+    $cmd = @(
+      '@echo off'
+      "call `"$vs\VC\Auxiliary\Build\vcvars64.bat`" -vcvars_ver=$($msvc144.Name) || exit /b 1"
+      "`"$cmake`" " + (($cfgArgs | ForEach-Object { "`"$_`"" }) -join ' ') + ' || exit /b 1'
+      "`"$cmake`" --build `"$build`" --target tl_llama --parallel || exit /b 1"
+    ) -join "`r`n"
+    Set-Content -Path $bat -Value $cmd -Encoding ASCII
+    & cmd /c $bat
+    if ($LASTEXITCODE) { Fail 'Building llama.cpp failed' }
+  }
+  else {
+    if ($cuda -and $vsMajor -ge 18) {
       $extSrc = "$env:CUDA_PATH\extras\visual_studio_integration\MSBuildExtensions"
       $extDst = "$vs\MSBuild\Microsoft\VC\v180\BuildCustomizations"
       if ((Test-Path $extSrc) -and (Test-Path "$vs\MSBuild\Microsoft\VC\v180")) {
@@ -184,28 +219,13 @@ function Build-Llama-Windows {
       }
       $source += '-DCMAKE_CUDA_FLAGS=-allow-unsupported-compiler'
     }
-    Say "llama.cpp: with CUDA ($env:CUDA_PATH)"
+    $gen = if ($vsMajor -ge 18) { 'Visual Studio 18 2026' } else { 'Visual Studio 17 2022' }
+    & $cmake -S "$Root\flutter\tl_llama\src" -B $build -G $gen -A $(if ($Arm) { 'ARM64' } else { 'x64' }) -Wno-dev @source | Out-Null
+    if ($LASTEXITCODE) { Fail 'Configuring llama.cpp failed' }
+    & $cmake --build $build --config Release --target tl_llama --parallel
+    if ($LASTEXITCODE) { Fail 'Building llama.cpp failed' }
   }
-  elseif (-not $Arm) {
-    # a release always has it (TL_REQUIRE_CUDA in CI): one app for every GPU
-    if ($env:TL_REQUIRE_CUDA) { Fail 'The CUDA toolkit is required (CUDA_PATH)' }
-    Say 'llama.cpp: no CUDA toolkit (CUDA_PATH), so no CUDA backend: NVIDIA cards use Vulkan'
-  }
-  $gen = if ($vsMajor -ge 18) { 'Visual Studio 18 2026' } else { 'Visual Studio 17 2022' }
-  $toolset = @()
-  if ($cuda -and $vsMajor -ge 18) {
-    # CUDA 12.9's cudafe++ crashes (0xC0000005) on MSVC 14.52+ headers; use side-by-side MSVC 14.4x when present
-    $msvc144 = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory -Filter '14.4*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
-    if ($msvc144) {
-      $toolset = @('-T', "version=$($msvc144.Name),host=x64")
-      Say "llama.cpp: using MSVC $($msvc144.Name) for CUDA"
-    }
-  }
-  & $cmake -S "$Root\flutter\tl_llama\src" -B $build -G $gen -A $(if ($Arm) { 'ARM64' } else { 'x64' }) @toolset -Wno-dev @source | Out-Null
-  if ($LASTEXITCODE) { Fail 'Configuring llama.cpp failed' }
-  & $cmake --build $build --config Release --target tl_llama --parallel
-  if ($LASTEXITCODE) { Fail 'Building llama.cpp failed' }
-  Get-ChildItem $build -Recurse -Filter *.dll | Where-Object { $_.FullName -match '\\Release\\' } | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
+  Get-ChildItem $build -Recurse -Filter *.dll | Where-Object { $_.FullName -match '\\(Release|bin)\\' -and $_.FullName -notmatch 'CMakeFiles' } | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
   if ($cuda) {
     # CUDA's runtime and cuBLAS, which ggml-cuda.dll loads (CUDA 12: in bin, or bin\x64 from 13 on)
     Get-ChildItem "$env:CUDA_PATH\bin" -Recurse -Include 'cudart64_*.dll', 'cublas64_*.dll', 'cublasLt64_*.dll' | Copy-Item -Destination "$Root\windows\TwimShelf\lib\" -Force
