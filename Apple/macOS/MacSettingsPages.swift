@@ -48,7 +48,7 @@ struct SettingsRootView: View {
                     NavTile(title: L("common.importAndBackup"), detail: nil, symbol: "shippingbox.fill", color: .brown, id: "nav-transfer") { env.open(L("common.importAndBackup"), MacSettingsPages.transfer()) }
                     NavTile(title: L("common.tags"), detail: nil, symbol: "tag.fill", color: .indigo, id: "nav-tags") { env.open(L("common.tags"), MacTagsPage()) }
                     NavTile(title: L("common.aiModels"), detail: (ModelStore.shared.activeTaggerId.map { ModelStore.shared.displayName($0) } ?? L("mac.models.none")) + (counts.total > 0 ? L("mac.models.analysed", counts.done, counts.total) : ""),
-                            symbol: "sparkles", color: .purple, progress: counts.total > 0 ? Double(counts.done) / Double(counts.total) : nil, id: "nav-models") { env.open(L("common.aiModels"), MacSettingsPages.models()) }
+                            symbol: "sparkles", color: .purple, id: "nav-models") { env.open(L("common.aiModels"), MacSettingsPages.models()) }
                     NavTile(title: L("mac.sync"), detail: svc.hasAccount ? (online > 0 ? L("mac.sync.online", online) : L("mac.sync.noneOnline")) : L("mac.sync.noAccount"), symbol: "arrow.triangle.2.circlepath", color: .green,
                             badge: (svc.status?.syncing ?? 0) > 0 ? L("mac.sync.syncing") : nil, badgeColor: .blue, id: "nav-sync") { env.open(L("mac.sync"), MacSettingsPages.sync()) }
                     NavTile(title: L("ext.title"), detail: ExtensionReceiver.summary, symbol: "puzzlepiece.extension.fill", color: .indigo, id: "nav-extension") { env.open(L("ext.title"), MacSettingsPages.browserExtension()) }

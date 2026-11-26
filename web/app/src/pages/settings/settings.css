@@ -130,14 +130,14 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px color-mix(in srgb, var(--danger) 24%, transparent);
 }
 
-/* Hero Card (radius 24, padding 22, gap 20) */
+/* Hero Card (MacSettingsPages.swift: CardSurface radius 24, padding 22, gap 20) */
 .s-hero {
   border-radius: 24px;
   padding: 22px;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--card)) 0%, color-mix(in srgb, var(--ai) 6%, var(--card)) 55%, var(--card) 100%);
+  background: var(--card);
   box-shadow: var(--shadow-card);
   width: 100%;
 }

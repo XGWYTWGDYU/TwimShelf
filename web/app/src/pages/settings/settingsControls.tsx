@@ -272,9 +272,9 @@ export function StatsStrip({ stats }: { stats?: LibraryStats | null }) {
   return (
     <div className="stats-strip">
       <BigStat value={stats?.posts} name={L('common.posts')} icon={<MessageSquare size={12} />} color="var(--accent)" />
-      <BigStat value={stats?.photos} name={L('search.kw.photo.word')} icon={<Image size={12} />} color="var(--orange)" />
-      <BigStat value={stats?.videos} name={L('place.videos')} icon={<PlaySquare size={12} />} color="var(--danger)" />
-      <BigStat value={stats?.tags} name={L('common.tags')} icon={<Tag size={12} />} color="var(--ai)" />
+      <BigStat value={stats?.photos} name={L('search.kw.photo.word')} icon={<Image size={12} />} color="var(--accent)" />
+      <BigStat value={stats?.videos} name={L('place.videos')} icon={<PlaySquare size={12} />} color="var(--accent)" />
+      <BigStat value={stats?.tags} name={L('common.tags')} icon={<Tag size={12} />} color="var(--accent)" />
     </div>
   );
 }

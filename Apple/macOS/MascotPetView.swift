@@ -16,6 +16,7 @@ final class MascotPetView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         autoresizingMask = [.width, .height]
+        if frame.width > 0, frame.height > 0 { engine.setBounds(frame.size, margin: 18) }
         observers.append(NotificationCenter.default.addObserver(forName: Mascot.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.update() }
         })
@@ -41,6 +42,9 @@ final class MascotPetView: NSView {
     private func update() {
         let show = Mascot.isOn && Mascot.petFits(bounds.size) && window != nil
         isHidden = !show
+        if show {
+            engine.setBounds(bounds.size, margin: 18)
+        }
         if show, timer == nil {
             lastTime = 0
             let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.step() } }

@@ -120,7 +120,6 @@ function SettingsOverview() {
 
   const aiDetail = (activeModel ? activeModel.title : L('mac.models.none'))
     + (aiTotal > 0 ? L('mac.models.analysed', aiDone, aiTotal) : '');
-  const aiProgress = aiTotal > 0 ? aiDone / aiTotal : undefined;
 
   const syncDetail = hasAccount
     ? (onlinePeers > 0 ? L('mac.sync.online', onlinePeers) : L('mac.sync.noneOnline'))
@@ -229,7 +228,7 @@ function SettingsOverview() {
             <h2 className="s-hero-title">{L('common.library')}</h2>
             <Pill
               text={syncPillText}
-              color={syncing ? 'blue' : hasAccount ? 'green' : 'secondary'}
+              color={syncing ? 'blue' : 'secondary'}
               icon={<RefreshCw size={10} strokeWidth={2.5} />}
             />
           </div>
@@ -285,7 +284,6 @@ function SettingsOverview() {
               icon={<Sparkles size={19} strokeWidth={2} />}
               color="purple"
               mascot={tagActivity.running ? 'camera' : undefined}
-              progress={aiProgress}
               onClick={() => settings('ai')}
             />
             <NavTile
@@ -310,28 +308,6 @@ function SettingsOverview() {
         </SectionGroup>
 
         <SectionGroup title={L('mac.prefs')}>
-          <Card>
-            <CardRow
-              icon={<Columns3 size={15} />}
-              color="teal"
-              title={L('cards.section')}
-              detail={L('cards.footer')}
-              trailing={(
-                <span className="browse-card-density">
-                  <Select
-                    label={L('cards.section')}
-                    value={density}
-                    options={cardDensities.map((value) => ({ value, label: L(`cards.${value}`) }))}
-                    onChange={(value) => {
-                      const selected = cardDensities.find((option) => option === value);
-                      if (selected) setCardDensity(selected);
-                    }}
-                  />
-                  <ChevronDown className="browse-card-density-arrow" size={14} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-              )}
-            />
-          </Card>
           <Card spacing={14}>
             <div className="card-group-label">{L('common.search')}</div>
             <div style={{ padding: 12, borderRadius: 12, background: 'var(--bg-subtle)' }}>
@@ -344,9 +320,76 @@ function SettingsOverview() {
           </Card>
         </SectionGroup>
 
-        {window.twimshelf?.desktop && window.twimshelf.getLoginItem && (
-          <SectionGroup footer={L('settings.launchAtLogin.footer')}>
-            <Card spacing={12}>
+        <SectionGroup title={L('mascot.title')}>
+          <Card spacing={14}>
+            <ToggleRow
+              mascot="settings"
+              alwaysMascot
+              color="orange"
+              title={L('mascot.toggle')}
+              detail={L('mascot.footer')}
+              checked={mascot}
+              onChange={setMascotEnabled}
+            />
+            <RowDivider inset={42} />
+            <CardRow
+              icon={<Scale size={15} />}
+              color="gray"
+              title={L('mascot.licenses')}
+              trailing={(
+                <Button onClick={() => void alertMessage(L('mascot.licenses'), clawdLicense)}>
+                  {L('common.view')}
+                </Button>
+              )}
+            />
+          </Card>
+        </SectionGroup>
+
+        {(!!updateRepo() || !!serverRepo.data) && (
+          <Card spacing={12}>
+            <CardRow
+              icon={<ArrowDownCircle size={15} strokeWidth={2} />}
+              color="blue"
+              title={L('update.check')}
+              trailing={
+                <Button
+                  disabled={checkingUpdate}
+                  onClick={() => {
+                    setCheckingUpdate(true);
+                    void checkForUpdate(true).finally(() => setCheckingUpdate(false));
+                  }}>
+                  {checkingUpdate ? L('update.checking') : L('update.check')}
+                </Button>
+              }
+            />
+          </Card>
+        )}
+
+        <Card spacing={14}>
+          <CardRow
+            icon={<Columns3 size={15} />}
+            color="teal"
+            title={L('cards.section')}
+            trailing={(
+              <span className="browse-card-density">
+                <Select
+                  label={L('cards.section')}
+                  value={density}
+                  options={cardDensities.map((value) => ({ value, label: L(`cards.${value}`) }))}
+                  onChange={(value) => {
+                    const selected = cardDensities.find((option) => option === value);
+                    if (selected) setCardDensity(selected);
+                  }}
+                />
+                <ChevronDown className="browse-card-density-arrow" size={14} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+            )}
+          />
+        </Card>
+
+        <Card spacing={12}>
+          {window.twimshelf?.desktop && window.twimshelf.getLoginItem && (
+            <>
               <ToggleRow
                 icon={<Power size={15} strokeWidth={2} />}
                 color="green"
@@ -356,43 +399,9 @@ function SettingsOverview() {
                   void window.twimshelf?.setLoginItem?.(v).then(setLoginItem, () => {});
                 }}
               />
-            </Card>
-          </SectionGroup>
-        )}
-
-        {(!!updateRepo() || !!serverRepo.data) && (
-          <SectionGroup footer={L('update.footer')}>
-            <Card spacing={12}>
-              <CardRow
-                icon={<ArrowDownCircle size={15} strokeWidth={2} />}
-                color="blue"
-                title={L('update.check')}
-                trailing={
-                  <Button
-                    disabled={checkingUpdate}
-                    onClick={() => {
-                      setCheckingUpdate(true);
-                      void checkForUpdate(true).finally(() => setCheckingUpdate(false));
-                    }}>
-                    {checkingUpdate ? L('update.checking') : L('update.check')}
-                  </Button>
-                }
-              />
-            </Card>
-          </SectionGroup>
-        )}
-
-        <SectionGroup title={L('mascot.title')} footer={L('mascot.footer')}>
-          <Card spacing={12}>
-            <ToggleRow mascot="settings" alwaysMascot color="orange"
-              title={L('mascot.toggle')} checked={mascot} onChange={setMascotEnabled} />
-            <RowDivider inset={42} />
-            <NavRow icon={<Scale size={15} />} color="gray" title={L('mascot.licenses')}
-              onClick={() => void alertMessage(L('mascot.licenses'), clawdLicense)} />
-          </Card>
-        </SectionGroup>
-
-        <Card spacing={12}>
+              <RowDivider inset={42} />
+            </>
+          )}
           <NavRow
             id="nav-storage"
             icon={<HardDrive size={15} strokeWidth={2} />}
@@ -428,7 +437,6 @@ function SettingsOverview() {
             icon={<Trash2 size={15} strokeWidth={2} />}
             color="red"
             title={L('mac.wipe.title')}
-            detail={L('settings.wipe.footer')}
             trailing={
               <Button kind="danger" disabled={task.busy} onClick={() => void task.run(() => runWipeFlow())}>
                 {L('mac.eraseEllipsis')}

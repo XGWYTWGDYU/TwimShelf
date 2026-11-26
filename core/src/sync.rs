@@ -191,7 +191,13 @@ async fn model_wait<T>(f: impl std::future::Future<Output = anyhow::Result<T>>) 
 struct Channel { s: Box<dyn Wire>, tx: ChaCha20Poly1305, rx: ChaCha20Poly1305, tx_n: u64, rx_n: u64,
     /// Library generation when the session began: writes stop if a wipe happened since.
     epoch: u64,
-    revoked: tokio::sync::watch::Receiver<u64> }
+    revoked: tokio::sync::watch::Receiver<u64>,
+    /// RTT-bounded `peer - local` clock offset measured during the fast HMAC handshake, if the
+    /// peer sent `now_ms` in `Hello2`/`Hello3` and the round-trip stayed within `MAX_CLOCK_RTT_MS`.
+    handshake_skew_ms: Option<i64>,
+    /// Local wall time when the handshake finished; bounds the fallback `Msg::Hello` reading for
+    /// older peers so an iOS background suspension or slow disk scan never looks like clock skew.
+    handshake_done_ms: u64 }
 
 impl Channel {
     fn check(&self) -> anyhow::Result<()> {
@@ -254,9 +260,11 @@ enum Msg {
 #[derive(Serialize, Deserialize)]
 struct Hello1 { v: u32, mode: String, account: Option<String>, device: String, nonce: Option<String>, spake: Option<String> }
 #[derive(Serialize, Deserialize, Default)]
-struct Hello2 { error: Option<String>, nonce: Option<String>, device: Option<String>, mac: Option<String>, spake: Option<String>, sealed: Option<String> }
-#[derive(Serialize, Deserialize)]
-struct Hello3 { mac: Option<String>, ack: Option<String> }
+struct Hello2 { error: Option<String>, nonce: Option<String>, device: Option<String>, mac: Option<String>, spake: Option<String>, sealed: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] now_ms: Option<u64> }
+#[derive(Serialize, Deserialize, Default)]
+struct Hello3 { mac: Option<String>, ack: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] now_ms: Option<u64> }
 
 fn session_keys(account: &[u8; 32], ni: &[u8], nr: &[u8]) -> (ChaCha20Poly1305, ChaCha20Poly1305) {
     let salt = [ni, nr].concat();
@@ -426,11 +434,14 @@ impl SyncNode {
         if ni.len() != 32 { bail!("bad nonce"); }
         let nr: [u8; 32] = rand::random();
         let me = self.device_id();
-        send_json(&mut s, &Hello2 { nonce: Some(hex::encode(nr)), device: Some(me), mac: Some(hex::encode(hmac(&acct.key, &[b"R", &ni, &nr]))), ..Default::default() }).await?;
+        let t_send = now_ms();
+        send_json(&mut s, &Hello2 { nonce: Some(hex::encode(nr)), device: Some(me), mac: Some(hex::encode(hmac(&acct.key, &[b"R", &ni, &nr]))), now_ms: Some(t_send), ..Default::default() }).await?;
         let h3: Hello3 = recv_json(&mut s).await?;
+        let t_recv = now_ms();
         if !hmac_ok(&acct.key, &[b"I", &ni, &nr], &hex::decode(h3.mac.unwrap_or_default())?) { bail!("peer failed authentication"); }
+        let handshake_skew_ms = h3.now_ms.and_then(|their| crate::rules::measure_clock_skew(t_send, t_recv, their));
         let (i2r, r2i) = session_keys(&acct.key, &ni, &nr);
-        Ok(Channel { s: Box::new(s), tx: r2i, rx: i2r, tx_n: 0, rx_n: 0, epoch, revoked })
+        Ok(Channel { s: Box::new(s), tx: r2i, rx: i2r, tx_n: 0, rx_n: 0, epoch, revoked, handshake_skew_ms, handshake_done_ms: t_recv })
     }
 
     /// Initiator side of the handshake for `mode` ("sync" or "models").
@@ -446,21 +457,24 @@ impl SyncNode {
         // (the channel's own checks only start once the handshake is done).
         let mut leaving = revoked.clone();
         let handshake = async {
+            let t_send = now_ms();
             send_json(&mut s, &Hello1 { v: 1, mode: mode.into(), account: Some(acct.id.clone()), device: self.device_id(), nonce: Some(hex::encode(ni)), spake: None }).await?;
             let h2: Hello2 = recv_json(&mut s).await?;
+            let t_recv = now_ms();
             if let Some(e) = h2.error { bail!(tr!("sync.refused", e = e)); }
             let nr = hex::decode(h2.nonce.unwrap_or_default())?;
             if !hmac_ok(&acct.key, &[b"R", &ni, &nr], &hex::decode(h2.mac.unwrap_or_default())?) { bail!(tr!("sync.peerUnauthenticated")); }
-            send_json(&mut s, &Hello3 { mac: Some(hex::encode(hmac(&acct.key, &[b"I", &ni, &nr]))), ack: None }).await?;
-            Ok::<_, anyhow::Error>(nr)
+            let skew = h2.now_ms.and_then(|their| crate::rules::measure_clock_skew(t_send, t_recv, their));
+            send_json(&mut s, &Hello3 { mac: Some(hex::encode(hmac(&acct.key, &[b"I", &ni, &nr]))), ack: None, now_ms: Some(now_ms()) }).await?;
+            Ok::<_, anyhow::Error>((nr, skew))
         };
-        let nr = tokio::select! {
+        let (nr, handshake_skew_ms) = tokio::select! {
             biased;
             _ = leaving.changed() => bail!(tr!("sync.accountGone")),
             r = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake) => r.map_err(|_| anyhow!(tr!("sync.handshakeTimeout")))??,
         };
         let (i2r, r2i) = session_keys(&acct.key, &ni, &nr);
-        Ok(Channel { s: Box::new(s), tx: i2r, rx: r2i, tx_n: 0, rx_n: 0, epoch, revoked })
+        Ok(Channel { s: Box::new(s), tx: i2r, rx: r2i, tx_n: 0, rx_n: 0, epoch, revoked, handshake_skew_ms, handshake_done_ms: now_ms() })
     }
 
     // ---------- on-demand model sharing ----------
@@ -625,7 +639,7 @@ impl SyncNode {
         let opened = aead.decrypt(&Channel::nonce(0), hex::decode(h2.sealed.unwrap_or_default())?.as_ref()).map_err(|_| anyhow!(tr!("sync.codeWrong")))?;
         let v: serde_json::Value = serde_json::from_slice(&opened)?;
         let key: [u8; 32] = hex::decode(v["key"].as_str().unwrap_or_default())?.try_into().map_err(|_| anyhow!("bad key"))?;
-        send_json(&mut s, &Hello3 { mac: None, ack: Some(hex::encode(hmac(&k, &[b"paired"]))) }).await?;
+        send_json(&mut s, &Hello3 { mac: None, ack: Some(hex::encode(hmac(&k, &[b"paired"]))), ..Default::default() }).await?;
         Ok(Account::from_key(key))
     }
 
@@ -636,7 +650,7 @@ impl SyncNode {
     pub async fn simulated_session<W: Wire + 'static>(self: &Arc<Self>, wire: W, initiator: bool) -> anyhow::Result<()> {
         let (i2r, r2i) = session_keys(&[7u8; 32], &[1u8; 32], &[2u8; 32]);
         let (tx, rx) = if initiator { (i2r, r2i) } else { (r2i, i2r) };
-        let ch = Channel { s: Box::new(wire), tx, rx, tx_n: 0, rx_n: 0, epoch: self.lib.epoch(), revoked: self.account_revision.subscribe() };
+        let ch = Channel { s: Box::new(wire), tx, rx, tx_n: 0, rx_n: 0, epoch: self.lib.epoch(), revoked: self.account_revision.subscribe(), handshake_skew_ms: None, handshake_done_ms: now_ms() };
         self.run_session(ch, initiator, "simulated".into()).await
     }
 
@@ -697,6 +711,11 @@ impl SyncNode {
         ch.send(&Msg::Hello { device: me.clone(), name, vv: my_vv, now_ms: now_ms() }).await?;
         let Msg::Hello { device: peer, name: peer_name, vv: their_vv, now_ms: their_now } = ch.recv().await? else { bail!("protocol: hello") };
         let my_now = now_ms();
+        // Prefer the causally RTT-bounded reading from the HMAC handshake (immune to DB scans and
+        // iOS background suspension between handshake and Hello). Fall back to Msg::Hello for older
+        // peers only when the elapsed time since handshake stayed within MAX_CLOCK_RTT_MS.
+        let measured_skew_ms = ch.handshake_skew_ms
+            .or_else(|| crate::rules::measure_clock_skew(ch.handshake_done_ms, my_now, their_now));
         if peer == me { bail!("connected to self"); }
         // One session per peer: a second concurrent session would fetch the same files twice.
         // Both sides check, and the side that finds a duplicate tells the other (two devices may
@@ -733,9 +752,9 @@ impl SyncNode {
         let mut peers = self.peers.lock().unwrap();
         let p = peers.entry(peer.clone()).or_default();
         p.device = peer; p.name = peer_name; p.addr = addr;
-        if their_now != 0 {
-            p.clock_skew_ms = i64::try_from(their_now as i128 - my_now as i128).ok();
-            p.clock_warning = crate::rules::skew_warning(my_now, their_now);
+        if let Some(skew) = measured_skew_ms {
+            p.clock_skew_ms = Some(skew);
+            p.clock_warning = crate::rules::skew_ms_warning(skew);
         }
         match &result { Ok(_) => { p.last_sync = now_s(); p.last_error = None; } Err(_) if busy => {} Err(e) => p.last_error = Some(format!("{e:#}")) }
         drop(peers);
@@ -1446,9 +1465,9 @@ mod tests {
         let (tx, rx) = session_keys(&[7; 32], &[1; 32], &[2; 32]);
         let (_revision, revoked) = tokio::sync::watch::channel(0);
         let mut sender = Channel { s: Box::new(a), tx: tx.clone(), rx: rx.clone(),
-            tx_n: u64::MAX - 1, rx_n: 0, epoch: 0, revoked: revoked.clone() };
+            tx_n: u64::MAX - 1, rx_n: 0, epoch: 0, revoked: revoked.clone(), handshake_skew_ms: None, handshake_done_ms: 0 };
         let mut receiver = Channel { s: Box::new(b), tx: rx, rx: tx,
-            tx_n: 0, rx_n: u64::MAX - 1, epoch: 0, revoked };
+            tx_n: 0, rx_n: u64::MAX - 1, epoch: 0, revoked, handshake_skew_ms: None, handshake_done_ms: 0 };
         sender.send_raw(b"last permitted nonce").await.unwrap();
         assert_eq!(receiver.recv_raw().await.unwrap(), b"last permitted nonce");
         for _ in 0..2 {
@@ -1555,7 +1574,7 @@ mod chatgpt_fault_tests {
   let lib=Arc::new(Library::open(dir).unwrap());let node=SyncNode::new(lib.clone());
   let (a,b)=tokio::io::duplex(1<<20);
   let (i2r,r2i)=session_keys(&[7;32],&[1;32],&[2;32]);
-  let mut peer=Channel{s:Box::new(a),tx:i2r,rx:r2i,tx_n:0,rx_n:0,epoch:0,revoked:node.account_revision.subscribe()};
+  let mut peer=Channel{s:Box::new(a),tx:i2r,rx:r2i,tx_n:0,rx_n:0,epoch:0,revoked:node.account_revision.subscribe(),handshake_skew_ms:None,handshake_done_ms:0};
   let n=node.clone();let task=tokio::spawn(async move {n.simulated_session(b,false).await});
   peer.send(&Msg::Hello{device:"peer".into(),name:"peer".into(),vv:Default::default(),now_ms:now_ms()}).await.unwrap();
   let _=peer.recv().await.unwrap();
@@ -1570,8 +1589,8 @@ mod chatgpt_fault_tests {
   let lib=Arc::new(Library::open(&dir).unwrap());let node=SyncNode::new(lib);
   let (a,b)=tokio::io::duplex(1<<20);
   let (i2r,r2i)=session_keys(&[7;32],&[1;32],&[2;32]);
-  let mut peer=Channel{s:Box::new(a),tx:i2r.clone(),rx:r2i.clone(),tx_n:0,rx_n:0,epoch:0,revoked:node.account_revision.subscribe()};
-  let mut ch=Channel{s:Box::new(b),tx:r2i,rx:i2r,tx_n:0,rx_n:0,epoch:0,revoked:node.account_revision.subscribe()};
+  let mut peer=Channel{s:Box::new(a),tx:i2r.clone(),rx:r2i.clone(),tx_n:0,rx_n:0,epoch:0,revoked:node.account_revision.subscribe(),handshake_skew_ms:None,handshake_done_ms:0};
+  let mut ch=Channel{s:Box::new(b),tx:r2i,rx:i2r,tx_n:0,rx_n:0,epoch:0,revoked:node.account_revision.subscribe(),handshake_skew_ms:None,handshake_done_ms:0};
   let id="a".repeat(64);
   peer.send(&Msg::Blob{id:id.clone(),ext:"jpg".into(),size:1024}).await.unwrap();
   peer.send_raw(&[1;16]).await.unwrap();drop(peer);
@@ -1593,7 +1612,7 @@ mod chatgpt_fault_tests {
   let (a,b) = tokio::io::duplex(1 << 20);
   let (i2r,r2i) = session_keys(&[7;32], &[1;32], &[2;32]);
   let mut ch = Channel { s: Box::new(b), tx:r2i, rx:i2r, tx_n:0, rx_n:0,
-      epoch:lib.epoch(), revoked:node.account_revision.subscribe() };
+      epoch:lib.epoch(), revoked:node.account_revision.subscribe(), handshake_skew_ms: None, handshake_done_ms: 0 };
   let n = node.clone();
   let task = tokio::spawn(async move { n.recv_ops(&mut ch).await });
   tokio::task::yield_now().await;
@@ -1601,6 +1620,98 @@ mod chatgpt_fault_tests {
   assert!(tokio::time::timeout(Duration::from_secs(2), task).await.unwrap().unwrap().is_err());
   assert!(lib.db().version_vector().unwrap().is_empty());
   drop(a); drop(node); drop(lib);
+  std::fs::remove_dir_all(dir).unwrap();
+ }
+
+ #[test]
+ fn clock_skew_measurement_rejects_stalled_and_detects_real_skew() {
+  use crate::rules::{measure_clock_skew, skew_ms_warning, MAX_CLOCK_RTT_MS};
+  let base = 1_700_000_000_000u64;
+  // Normal 20ms RTT, clocks aligned -> ~0ms skew, no warning.
+  let s = measure_clock_skew(base, base + 20, base + 10).unwrap();
+  assert_eq!(s, 0);
+  assert!(!skew_ms_warning(s));
+  // Real 8-minute peer lag over a fast 10ms RTT -> accurately flagged.
+  let eight_min = 8 * 60 * 1000;
+  let real = measure_clock_skew(base, base + 10, base - eight_min).unwrap();
+  assert_eq!(real, -(eight_min as i64) - 5);
+  assert!(skew_ms_warning(real));
+  // Simulated 8-minute iOS suspension between trigger and receive -> discarded (no false warning).
+  assert_eq!(measure_clock_skew(base, base + eight_min, base), None);
+  // Boundary: RTT right above MAX_CLOCK_RTT_MS is discarded; right at it is accepted.
+  assert_eq!(measure_clock_skew(base, base + MAX_CLOCK_RTT_MS + 1, base), None);
+  assert!(measure_clock_skew(base, base + MAX_CLOCK_RTT_MS, base + MAX_CLOCK_RTT_MS / 2).is_some());
+  // Backwards wall clock step or missing peer timestamp -> discarded.
+  assert_eq!(measure_clock_skew(base + 1000, base, base), None);
+  assert_eq!(measure_clock_skew(base, base + 10, 0), None);
+ }
+
+ #[tokio::test]
+ async fn suspended_session_before_hello_does_not_false_warn_clock_skew() {
+  let dir = std::env::temp_dir().join(format!("tl-skew-suspend-{}", rand::random::<u64>()));
+  let lib = Arc::new(Library::open(&dir).unwrap());
+  let node = SyncNode::new(lib.clone());
+  let (a, b) = tokio::io::duplex(1 << 20);
+  let (i2r, r2i) = session_keys(&[7; 32], &[1; 32], &[2; 32]);
+  let eight_min = 8 * 60 * 1000u64;
+  let now = now_ms();
+  // Reproduce an 8-minute pause between handshake completion and receiving an older peer's Hello:
+  // peer stamped Hello at `now - 8 min` right after handshake; local device woke up at `now`.
+  let mut peer_ch = Channel { s: Box::new(a), tx: r2i, rx: i2r, tx_n: 0, rx_n: 0,
+      epoch: 0, revoked: node.account_revision.subscribe(), handshake_skew_ms: None, handshake_done_ms: now - eight_min };
+  let local_ch = Channel { s: Box::new(b), tx: session_keys(&[7; 32], &[1; 32], &[2; 32]).0, rx: session_keys(&[7; 32], &[1; 32], &[2; 32]).1,
+      tx_n: 0, rx_n: 0, epoch: lib.epoch(), revoked: node.account_revision.subscribe(), handshake_skew_ms: None, handshake_done_ms: now - eight_min };
+  let peer_task = tokio::spawn(async move {
+      peer_ch.send(&Msg::Hello { device: "mac-peer".into(), name: "Mac".into(), vv: Default::default(), now_ms: now - eight_min }).await.unwrap();
+      let _ = peer_ch.recv().await.unwrap(); // Hello
+      let _ = peer_ch.recv().await.unwrap(); // OpsEnd
+      peer_ch.send(&Msg::OpsEnd).await.unwrap();
+      let _ = peer_ch.recv().await.unwrap(); // Want
+      peer_ch.send(&Msg::BlobsEnd).await.unwrap();
+      peer_ch.send(&Msg::Want { blobs: vec![] }).await.unwrap();
+      let _ = peer_ch.recv().await.unwrap(); // BlobsEnd
+      peer_ch.send(&Msg::Bye).await.unwrap();
+  });
+  node.run_session(local_ch, true, "127.0.0.1:1".into()).await.unwrap();
+  peer_task.await.unwrap();
+  let p = node.status().peers.into_iter().next().unwrap();
+  assert!(!p.clock_warning, "8-minute pause before Hello must not report peer clock as 8 min slow");
+  assert_eq!(p.clock_skew_ms, None);
+  drop(node); drop(lib);
+  std::fs::remove_dir_all(dir).unwrap();
+ }
+
+ #[tokio::test]
+ async fn genuine_clock_skew_over_fast_session_still_warns() {
+  let dir = std::env::temp_dir().join(format!("tl-skew-real-{}", rand::random::<u64>()));
+  let lib = Arc::new(Library::open(&dir).unwrap());
+  let node = SyncNode::new(lib.clone());
+  let (a, b) = tokio::io::duplex(1 << 20);
+  let (i2r, r2i) = session_keys(&[7; 32], &[1; 32], &[2; 32]);
+  let eight_min = 8 * 60 * 1000u64;
+  let now = now_ms();
+  // Fast handshake just finished (`handshake_done_ms = now`), yet peer's clock really is 8 min slow.
+  let mut peer_ch = Channel { s: Box::new(a), tx: r2i, rx: i2r, tx_n: 0, rx_n: 0,
+      epoch: 0, revoked: node.account_revision.subscribe(), handshake_skew_ms: None, handshake_done_ms: now };
+  let local_ch = Channel { s: Box::new(b), tx: session_keys(&[7; 32], &[1; 32], &[2; 32]).0, rx: session_keys(&[7; 32], &[1; 32], &[2; 32]).1,
+      tx_n: 0, rx_n: 0, epoch: lib.epoch(), revoked: node.account_revision.subscribe(), handshake_skew_ms: None, handshake_done_ms: now };
+  let peer_task = tokio::spawn(async move {
+      peer_ch.send(&Msg::Hello { device: "mac-peer".into(), name: "Mac".into(), vv: Default::default(), now_ms: now - eight_min }).await.unwrap();
+      let _ = peer_ch.recv().await.unwrap(); // Hello
+      let _ = peer_ch.recv().await.unwrap(); // OpsEnd
+      peer_ch.send(&Msg::OpsEnd).await.unwrap();
+      let _ = peer_ch.recv().await.unwrap(); // Want
+      peer_ch.send(&Msg::BlobsEnd).await.unwrap();
+      peer_ch.send(&Msg::Want { blobs: vec![] }).await.unwrap();
+      let _ = peer_ch.recv().await.unwrap(); // BlobsEnd
+      peer_ch.send(&Msg::Bye).await.unwrap();
+  });
+  node.run_session(local_ch, true, "127.0.0.1:1".into()).await.unwrap();
+  peer_task.await.unwrap();
+  let p = node.status().peers.into_iter().next().unwrap();
+  assert!(p.clock_warning, "genuine 8-minute clock skew must still trigger warning");
+  assert!((p.clock_skew_ms.unwrap() + eight_min as i64).abs() < 5000);
+  drop(node); drop(lib);
   std::fs::remove_dir_all(dir).unwrap();
  }
 

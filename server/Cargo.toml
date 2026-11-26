@@ -1,6 +1,6 @@
 [package]
 name = "tl-server"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 description = "TwimShelf for a server (NAS, homelab): the core and the web app over HTTP"
 

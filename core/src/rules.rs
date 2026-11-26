@@ -351,8 +351,29 @@ pub fn trash_expired(r: TrashReg, now_ms: u64, keep_ms: u64) -> bool {
 
 /// Clock difference to a peer worth warning about (the recycle bin and LWW use wall time).
 pub const SKEW_WARN_MS: i64 = 5 * 60 * 1000;
+/// Largest round-trip (or handshake-to-hello) delay over which a clock reading is still trusted.
+/// Anything longer (such as iOS suspending the app in the background or a slow disk scan) would
+/// mistake our own pause for the peer's clock being slow, so the sample is discarded.
+pub const MAX_CLOCK_RTT_MS: u64 = 10_000;
+
 pub fn skew_warning(mine_ms: u64, theirs_ms: u64) -> bool {
     theirs_ms != 0 && (theirs_ms as i128 - mine_ms as i128).abs() > SKEW_WARN_MS as i128
+}
+
+pub fn skew_ms_warning(skew_ms: i64) -> bool {
+    skew_ms.unsigned_abs() > SKEW_WARN_MS as u64
+}
+
+/// Estimates `peer_clock - local_clock` in milliseconds from a causally bounded exchange:
+/// `t_send_ms` was read before sending the trigger that caused the peer to stamp `peer_now_ms`,
+/// and `t_recv_ms` was read upon receiving it. Returns `None` if the peer reported no clock,
+/// local wall time stepped backwards, or the round-trip exceeded `MAX_CLOCK_RTT_MS`.
+pub fn measure_clock_skew(t_send_ms: u64, t_recv_ms: u64, peer_now_ms: u64) -> Option<i64> {
+    if peer_now_ms == 0 || t_recv_ms < t_send_ms { return None; }
+    let rtt = t_recv_ms - t_send_ms;
+    if rtt > MAX_CLOCK_RTT_MS { return None; }
+    let mid = t_send_ms + rtt / 2;
+    i64::try_from(peer_now_ms as i128 - mid as i128).ok()
 }
 
 /// For one device's log: the sequence range the peer is missing, as (first, last) inclusive.
@@ -942,6 +963,12 @@ mod proofs {
         if a != 0 && b != 0 { assert_eq!(skew_warning(a, b), skew_warning(b, a)); }
         assert!(!skew_warning(a, 0), "no reading from the peer: no warning");
         if b != 0 { assert_eq!(skew_warning(a, b), a.abs_diff(b) > SKEW_WARN_MS as u64); }
+        let t_send: u64 = kani::any();
+        let t_recv: u64 = kani::any();
+        assert_eq!(measure_clock_skew(t_send, t_recv, 0), None);
+        if t_recv < t_send || t_recv - t_send > MAX_CLOCK_RTT_MS {
+            assert_eq!(measure_clock_skew(t_send, t_recv, b), None);
+        }
     }
 
     #[kani::proof]

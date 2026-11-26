@@ -43,6 +43,9 @@ final class MascotPetView: UIView {
     private func update() {
         let show = Mascot.isOn && Mascot.petFits(bounds.size) && superview != nil
         isHidden = !show
+        if show {
+            engine.setBounds(bounds.size, margin: 18)
+        }
         if show, link == nil {
             let l = CADisplayLink(target: self, selector: #selector(step(_:)))
             l.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)   // pixel art
