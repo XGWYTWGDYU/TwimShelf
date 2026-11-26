@@ -55,7 +55,13 @@ impl std::error::Error for AiError {}
 
 impl From<crate::ai::reply::ReplyError> for AiError {
     fn from(e: crate::ai::reply::ReplyError) -> Self {
-        AiError::new(match e { crate::ai::reply::ReplyError::Bad => Kind::BadTags, crate::ai::reply::ReplyError::None => Kind::NoTags })
+        use crate::ai::reply::ReplyError;
+        match e {
+            ReplyError::Bad => AiError::new(Kind::BadTags),
+            // a cut-off or unfinished answer: a failed analysis, never tags (and never AiDone)
+            ReplyError::Incomplete => AiError::detail(Kind::BadTags, "incomplete answer"),
+            ReplyError::None => AiError::new(Kind::NoTags),
+        }
     }
 }
 

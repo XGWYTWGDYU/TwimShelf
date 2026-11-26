@@ -62,7 +62,9 @@ pub struct Tagged {
     pub ms: u64,
 }
 
-const LOCAL_MAX_TOKENS: i32 = 160;
+/// Twelve tags of six characters in a code fence take about 130 of Gemma 4's tokens (measured:
+/// 107 for ten); an answer that runs out of budget is a failure now, so leave room.
+const LOCAL_MAX_TOKENS: i32 = 256;
 
 impl ModelRef {
     /// The name the model's prompt is kept under.
@@ -96,7 +98,8 @@ pub fn tag(models_dir: &Path, setting: impl Fn(&str) -> Option<String>, req: &Ta
                 local_gguf(models_dir, &gguf, info.bytes, &picture.0, &prompt.system, &question, &job.cancel)?
             } else {
                 let text = engine::describe_mlx(&dir, &picture.0, &prompt.system, &question, LOCAL_MAX_TOKENS)?;
-                (reply::parse_tags(&text)?, None)
+                // MLX does not say why it stopped: the list itself must be whole and not loop
+                (reply::local_tags(&text, reply::Finish::Ended)?, None)
             };
             Ok(Tagged { tags, device, ms: start.elapsed().as_millis() as u64 })
         }
@@ -122,8 +125,8 @@ impl Drop for Picture {
 fn local_gguf(models_dir: &Path, model: &engine::Gguf, bytes: u64, image: &Path, system: &str, question: &str, cancel: &Cancel) -> AiResult<(Vec<String>, Option<String>)> {
     let run = |device: &str| -> AiResult<Vec<String>> {
         cancel.check()?;
-        let text = engine::describe_gguf(model, device, image, system, question, LOCAL_MAX_TOKENS)?;
-        Ok(reply::parse_tags(&text)?)
+        let (text, finish) = engine::describe_gguf(model, device, image, system, question, LOCAL_MAX_TOKENS)?;
+        Ok(reply::local_tags(&text, finish)?)
     };
     let gpus = devices::gpus();
     if gpus.is_empty() { return Err(AiError::new(Kind::NoGpu)); }
