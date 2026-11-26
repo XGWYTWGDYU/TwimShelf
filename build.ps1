@@ -192,7 +192,16 @@ function Build-Llama-Windows {
     Say 'llama.cpp: no CUDA toolkit (CUDA_PATH), so no CUDA backend: NVIDIA cards use Vulkan'
   }
   $gen = if ($vsMajor -ge 18) { 'Visual Studio 18 2026' } else { 'Visual Studio 17 2022' }
-  & $cmake -S "$Root\flutter\tl_llama\src" -B $build -G $gen -A $(if ($Arm) { 'ARM64' } else { 'x64' }) -Wno-dev @source | Out-Null
+  $toolset = @()
+  if ($cuda -and $vsMajor -ge 18) {
+    # CUDA 12.9's cudafe++ crashes (0xC0000005) on MSVC 14.52+ headers; use side-by-side MSVC 14.4x when present
+    $msvc144 = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory -Filter '14.4*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+    if ($msvc144) {
+      $toolset = @('-T', "version=$($msvc144.Name),host=x64")
+      Say "llama.cpp: using MSVC $($msvc144.Name) for CUDA"
+    }
+  }
+  & $cmake -S "$Root\flutter\tl_llama\src" -B $build -G $gen -A $(if ($Arm) { 'ARM64' } else { 'x64' }) @toolset -Wno-dev @source | Out-Null
   if ($LASTEXITCODE) { Fail 'Configuring llama.cpp failed' }
   & $cmake --build $build --config Release --target tl_llama --parallel
   if ($LASTEXITCODE) { Fail 'Building llama.cpp failed' }
