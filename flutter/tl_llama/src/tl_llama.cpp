@@ -230,8 +230,11 @@ static char *describe_picture(tl_llama *m, const char *image, const char *system
   mtmd_bitmap_free(bitmap);
   if (r != 0) { fail(error, "prompt"); return nullptr; }
 
-  // nearly greedy, as the MLX engine (temperature 0.1)
+  // nearly greedy, as the MLX engine (temperature 0.1), but not caught in a loop: at 0.1 alone
+  // half of Gemma 4's lists repeated one entry until the token budget ran out ("藍色 衣服" ...);
+  // a mild repetition penalty over the last 64 tokens ended all of them (measured, 18 + 18 runs)
   llama_sampler *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+  llama_sampler_chain_add(smpl, llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 64, 1.1f, 0.0f, 0.0f));
   llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.1f));
   llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
   std::string out;
