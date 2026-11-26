@@ -1,8 +1,4 @@
 {
-  "features" : [
-    "refractivity",
-    "specular-location"
-  ],
   "fill" : {
     "linear-gradient" : [
       "display-p3:0.62875,0.80698,1.00000,1.00000",
@@ -24,7 +20,6 @@
           "value" : "normal"
         }
       ],
-      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
@@ -63,23 +58,17 @@
           "value" : 1
         }
       ],
-      "refractivity" : {
-        "depth" : 0.1628515625,
-        "enabled" : true,
-        "strength" : 0.223984375
-      },
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.5
       },
-      "specular" : "outside",
+      "specular" : true,
       "translucency" : {
         "enabled" : true,
         "value" : 0.7
       }
     },
     {
-      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
@@ -118,23 +107,17 @@
           "value" : 1
         }
       ],
-      "refractivity" : {
-        "depth" : 0.1628515625,
-        "enabled" : true,
-        "strength" : 0.223984375
-      },
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.5
       },
-      "specular" : "outside",
+      "specular" : true,
       "translucency" : {
         "enabled" : true,
         "value" : 0.65
       }
     },
     {
-      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
@@ -173,16 +156,11 @@
           "value" : 1
         }
       ],
-      "refractivity" : {
-        "depth" : 0,
-        "enabled" : false,
-        "strength" : -0.5856640625
-      },
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.5
       },
-      "specular" : "outside",
+      "specular" : true,
       "translucency" : {
         "enabled" : false,
         "value" : 0.5
