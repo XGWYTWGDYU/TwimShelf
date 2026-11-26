@@ -330,6 +330,15 @@ internal static unsafe partial class Native
     internal static partial nint tl_check_cookies(string? @auth_token, string? @ct0);
 
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_cookies_list();
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_cookie_save(string? @account_json);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_cookie_delete(string? @id);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint tl_export_status();
 
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
@@ -495,6 +504,19 @@ internal static unsafe partial class Native
 
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial nint tl_ext_remove(string? @id);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_ext_managed_status();
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_ext_managed_check(string? @repo);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    internal static partial nint tl_ext_managed_install(string? @repo);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    internal static partial bool tl_ext_take_open_settings();
 
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial void tl_ai_set_engine_dir(string? @dir);

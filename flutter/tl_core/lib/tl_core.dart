@@ -207,6 +207,34 @@ class Core {
         _bindings.tl_set_cookies(
             _string(authToken, arena), _string(ct0, arena));
       });
+  static List<CookieAccount> cookiesList() => _call((arena) {
+        final value = _read(_bindings.tl_cookies_list());
+        return (value as List)
+            .map((v) => CookieAccount.fromJson(v as Map<String, dynamic>))
+            .toList();
+      });
+  static CookieAccount saveCookie({
+    String? id,
+    String label = '',
+    required String authToken,
+    required String ct0,
+    String? screenName,
+  }) =>
+      _call((arena) {
+        final body = jsonEncode({
+          'id': id,
+          'label': label,
+          'auth_token': authToken,
+          'ct0': ct0,
+          'screen_name': screenName,
+        });
+        final value = _read(_bindings.tl_cookie_save(_string(body, arena)));
+        return CookieAccount.fromJson(value as Map<String, dynamic>);
+      });
+  static bool deleteCookie(String id) => _call((arena) {
+        final value = _read(_bindings.tl_cookie_delete(_string(id, arena)));
+        return value as bool;
+      });
   static void addTag(String label, String mediaId, {bool ai = false}) =>
       _call((arena) {
         _read(_bindings.tl_tag(

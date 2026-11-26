@@ -312,6 +312,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         SyncService.shared.start()
         // the browser extension sends links here while the app is open
         ExtensionReceiver.shared.start()
+        NotificationCenter.default.addObserver(forName: ExtensionReceiver.openSettingsRequested, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let open = {
+                    self.main.setPanel(open: true, animated: false)
+                    self.main.panel.popToRoot()
+                    self.main.panel.push(MacSettingsPages.browserExtension(autoCheckUpdate: true), title: L("ext.title"))
+                }
+                if self.lockWhenShown {
+                    AppLock.authenticate { [weak self] outcome in
+                        switch outcome {
+                        case .passed, .unavailable:
+                            self?.lockWhenShown = false
+                            self?.showWindowAgain()
+                            open()
+                        case .stayed: break
+                        }
+                    }
+                } else {
+                    self.showWindowAgain()
+                    open()
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            ExtensionReceiver.checkUpdateOnLaunch(window: self?.window)
+        }
         // Recycle bin: delete what stayed longer than the retention period.
         DispatchQueue.global(qos: .utility).async { if Core.expireTrash() > 0 { DispatchQueue.main.async { NotificationCenter.default.post(name: .libraryChanged, object: nil) } } }
         if ProcessInfo.processInfo.environment["TL_SELFTEST"] == nil { AutoTagger.shared.startIfEnabled() }

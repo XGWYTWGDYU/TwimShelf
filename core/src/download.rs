@@ -54,14 +54,14 @@ static CANCEL: AtomicBool = AtomicBool::new(false);
 /// One media file is never larger than this (X's own limit is far lower).
 const MAX_MEDIA_BYTES: u64 = 8 << 30;
 static GENERATION: AtomicU64 = AtomicU64::new(0);
-static COOKIES: Mutex<Option<Credentials>> = Mutex::new(None);
 
 pub fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().expect("tokio"))
 }
 
-pub fn set_cookies(c: Option<Credentials>) { *COOKIES.lock().unwrap() = c; }
+/// Legacy no-op: cookies now live in the synced library store (`crate::cookies`).
+pub fn set_cookies(_c: Option<Credentials>) {}
 pub fn status() -> DownloadStatus { STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default() }
 pub fn cancel() { CANCEL.store(true, Ordering::SeqCst); update(|s| s.outcome = "cancelled".into()); }
 pub fn stop(lib: &Library, pause: bool) -> anyhow::Result<usize> {
@@ -198,14 +198,23 @@ fn start_impl(lib: Arc<Library>, req: DownloadRequest, resume_paused: bool) -> a
 }
 
 /// Downloads one post into `lib`, a library of its own (`share`), outside the download queue:
-/// stopping the queue does not touch it, and it shows in no status.
+/// stopping the queue does not touch it, and it shows in no status. `cookie_lib` supplies synced
+/// cookies and the author routing cache (typically the app's main library when open).
 pub fn stage_link(lib: &Library, url: &str, route: Route) -> anyhow::Result<()> {
+    stage_link_with_cookies(lib, None, url, route)
+}
+
+pub fn stage_link_with_cookies(lib: &Library, cookie_lib: Option<&Library>, url: &str, route: Route) -> anyhow::Result<()> {
     let o = LinkOpts { route, revive: false, folder: None, recent: false, staged: true };
-    runtime().block_on(process(lib, url, &o)).map(|_| ())
+    runtime().block_on(process_with(lib, cookie_lib, url, &o)).map(|_| ())
 }
 
 /// Ok(true) = downloaded, Ok(false) = already in the library.
 async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool> {
+    process_with(lib, Some(lib), url, o).await
+}
+
+async fn process_with(lib: &Library, cookie_lib: Option<&Library>, url: &str, o: &LinkOpts) -> anyhow::Result<bool> {
     let (route, revive, folder) = (o.route, o.revive, o.folder.as_deref());
     // a wipe meanwhile: nothing fetched for the old library may be written into the new one
     let epoch = lib.epoch();
@@ -222,7 +231,7 @@ async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool>
         // already in the library: still goes into the chosen folder (with all its media)
         return Ok(false);
     }
-    let post = fetch_post(url, route).await?;
+    let post = fetch_post(cookie_lib, url, route).await?;
     // the post returned must be the one asked for (a wrong or tampered answer must not overwrite another post)
     if post.meta.id != id { bail!(tr!("download.mismatch")); }
     let mut stored = vec![];
@@ -254,28 +263,10 @@ async fn process(lib: &Library, url: &str, o: &LinkOpts) -> anyhow::Result<bool>
     Ok(true)
 }
 
-/// Fetches a post's metadata and media list by the chosen route (auto: FxTwitter, then the
-/// account cookie if set, then guest GraphQL).
-async fn fetch_post(url: &str, route: Route) -> anyhow::Result<RemotePost> {
-    let cookies = COOKIES.lock().unwrap().clone();
-    let protected = |c: Option<Credentials>| async move {
-        let c = c.ok_or_else(|| anyhow!(tr!("download.noCookie")))?;
-        crate::protected::fetch_post(url, &c).await.map_err(|e| anyhow!("{e}"))
-    };
-    let post: RemotePost = match route {
-        Route::Fx => net::fetch_fx(url).await?,
-        Route::Cookie => protected(cookies).await?,
-        // public mirror first; posts it cannot reach (protected accounts) through the module
-        Route::Auto => match net::fetch_fx(url).await {
-            Ok(p) if !p.media.is_empty() => p,
-            first => match cookies {
-                Some(_) => protected(cookies).await.map_err(|e| anyhow!(tr!("download.bothFailed", e = e)))?,
-                None => { first?; bail!(tr!("download.noMediaMaybeLocked")) }
-            },
-        },
-    };
-    if post.media.is_empty() { bail!(tr!("download.noMedia")); }
-    Ok(post)
+/// Fetches a post's metadata and media list by the chosen route using the library's synced
+/// multi-account cookies and per-author routing cache (`crate::cookies`).
+async fn fetch_post(cookie_lib: Option<&Library>, url: &str, route: Route) -> anyhow::Result<RemotePost> {
+    crate::cookies::fetch_post(cookie_lib, url, route).await
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -310,7 +301,7 @@ pub async fn repair(lib: &Library, media_id: &str) -> anyhow::Result<Repair> {
             None => bail!(tr!("repair.noLink")),
         }
     };
-    let post = fetch_post(&link, Route::Auto).await?;
+    let post = fetch_post(Some(lib), &link, Route::Auto).await?;
     let src = post.media.get(ordinal as usize).filter(|m| m.kind == kind)
         .or_else(|| post.media.iter().find(|m| m.kind == kind && post.media.len() == 1))
         .ok_or_else(|| anyhow!(tr!("repair.goneFromPost")))?;

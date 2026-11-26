@@ -121,3 +121,104 @@ export async function checkForUpdate(manual: boolean): Promise<void> {
     }
   }
 }
+
+export interface ExtensionManagedStatus {
+  installed: boolean;
+  version: string | null;
+  dir: string;
+}
+
+export interface ExtensionUpdateCheck {
+  installed: boolean;
+  current: string | null;
+  latest: string;
+  has_update: boolean;
+  page_url: string;
+  dir: string;
+}
+
+let pendingExtAutoCheck = false;
+const extCheckListeners = new Set<() => void>();
+
+export function requestExtensionAutoCheck(): void {
+  pendingExtAutoCheck = true;
+  for (const fn of extCheckListeners) fn();
+}
+
+export function consumeExtensionAutoCheck(): boolean {
+  const v = pendingExtAutoCheck;
+  pendingExtAutoCheck = false;
+  return v;
+}
+
+export function onExtensionAutoCheck(fn: () => void): () => void {
+  extCheckListeners.add(fn);
+  return () => extCheckListeners.delete(fn);
+}
+
+/** Downloads or updates the app-hosted extension in-place (desktop apps only; never touches Web/Docker). */
+export async function installManagedExtension(updating: boolean): Promise<ExtensionManagedStatus | null> {
+  const tw = window.twimshelf;
+  if (!tw?.desktop) return null;
+  try {
+    toast(updating ? L('ext.managed.updating') : L('ext.managed.downloading'));
+    const st = await core.read<ExtensionManagedStatus>(core.b.tl_ext_managed_install(updateRepo()));
+    const prefs = (await tw.getUpdatePrefs?.()) ?? {};
+    await tw.setUpdatePrefs?.({ ...prefs, extLastCheck: Date.now(), extSkipped: undefined });
+    if (updating) {
+      await alertMessage(L('ext.managed.updated.title', st.version ?? ''), L('ext.managed.updated.message'));
+    } else {
+      await alertMessage(L('ext.managed.downloaded.title'), L('ext.managed.downloaded.message', st.dir));
+    }
+    return st;
+  } catch (e) {
+    const msg = e instanceof Error ? L(e.message) : L('common.notDone');
+    await alertMessage(L('ext.managed.title'), L('ext.managed.downloadFailed', msg));
+    return null;
+  }
+}
+
+/** Daily automatic update check for the app-hosted extension (desktop apps only, and only when the
+ *  app already manages a copy in its data directory; external installs are never checked or touched). */
+export async function checkExtensionUpdate(manual: boolean): Promise<ExtensionUpdateCheck | null> {
+  const tw = window.twimshelf;
+  if (!tw?.desktop) return null;
+  try {
+    const status = await core.read<ExtensionManagedStatus>(core.b.tl_ext_managed_status());
+    if (!status.installed) return null;
+    const prefs = (await tw.getUpdatePrefs?.()) ?? {};
+    if (!manual && prefs.extLastCheck && Date.now() - prefs.extLastCheck < ONE_DAY_MS) return null;
+
+    const info = await core.read<ExtensionUpdateCheck>(core.b.tl_ext_managed_check(updateRepo()));
+    await tw.setUpdatePrefs?.({ ...prefs, extLastCheck: Date.now() });
+    if (!info.installed) return info;
+    if (!info.has_update) {
+      if (manual) await alertMessage(L('ext.managed.title'), L('ext.managed.upToDate', info.current ?? info.latest));
+      return info;
+    }
+    if (!manual && prefs.extSkipped === info.latest) return info;
+
+    const buttons = manual
+      ? [L('update.later'), L('ext.managed.updateNow')]
+      : [L('update.skip'), L('update.later'), L('ext.managed.updateNow')];
+    const choice = await choose(
+      L('ext.managed.prompt.title', info.latest),
+      L('ext.managed.prompt.message', info.current ?? ''),
+      buttons,
+      { cancel: false },
+    );
+    if (!manual && choice === 0) {
+      await tw.setUpdatePrefs?.({ ...prefs, extLastCheck: Date.now(), extSkipped: info.latest });
+      return info;
+    }
+    const updateIdx = manual ? 1 : 2;
+    if (choice === updateIdx) await installManagedExtension(true);
+    return info;
+  } catch (e) {
+    if (manual) {
+      const msg = e instanceof Error ? L(e.message) : L('common.notDone');
+      await alertMessage(L('ext.managed.title'), L('ext.managed.checkFailed', msg));
+    }
+    return null;
+  }
+}

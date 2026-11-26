@@ -213,5 +213,11 @@
   },
   "updateOpen": {
     "message": "查看"
+  },
+  "updateInApp": {
+    "message": "更新"
+  },
+  "updateOpeningApp": {
+    "message": "正在打开 TwimShelf…"
   }
 }

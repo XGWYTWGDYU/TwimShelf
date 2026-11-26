@@ -22,14 +22,16 @@ declare global {
       toggleFullScreen?: () => void;
       saveFile?: (url: string, name: string) => Promise<string | null>;
       showItemInFolder?: (path: string) => void;
+      openPath?: (path: string) => Promise<boolean>;
+      focusWindow?: () => void;
       /** The desktop app's icon (a data URL), or ''. */
       appIcon?: string;
       getMascotEnabled?: () => Promise<boolean>;
       setMascotEnabled?: (enabled: boolean) => Promise<void>;
       getLoginItem?: () => Promise<boolean>;
       setLoginItem?: (enabled: boolean) => Promise<boolean>;
-      getUpdatePrefs?: () => Promise<{ lastCheck?: number; skipped?: string }>;
-      setUpdatePrefs?: (prefs: { lastCheck?: number; skipped?: string }) => Promise<void>;
+      getUpdatePrefs?: () => Promise<{ lastCheck?: number; skipped?: string; extLastCheck?: number; extSkipped?: string }>;
+      setUpdatePrefs?: (prefs: { lastCheck?: number; skipped?: string; extLastCheck?: number; extSkipped?: string }) => Promise<void>;
       installUpdate?: (serverFile: string) => Promise<{ replaced: boolean; path: string }>;
       relaunch?: () => Promise<void>;
     };

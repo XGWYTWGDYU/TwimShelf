@@ -297,6 +297,14 @@ class CoreBindings {
   late final tl_check_cookies = library.lookupFunction<
       Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>),
       Pointer<Utf8> Function(Pointer<Utf8>, Pointer<Utf8>)>('tl_check_cookies');
+  late final tl_cookies_list = library.lookupFunction<
+      Pointer<Utf8> Function(), Pointer<Utf8> Function()>('tl_cookies_list');
+  late final tl_cookie_save = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_cookie_save');
+  late final tl_cookie_delete = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_cookie_delete');
   late final tl_export_status = library.lookupFunction<Pointer<Utf8> Function(),
       Pointer<Utf8> Function()>('tl_export_status');
   late final tl_export_cancel = library.lookupFunction<Pointer<Utf8> Function(),
@@ -444,6 +452,16 @@ class CoreBindings {
   late final tl_ext_remove = library.lookupFunction<
       Pointer<Utf8> Function(Pointer<Utf8>),
       Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ext_remove');
+  late final tl_ext_managed_status = library.lookupFunction<
+      Pointer<Utf8> Function(), Pointer<Utf8> Function()>('tl_ext_managed_status');
+  late final tl_ext_managed_check = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ext_managed_check');
+  late final tl_ext_managed_install = library.lookupFunction<
+      Pointer<Utf8> Function(Pointer<Utf8>),
+      Pointer<Utf8> Function(Pointer<Utf8>)>('tl_ext_managed_install');
+  late final tl_ext_take_open_settings = library.lookupFunction<
+      Bool Function(), bool Function()>('tl_ext_take_open_settings');
   late final tl_ai_set_engine_dir = library.lookupFunction<
       Void Function(Pointer<Utf8>), void Function(Pointer<Utf8>)>('tl_ai_set_engine_dir');
   late final tl_ai_tag = library.lookupFunction<

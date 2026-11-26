@@ -362,6 +362,19 @@ ipcMain.on('show-item', (e, p) => {
   const inside = Object.values(dataPaths()).some((d) => fs.existsSync(d) && real.startsWith(fs.realpathSync(d) + path.sep));
   if (inside) shell.showItemInFolder(real);
 });
+ipcMain.handle('open-path', async (e, p) => {
+  if (!fromPage(e) || typeof p !== 'string' || !fs.existsSync(p)) return false;
+  const real = fs.realpathSync(p);
+  const inside = Object.values(dataPaths()).some((d) => fs.existsSync(d) && (real === fs.realpathSync(d) || real.startsWith(fs.realpathSync(d) + path.sep)));
+  if (!inside) return false;
+  return (await shell.openPath(real)) === '';
+});
+ipcMain.on('focus-window', (e) => {
+  if (!fromPage(e) || !win) return;
+  if (!win.isVisible()) win.show();
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
 
 ipcMain.on('desktop-meta', (e) => {
   e.returnValue = {

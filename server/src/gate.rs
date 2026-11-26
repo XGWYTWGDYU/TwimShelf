@@ -186,12 +186,18 @@ pub async fn ext(State(cfg): State<Shared>, method: Method, headers: HeaderMap, 
 pub fn refresh_extension_options(cfg: &Config) {
     let q: Value = std::fs::read(cfg.dir("library").join("downloads.queue.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
     let route = match q.get("route").and_then(Value::as_str) { Some("fx") => "fx", Some("cookie") => "cookie", _ => "auto" };
+    let is_desktop = cfg.desktop.is_some();
     let options = json!({
-        "name": crate::device_name(), "platform": "server", "flavor": "server", "route": route,
+        "name": crate::device_name(),
+        "platform": if is_desktop { if cfg!(target_os = "macos") { "macos" } else { "linux" } } else { "server" },
+        "flavor": if is_desktop { "desktop" } else { "server" },
+        "route": route,
         "concurrency": q.get("concurrency").and_then(Value::as_u64).unwrap_or(3),
         "interval_ms": q.get("intervalMs").and_then(Value::as_u64).unwrap_or(500),
         "folder": q.get("folder").and_then(Value::as_str),
         "listen": false,
+        "desktop": is_desktop,
+        "managed_dir": if is_desktop { Some(cfg.data.join("extension").to_string_lossy().into_owned()) } else { None },
     });
     if let Ok(o) = serde_json::from_value(options) { let _ = extension::serve(o); }
 }

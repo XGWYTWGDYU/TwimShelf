@@ -36,6 +36,7 @@ public sealed partial class MainWindow : Window
     IShellPage? _page;
     string _lastSidebarKey = "";
     bool _building;
+    Microsoft.UI.Dispatching.DispatcherQueueTimer? _extOpenPoll;
 
     public static new MainWindow? Current { get; private set; }
 
@@ -71,7 +72,16 @@ public sealed partial class MainWindow : Window
         DropImport.Attach(this, Root, library);
         BuildSidebar();
         Show(Place.Browse);
-        Closed += (_, _) => SaveSize();
+        Closed += (_, _) => { _extOpenPoll?.Stop(); SaveSize(); };
+        _extOpenPoll = DispatcherQueue.CreateTimer();
+        _extOpenPoll.Interval = TimeSpan.FromSeconds(1);
+        _extOpenPoll.Tick += async (_, _) =>
+        {
+            if (!TwimShelf.Core.TlCore.ExtensionTakeOpenSettings()) return;
+            if (!await App.ShowWindow()) return;
+            OpenSettingsPage("extension-update");
+        };
+        _extOpenPoll.Start();
         // 开机自启: closing hides the window and TwimShelf goes on in the background (退出 ends it)
         AppWindow.Closing += (_, e) =>
         {

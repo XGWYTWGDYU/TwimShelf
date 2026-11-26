@@ -213,5 +213,11 @@
   },
   "updateOpen": {
     "message": "入手"
+  },
+  "updateInApp": {
+    "message": "更新"
+  },
+  "updateOpeningApp": {
+    "message": "TwimShelf を開いています…"
   }
 }

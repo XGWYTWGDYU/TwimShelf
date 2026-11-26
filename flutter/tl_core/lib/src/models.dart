@@ -875,6 +875,32 @@ class HubDetail {
       );
 }
 
+class CookieAccount {
+  const CookieAccount({
+    required this.id,
+    this.label = '',
+    required this.authToken,
+    required this.ct0,
+    this.screenName,
+    this.createdAt = 0,
+  });
+  final String id;
+  final String label;
+  final String authToken;
+  final String ct0;
+  final String? screenName;
+  final int createdAt;
+
+  factory CookieAccount.fromJson(Map<String, dynamic> j) => CookieAccount(
+        id: j['id'] as String? ?? '',
+        label: j['label'] as String? ?? '',
+        authToken: j['auth_token'] as String? ?? '',
+        ct0: j['ct0'] as String? ?? '',
+        screenName: j['screen_name'] as String?,
+        createdAt: (j['created_at'] as num?)?.toInt() ?? 0,
+      );
+}
+
 class UpdateInfo implements JsonModel {
   UpdateInfo({required this.version, required this.page_url, this.notes = '', this.asset_name, this.asset_url, this.asset_size = 0, this.asset_digest});
   final String version;

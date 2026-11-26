@@ -174,6 +174,16 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       case "openSetup":
         await chrome.tabs.create({ url: chrome.runtime.getURL("popup.html?tab=1") });
         return { ok: true };
+      case "openAppExtensionSettings": {
+        const ordered = msg.deviceId
+          ? [usable.find((d) => d.id === msg.deviceId), ...usable.filter((d) => d.id !== msg.deviceId)].filter(Boolean)
+          : usable;
+        for (const device of ordered) {
+          const r = await call(device, "POST", "/ext/open-settings", {});
+          if (r.status === 200) return { opened: true, deviceId: device.id };
+        }
+        return { opened: false };
+      }
       default:
         return { error: "unknown" };
     }

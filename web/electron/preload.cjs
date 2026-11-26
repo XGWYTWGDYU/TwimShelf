@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('twimshelf', {
   toggleFullScreen: () => ipcRenderer.send('toggle-fullscreen'),
   saveFile: (url, name) => ipcRenderer.invoke('save-file', url, name),
   showItemInFolder: (path) => ipcRenderer.send('show-item', String(path)),
+  openPath: (path) => ipcRenderer.invoke('open-path', String(path)),
+  focusWindow: () => ipcRenderer.send('focus-window'),
   getMascotEnabled: () => ipcRenderer.invoke('get-mascot-enabled'),
   setMascotEnabled: (enabled) => ipcRenderer.invoke('set-mascot-enabled', !!enabled),
   getLoginItem: () => ipcRenderer.invoke('get-login-item'),

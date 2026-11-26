@@ -1,11 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { L } from '@twimshelf/core';
-import { Link2, Puzzle } from 'lucide-react';
+import { Download, Link2, Puzzle } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { change, LoadState, useTask } from '../../components/libraryControls';
 import { alertMessage, choose } from '../../components/pickers';
-import { core } from '../../lib/core';
+import { core, desktop } from '../../lib/core';
 import { useAsync, useInterval } from '../../lib/hooks';
+import {
+  checkExtensionUpdate,
+  consumeExtensionAutoCheck,
+  installManagedExtension,
+  onExtensionAutoCheck,
+  type ExtensionManagedStatus,
+  type ExtensionUpdateCheck,
+} from '../../lib/update';
 import { copyText } from './serverFiles';
 import {
   Card, CardRow, RowDivider, SectionGroup, SettingsScreen,
@@ -13,7 +21,7 @@ import {
 
 interface Client { id: string; name: string; added: number; seen: number }
 interface Pairing { code: string; link: string; expires_in: number }
-interface ExtensionState { clients: Client[]; pairing: Pairing | null }
+interface ExtensionState { clients: Client[]; pairing: Pairing | null; port?: number | null }
 
 function formatShortDate(seconds: number): string {
   return new Date(seconds * 1000).toLocaleString(undefined, {
@@ -23,8 +31,15 @@ function formatShortDate(seconds: number): string {
 
 export default function ExtensionPage() {
   const state = useAsync(() => core.read<ExtensionState>(core.b.tl_ext_clients()), []);
+  const managed = useAsync(
+    () => (desktop ? core.read<ExtensionManagedStatus>(core.b.tl_ext_managed_status()) : Promise.resolve(null)),
+    [],
+  );
   const task = useTask();
   const [copied, setCopied] = useState(false);
+  const [pathCopied, setPathCopied] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState<ExtensionUpdateCheck | null>(null);
+  const [extBusy, setExtBusy] = useState<string | null>(null);
   const before = useRef<Set<string> | undefined>(undefined);
   const pairing = state.data?.pairing;
 
@@ -43,6 +58,43 @@ export default function ExtensionPage() {
     const added = state.data.clients.find((client) => !previous.has(client.id));
     if (added) void alertMessage(L('ext.code.done', added.name));
   }, [state.data, pairing]);
+
+  const runCheckUpdate = useCallback(async () => {
+    if (!desktop || extBusy) return;
+    setExtBusy(L('ext.managed.checking'));
+    try {
+      const info = await checkExtensionUpdate(true);
+      if (info) setUpdateCheck(info);
+      managed.reload();
+    } finally {
+      setExtBusy(null);
+    }
+  }, [extBusy, managed]);
+
+  const runInstall = useCallback(async (updating: boolean) => {
+    if (!desktop || extBusy) return;
+    setExtBusy(updating ? L('ext.managed.updating') : L('ext.managed.downloading'));
+    try {
+      const st = await installManagedExtension(updating);
+      if (st) {
+        setUpdateCheck(null);
+        setPathCopied(false);
+        managed.reload();
+      }
+    } finally {
+      setExtBusy(null);
+    }
+  }, [extBusy, managed]);
+
+  useEffect(() => {
+    if (!desktop) return;
+    const trigger = () => {
+      if (!consumeExtensionAutoCheck()) return;
+      if (managed.data?.installed) void runCheckUpdate();
+    };
+    if (managed.data?.installed) trigger();
+    return onExtensionAutoCheck(trigger);
+  }, [managed.data?.installed, runCheckUpdate]);
 
   async function removeClient(c: Client) {
     const ok = await choose(
@@ -63,12 +115,71 @@ export default function ExtensionPage() {
       ? `${pairing.code.slice(0, 3)} ${pairing.code.slice(3)}`
       : pairing.code
     : '';
+  const managedInstalled = desktop && managed.data?.installed === true;
+  const clientsFooter = desktop && state.data?.port
+    ? L('ext.footer.desktop', String(state.data.port))
+    : L('ext.footer.web');
 
   return (
     <SettingsScreen title={L('ext.title')}>
       <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5, padding: '0 4px' }}>
         {L('ext.intro')}
       </div>
+
+      {desktop && (
+        <SectionGroup title={L('ext.managed.title')}>
+          <Card spacing={12}>
+            {managedInstalled && managed.data ? (
+              <>
+                <CardRow
+                  icon={<Download size={15} strokeWidth={2} />}
+                  color="blue"
+                  title={L('ext.managed.version', managed.data.version ?? '')}
+                  detail={updateCheck?.has_update ? L('ext.managed.updateReady', updateCheck.latest) : undefined}
+                  trailing={
+                    extBusy ? (
+                      <span style={{ fontSize: 12, color: 'var(--fg-2)' }}>{extBusy}</span>
+                    ) : updateCheck?.has_update ? (
+                      <Button kind="primary" onClick={() => void runInstall(true)}>
+                        {L('ext.managed.update', updateCheck.latest)}
+                      </Button>
+                    ) : (
+                      <Button onClick={() => void runCheckUpdate()}>
+                        {L('ext.managed.checkUpdate')}
+                      </Button>
+                    )
+                  }
+                />
+                <div className="ext-link-box selectable">{managed.data.dir}</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button onClick={() => void window.twimshelf?.openPath?.(managed.data!.dir)}>
+                    {L('ext.managed.openFolder')}
+                  </Button>
+                  <Button
+                    onClick={() => void copyText(managed.data!.dir).then(() => setPathCopied(true))}>
+                    {pathCopied ? L('ext.managed.pathCopied') : L('ext.managed.copyPath')}
+                  </Button>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.55, whiteSpace: 'pre-line' }}>
+                  {L('ext.managed.installGuide')}
+                </div>
+              </>
+            ) : (
+              <CardRow
+                icon={<Download size={15} strokeWidth={2} />}
+                color="blue"
+                title={L('ext.managed.download')}
+                detail={L('ext.managed.notInstalled')}
+                trailing={
+                  <Button kind="primary" disabled={!!extBusy} onClick={() => void runInstall(false)}>
+                    {extBusy || L('ext.managed.download')}
+                  </Button>
+                }
+              />
+            )}
+          </Card>
+        </SectionGroup>
+      )}
 
       {pairing ? (
         <Card tint="blue" spacing={12}>
@@ -130,7 +241,7 @@ export default function ExtensionPage() {
       {!state.data || state.error ? (
         <LoadState error={state.error} reload={state.reload} />
       ) : (
-        <SectionGroup title={L('ext.clients')} note={L('ext.footer.web')}>
+        <SectionGroup title={L('ext.clients')} note={clientsFooter}>
           <Card spacing={12}>
             {!state.data.clients.length && (
               <span style={{ fontSize: 13, color: 'var(--fg-2)' }}>{L('ext.state.none')}</span>
@@ -144,9 +255,22 @@ export default function ExtensionPage() {
                   title={client.name}
                   detail={L('ext.client.detail', formatShortDate(client.added), formatShortDate(client.seen))}
                   trailing={
-                    <Button disabled={task.busy} onClick={() => void removeClient(client)}>
-                      {L('ext.remove.confirm')}
-                    </Button>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {managedInstalled && (
+                        updateCheck?.has_update ? (
+                          <Button kind="primary" disabled={!!extBusy || task.busy} onClick={() => void runInstall(true)}>
+                            {L('ext.managed.update', updateCheck.latest)}
+                          </Button>
+                        ) : (
+                          <Button disabled={!!extBusy || task.busy} onClick={() => void runCheckUpdate()}>
+                            {L('ext.managed.checkUpdate')}
+                          </Button>
+                        )
+                      )}
+                      <Button disabled={task.busy} onClick={() => void removeClient(client)}>
+                        {L('ext.remove.confirm')}
+                      </Button>
+                    </div>
                   }
                 />
               </div>

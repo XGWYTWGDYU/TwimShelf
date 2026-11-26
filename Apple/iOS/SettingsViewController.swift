@@ -8,8 +8,6 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
 
     private let stats = StatsCardView()
     private let linksView = PlaceholderTextView(placeholder: L("settings.links.placeholder"))
-    private let authField = UITextField()
-    private let ct0Field = UITextField()
     private var activityCards: [Activity.Kind: ActivityCardView] = [:]
     private var batchURLs: [String] = []
     private var batchFileName: String?
@@ -42,13 +40,6 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
         navigationController?.navigationBar.prefersLargeTitles = true
         navigationItem.largeTitleDisplayMode = .always
         linksView.accessibilityIdentifier = "linksView"
-        for (f, p) in [(authField, "auth_token"), (ct0Field, "ct0")] {
-            f.placeholder = p; f.isSecureTextEntry = true; f.autocapitalizationType = .none; f.autocorrectionType = .no; f.clearButtonMode = .whileEditing
-            f.font = .monospacedSystemFont(ofSize: 15, weight: .regular)
-            f.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
-        }
-        authField.text = Keychain.get("auth_token")
-        ct0Field.text = Keychain.get("ct0")
         let nc = NotificationCenter.default
         observers = [ActivityCenter.changed, ModelStore.changed, SyncService.changed, LibraryPrefs.changed].map {
             nc.addObserver(forName: $0, object: nil, queue: .main) { [weak self] _ in self?.build() }
@@ -282,22 +273,110 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
         ]
     }
 
+    // MARK: Account Cookies (edited in place under their row, as on the Mac)
+
+    /// The Cookie being added (no account) or edited; nil when every row is closed.
+    private var cookieDraft: CookieDraft?
+
     private func cookieSections() -> [Section] {
-        [
-            Section(id: "cookie", header: L("settings.cookie.header"), footer: L("settings.cookie.footer"), rows: [
-                .custom("auth", authField),
-                .custom("ct0", ct0Field),
-                .button(L("settings.cookie.save"), icon: .init("key.fill", .systemYellow)) { [weak self] in self?.saveCookies() },
-                .button(L("settings.cookie.check"), icon: .init("checkmark.shield", .systemGreen), id: "b:checkCookie") { [weak self] in
-                    // a network request of up to ~30 s: never on the main thread
-                    self?.runBusy(L("settings.cookie.checking"), { Core.checkCookies() }) { r in
-                        let a = UIAlertController(title: r.title, message: r.detail, preferredStyle: .alert)
-                        a.addAction(UIAlertAction(title: L("common.ok"), style: .default))
-                        self?.present(a, animated: true)
+        let accounts = Core.cookiesList()
+        // removed meanwhile (on another device): its editor goes with it
+        if let id = cookieDraft?.account?.id, !accounts.contains(where: { $0.id == id }) { cookieDraft = nil }
+        var rows: [Row] = []
+        for acc in accounts {
+            let open = cookieDraft?.account?.id == acc.id
+            rows.append(.expander(acc.displayName, detail: acc.detailLine, expanded: open, icon: .init("key.fill", .systemOrange), id: "ck:\(acc.id)") { [weak self] in
+                self?.toggleCookieEditor(acc) })
+            if open, let d = cookieDraft {
+                rows.append(.custom("ck-editor-\(acc.id)", d.editorView))
+            }
+        }
+        let adding = cookieDraft != nil && cookieDraft?.account == nil
+        rows.append(.expander(L("cookie.add"), expanded: adding, icon: .init("plus.circle.fill", .systemBlue), id: "ck:add") { [weak self] in
+            self?.toggleCookieEditor(nil) })
+        if adding, let d = cookieDraft {
+            rows.append(.custom("ck-editor-new", d.editorView))
+        }
+        return [Section(id: "cookie", header: L("settings.cookie.header"), footer: L("cookie.multi.footer"), rows: rows)]
+    }
+
+    /// Opens [account]'s editor (nil: a new one), closing any other; the open one closes.
+    private func toggleCookieEditor(_ account: Core.CookieAccount?) {
+        navigationController?.view.endEditing(true)
+        let isOpen = cookieDraft != nil && cookieDraft?.account?.id == account?.id
+        if isOpen {
+            cookieDraft = nil
+        } else {
+            cookieDraft = CookieDraft(
+                account: account,
+                onCheck: { [weak self] in self?.checkCookieDraft() },
+                onSave: { [weak self] in self?.saveCookieDraft() },
+                onCancel: { [weak self] in self?.toggleCookieEditor(nil) },
+                onDelete: account.map { acc in { [weak self] in self?.confirmDeleteCookie(acc) } },
+                onLayoutChanged: { [weak self] in self?.subpage?.collectionView.collectionViewLayout.invalidateLayout() }
+            )
+        }
+        build()
+        if !isOpen { DispatchQueue.main.async { self.cookieDraft?.firstEmptyField.becomeFirstResponder() } }
+    }
+
+    private func saveCookieDraft() {
+        guard let d = cookieDraft else { return }
+        navigationController?.view.endEditing(true)
+        guard let tokens = d.tokens else { return alert(L("cookie.fillBoth")) }
+        let (a, c) = tokens
+        do {
+            _ = try Core.saveCookie(id: d.account?.id, label: d.label, authToken: a, ct0: c, screenName: d.screenName)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            cookieDraft = nil
+            build()
+        } catch {
+            alert(L("settings.cookie.notSaved"), error.localizedDescription)
+        }
+    }
+
+    private func checkCookieDraft() {
+        guard let d = cookieDraft else { return }
+        navigationController?.view.endEditing(true)
+        guard let tokens = d.tokens else { return alert(L("cookie.fillBoth")) }
+        let (a, c) = tokens
+        d.checking = true
+        d.result = nil
+        d.updateControls()
+        // a network request of up to ~30 s: never on the main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            let r = Core.checkCookies(authToken: a, ct0: c)
+            DispatchQueue.main.async { [weak self, weak d] in
+                guard let self, let d else { return }
+                d.checking = false
+                if r.ok, let sn = r.screenName, !sn.isEmpty {
+                    d.screenName = sn
+                    d.result = (true, L("cookie.signedIn", sn))
+                    // a saved account learns whom it signs in as right away
+                    if let acc = d.account, let updated = try? Core.saveCookie(id: acc.id, label: d.label, authToken: a, ct0: c, screenName: sn) {
+                        d.account = updated
                     }
-                },
-            ]),
-        ]
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                } else {
+                    d.result = (false, r.detail.isEmpty ? r.title : "\(r.title)\n\(r.detail)")
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                }
+                d.updateControls()
+                self.build()
+            }
+        }
+    }
+
+    private func confirmDeleteCookie(_ acc: Core.CookieAccount) {
+        navigationController?.view.endEditing(true)
+        let a = UIAlertController(title: L("cookie.delete.title", acc.displayName), message: L("cookie.delete.message"), preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: L("common.cancel"), style: .cancel))
+        a.addAction(UIAlertAction(title: L("common.delete"), style: .destructive) { [weak self] _ in
+            do { _ = try Core.deleteCookie(acc.id) } catch { self?.alert(L("mac.deleteFailed"), error.localizedDescription) }
+            self?.cookieDraft = nil
+            self?.build()
+        })
+        present(a, animated: true)
     }
 
     func exportDiagnostics() {
@@ -385,15 +464,6 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
         } catch { alert(L("common.couldNotStartDownload"), error.localizedDescription) }
     }
 
-    private func saveCookies() {
-        let ok1 = Keychain.set("auth_token", (authField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
-        let ok2 = Keychain.set("ct0", (ct0Field.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
-        Session.applyStoredCookies()
-        view.endEditing(true)
-        guard ok1 && ok2 else { return alert(L("settings.cookie.notSaved"), L("settings.cookie.keychainRefused")) }
-        alert((authField.text ?? "").isEmpty || (ct0Field.text ?? "").isEmpty ? L("settings.cookie.cleared") : L("settings.cookie.saved"))
-    }
-
     private func showErrors(_ errors: [[String]]) {
         let vc = FormViewController()
         vc.title = L("settings.failures")
@@ -440,7 +510,6 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
         }) { [weak self] in
             if includeModels { ModelStore.shared.wipe() } else { ModelStore.shared.reload() }
             SyncService.shared.resetForWipe()
-            self?.authField.text = ""; self?.ct0Field.text = ""
             NotificationCenter.default.post(name: .libraryChanged, object: nil)
             ActivityCenter.shared.refreshStats()
             self?.build()
@@ -570,5 +639,242 @@ final class SettingsSubpage: FormViewController {
         guard isViewLoaded else { return }
         sections = make()
         reloadForm()
+    }
+}
+
+/// Soft filled rounded input box (no border, no placeholder text inside) for the inline Cookie editor.
+private final class CookieBoxField: UITextField {
+    private let textInsets = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 34)
+
+    init(monospaced: Bool) {
+        super.init(frame: .zero)
+        borderStyle = .none
+        backgroundColor = .tertiarySystemFill
+        layer.cornerRadius = 10
+        layer.cornerCurve = .continuous
+        clearButtonMode = .whileEditing
+        let body = UIFont.preferredFont(forTextStyle: .body)
+        let mono = UIFontMetrics(forTextStyle: .body).scaledFont(for: .monospacedSystemFont(ofSize: 15, weight: .regular))
+        font = monospaced ? mono : body
+        adjustsFontForContentSizeCategory = true
+        if monospaced {
+            autocapitalizationType = .none
+            autocorrectionType = .no
+            spellCheckingType = .no
+            smartQuotesType = .no
+            smartDashesType = .no
+            textContentType = .none
+        }
+        heightAnchor.constraint(greaterThanOrEqualToConstant: 42).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func textRect(forBounds bounds: CGRect) -> CGRect { bounds.inset(by: textInsets) }
+    override func editingRect(forBounds bounds: CGRect) -> CGRect { bounds.inset(by: textInsets) }
+    override func placeholderRect(forBounds bounds: CGRect) -> CGRect { bounds.inset(by: textInsets) }
+    override func clearButtonRect(forBounds bounds: CGRect) -> CGRect {
+        super.clearButtonRect(forBounds: bounds).offsetBy(dx: -6, dy: 0)
+    }
+}
+
+/// Inline Cookie editor shown directly under an expanded account or "Add Cookie" row:
+/// three stacked labeled gray rounded input boxes (no placeholder text inside) and a bottom
+/// bar of native UIKit buttons (Check on left, Cancel/Delete + Save on right).
+private final class CookieDraft: NSObject, UITextFieldDelegate {
+    var account: Core.CookieAccount?
+    var screenName: String?
+    var checking = false
+    /// Shown under the fields; cleared as soon as a token changes.
+    var result: (ok: Bool, text: String)?
+
+    let labelField = CookieBoxField(monospaced: false)
+    let authField = CookieBoxField(monospaced: true)
+    let ct0Field = CookieBoxField(monospaced: true)
+    let editorView = UIStackView()
+
+    private let statusRow = CookieStatusRow()
+    private let checkButton = UIButton(type: .system)
+    private let secondaryButton = UIButton(type: .system)
+    private let saveButton = UIButton(type: .system)
+    private let onLayoutChanged: () -> Void
+    private var fields: [UITextField] { [labelField, authField, ct0Field] }
+
+    init(
+        account: Core.CookieAccount?,
+        onCheck: @escaping () -> Void,
+        onSave: @escaping () -> Void,
+        onCancel: @escaping () -> Void,
+        onDelete: (() -> Void)?,
+        onLayoutChanged: @escaping () -> Void
+    ) {
+        self.account = account
+        self.screenName = account?.screenName
+        self.onLayoutChanged = onLayoutChanged
+        super.init()
+
+        labelField.text = account?.label
+        labelField.accessibilityLabel = L("cookie.label")
+        labelField.returnKeyType = .next
+
+        authField.text = account?.authToken
+        authField.accessibilityLabel = "auth_token"
+        authField.returnKeyType = .next
+
+        ct0Field.text = account?.ct0
+        ct0Field.accessibilityLabel = "ct0"
+        ct0Field.returnKeyType = .done
+
+        for f in fields { f.delegate = self }
+        for f in [authField, ct0Field] {
+            f.addAction(UIAction { [weak self] _ in
+                guard let self else { return }
+                if self.result != nil {
+                    self.result = nil
+                    self.screenName = self.account?.screenName
+                }
+                self.updateControls()
+            }, for: .editingChanged)
+        }
+
+        editorView.axis = .vertical
+        editorView.spacing = 14
+        editorView.isLayoutMarginsRelativeArrangement = true
+        editorView.layoutMargins = .init(top: 10, left: 0, bottom: 10, right: 0)
+
+        let gLabel = Self.fieldGroup(title: L("cookie.label"), monospaced: false, field: labelField)
+        let gAuth = Self.fieldGroup(title: "auth_token", monospaced: true, field: authField)
+        let gCt0 = Self.fieldGroup(title: "ct0", monospaced: true, field: ct0Field)
+
+        statusRow.isHidden = true
+
+        checkButton.addAction(UIAction { _ in onCheck() }, for: .touchUpInside)
+        saveButton.addAction(UIAction { _ in onSave() }, for: .touchUpInside)
+        if let onDelete {
+            secondaryButton.addAction(UIAction { _ in onDelete() }, for: .touchUpInside)
+        } else {
+            secondaryButton.addAction(UIAction { _ in onCancel() }, for: .touchUpInside)
+        }
+        for b in [checkButton, secondaryButton, saveButton] {
+            b.setContentHuggingPriority(.required, for: .horizontal)
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
+
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let buttonBar = UIStackView(arrangedSubviews: [checkButton, spacer, secondaryButton, saveButton])
+        buttonBar.axis = .horizontal
+        buttonBar.alignment = .center
+        buttonBar.spacing = 8
+
+        [gLabel, gAuth, gCt0, statusRow, buttonBar].forEach(editorView.addArrangedSubview)
+        editorView.setCustomSpacing(18, after: gCt0)
+        updateControls()
+    }
+
+    private static func fieldGroup(title: String, monospaced: Bool, field: CookieBoxField) -> UIStackView {
+        let label = UILabel()
+        label.text = title
+        let sub = UIFont.preferredFont(forTextStyle: .subheadline)
+        label.font = monospaced
+            ? UIFontMetrics(forTextStyle: .subheadline).scaledFont(for: .monospacedSystemFont(ofSize: 14, weight: .regular))
+            : sub
+        label.textColor = .secondaryLabel
+        label.adjustsFontForContentSizeCategory = true
+        let st = UIStackView(arrangedSubviews: [label, field])
+        st.axis = .vertical
+        st.spacing = 6
+        return st
+    }
+
+    func updateControls() {
+        let wasHidden = statusRow.isHidden
+        if let r = result {
+            statusRow.show(r)
+            statusRow.isHidden = false
+        } else {
+            statusRow.isHidden = true
+        }
+
+        // Native UIButton.Configuration styles without overriding cornerStyle,
+        // so the system uses its native button shape on every iOS version.
+        var checkCfg = UIButton.Configuration.tinted()
+        checkCfg.title = checking ? L("settings.cookie.checking") : L("settings.cookie.check")
+        checkCfg.image = checking ? nil : UIImage(systemName: "checkmark.shield")
+        checkCfg.imagePadding = 5
+        checkCfg.showsActivityIndicator = checking
+        checkButton.configuration = checkCfg
+        checkButton.isEnabled = !checking
+
+        if account != nil {
+            var delCfg = UIButton.Configuration.tinted()
+            delCfg.title = L("common.delete")
+            delCfg.baseForegroundColor = .systemRed
+            delCfg.baseBackgroundColor = .systemRed
+            secondaryButton.configuration = delCfg
+            secondaryButton.isEnabled = !checking
+        } else {
+            var cancelCfg = UIButton.Configuration.gray()
+            cancelCfg.title = L("common.cancel")
+            secondaryButton.configuration = cancelCfg
+            secondaryButton.isEnabled = !checking
+        }
+
+        var saveCfg = UIButton.Configuration.borderedProminent()
+        saveCfg.title = L("common.save")
+        saveButton.configuration = saveCfg
+        saveButton.isEnabled = !checking && tokens != nil
+
+        if wasHidden != statusRow.isHidden { onLayoutChanged() }
+    }
+
+    var label: String { (labelField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// Both tokens, trimmed; nil while either is empty.
+    var tokens: (String, String)? {
+        let a = (authField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let c = (ct0Field.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return a.isEmpty || c.isEmpty ? nil : (a, c)
+    }
+
+    var firstEmptyField: UITextField {
+        account == nil ? (fields.first { ($0.text ?? "").isEmpty } ?? labelField) : labelField
+    }
+
+    func textFieldShouldReturn(_ f: UITextField) -> Bool {
+        if let i = fields.firstIndex(of: f), i + 1 < fields.count { fields[i + 1].becomeFirstResponder() }
+        else { f.resignFirstResponder() }
+        return false
+    }
+}
+
+/// What the last check found: a symbol in its colour and the words in the text colour.
+private final class CookieStatusRow: UIStackView {
+    private let icon = UIImageView()
+    private let text = UILabel()
+
+    init() {
+        super.init(frame: .zero)
+        icon.preferredSymbolConfiguration = .init(textStyle: .body)
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.setContentCompressionResistancePriority(.required, for: .horizontal)
+        text.font = .preferredFont(forTextStyle: .subheadline)
+        text.adjustsFontForContentSizeCategory = true
+        text.numberOfLines = 0
+        addArrangedSubview(icon)
+        addArrangedSubview(text)
+        spacing = 10
+        alignment = .firstBaseline
+        isAccessibilityElement = true
+    }
+    required init(coder: NSCoder) { fatalError() }
+
+    func show(_ r: (ok: Bool, text: String)?) {
+        guard let r else { return }
+        icon.image = UIImage(systemName: r.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        icon.tintColor = r.ok ? .systemGreen : .systemRed
+        text.text = r.text
+        accessibilityLabel = r.text
     }
 }

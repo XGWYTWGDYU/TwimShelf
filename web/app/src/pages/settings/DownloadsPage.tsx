@@ -1,24 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { L, type CookieCheck, type DownloadRequest, type DownloadStatus } from '@twimshelf/core';
 import {
-  Check, Download, FileText, Folder, Globe, Inbox, KeyRound,
+  Check, ChevronDown, Download, FileText, Folder, Globe, Inbox, KeyRound,
   Lock, LockOpen, Plus, TriangleAlert, WandSparkles,
 } from 'lucide-react';
 import { Button, TextField } from '../../components/ui';
 import { change, errorText, LoadState, useTask } from '../../components/libraryControls';
-import { alertMessage, prompt } from '../../components/pickers';
+import { alertMessage, choose, prompt } from '../../components/pickers';
 import { toast } from '../../components/toast';
 import { core } from '../../lib/core';
 import { useAsync, useInterval, useStore } from '../../lib/hooks';
 import { folders, libraryChanged } from '../../lib/library';
-import { readSecret, removeFile, updateSecrets, upload, writeText } from './serverFiles';
+import { removeFile, upload, writeText } from './serverFiles';
 import {
   defaultDownloadOptions, downloadLinks, downloadOptionFile, downloadRoutes, parseLinks,
   readDownloadOptionFile, type DownloadOptions,
 } from './downloadLinks';
 import {
   ActivityRow, Card, ChipButton, CustomSlider, IconTile, OptionCard,
-  Pill, PlaceholderEditor, SectionGroup, SettingsScreen,
+  Pill, PlaceholderEditor, RowDivider, SectionGroup, SettingsScreen,
 } from './settingsControls';
 
 type Options = DownloadOptions;
@@ -427,83 +427,239 @@ export default function DownloadsPage() {
   );
 }
 
-function CookieSettings() {
-  const [token, setToken] = useState('');
-  const [csrf, setCsrf] = useState('');
-  const task = useTask();
-  const stored = useAsync(async () => {
-    const [a, c] = await Promise.all([
-      readSecret('auth_token').catch(() => null),
-      readSecret('ct0').catch(() => null),
-    ]);
-    return { hasAuth: !!a, hasCt0: !!c, auth: a ?? '', ct0: c ?? '' };
-  }, []);
+interface CookieAccount {
+  id: string;
+  label: string;
+  auth_token: string;
+  ct0: string;
+  screen_name?: string | null;
+  created_at: number;
+}
 
-  const loading = !stored.data && !stored.error;
-  const auth = token.trim();
-  const ct0 = csrf.trim();
-  const valid = Boolean(auth) === Boolean(ct0);
-  const isSet = Boolean((auth && ct0) || (stored.data?.hasAuth && stored.data?.hasCt0));
+function cookieDisplayName(a: CookieAccount): string {
+  if (a.label.trim()) return a.label.trim();
+  if (a.screen_name) return `@${a.screen_name}`;
+  return L('cookie.unnamed');
+}
+
+function CookieSettings() {
+  const accounts = useAsync(() => core.read<CookieAccount[]>(core.b.tl_cookies_list()), []);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [adding, setAdding] = useState(false);
+
+  const list = accounts.data ?? [];
+  const loading = !accounts.data && !accounts.error;
+
+  function toggleExpand(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function removeAccount(acc: CookieAccount) {
+    const ok = await choose(
+      L('cookie.delete.title', cookieDisplayName(acc)),
+      L('cookie.delete.message'),
+      [L('common.delete')],
+      { destructive: true },
+    );
+    if (ok == null) return;
+    await core.read(core.b.tl_cookie_delete(acc.id));
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.delete(acc.id);
+      return next;
+    });
+    accounts.reload();
+  }
 
   return (
     <SectionGroup
       title={L('mac.cookie')}
-      note={L('mac.cookie.footer')}
+      note={L('cookie.multi.footer')}
       trailing={
         <Pill
-          text={L(loading ? 'mac.preparing' : isSet ? 'mac.set' : 'mac.notSet')}
-          color={isSet ? 'green' : 'secondary'}
-          icon={isSet ? <Lock size={10} strokeWidth={2.5} /> : <LockOpen size={10} strokeWidth={2.5} />}
+          text={loading ? L('mac.preparing') : list.length ? L('cookie.count', String(list.length)) : L('mac.notSet')}
+          color={list.length ? 'green' : 'secondary'}
+          icon={list.length ? <Lock size={10} strokeWidth={2.5} /> : <LockOpen size={10} strokeWidth={2.5} />}
         />
       }>
-      <Card spacing={12}>
-        <div className="secret-field-row">
-          <span className="secret-field-name">auth_token</span>
-          <TextField
-            type="password"
-            value={token}
-            onChange={setToken}
-            placeholder={loading ? undefined : L(stored.data?.hasAuth ? 'mac.set' : 'mac.notSet')}
-          />
+      {accounts.error ? (
+        <LoadState error={accounts.error} reload={accounts.reload} />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {!list.length && !adding && (
+            <Card><span style={{ fontSize: 13, color: 'var(--fg-2)' }}>{L('cookie.noneAdded')}</span></Card>
+          )}
+          {list.map((acc) => {
+            const open = expanded.has(acc.id);
+            const masked = acc.auth_token.length > 4 ? `••••${acc.auth_token.slice(-4)}` : '••••';
+            return (
+              <Card key={acc.id} spacing={12}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <IconTile icon={<KeyRound size={17} strokeWidth={2} />} color="orange" size={36} />
+                  <div className="card-row-texts" style={{ gap: 4 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>{cookieDisplayName(acc)}</div>
+                    <div className="chips-row" style={{ gap: 5 }}>
+                      {acc.screen_name && <Pill text={`@${acc.screen_name}`} color="blue" />}
+                      <Pill text={masked} color="secondary" />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-label={L('models.expand')}
+                    onClick={() => toggleExpand(acc.id)}>
+                    <ChevronDown
+                      size={15}
+                      strokeWidth={2.2}
+                      style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 0.18s' }}
+                    />
+                  </button>
+                </div>
+                {open && (
+                  <>
+                    <RowDivider />
+                    <CookieAccountEditor
+                      account={acc}
+                      onSaved={() => accounts.reload()}
+                      onDelete={() => void removeAccount(acc)}
+                    />
+                  </>
+                )}
+              </Card>
+            );
+          })}
+          {adding ? (
+            <Card spacing={12}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>{L('cookie.add')}</div>
+              <CookieAccountEditor
+                onSaved={(saved) => {
+                  setAdding(false);
+                  setExpanded((prev) => new Set(prev).add(saved.id));
+                  accounts.reload();
+                }}
+                onCancel={() => setAdding(false)}
+              />
+            </Card>
+          ) : (
+            <Card spacing={0}>
+              <button
+                type="button"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--fg)', textAlign: 'left',
+                }}
+                onClick={() => setAdding(true)}>
+                <IconTile icon={<Plus size={16} strokeWidth={2.4} />} color="blue" size={32} />
+                <span style={{ fontSize: 13.5, fontWeight: 600 }}>{L('cookie.add')}</span>
+              </button>
+            </Card>
+          )}
         </div>
-        <div className="secret-field-row">
-          <span className="secret-field-name">ct0</span>
-          <TextField
-            type="password"
-            value={csrf}
-            onChange={setCsrf}
-            placeholder={loading ? undefined : L(stored.data?.hasCt0 ? 'mac.set' : 'mac.notSet')}
-          />
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button
-            disabled={task.busy || (!auth && !stored.data?.auth) || (!ct0 && !stored.data?.ct0)}
-            onClick={() => void task.run(async () => {
-              const a = auth || stored.data?.auth || '';
-              const c = ct0 || stored.data?.ct0 || '';
-              const result = await core.read<CookieCheck>(core.b.tl_check_cookies(a, c));
-              await alertMessage(
-                result.error ? L('cookie.invalid') : L('cookie.signedIn', result.screen_name ?? ''),
-                result.error ? L(result.error) : (result.name ?? ''),
-              );
-            })}>
-            {L('settings.cookie.check')}
-          </Button>
-          <Button
-            kind="primary"
-            disabled={task.busy || loading || !valid}
-            onClick={() => void task.run(async () => {
-              await updateSecrets({ auth_token: auth || null, ct0: ct0 || null });
-              await core.b.tl_set_cookies(auth, ct0);
-              setToken('');
-              setCsrf('');
-              stored.reload();
-              await alertMessage(L(auth ? 'settings.cookie.saved' : 'settings.cookie.cleared'));
-            })}>
-            {L('settings.cookie.save')}
-          </Button>
-        </div>
-      </Card>
+      )}
     </SectionGroup>
+  );
+}
+
+function CookieAccountEditor({
+  account,
+  onSaved,
+  onDelete,
+  onCancel,
+}: {
+  account?: CookieAccount;
+  onSaved: (saved: CookieAccount) => void;
+  onDelete?: () => void;
+  onCancel?: () => void;
+}) {
+  const [label, setLabel] = useState(account?.label ?? '');
+  const [authToken, setAuthToken] = useState(account?.auth_token ?? '');
+  const [ct0, setCt0] = useState(account?.ct0 ?? '');
+  const [screenName, setScreenName] = useState<string | null>(account?.screen_name ?? null);
+  const task = useTask();
+
+  async function save() {
+    const a = authToken.trim();
+    const c = ct0.trim();
+    if (!a || !c) {
+      await alertMessage(L('cookie.fillBoth'));
+      return;
+    }
+    await task.run(async () => {
+      const saved = await core.read<CookieAccount>(
+        core.b.tl_cookie_save(JSON.stringify({
+          id: account?.id ?? null,
+          label: label.trim(),
+          auth_token: a,
+          ct0: c,
+          screen_name: screenName,
+        })),
+      );
+      toast(L('settings.cookie.saved'));
+      onSaved(saved);
+    });
+  }
+
+  async function check() {
+    const a = authToken.trim();
+    const c = ct0.trim();
+    if (!a || !c) {
+      await alertMessage(L('cookie.fillBoth'));
+      return;
+    }
+    await task.run(async () => {
+      const result = await core.read<CookieCheck>(core.b.tl_check_cookies(a, c));
+      if (!result.error && result.screen_name) {
+        setScreenName(result.screen_name);
+        if (account) {
+          const saved = await core.read<CookieAccount>(
+            core.b.tl_cookie_save(JSON.stringify({
+              id: account.id,
+              label: label.trim(),
+              auth_token: a,
+              ct0: c,
+              screen_name: result.screen_name,
+            })),
+          );
+          onSaved(saved);
+        }
+      }
+      await alertMessage(
+        result.error ? L('cookie.invalid') : L('cookie.signedIn', result.screen_name ?? ''),
+        result.error ? L(result.error) : (result.name ?? ''),
+      );
+    });
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="secret-field-row">
+        <span className="secret-field-name">{L('cookie.label')}</span>
+        <TextField value={label} onChange={setLabel} />
+      </div>
+      <div className="secret-field-row">
+        <span className="secret-field-name">auth_token</span>
+        <TextField value={authToken} onChange={setAuthToken} />
+      </div>
+      <div className="secret-field-row">
+        <span className="secret-field-name">ct0</span>
+        <TextField value={ct0} onChange={setCt0} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {onDelete && (
+          <Button kind="danger" disabled={task.busy} onClick={onDelete}>{L('common.delete')}</Button>
+        )}
+        {onCancel && (
+          <Button disabled={task.busy} onClick={onCancel}>{L('common.cancel')}</Button>
+        )}
+        <div style={{ flex: 1 }} />
+        <Button disabled={task.busy} onClick={() => void check()}>{L('settings.cookie.check')}</Button>
+        <Button kind="primary" disabled={task.busy} onClick={() => void save()}>{L('common.save')}</Button>
+      </div>
+    </div>
   );
 }

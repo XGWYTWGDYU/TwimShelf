@@ -11,7 +11,6 @@ import '../app/prefs.dart';
 import '../app/shell.dart';
 import '../l10n/l10n.dart';
 import '../mascot/mascot.dart';
-import '../platform/secrets.dart';
 import '../services/updates.dart';
 import '../widgets/choice_menu.dart';
 import 'settings/about_page.dart';
@@ -269,8 +268,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// The account cookies (needed for locked accounts' posts): kept in the platform's secret store,
-/// never synced.
+/// Multi-account X Cookie management, modeled after ai_page's expandable model/prompt cards:
+/// all accounts are equal (no default/primary) and synced across devices.
 class CookieSection extends StatefulWidget {
   const CookieSection({super.key});
 
@@ -279,12 +278,139 @@ class CookieSection extends StatefulWidget {
 }
 
 class _CookieSectionState extends State<CookieSection> {
-  final _auth = TextEditingController();
-  final _ct0 = TextEditingController();
+  List<CookieAccount> _accounts = const [];
+  bool _adding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() {
+    try {
+      final list = Core.cookiesList();
+      if (mounted) setState(() => _accounts = list);
+    } catch (_) {}
+  }
+
+  void _toast(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
+
+  String _displayName(CookieAccount a) {
+    if (a.label.trim().isNotEmpty) return a.label.trim();
+    if (a.screenName != null && a.screenName!.isNotEmpty) return '@${a.screenName}';
+    return L('cookie.unnamed');
+  }
+
+  String _detailLine(CookieAccount a) {
+    final parts = <String>[];
+    if (a.screenName != null && a.screenName!.isNotEmpty && a.label.trim().isNotEmpty) {
+      parts.add('@${a.screenName}');
+    }
+    final tail = a.authToken.length > 4 ? '••••${a.authToken.substring(a.authToken.length - 4)}' : '••••';
+    parts.add(tail);
+    return parts.join(' · ');
+  }
+
+  Future<void> _delete(CookieAccount a) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: Text(L('cookie.delete.title', [_displayName(a)])),
+        content: Text(L('cookie.delete.message')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: Text(L('common.cancel'))),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(d).colorScheme.error),
+            onPressed: () => Navigator.pop(d, true),
+            child: Text(L('common.delete')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      Core.deleteCookie(a.id);
+      _reload();
+    } catch (e) {
+      _toast('$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _Section(
+        title: L('settings.cookie.header'),
+        footer: L('cookie.multi.footer'),
+        children: [
+          if (_accounts.isEmpty && !_adding)
+            ListTile(
+              leading: const SettingsIcon(Icons.key_outlined),
+              title: Text(L('cookie.noneAdded')),
+            ),
+          for (final acc in _accounts)
+            ExpansionTile(
+              key: ValueKey('cookie-${acc.id}'),
+              shape: const Border(),
+              collapsedShape: const Border(),
+              leading: const SettingsIcon(Icons.key),
+              title: Text(_displayName(acc)),
+              subtitle: Text(_detailLine(acc)),
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              children: [
+                _CookieEditor(
+                  key: ValueKey('cookie-editor-${acc.id}-${acc.label}-${acc.authToken}-${acc.ct0}-${acc.screenName}'),
+                  account: acc,
+                  onSaved: () {
+                    _toast(L('settings.cookie.saved'));
+                    _reload();
+                  },
+                  onDelete: () => _delete(acc),
+                ),
+              ],
+            ),
+          if (_adding)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: _CookieEditor(
+                onSaved: () {
+                  setState(() => _adding = false);
+                  _toast(L('settings.cookie.saved'));
+                  _reload();
+                },
+                onCancel: () => setState(() => _adding = false),
+              ),
+            )
+          else
+            ListTile(
+              leading: const SettingsIcon(Icons.add_circle_outline),
+              title: Text(L('cookie.add')),
+              onTap: () => setState(() => _adding = true),
+            ),
+        ],
+      );
+}
+
+class _CookieEditor extends StatefulWidget {
+  const _CookieEditor({super.key, this.account, required this.onSaved, this.onDelete, this.onCancel});
+  final CookieAccount? account;
+  final VoidCallback onSaved;
+  final VoidCallback? onDelete;
+  final VoidCallback? onCancel;
+
+  @override
+  State<_CookieEditor> createState() => _CookieEditorState();
+}
+
+class _CookieEditorState extends State<_CookieEditor> {
+  late final _label = TextEditingController(text: widget.account?.label ?? '');
+  late final _auth = TextEditingController(text: widget.account?.authToken ?? '');
+  late final _ct0 = TextEditingController(text: widget.account?.ct0 ?? '');
+  late String? _screenName = widget.account?.screenName;
   bool _checking = false;
 
   @override
   void dispose() {
+    _label.dispose();
     _auth.dispose();
     _ct0.dispose();
     super.dispose();
@@ -292,26 +418,22 @@ class _CookieSectionState extends State<CookieSection> {
 
   void _toast(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
 
-  Future<void> _save() async {
-    final cleared = _auth.text.trim().isEmpty && _ct0.text.trim().isEmpty;
-    final a = await Secrets.write('auth_token', _auth.text.trim());
-    final b = await Secrets.write('ct0', _ct0.text.trim());
-    if (!mounted) return;
-    if (a is SecretsUnavailable || b is SecretsUnavailable) return _toast(L('settings.cookie.notSaved'));
-    await Session.applyStoredCookies();
-    if (!mounted) return;
-    _auth.clear();
-    _ct0.clear();
-    _toast(cleared ? L('settings.cookie.cleared') : L('settings.cookie.saved'));
-  }
-
   Future<void> _check() async {
+    final a = _auth.text.trim(), c = _ct0.text.trim();
+    if (a.isEmpty || c.isEmpty) return _toast(L('cookie.fillBoth'));
     setState(() => _checking = true);
-    final auth = await Secrets.read('auth_token'), ct0 = await Secrets.read('ct0');
-    final a = auth is SecretValue<String?> ? auth.value ?? '' : '', c = ct0 is SecretValue<String?> ? ct0.value ?? '' : '';
     final r = await checkCookies(a, c);
     if (!mounted) return;
     setState(() => _checking = false);
+    if (r.error == null && r.screen_name != null && r.screen_name!.isNotEmpty) {
+      _screenName = r.screen_name;
+      if (widget.account != null) {
+        try {
+          Core.saveCookie(id: widget.account!.id, label: _label.text.trim(), authToken: a, ct0: c, screenName: _screenName);
+          widget.onSaved();
+        } catch (_) {}
+      }
+    }
     showDialog<void>(
       context: context,
       builder: (d) => AlertDialog(
@@ -322,23 +444,81 @@ class _CookieSectionState extends State<CookieSection> {
     );
   }
 
+  void _save() {
+    final a = _auth.text.trim(), c = _ct0.text.trim();
+    if (a.isEmpty || c.isEmpty) return _toast(L('cookie.fillBoth'));
+    try {
+      Core.saveCookie(id: widget.account?.id, label: _label.text.trim(), authToken: a, ct0: c, screenName: _screenName);
+      widget.onSaved();
+    } catch (e) {
+      _toast(L('settings.cookie.notSaved'));
+    }
+  }
+
   @override
-  Widget build(BuildContext context) => _Section(title: L('settings.cookie.header'), footer: L('settings.cookie.footer'), children: [
+  Widget build(BuildContext context) {
+    final labelStyle = Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: TextField(contextMenuBuilder: appTextMenu, controller: _auth, obscureText: true, autocorrect: false, enableSuggestions: false, decoration: const InputDecoration(labelText: 'auth_token')),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(L('cookie.label'), style: labelStyle),
+            const SizedBox(height: 6),
+            TextField(
+              contextMenuBuilder: appTextMenu,
+              controller: _label,
+              decoration: const InputDecoration(border: OutlineInputBorder()),
+            ),
+          ]),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: TextField(contextMenuBuilder: appTextMenu, controller: _ct0, obscureText: true, autocorrect: false, enableSuggestions: false, decoration: const InputDecoration(labelText: 'ct0')),
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('auth_token', style: labelStyle),
+            const SizedBox(height: 6),
+            TextField(
+              contextMenuBuilder: appTextMenu,
+              controller: _auth,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(border: OutlineInputBorder()),
+            ),
+          ]),
         ),
-        ListTile(leading: const SettingsIcon(Icons.key), title: Text(L('settings.cookie.save')), onTap: _save),
-        ListTile(
-          leading: _checking ? const SizedBox.square(dimension: 24, child: CircularProgressIndicator(strokeWidth: 2)) : const SettingsIcon(Icons.verified_user),
-          title: Text(_checking ? L('settings.cookie.checking') : L('settings.cookie.check')),
-          onTap: _checking ? null : _check,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('ct0', style: labelStyle),
+            const SizedBox(height: 6),
+            TextField(
+              contextMenuBuilder: appTextMenu,
+              controller: _ct0,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(border: OutlineInputBorder()),
+            ),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.end, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            if (widget.onDelete != null)
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
+                onPressed: widget.onDelete,
+                child: Text(L('common.delete')),
+              ),
+            if (widget.onCancel != null)
+              TextButton(onPressed: widget.onCancel, child: Text(L('common.cancel'))),
+            TextButton(
+              onPressed: _checking ? null : _check,
+              child: Text(_checking ? L('settings.cookie.checking') : L('settings.cookie.check')),
+            ),
+            FilledButton(onPressed: _save, child: Text(L('common.save'))),
+          ]),
         ),
       ]);
+  }
 }
 
 class _Stat extends StatelessWidget {

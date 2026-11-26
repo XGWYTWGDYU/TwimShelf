@@ -417,12 +417,14 @@ enum Core {
     struct ExtensionClient: Decodable, Identifiable { let id: String; let name: String; let added: Int; let seen: Int }
     struct ExtensionPairing: Decodable { let code: String; let link: String; let expiresIn: Int }
     struct ExtensionState: Decodable { let clients: [ExtensionClient]; let pairing: ExtensionPairing?; let port: Int? }
+    struct ExtensionManagedStatus: Decodable, Equatable { let installed: Bool; let version: String?; let dir: String }
+    struct ExtensionUpdateCheck: Decodable, Equatable { let installed: Bool; let current: String?; let latest: String; let hasUpdate: Bool; let pageUrl: String; let dir: String }
 
     /// This device for the browser extension (name, platform, download settings); with `listen`
     /// the listener starts once. Its port.
-    @discardableResult static func extensionServe(name: String, platform: String, route: String, concurrency: Int, intervalMs: Int, folder: String?, listen: Bool) throws -> Int? {
-        struct O: Encodable { let name: String; let platform: String; let flavor: String; let route: String; let concurrency: Int; let intervalMs: Int; let folder: String?; let listen: Bool }
-        let json = String(decoding: try encoder.encode(O(name: name, platform: platform, flavor: "native", route: route, concurrency: concurrency, intervalMs: intervalMs, folder: folder, listen: listen)), as: UTF8.self)
+    @discardableResult static func extensionServe(name: String, platform: String, route: String, concurrency: Int, intervalMs: Int, folder: String?, listen: Bool, desktop: Bool = false, managedDir: String? = nil) throws -> Int? {
+        struct O: Encodable { let name: String; let platform: String; let flavor: String; let route: String; let concurrency: Int; let intervalMs: Int; let folder: String?; let listen: Bool; let desktop: Bool; let managedDir: String? }
+        let json = String(decoding: try encoder.encode(O(name: name, platform: platform, flavor: "native", route: route, concurrency: concurrency, intervalMs: intervalMs, folder: folder, listen: listen, desktop: desktop, managedDir: managedDir)), as: UTF8.self)
         return try decodeOk(tl_ext_serve(json), as: Int?.self)
     }
     /// A new binding code, with this device's own LAN addresses in its binding text.
@@ -434,6 +436,10 @@ enum Core {
     static func extensionPairCancel() { tl_ext_pair_cancel() }
     static func extensionState() throws -> ExtensionState { try call(tl_ext_clients(), as: ExtensionState.self) }
     @discardableResult static func extensionRemove(_ id: String) throws -> Bool { try call(tl_ext_remove(id), as: Bool.self) }
+    static func extensionManagedStatus() throws -> ExtensionManagedStatus { try call(tl_ext_managed_status(), as: ExtensionManagedStatus.self) }
+    static func extensionManagedCheck(repo: String) throws -> ExtensionUpdateCheck { try call(tl_ext_managed_check(repo), as: ExtensionUpdateCheck.self) }
+    static func extensionManagedInstall(repo: String) throws -> ExtensionManagedStatus { try call(tl_ext_managed_install(repo), as: ExtensionManagedStatus.self) }
+    static func extensionTakeOpenSettings() -> Bool { tl_ext_take_open_settings() }
 
     static var libraryDirectory: URL {
         #if DEBUG
@@ -660,14 +666,53 @@ enum Core {
         rows(tl_media_tags(mediaId)).compactMap { $0.first as? String }
     }
 
-    /// Checks the saved cookies with X (Settings → 检查 Cookie).
-    static func checkCookies() -> (title: String, detail: String) {
-        struct R: Decodable { let screenName: String?; let error: String? }
-        let auth = Keychain.get("auth_token") ?? "", ct0 = Keychain.get("ct0") ?? ""
-        guard !auth.isEmpty, !ct0.isEmpty else { return (L("cookie.none.title"), L("cookie.none.message")) }
-        guard let r = try? call(tl_check_cookies(auth, ct0), as: R.self) else { return (L("cookie.checkFailed"), "") }
-        if let e = r.error { return (L("cookie.invalid"), e) }
-        return (L("cookie.valid"), L("cookie.signedIn", r.screenName ?? ""))
+    struct CookieAccount: Codable, Identifiable, Equatable {
+        let id: String
+        var label: String
+        var authToken: String
+        var ct0: String
+        var screenName: String?
+        var createdAt: UInt64
+
+        var displayName: String {
+            if !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return label }
+            if let s = screenName, !s.isEmpty { return "@\(s)" }
+            return L("cookie.unnamed")
+        }
+
+        var detailLine: String {
+            var parts: [String] = []
+            if let s = screenName, !s.isEmpty, !label.isEmpty { parts.append("@\(s)") }
+            let tail = authToken.count > 4 ? "••••\(authToken.suffix(4))" : "••••"
+            parts.append(tail)
+            return parts.joined(separator: " · ")
+        }
+    }
+
+    static func cookiesList() -> [CookieAccount] {
+        (try? call(tl_cookies_list(), as: [CookieAccount].self)) ?? []
+    }
+
+    @discardableResult
+    static func saveCookie(id: String? = nil, label: String, authToken: String, ct0: String, screenName: String? = nil) throws -> CookieAccount {
+        struct Input: Encodable { let id: String?; let label: String; let authToken: String; let ct0: String; let screenName: String? }
+        return try call(tl_cookie_save(json(Input(id: id, label: label, authToken: authToken, ct0: ct0, screenName: screenName))), as: CookieAccount.self)
+    }
+
+    @discardableResult
+    static func deleteCookie(_ id: String) throws -> Bool {
+        try call(tl_cookie_delete(id), as: Bool.self)
+    }
+
+    /// Checks a specific X cookie pair (Settings → 检查 Cookie).
+    static func checkCookies(authToken: String, ct0: String) -> (ok: Bool, screenName: String?, title: String, detail: String) {
+        struct R: Decodable { let screenName: String?; let name: String?; let error: String? }
+        let auth = authToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ct0 = ct0.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !auth.isEmpty, !ct0.isEmpty else { return (false, nil, L("cookie.none.title"), L("cookie.none.message")) }
+        guard let r = try? call(tl_check_cookies(auth, ct0), as: R.self) else { return (false, nil, L("cookie.checkFailed"), "") }
+        if let e = r.error { return (false, nil, L("cookie.invalid"), e) }
+        return (true, r.screenName, L("cookie.valid"), L("cookie.signedIn", r.screenName ?? ""))
     }
 
     /// Every live media with this tag into a folder (created if needed); returns how many were added.

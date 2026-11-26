@@ -1,18 +1,24 @@
-// 浏览器扩展: binds the TwimShelf extension of a Chromium browser to this device (a code shown here,
-// typed or pasted there), and lists the browsers bound so far.
+// 浏览器扩展: downloads/updates the app-hosted extension in the app's data folder, binds Chromium
+// browsers to this device, and lists the browsers bound so far.
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TwimShelf.Controls;
 using TwimShelf.Core;
 using TwimShelf.Extension;
 using TwimShelf.Models;
+using TwimShelf.Services;
 using static TwimShelf.Services.Strings;
 
 namespace TwimShelf.Pages;
 
-public sealed partial class ExtensionSettings(LibraryModel library) : SettingsSubpage
+public sealed partial class ExtensionSettings(LibraryModel library, bool autoCheckUpdate = false) : SettingsSubpage
 {
     ExtensionClients? _state;
+    ExtensionManagedStatus? _managed;
+    ExtensionUpdateCheck? _updateCheck;
+    bool _busy;
+    bool _didAutoCheck;
     string? _error;
     HashSet<string> _before = [];
     Microsoft.UI.Dispatching.DispatcherQueueTimer? _poll;
@@ -32,6 +38,7 @@ public sealed partial class ExtensionSettings(LibraryModel library) : SettingsSu
 
     void Load()
     {
+        try { _managed = TlCore.ExtensionManagedStatus(); } catch { }
         try
         {
             var s = TlCore.ExtensionClients();
@@ -53,6 +60,7 @@ public sealed partial class ExtensionSettings(LibraryModel library) : SettingsSu
         Clear();
         _ = library;
         Add(new TextBlock { Text = L("ext.intro"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 0, 8) });
+        BuildManagedSection();
         if (_state?.Pairing is { } p)
         {
             var code = p.Code.Length > 3 ? $"{p.Code[..3]} {p.Code[3..]}" : p.Code;
@@ -94,13 +102,166 @@ public sealed partial class ExtensionSettings(LibraryModel library) : SettingsSu
         if (clients.Count == 0) Card(L("ext.state.none"));
         foreach (var c in clients)
         {
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            if (_managed?.Installed == true)
+            {
+                if (_updateCheck is { HasUpdate: true } u)
+                {
+                    var upd = new Button
+                    {
+                        Content = L("ext.managed.update", u.Latest),
+                        Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+                        IsEnabled = !_busy,
+                    };
+                    upd.Click += (_, _) => _ = RunInstall(updating: true);
+                    actions.Children.Add(upd);
+                }
+                else
+                {
+                    var chk = new Button { Content = L("ext.managed.checkUpdate"), IsEnabled = !_busy };
+                    chk.Click += (_, _) => _ = RunCheck();
+                    actions.Children.Add(chk);
+                }
+            }
             var remove = new Button { Content = new FontIcon { Glyph = "", FontSize = 14 } };
             ToolTipService.SetToolTip(remove, L("ext.remove.confirm"));
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, L("ext.remove.confirm"));
             remove.Click += (_, _) => _ = Remove(c);
-            Card(c.Name, L("ext.client.detail", Date(c.Added), Date(c.Seen)), "", remove);
+            actions.Children.Add(remove);
+            Card(c.Name, L("ext.client.detail", Date(c.Added), Date(c.Seen)), "", actions);
         }
         Footer(Receiver.Port != null ? L("ext.footer.desktop", Receiver.Port.ToString()) : L("ext.unavailable", Receiver.Problem ?? ""));
+
+        if (autoCheckUpdate && !_didAutoCheck && _managed?.Installed == true)
+        {
+            _didAutoCheck = true;
+            _ = RunCheck();
+        }
+    }
+
+    void BuildManagedSection()
+    {
+        Header(L("ext.managed.title"));
+        if (_managed is { Installed: true } m)
+        {
+            Button action;
+            if (_updateCheck is { HasUpdate: true } u)
+            {
+                action = new Button
+                {
+                    Content = L("ext.managed.update", u.Latest),
+                    Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+                    IsEnabled = !_busy,
+                };
+                action.Click += (_, _) => _ = RunInstall(updating: true);
+            }
+            else
+            {
+                action = new Button { Content = _busy ? L("ext.managed.checking") : L("ext.managed.checkUpdate"), IsEnabled = !_busy };
+                action.Click += (_, _) => _ = RunCheck();
+            }
+            var desc = _updateCheck is { HasUpdate: true } upd ? L("ext.managed.updateReady", upd.Latest) : null;
+            Card(L("ext.managed.version", m.Version ?? ""), desc, "", action);
+
+            var openBtn = new Button { Content = L("ext.managed.openFolder") };
+            openBtn.Click += (_, _) =>
+            {
+                try { Process.Start(new ProcessStartInfo("explorer.exe", m.Dir) { UseShellExecute = true }); }
+                catch (Exception e) { Dialogs.Toast(W, e.Message); }
+            };
+            var copyBtn = new Button { Content = L("ext.managed.copyPath") };
+            copyBtn.Click += (_, _) =>
+            {
+                var dp = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                dp.SetText(m.Dir);
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+                Dialogs.Toast(W, L("ext.managed.pathCopied"));
+            };
+            var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { openBtn, copyBtn } };
+            Add(new Border
+            {
+                Padding = new Thickness(16), CornerRadius = new CornerRadius(8),
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"],
+                BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"], BorderThickness = new Thickness(1),
+                Child = new StackPanel
+                {
+                    Spacing = 10,
+                    Children =
+                    {
+                        new TextBox { Text = m.Dir, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas") },
+                        btnRow,
+                        new TextBlock
+                        {
+                            Text = L("ext.managed.installGuide"),
+                            TextWrapping = TextWrapping.Wrap,
+                            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                        },
+                    },
+                },
+            });
+        }
+        else
+        {
+            var dl = new Button
+            {
+                Content = L("ext.managed.download"),
+                Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+                IsEnabled = !_busy,
+            };
+            dl.Click += (_, _) => _ = RunInstall(updating: false);
+            Card(L("ext.managed.download"), L("ext.managed.notInstalled"), "", dl);
+        }
+    }
+
+    async Task RunCheck()
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        Build();
+        try
+        {
+            var info = await TlCore.Run(() => TlCore.ExtensionManagedCheck(Updates.Repo));
+            _updateCheck = info;
+            _busy = false;
+            Build();
+            if (info.HasUpdate)
+            {
+                var choice = await Dialogs.Choose(
+                    W,
+                    L("ext.managed.prompt.title", info.Latest),
+                    L("ext.managed.prompt.message", info.Current ?? ""),
+                    L("ext.managed.updateNow"));
+                if (choice == 0) await RunInstall(updating: true);
+            }
+            else
+            {
+                Dialogs.Toast(W, L("ext.managed.upToDate", info.Current ?? info.Latest));
+            }
+        }
+        catch (Exception e)
+        {
+            _busy = false;
+            _error = L("ext.managed.checkFailed", e.Message);
+            Build();
+        }
+    }
+
+    async Task RunInstall(bool updating)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = null;
+        Build();
+        var st = await Receiver.InstallManaged(W, updating);
+        _busy = false;
+        if (st != null)
+        {
+            _managed = st;
+            _updateCheck = null;
+        }
+        Build();
     }
 
     static FrameworkElement Col(FrameworkElement e, int c) { Grid.SetColumn(e, c); return e; }

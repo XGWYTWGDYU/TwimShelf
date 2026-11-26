@@ -33,6 +33,24 @@ const ERRORS = {
 let adding = false;
 /** The tab shown once a device is bound: "tasks" (下载) or "devices" (设备). */
 let tab = "tasks";
+/** Bound desktop app that hosts/manages this extension (when online and reporting managed: true). */
+let managedUpdateDevice = null;
+let currentUpdate = null;
+let updateProbeSeq = 0;
+
+$("updateBox").addEventListener("click", async (e) => {
+  if (!managedUpdateDevice) return;
+  e.preventDefault();
+  const go = $("updateBox").querySelector(".update-go");
+  if (go) go.textContent = t("updateOpeningApp");
+  const r = await chrome.runtime.sendMessage({ type: "openAppExtensionSettings", deviceId: managedUpdateDevice.id }).catch(() => null);
+  if (r?.opened) {
+    window.close();
+  } else {
+    if (go) go.textContent = t("updateOpen");
+    if (currentUpdate?.url) chrome.tabs.create({ url: currentUpdate.url });
+  }
+});
 for (const [id, name] of [["tabTasks", "tasks"], ["tabDevices", "devices"]]) {
   $(id).addEventListener("click", () => { tab = name; adding = false; status(""); render(); });
 }
@@ -168,12 +186,43 @@ function taskRow(x) {
 
 // ------------------------------------------------------------------------------------------
 
+async function probeManagedUpdate(usable, defaultDevice, seq) {
+  const ordered = defaultDevice
+    ? [usable.find((d) => d.id === defaultDevice), ...usable.filter((d) => d.id !== defaultDevice)].filter(Boolean)
+    : usable;
+  for (const d of ordered) {
+    if (d.platform === "server") continue;
+    for (const base of [d.current, ...(d.addresses || []).filter((a) => a !== d.current)].filter(Boolean)) {
+      const h = await hello(base, d.token);
+      if (seq !== updateProbeSeq) return;
+      if (h) {
+        if (h.bound && h.managed === true) {
+          managedUpdateDevice = d;
+          const go = $("updateBox").querySelector(".update-go");
+          if (go) go.textContent = t("updateInApp");
+          return;
+        }
+        break;
+      }
+    }
+  }
+}
+
 async function render() {
   const { devices, tasks, defaultDevice } = await load();
   const { update } = await chrome.storage.local.get("update");
+  currentUpdate = update || null;
+  managedUpdateDevice = null;
+  const seq = ++updateProbeSeq;
   $("updateBox").hidden = !update;
-  if (update) { $("updateText").textContent = t("updateAvailable", update.version); $("updateBox").href = update.url; }
   const usable = devices.filter((d) => !d.unbound);
+  if (update) {
+    $("updateText").textContent = t("updateAvailable", update.version);
+    $("updateBox").href = update.url;
+    const go = $("updateBox").querySelector(".update-go");
+    if (go) go.textContent = t("updateOpen");
+    if (usable.length) void probeManagedUpdate(usable, defaultDevice, seq);
+  }
   const list = Object.values(tasks).sort((a, b) => b.updated - a.updated).slice(0, 30);
   const active = list.filter((x) => ACTIVE.has(x.state)).length;
 

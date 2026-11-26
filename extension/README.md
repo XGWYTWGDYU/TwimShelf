@@ -5,17 +5,26 @@
 - Windows、Linux、macOS 上的 TwimShelf App（Flutter 版和原生版），App 打开时接收；
 - TwimShelf Linux 服务器（Docker），随时接收。
 
-这是一个独立的项目，和主项目没有关联：没有构建步骤，构建脚本和 `config.yaml` 都不处理它。
+这是一个免构建的 Chromium 扩展源码目录，发布时由 GitHub Actions 打包为 `TwimShelf-extension-<版本>.zip`，并由 Windows、macOS、Linux 桌面版 App 托管下载与更新（网页版 / Docker 服务器不托管扩展）。
 
 ## 安装
 
-1. 在 Chrome、Edge 或其他 Chromium 浏览器（116 以上）打开 `chrome://extensions`。
-2. 打开右上角的「开发者模式」。
-3. 点「加载已解压的扩展程序」，选择这个 `extension` 目录。
+### 方式一：通过桌面版 App 下载并托管（推荐）
 
-更新代码后，在同一页面点扩展卡片上的刷新按钮。
+1. 在 macOS、Windows 或 Linux 桌面版 TwimShelf 中打开 **设置 → 浏览器扩展**，点击 **「下载扩展」**，扩展会自动下载解压到应用的数据目录中。
+2. 在 Chrome、Edge 或其他 Chromium 浏览器（116 以上）打开 `chrome://extensions`，开启右上角的「开发者模式」。
+3. 点击「加载已解压的扩展程序」，选择应用页面给出的扩展文件夹（请勿删除该文件夹）。
 
-扩展每 12 小时到 GitHub 查一次最新的正式版（仓库取自 `manifest.json` 的 `homepage_url`，fork 后改这里），有新版本时在弹窗顶部提示并链接到发布页。它不会自己安装：解压加载的扩展只能手动替换目录后刷新。
+### 方式二：手动安装（仅使用 Linux 服务器或从源码开发）
+
+从 GitHub Releases 下载 `TwimShelf-extension-<版本>.zip` 并解压，或直接选择本仓库的 `extension` 目录，在 `chrome://extensions` 开启「开发者模式」后点击「加载已解压的扩展程序」加载。
+
+> 如果你已经把扩展手动安装在其他目录，桌面版 App 不会改动或托管你原有的目录。
+
+## 更新
+
+- **桌面版 App 托管的扩展**：App 每天会自动检查一次新版本并提示更新，也可以在 **设置 → 浏览器扩展**（以及已绑定的浏览器条目旁）手动点击「检查更新」。更新时会直接覆盖应用数据目录里的扩展文件，**无需退出 Chrome / Edge**，覆盖完成后在 `chrome://extensions` 点击 TwimShelf 卡片上的刷新按钮即可生效（已绑定的设备记录不会丢失）。
+- **从扩展弹窗一键跳转**：扩展每 12 小时也会自行向 GitHub 检查一次正式版更新（仓库取自 `manifest.json` 的 `homepage_url`）。如果已绑定正在运行且托管了扩展的桌面版 App，弹窗顶部会显示「更新」按钮，点击即可直接唤起 App 并跳转到浏览器扩展设置页；未由桌面版 App 托管时，点击仍会打开 GitHub 发布页。
 
 ## 绑定设备
 
@@ -44,10 +53,11 @@
 
 | 请求 | 用途 |
 | --- | --- |
-| `GET /ext/hello` | 是否是 TwimShelf、设备名、平台、是否已绑定 |
+| `GET /ext/hello` | 是否是 TwimShelf、设备名、平台、是否已绑定、桌面版是否托管了扩展 |
 | `POST /ext/pair {code, name}` | 用绑定码换取令牌 |
 | `POST /ext/download {url}` | 把帖子加入下载队列 |
 | `POST /ext/status {urls}` | 查询任务状态 |
+| `POST /ext/open-settings` | 唤起桌面版 App 并跳转到「浏览器扩展」设置页检查更新 |
 | `POST /ext/unbind` | 解除绑定 |
 
 桌面版 App 监听 27800–27809 端口，只接受本机和局域网的请求；Linux 服务器在自己的端口（默认 2778）下提供 `/ext/`。网页无法调用这些接口：带网页来源的请求会被拒绝。

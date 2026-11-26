@@ -113,6 +113,9 @@ public sealed class Prefs
     /// 检查更新: when it last looked (ms), and a version the person chose to skip.
     public long UpdateLastCheck { get => Long("update.lastCheck") ?? 0; set => Set("update.lastCheck", value, notify: false); }
     public string? UpdateSkipped { get => String("update.skipped"); set => Set("update.skipped", value, notify: false); }
+    /// App-hosted browser extension updates: last check (ms) and skipped version.
+    public long ExtUpdateLastCheck { get => Long("ext.update.lastCheck") ?? 0; set => Set("ext.update.lastCheck", value, notify: false); }
+    public string? ExtUpdateSkipped { get => String("ext.update.skipped"); set => Set("ext.update.skipped", value, notify: false); }
     /// The photo grid's tile size (legacy setting) and zoom level (0 densest .. 2 largest).
     public double GridTile { get => Math.Clamp(Double("windows.grid.tile") ?? 160, 72, 400); set => Set("windows.grid.tile", value, notify: false); }
     public int GridLevel { get => (int)Math.Clamp(Long("windows.grid.level") ?? 1, 0, 2); set => Set("windows.grid.level", Math.Clamp(value, 0, 2), notify: false); }

@@ -175,14 +175,8 @@ fn start_sync(cfg: &Config) {
     eprintln!("sync: started as \"{name}\" ({r}, {d})");
 }
 
-/// The X session cookies the web app stored: downloads (from the browser extension too) can use
-/// them with no browser open.
-fn apply_cookies(cfg: &Config) {
-    let cookies = cfg.secrets.read(["auth_token", "ct0"]).inspect_err(|_| eprintln!("secrets: download cookies cannot be read"));
-    if let Ok([Some(a), Some(t)]) = cookies {
-        tl_core::ffi::tl_set_cookies(c(Path::new(&a)).as_ptr(), c(Path::new(&t)).as_ptr());
-    }
-}
+/// No-op: X account cookies are now synced directly inside the library store (no local secrets encryption).
+fn apply_cookies(_cfg: &Config) {}
 
 /// A core function's answer (`wire::take`: its JSON text) as JSON. Fields read from the text itself
 /// are all missing: on-device AI looked off, and every tag the page asked for looked failed.

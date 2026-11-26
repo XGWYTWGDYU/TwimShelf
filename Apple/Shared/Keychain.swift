@@ -67,7 +67,6 @@ enum Keychain {
 }
 
 enum Session {
-    static func applyStoredCookies() {
-        Core.setCookies(authToken: Keychain.get("auth_token") ?? "", ct0: Keychain.get("ct0") ?? "")
-    }
+    /// No-op: X account cookies are now synced directly inside the library store (no Keychain encryption).
+    static func applyStoredCookies() {}
 }

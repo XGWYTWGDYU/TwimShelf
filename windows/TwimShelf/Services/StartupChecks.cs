@@ -23,5 +23,6 @@ public static class StartupChecks
             }
         }
         await Updates.CheckOnLaunch(w);
+        await TwimShelf.Extension.Receiver.CheckUpdateOnLaunch(w);
     }
 }

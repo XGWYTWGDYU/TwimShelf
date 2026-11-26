@@ -29,16 +29,25 @@ public sealed partial class DownloadsSettings : SettingsSubpage
         D.Changed += OnChanged;
     }
 
-    readonly PasswordBox _auth = new() { PlaceholderText = "auth_token", MinWidth = 260 };
-    readonly PasswordBox _ct0 = new() { PlaceholderText = "ct0", MinWidth = 260 };
+    readonly Dictionary<string, CookieEditor> _cookieEditors = [];
+    readonly HashSet<string> _cookieExpanded = [];
+    bool _addingCookie;
+    CookieEditor? _newCookieEditor;
 
     /// The download's progress redraws the page, but never under someone typing in it.
     void OnChanged() => DispatcherQueue.TryEnqueue(() =>
     {
-        if (_links.FocusState != FocusState.Unfocused || _auth.FocusState != FocusState.Unfocused || _ct0.FocusState != FocusState.Unfocused) return;
+        if (_links.FocusState != FocusState.Unfocused
+            || _cookieEditors.Values.Any(e => e.HasFocus)
+            || (_newCookieEditor?.HasFocus ?? false)) return;
         Build();
     });
-    public override void Closed() => D.Changed -= OnChanged;
+    public override void Closed()
+    {
+        D.Changed -= OnChanged;
+        foreach (var e in _cookieEditors.Values) e.Release();
+        _newCookieEditor?.Release();
+    }
 
     async Task Run(Func<Task> action)
     {
@@ -187,38 +196,177 @@ public sealed partial class DownloadsSettings : SettingsSubpage
         });
     }
 
-    /// The account cookies (locked accounts' posts): in this device's secrets, never synced.
+    /// Multi-account X cookies (all equal, synced across devices), modeled after AiSettings' expandable model/prompt cards.
     void CookieSection()
     {
         Header(L("settings.cookie.header"));
-        var auth = _auth;
-        var ct0 = _ct0;
-        Detach.From(auth);
-        Detach.From(ct0);
-        Detach.Owned(Card("auth_token", null, "", auth), auth);
-        Detach.Owned(Card("ct0", null, "", ct0), ct0);
-        var save = Btn(L("settings.cookie.save"), async () =>
+        List<CookieAccount> accounts;
+        try { accounts = TlCore.CookiesList(); } catch { accounts = []; }
+
+        if (accounts.Count == 0 && !_addingCookie) Card(L("cookie.noneAdded"), null, "");
+
+        foreach (var acc in accounts)
         {
-            var cleared = auth.Password.Trim().Length == 0 && ct0.Password.Trim().Length == 0;
-            try
+            var item = acc;
+            var title = DisplayName(item);
+            var desc = DetailLine(item);
+            var ex = new SettingsExpander { Header = title, Description = desc, HeaderIcon = Icon("") };
+            ex.IsExpanded = _cookieExpanded.Contains(item.Id);
+            ex.Expanded += (_, _) => _cookieExpanded.Add(item.Id);
+            ex.Collapsed += (_, _) => _cookieExpanded.Remove(item.Id);
+
+            if (!_cookieEditors.TryGetValue(item.Id, out var editor))
+                _cookieEditors[item.Id] = editor = new CookieEditor(item, OnCookieSaved, null);
+            var editCard = new SettingsCard { ContentAlignment = ContentAlignment.Vertical, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            editCard.Content = Detach.From(editor);
+            Detach.Owned(editCard, editor);
+            ex.Items.Add(editCard);
+
+            var del = new SettingsCard { Header = L("common.delete"), HeaderIcon = Icon(""), IsClickEnabled = true };
+            del.Click += async (_, _) =>
             {
-                await Secrets.Write("auth_token", auth.Password.Trim());
-                await Secrets.Write("ct0", ct0.Password.Trim());
-            }
-            catch { Dialogs.Toast(W, L("settings.cookie.notSaved")); return; }
-            await Secrets.ApplyStoredCookies();
-            auth.Password = ct0.Password = "";
-            Dialogs.Toast(W, cleared ? L("settings.cookie.cleared") : L("settings.cookie.saved"));
-        }, accent: true);
-        var check = Btn(L("settings.cookie.check"), async () =>
+                if (!await Dialogs.Confirm(W, L("cookie.delete.title", title), L("cookie.delete.message"), L("common.delete"), destructive: true)) return;
+                try
+                {
+                    TlCore.CookieDelete(item.Id);
+                    _cookieExpanded.Remove(item.Id);
+                    _cookieEditors.Remove(item.Id);
+                    Build();
+                }
+                catch (Exception e) { Dialogs.Toast(W, e.Message); }
+            };
+            ex.Items.Add(del);
+            Add(ex);
+        }
+
+        if (_addingCookie)
         {
-            string a, c;
-            try { a = await Secrets.Read("auth_token") ?? ""; c = await Secrets.Read("ct0") ?? ""; }
-            catch { a = c = ""; }
-            var r = await Dialogs.Progress(W, L("settings.cookie.checking"), () => TlCore.CheckCookies(a, c));
-            await Dialogs.Alert(W, r.Error == null ? "@" + (r.ScreenName ?? "") : L("cookie.invalid"), r.Error ?? r.Name);
-        });
-        Card(L("mac.cookie"), null, "", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { check, save } });
-        Footer(L("windows.cookie.footer"));
+            _newCookieEditor ??= new CookieEditor(null, saved =>
+            {
+                _addingCookie = false;
+                _newCookieEditor?.Release();
+                _newCookieEditor = null;
+                _cookieExpanded.Add(saved.Id);
+                OnCookieSaved(saved);
+            }, () =>
+            {
+                _addingCookie = false;
+                _newCookieEditor?.Release();
+                _newCookieEditor = null;
+                Build();
+            });
+            var addCard = new SettingsCard
+            {
+                Header = L("cookie.add"),
+                HeaderIcon = Icon(""),
+                ContentAlignment = ContentAlignment.Vertical,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            };
+            addCard.Content = Detach.From(_newCookieEditor);
+            Detach.Owned(addCard, _newCookieEditor);
+            Add(addCard);
+        }
+        else
+        {
+            Action(L("cookie.add"), null, "", () =>
+            {
+                _newCookieEditor = null;
+                _addingCookie = true;
+                Build();
+            });
+        }
+        Footer(L("cookie.multi.footer"));
+    }
+
+    void OnCookieSaved(CookieAccount saved)
+    {
+        _cookieEditors.Remove(saved.Id);
+        Build();
+    }
+
+    static string DisplayName(CookieAccount a)
+    {
+        if (!string.IsNullOrWhiteSpace(a.Label)) return a.Label;
+        if (!string.IsNullOrWhiteSpace(a.ScreenName)) return "@" + a.ScreenName;
+        return L("cookie.unnamed");
+    }
+
+    static string DetailLine(CookieAccount a)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(a.ScreenName) && !string.IsNullOrWhiteSpace(a.Label))
+            parts.Add("@" + a.ScreenName);
+        parts.Add(a.AuthToken.Length > 4 ? "••••" + a.AuthToken[^4..] : "••••");
+        return string.Join(" · ", parts);
+    }
+
+    sealed partial class CookieEditor : StackPanel
+    {
+        readonly CookieAccount? _account;
+        readonly TextBox _label;
+        readonly TextBox _auth;
+        readonly TextBox _ct0;
+        string? _screenName;
+
+        public bool HasFocus => _label.FocusState != FocusState.Unfocused
+            || _auth.FocusState != FocusState.Unfocused
+            || _ct0.FocusState != FocusState.Unfocused;
+
+        public CookieEditor(CookieAccount? account, Action<CookieAccount> onSaved, Action? onCancel)
+        {
+            _account = account;
+            _screenName = account?.ScreenName;
+            Spacing = 10;
+            _label = new TextBox { Header = L("cookie.label"), Text = account?.Label ?? "" };
+            _auth = new TextBox { Header = "auth_token", Text = account?.AuthToken ?? "", FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas") };
+            _ct0 = new TextBox { Header = "ct0", Text = account?.Ct0 ?? "", FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas") };
+            Children.Add(_label);
+            Children.Add(_auth);
+            Children.Add(_ct0);
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
+            if (onCancel != null)
+            {
+                var cancel = new Button { Content = L("common.cancel") };
+                cancel.Click += (_, _) => onCancel();
+                buttons.Children.Add(cancel);
+            }
+            var check = new Button { Content = L("settings.cookie.check") };
+            check.Click += async (_, _) =>
+            {
+                var a = _auth.Text.Trim();
+                var c = _ct0.Text.Trim();
+                if (a.Length == 0 || c.Length == 0) { Dialogs.Toast(W, L("cookie.fillBoth")); return; }
+                var r = await Dialogs.Progress(W, L("settings.cookie.checking"), () => TlCore.CheckCookies(a, c));
+                if (r.Error == null && !string.IsNullOrWhiteSpace(r.ScreenName))
+                {
+                    _screenName = r.ScreenName;
+                    if (_account != null)
+                    {
+                        try { onSaved(TlCore.CookieSave(_account.Id, _label.Text, a, c, _screenName)); } catch { }
+                    }
+                }
+                await Dialogs.Alert(W, r.Error == null ? "@" + (r.ScreenName ?? "") : L("cookie.invalid"), r.Error ?? r.Name);
+            };
+            var save = new Button { Content = L("common.save"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+            save.Click += (_, _) =>
+            {
+                var a = _auth.Text.Trim();
+                var c = _ct0.Text.Trim();
+                if (a.Length == 0 || c.Length == 0) { Dialogs.Toast(W, L("cookie.fillBoth")); return; }
+                try
+                {
+                    var saved = TlCore.CookieSave(_account?.Id, _label.Text, a, c, _screenName);
+                    Dialogs.Toast(W, L("settings.cookie.saved"));
+                    onSaved(saved);
+                }
+                catch (Exception e) { Dialogs.Toast(W, e.Message); }
+            };
+            buttons.Children.Add(check);
+            buttons.Children.Add(save);
+            Children.Add(buttons);
+        }
+
+        public void Release() => Detach.From(this);
     }
 }

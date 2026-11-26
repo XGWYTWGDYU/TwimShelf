@@ -25,8 +25,15 @@ fn items(lib: &Library) -> anyhow::Result<Vec<FeedItem>> {
 /// Downloads `urls` into the staging folder `dir`. Blocks until they are done: call it off the main
 /// thread.
 pub fn stage(dir: &Path, urls: &[String], route: Route) -> anyhow::Result<Staged> {
+    stage_with_cookies(dir, urls, route, None)
+}
+
+pub fn stage_with_cookies(dir: &Path, urls: &[String], route: Route, cookie_lib: Option<&Library>) -> anyhow::Result<Staged> {
     let lib = Library::open(dir)?;
-    let failed = urls.iter().filter_map(|u| download::stage_link(&lib, u, route).err().map(|e| (u.clone(), format!("{e:#}")))).collect();
+    let failed = urls
+        .iter()
+        .filter_map(|u| download::stage_link_with_cookies(&lib, cookie_lib, u, route).err().map(|e| (u.clone(), format!("{e:#}"))))
+        .collect();
     Ok(Staged { items: items(&lib)?, failed })
 }
 

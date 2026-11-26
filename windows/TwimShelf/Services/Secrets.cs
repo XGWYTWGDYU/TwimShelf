@@ -84,20 +84,6 @@ public static class Secrets
 
     public static Task Delete(string key) => Write(key, "");
 
-    /// After the library opens: the stored cookies into the core. False when the secrets could not be read.
-    public static async Task<bool> ApplyStoredCookies()
-    {
-        try
-        {
-            var auth = await Read("auth_token");
-            var ct0 = await Read("ct0");
-            TlCore.SetCookies(auth ?? "", ct0 ?? "");
-            return true;
-        }
-        catch
-        {
-            TlCore.SetCookies("", "");
-            return false;
-        }
-    }
+    /// No-op: X account cookies are now synced directly inside the library store (no local encryption).
+    public static Task<bool> ApplyStoredCookies() => Task.FromResult(true);
 }

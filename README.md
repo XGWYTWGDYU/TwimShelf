@@ -95,11 +95,17 @@ docker run -d --name twimshelf --restart unless-stopped -p 2778:2778 -v /srv/twi
 
 ## 浏览器扩展
 
-在帖子旁加下载按钮，点击可发送到绑定的设备下载，支持绑定浏览器扩展的版本有：Windows、Linux、macOS 上的 App 和 Linux 服务器
-1. **安装**：在项目GitHub主页点击code➡️download zip，解压后在 Chrome 或 Edge 打开 `chrome://extensions`，打开「开发者模式」，点「加载已解压的扩展程序」，选择解压目录的 `extension` 文件夹，注意，Chromium不会为加载的扩展建立副本，若删除extension文件夹，扩展将失效。扩展也会发布更新，请自行克隆仓库并加载新版本
+在帖子旁加下载按钮，点击可发送到绑定的设备下载。支持绑定浏览器扩展的版本有：Windows、Linux、macOS 上的桌面版 App，以及 Linux 服务器（Docker）。
+
+1. **安装**：
+   - **桌面版 App（推荐，应用托管）**：在 Windows、macOS 或 Linux 桌面版 App 里打开「设置 → 浏览器扩展」，点击 **「下载扩展」**，扩展会保存到应用的数据目录。随后在 Chrome 或 Edge 打开 `chrome://extensions`，开启「开发者模式」，点击「加载已解压的扩展程序」并选择该目录即可（请勿删除该目录）。
+   - **仅使用 Linux 服务器 / 手动安装**：从 GitHub Releases 下载 `TwimShelf-extension-<版本>.zip` 解压（或直接使用本仓库的 `extension` 目录），按上述方式加载已解压的扩展程序。
 2. **绑定**：在 TwimShelf 里打开「设置 → 浏览器扩展 → 绑定浏览器」。
    - 同一台电脑上的 App：在扩展里输入 6 位绑定码。
    - 其他电脑或 Linux 服务器：复制「绑定文本」，粘贴到扩展里。
+3. **更新**：
+   - 通过桌面版 App 下载并托管的扩展，App 每天会自动检查一次更新，你也可以在「设置 → 浏览器扩展」或已绑定浏览器旁手动点击「检查更新」。检测到新版本后点击更新，App 会直接覆盖托管目录中的文件，**无需退出浏览器**，更新完成后到 `chrome://extensions` 点一下扩展卡片上的刷新按钮即可生效。扩展自身检测到新版本时，点弹窗里的「更新」也会直接跳转到桌面版 App 的扩展页面完成更新。
+   - 如果你此前已经把扩展手动放在其他目录安装，App 不会改动或接管你的原有目录；如需改由 App 托管，只需在 App 中重新点击「下载扩展」并在浏览器里改从该目录加载即可。
 
 桌面版 App 打开时才能接收（端口 27800 起，只接受本机和局域网），Linux 服务器随时接收。详见 [extension/README.md](extension/README.md)。
 
@@ -135,7 +141,7 @@ Bundle ID 和包名、版本号、签名、分享扩展开关、构建目录都�
 | `flutter/tl_core`、`tl_native`、`tl_llama` | Flutter 插件：Rust 核心绑定、平台能力、llama.cpp 推理 |
 | `server` | Linux 服务器：把核心通过 HTTP 提供给网页版，以及登录、文件、视频封面 |
 | `docker` | Docker 镜像和 compose 示例 |
-| `extension` | Chromium 浏览器扩展（独立项目，构建脚本不处理它） |
+| `extension` | Chromium 浏览器扩展源码（随 GitHub Release 打包，并由桌面版 App 托管下载与更新） |
 | `scripts` | 配置生成、打包和检查脚本 |
 | `.github/workflows` | 自动构建和发布 |
 

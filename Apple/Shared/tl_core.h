@@ -109,6 +109,9 @@ char *tl_export_backup(const char *out_path);
 char *tl_export_diagnostics(const char *out_path, const char *app_info_json);
 char *tl_tag_to_folder(const char *json);
 char *tl_check_cookies(const char *auth_token, const char *ct0);
+char *tl_cookies_list(void);
+char *tl_cookie_save(const char *account_json);
+char *tl_cookie_delete(const char *id);
 char *tl_export_status(void);
 char *tl_export_cancel(void);
 char *tl_import_loose_dir(const char *json);
@@ -176,6 +179,10 @@ char *tl_ext_pair_begin(const char *addresses_json);
 void tl_ext_pair_cancel(void);
 char *tl_ext_clients(void);
 char *tl_ext_remove(const char *id);
+char *tl_ext_managed_status(void);
+char *tl_ext_managed_check(const char *repo);
+char *tl_ext_managed_install(const char *repo);
+bool tl_ext_take_open_settings(void);
 // Tagging with a vision model (see core/src/ai): every app asks the core, the core asks the model.
 /// The on-device engine (llama.cpp) is looked for in `dir` (empty: next to the program).
 void tl_ai_set_engine_dir(const char *dir);

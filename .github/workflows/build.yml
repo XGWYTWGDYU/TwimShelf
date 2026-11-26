@@ -383,6 +383,23 @@ jobs:
             if [ -e "$f" ]; then cp "$f" "${f/TwimShelf-/TwimShelf-Flutter-}"; fi
           done
           ls -la
+      - name: Package browser extension
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, zipfile
+          version = os.environ["VERSION"]
+          out = pathlib.Path("packages") / f"TwimShelf-extension-{version}.zip"
+          src = pathlib.Path("extension")
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+              for p in sorted(src.rglob("*")):
+                  if not p.is_file():
+                      continue
+                  rel = p.relative_to(src)
+                  if rel.name in (".DS_Store", "README.md"):
+                      continue
+                  zf.write(p, rel.as_posix())
+          print(f"Packaged {out} ({out.stat().st_size} bytes)")
+          PY
       - name: Build info and checksums
         working-directory: packages
         run: |

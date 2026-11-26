@@ -156,11 +156,13 @@ public sealed partial class SettingsPage : UserControl, IShellPage
         Crumbs();
     }
 
-    /// Opens one of the pages by name (the quick download card's 跳转到下载设置).
+    /// Opens one of the pages by name (the quick download card's 跳转到下载设置, or browser extension update jump).
     public void Open(string name)
     {
         while (_stack.Count > 1) Pop();
         if (name == "downloads") Push(new DownloadsSettings(_library, QuickDownload.TakeDraft()));
+        else if (name == "extension") Push(new ExtensionSettings(_library));
+        else if (name == "extension-update") Push(new ExtensionSettings(_library, autoCheckUpdate: true));
     }
 
     void Crumbs()

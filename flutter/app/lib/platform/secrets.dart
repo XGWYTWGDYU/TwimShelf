@@ -2,7 +2,6 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:tl_core/tl_core.dart';
 import 'os.dart';
 
 /// No backend error text is exposed: native errors can include sensitive data.
@@ -120,21 +119,11 @@ class Secrets {
 class Session {
   Session._();
 
-  /// Call after Core.open at launch. Missing cookies become empty strings;
-  /// unavailable storage clears any stale in-memory pair and reports failure.
+  /// No-op: X account cookies are now synced directly inside the library store (no Keystore/Keychain encryption).
   static Future<SecretResult<void>> applyStoredCookies({
     SecretStore? store,
     void Function(String, String)? setCookies,
   }) async {
-    final source = store ?? Secrets.store;
-    final apply = setCookies ?? Core.setCookies;
-    final auth = await source.read('auth_token');
-    final csrf = await source.read('ct0');
-    if (auth is! SecretValue<String?> || csrf is! SecretValue<String?>) {
-      apply('', '');
-      return const SecretsUnavailable<void>();
-    }
-    apply(auth.value ?? '', csrf.value ?? '');
     return const SecretValue<void>(null);
   }
 }

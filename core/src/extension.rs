@@ -16,18 +16,25 @@
 //!
 //! Requests (JSON in, JSON out; all but `hello` and `pair` need `Authorization: Bearer <token>`):
 //! `GET /ext/hello`, `POST /ext/pair {code, name}`, `POST /ext/download {url}`,
-//! `POST /ext/status {urls}`, `POST /ext/unbind`.
+//! `POST /ext/status {urls}`, `POST /ext/unbind`, `POST /ext/open-settings`.
 use crate::download::{self, DownloadRequest, Route};
 use crate::library::Library;
+use crate::net::client;
+use crate::update::newer;
 use anyhow::bail;
+use futures_util::StreamExt;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
+use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::io::AsyncWriteExt;
 
 pub const FIRST_PORT: u16 = 27800;
 const PORTS: u16 = 10;
@@ -52,6 +59,298 @@ pub struct Options {
     #[serde(default)] pub folder: Option<String>,
     /// Listen on a port of its own (the desktop apps); the server routes requests itself.
     #[serde(default)] pub listen: bool,
+    /// True for desktop apps (macOS, Windows, Linux Electron) that can host/manage the extension
+    /// and open their own Browser Extension settings page; false for Docker/web servers.
+    #[serde(default)] pub desktop: bool,
+    /// Optional explicit folder for the app-hosted extension (defaults to `<lib.dir>/../extension`).
+    #[serde(default)] pub managed_dir: Option<String>,
+}
+
+const DEFAULT_REPO: &str = "XGWYTWGDYU/TwimShelf";
+static OPEN_SETTINGS: AtomicBool = AtomicBool::new(false);
+
+/// Returns true once after the browser extension asks this desktop app to open its Extension page.
+pub fn take_open_settings() -> bool { OPEN_SETTINGS.swap(false, Ordering::SeqCst) }
+
+fn is_desktop_options(o: &Options) -> bool { o.desktop || o.listen }
+
+/// Folder where this desktop app hosts the downloaded extension (never touches external installs).
+pub fn managed_dir(lib: &Library) -> PathBuf {
+    let custom = state().lock().unwrap().options.managed_dir.clone().filter(|s| !s.trim().is_empty());
+    match custom {
+        Some(dir) => PathBuf::from(dir),
+        None => lib.dir.parent().unwrap_or(&lib.dir).join("extension"),
+    }
+}
+
+/// Installed version of the app-hosted extension, or None if the user has not downloaded one here.
+pub fn managed_version(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    let ver = v.get("version").and_then(Value::as_str)?.trim();
+    if ver.is_empty() { None } else { Some(ver.to_string()) }
+}
+
+/// Status of the app-hosted extension: `{installed, version, dir}`.
+pub fn managed_status(lib: &Library) -> Value {
+    let dir = managed_dir(lib);
+    let version = managed_version(&dir);
+    json!({
+        "installed": version.is_some(),
+        "version": version,
+        "dir": dir.to_string_lossy(),
+    })
+}
+
+fn valid_repo(r: &str) -> bool {
+    let mut it = r.split('/');
+    let ok = |s: Option<&str>| s.map_or(false, |s| !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) && s != "." && s != "..");
+    ok(it.next()) && ok(it.next()) && it.next().is_none()
+}
+
+#[derive(Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    browser_download_url: String,
+    #[serde(default)] size: u64,
+    #[serde(default)] digest: Option<String>,
+}
+#[derive(Deserialize)]
+struct ReleaseInfo {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)] draft: bool,
+    #[serde(default)] prerelease: bool,
+    #[serde(default)] assets: Vec<ReleaseAsset>,
+}
+
+struct ExtensionRelease {
+    version: String,
+    page_url: String,
+    asset_url: String,
+    asset_size: u64,
+    asset_digest: Option<String>,
+}
+
+fn fetch_extension_release(repo: &str) -> anyhow::Result<ExtensionRelease> {
+    let repo = if repo.trim().is_empty() { DEFAULT_REPO } else { repo.trim() };
+    if !valid_repo(repo) { bail!(tr!("update.badRepo")) }
+    let url = format!("https://api.github.com/repos/{repo}/releases/latest");
+    let r: ReleaseInfo = download::runtime().block_on(async {
+        let resp = client().get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .timeout(Duration::from_secs(20))
+            .send().await?;
+        if !resp.status().is_success() { bail!(tr!("update.http", code = resp.status().as_u16())) }
+        Ok::<_, anyhow::Error>(resp.json().await?)
+    })?;
+    if r.draft || r.prerelease { bail!(tr!("update.noInstaller")) }
+    let version = r.tag_name.trim_start_matches(['v', 'V']).to_string();
+    // Prefer the dedicated small extension zip asset; fall back to the release tag source zip so
+    // downloading also works against releases published before the extension zip asset existed.
+    let asset = r.assets.iter().find(|a| {
+        let n = a.name.to_ascii_lowercase();
+        n.contains("extension") && n.ends_with(".zip")
+    });
+    let (asset_url, asset_size, asset_digest) = match asset {
+        Some(a) => (a.browser_download_url.clone(), a.size, a.digest.clone()),
+        None => (format!("https://github.com/{repo}/archive/refs/tags/{}.zip", r.tag_name), 0, None),
+    };
+    Ok(ExtensionRelease { version, page_url: r.html_url, asset_url, asset_size, asset_digest })
+}
+
+/// Checks GitHub Releases for the latest extension version vs the app-hosted copy (if any).
+pub fn managed_check(lib: &Library, repo: &str) -> anyhow::Result<Value> {
+    let dir = managed_dir(lib);
+    let current = managed_version(&dir);
+    let rel = fetch_extension_release(repo)?;
+    let has_update = match current.as_deref() {
+        Some(cur) => newer(&rel.version, cur),
+        None => true,
+    };
+    Ok(json!({
+        "installed": current.is_some(),
+        "current": current,
+        "latest": rel.version,
+        "has_update": has_update,
+        "page_url": rel.page_url,
+        "dir": dir.to_string_lossy(),
+    }))
+}
+
+/// Extracts an extension archive (either flat `manifest.json` at root or `.../extension/manifest.json`)
+/// into `target_dir` in-place (preserving `target_dir` itself so an already-loaded Chrome unpacked
+/// extension keeps its path/ID and updates without quitting Chrome).
+pub fn install_zip_into(zip_path: &Path, target_dir: &Path) -> anyhow::Result<String> {
+    let f = std::fs::File::open(zip_path)?;
+    let mut archive = zip::ZipArchive::new(f)?;
+
+    // Locate the prefix directory containing the browser extension's manifest.json.
+    let mut prefix: Option<String> = None;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        if entry.is_dir() { continue; }
+        let name = entry.name().replace('\\', "/");
+        if name == "manifest.json" || name.ends_with("/manifest.json") {
+            let mut text = String::new();
+            let _ = (&mut entry).take(256 * 1024).read_to_string(&mut text);
+            if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                if v.get("manifest_version").is_some() && v.get("version").and_then(Value::as_str).is_some() {
+                    let p = name.strip_suffix("manifest.json").unwrap_or("").to_string();
+                    // Prefer root manifest.json or an `extension/` folder if multiple exist
+                    if prefix.is_none() || p.is_empty() || p.ends_with("/extension/") || p == "extension/" {
+                        prefix = Some(p);
+                        if prefix.as_deref() == Some("") { break; }
+                    }
+                }
+            }
+        }
+    }
+    let Some(prefix) = prefix else { bail!("extension manifest.json not found in archive") };
+
+    let parent = target_dir.parent().unwrap_or(target_dir);
+    std::fs::create_dir_all(parent)?;
+    let staging = parent.join(format!(".extension-staging-{}-{:08x}", std::process::id(), rand::random::<u32>()));
+    std::fs::create_dir_all(&staging)?;
+    struct CleanDir(PathBuf);
+    impl Drop for CleanDir { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+    let _guard = CleanDir(staging.clone());
+
+    let mut extracted_files = 0usize;
+    let mut total_bytes = 0u64;
+    const MAX_UNPACKED_BYTES: u64 = 32 << 20;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        if entry.is_dir() { continue; }
+        // Skip symlinks inside archives
+        if entry.unix_mode().is_some_and(|m| (m & 0o170000) == 0o120000) { continue; }
+        let name = entry.name().replace('\\', "/");
+        let Some(rel) = name.strip_prefix(&prefix) else { continue };
+        let rel = rel.trim_start_matches('/');
+        if rel.is_empty() || rel == "README.md" || rel.starts_with("__MACOSX/") || rel.ends_with("/.DS_Store") || rel == ".DS_Store" { continue; }
+        let mut clean = PathBuf::new();
+        let mut safe = true;
+        for c in Path::new(rel).components() {
+            match c {
+                Component::Normal(p) => clean.push(p),
+                _ => { safe = false; break; }
+            }
+        }
+        if !safe || clean.as_os_str().is_empty() { bail!("unsafe path in extension archive"); }
+        let dest = staging.join(&clean);
+        if let Some(p) = dest.parent() { std::fs::create_dir_all(p)?; }
+        let mut out = std::fs::File::create(&dest)?;
+        let mut buf = [0u8; 16384];
+        loop {
+            let n = entry.read(&mut buf)?;
+            if n == 0 { break; }
+            total_bytes = total_bytes.saturating_add(n as u64);
+            anyhow::ensure!(total_bytes <= MAX_UNPACKED_BYTES, "extension archive too large");
+            out.write_all(&buf[..n])?;
+        }
+        extracted_files += 1;
+    }
+    anyhow::ensure!(extracted_files > 0, "extension archive contained no files");
+    let new_version = managed_version(&staging).ok_or_else(|| anyhow::anyhow!("invalid extension manifest.json"))?;
+
+    // Sync staging into target_dir in-place (preserving target_dir itself so Chrome does not need to quit).
+    std::fs::create_dir_all(target_dir)?;
+    let mut keep_files = HashSet::<PathBuf>::new();
+    let mut keep_dirs = HashSet::<PathBuf>::new();
+    fn sync_dir(src: &Path, dst: &Path, rel: &Path, keep_files: &mut HashSet<PathBuf>, keep_dirs: &mut HashSet<PathBuf>) -> anyhow::Result<()> {
+        for e in std::fs::read_dir(src)? {
+            let e = e?;
+            let name = e.file_name();
+            let s = e.path();
+            let d = dst.join(&name);
+            let r = rel.join(&name);
+            if e.file_type()?.is_dir() {
+                std::fs::create_dir_all(&d)?;
+                keep_dirs.insert(r.clone());
+                sync_dir(&s, &d, &r, keep_files, keep_dirs)?;
+            } else {
+                let bytes = std::fs::read(&s)?;
+                std::fs::write(&d, bytes)?;
+                keep_files.insert(r);
+            }
+        }
+        Ok(())
+    }
+    sync_dir(&staging, target_dir, Path::new(""), &mut keep_files, &mut keep_dirs)?;
+
+    // Prune stale files/dirs that no longer exist in the new version.
+    fn prune_dir(dst: &Path, rel: &Path, keep_files: &HashSet<PathBuf>, keep_dirs: &HashSet<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dst) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            let r = rel.join(e.file_name());
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                if !keep_dirs.contains(&r) {
+                    let _ = std::fs::remove_dir_all(&p);
+                } else {
+                    prune_dir(&p, &r, keep_files, keep_dirs);
+                }
+            } else if !keep_files.contains(&r) {
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+    }
+    prune_dir(target_dir, Path::new(""), &keep_files, &keep_dirs);
+
+    Ok(new_version)
+}
+
+/// Downloads the latest extension from GitHub Releases and installs/updates it in-place into the
+/// app's managed extension folder.
+pub fn managed_install(lib: &Library, repo: &str) -> anyhow::Result<Value> {
+    let dir = managed_dir(lib);
+    let rel = fetch_extension_release(repo)?;
+    let u = reqwest::Url::parse(&rel.asset_url).map_err(|_| anyhow::anyhow!(tr!("update.badUrl")))?;
+    if u.scheme() != "https" || u.host_str() != Some("github.com") { bail!(tr!("update.badUrl")) }
+    const MAX_ZIP_BYTES: u64 = 128 << 20;
+    anyhow::ensure!(rel.asset_size <= MAX_ZIP_BYTES, tr!("update.sizeMismatch"));
+    let limit = if rel.asset_size > 0 { rel.asset_size } else { MAX_ZIP_BYTES };
+    let digest = rel.asset_digest.as_deref().map(|value| {
+        value.strip_prefix("sha256:").filter(|d| d.len() == 64 && d.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or_else(|| anyhow::anyhow!(tr!("update.digestMismatch")))
+    }).transpose()?;
+
+    let parent = dir.parent().unwrap_or(&dir);
+    std::fs::create_dir_all(parent)?;
+    let part = parent.join(format!(".extension-dl-{:016x}.zip", rand::random::<u64>()));
+    let _cleanup = crate::library::TempFile(part.clone());
+
+    download::runtime().block_on(async {
+        let resp = client().get(&rel.asset_url).timeout(Duration::from_secs(60)).send().await?;
+        if !resp.status().is_success() { bail!(tr!("update.http", code = resp.status().as_u16())) }
+        anyhow::ensure!(resp.content_length().is_none_or(|n| n <= limit), tr!("update.sizeMismatch"));
+        let mut file = tokio::fs::File::create_new(&part).await?;
+        let mut hash = Sha256::new();
+        let mut n = 0u64;
+        let mut body = resp.bytes_stream();
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk?;
+            n += chunk.len() as u64;
+            anyhow::ensure!(n <= limit, tr!("update.sizeMismatch"));
+            hash.update(&chunk);
+            file.write_all(&chunk).await?;
+        }
+        if rel.asset_size > 0 && n != rel.asset_size { bail!(tr!("update.sizeMismatch")) }
+        if digest.is_some_and(|want| !hex::encode(hash.finalize()).eq_ignore_ascii_case(want)) {
+            bail!(tr!("update.digestMismatch"));
+        }
+        file.sync_all().await?;
+        Ok::<_, anyhow::Error>(())
+    })?;
+
+    let version = install_zip_into(&part, &dir)?;
+    Ok(json!({
+        "installed": true,
+        "version": version,
+        "dir": dir.to_string_lossy(),
+    }))
 }
 
 struct Pairing { code: String, until: Instant, tries: u32, link: String }
@@ -298,14 +597,18 @@ pub fn handle(lib: Option<Arc<Library>>, r: &Request) -> Reply {
         ("GET", "/ext/hello") => {
             let device = { let _g = FILE.lock().unwrap_or_else(|e| e.into_inner()); let s = load(&lib); if !file(&lib).exists() { let _ = save(&lib, &s); } s.device };
             let bound = client_of(&lib, r.token).is_some();
-            let st = state().lock().unwrap();
-            Reply { status: 200, body: json!({ "app": "TwimShelf", "api": API, "id": device, "name": st.options.name, "platform": st.options.platform, "flavor": st.options.flavor, "bound": bound }) }
+            let (name, platform, flavor, desktop) = {
+                let st = state().lock().unwrap();
+                (st.options.name.clone(), st.options.platform.clone(), st.options.flavor.clone(), is_desktop_options(&st.options))
+            };
+            let managed = desktop && managed_version(&managed_dir(&lib)).is_some();
+            Reply { status: 200, body: json!({ "app": "TwimShelf", "api": API, "id": device, "name": name, "platform": platform, "flavor": flavor, "bound": bound, "managed": managed }) }
         }
         ("POST", "/ext/pair") => match pair(&lib, &text("code"), &text("name")) {
             Ok(v) => Reply { status: 200, body: v },
             Err((s, c)) => err(s, c),
         },
-        (_, path @ ("/ext/download" | "/ext/status" | "/ext/unbind")) => {
+        (_, path @ ("/ext/download" | "/ext/status" | "/ext/unbind" | "/ext/open-settings")) => {
             let Some(client) = client_of(&lib, r.token) else { return err(401, "unbound") };
             if r.method != "POST" { return err(405, "method"); }
             match path {
@@ -326,6 +629,12 @@ pub fn handle(lib: Option<Arc<Library>>, r: &Request) -> Reply {
                         let _ = download::start(lib.clone(), request(vec![]));
                     }
                     Reply { status: 200, body: json!({ "tasks": tasks }) }
+                }
+                "/ext/open-settings" => {
+                    let desktop = is_desktop_options(&state().lock().unwrap().options);
+                    if !desktop { return err(404, "not_supported"); }
+                    OPEN_SETTINGS.store(true, Ordering::SeqCst);
+                    Reply { status: 200, body: json!({ "ok": true }) }
                 }
                 _ => {
                     let _ = remove(&lib, &client.id);
@@ -558,5 +867,81 @@ mod tests {
         for _ in 0..CODE_TRIES { let _ = pair(&lib, wrong, "x"); }
         assert_eq!(pair(&lib, &code, "x").unwrap_err().1, "no_code");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn managed_extension_zip_install_and_open_settings() {
+        let _t = TURN.lock().unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("tl-ext-managed-{}", rand::random::<u64>()));
+        let lib_dir = root.join("library");
+        let ext_dir = root.join("extension");
+        let lib = Arc::new(Library::open(&lib_dir).unwrap());
+        serve(Options {
+            name: "Test Desktop".into(),
+            platform: "macos".into(),
+            flavor: "native".into(),
+            desktop: true,
+            managed_dir: Some(ext_dir.to_string_lossy().into_owned()),
+            ..Default::default()
+        }).unwrap();
+
+        // Not installed yet: managed=false and hello reports managed=false
+        assert_eq!(managed_status(&lib)["installed"], false);
+        let call = |method: &str, path: &str, token: Option<&str>, body: Value| {
+            let b = body.to_string();
+            handle(Some(lib.clone()), &Request { method, path, token, origin: Some("chrome-extension://abc"), body: if body.is_null() { b"" } else { b.as_bytes() } })
+        };
+        assert_eq!(call("GET", "/ext/hello", None, Value::Null).body["managed"], false);
+
+        // Build a nested source-archive zip (`TwimShelf-2.0.0/extension/...`) and install it
+        let zip1 = root.join("src.zip");
+        {
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&zip1).unwrap());
+            let opt = zip::write::SimpleFileOptions::default();
+            w.start_file("TwimShelf-2.0.0/extension/manifest.json", opt).unwrap();
+            w.write_all(br#"{"manifest_version":3,"name":"TwimShelf","version":"2.0.0"}"#).unwrap();
+            w.start_file("TwimShelf-2.0.0/extension/popup.js", opt).unwrap();
+            w.write_all(b"console.log('v2.0.0');").unwrap();
+            w.start_file("TwimShelf-2.0.0/extension/old_only.txt", opt).unwrap();
+            w.write_all(b"stale").unwrap();
+            w.finish().unwrap();
+        }
+        assert_eq!(install_zip_into(&zip1, &ext_dir).unwrap(), "2.0.0");
+        assert_eq!(managed_status(&lib)["installed"], true);
+        assert_eq!(managed_status(&lib)["version"], "2.0.0");
+        assert!(ext_dir.join("old_only.txt").exists());
+        assert_eq!(call("GET", "/ext/hello", None, Value::Null).body["managed"], true);
+
+        // In-place update from a flat zip removes stale files and updates manifest.json
+        let zip2 = root.join("ext.zip");
+        {
+            let mut w = zip::ZipWriter::new(std::fs::File::create(&zip2).unwrap());
+            let opt = zip::write::SimpleFileOptions::default();
+            w.start_file("manifest.json", opt).unwrap();
+            w.write_all(br#"{"manifest_version":3,"name":"TwimShelf","version":"2.1.0"}"#).unwrap();
+            w.start_file("popup.js", opt).unwrap();
+            w.write_all(b"console.log('v2.1.0');").unwrap();
+            w.finish().unwrap();
+        }
+        assert_eq!(install_zip_into(&zip2, &ext_dir).unwrap(), "2.1.0");
+        assert_eq!(managed_status(&lib)["version"], "2.1.0");
+        assert!(!ext_dir.join("old_only.txt").exists());
+        assert_eq!(std::fs::read_to_string(ext_dir.join("popup.js")).unwrap(), "console.log('v2.1.0');");
+
+        // Pair and test /ext/open-settings (requires auth token, flips flag once)
+        let code = pair_begin(&lib, Some(vec!["127.0.0.1:27800".into()])).unwrap()["code"].as_str().unwrap().to_string();
+        let token = call("POST", "/ext/pair", None, json!({"code": code, "name": "Chrome"})).body["token"].as_str().unwrap().to_string();
+        assert_eq!(call("POST", "/ext/open-settings", None, Value::Null).status, 401);
+        assert!(!take_open_settings());
+        assert_eq!(call("POST", "/ext/open-settings", Some(&token), Value::Null).status, 200);
+        assert!(take_open_settings());
+        assert!(!take_open_settings());
+
+        // Non-desktop server refuses /ext/open-settings and reports managed=false
+        serve(Options { name: "Server".into(), platform: "server".into(), flavor: "server".into(), desktop: false, listen: false, ..Default::default() }).unwrap();
+        assert_eq!(call("GET", "/ext/hello", Some(&token), Value::Null).body["managed"], false);
+        assert_eq!(call("POST", "/ext/open-settings", Some(&token), Value::Null).status, 404);
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

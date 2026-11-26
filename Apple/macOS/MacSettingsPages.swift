@@ -13,7 +13,7 @@ enum MacSettingsPages {
     static func modelHub() -> SettingsHost { SettingsHost { ModelHubPageView() } }
     static func modelHubRepo(_ repo: String) -> SettingsHost { SettingsHost { ModelHubRepoPageView(repo: repo) } }
     static func sync() -> SettingsHost { SettingsHost { SyncPageView() } }
-    static func browserExtension() -> SettingsHost { SettingsHost { ExtensionPageView() } }
+    static func browserExtension(autoCheckUpdate: Bool = false) -> SettingsHost { SettingsHost { ExtensionPageView(autoCheckUpdate: autoCheckUpdate) } }
     static func problems() -> SettingsHost { SettingsHost { ProblemsPageView() } }
     static func about() -> SettingsHost { SettingsHost { AboutPageView() } }
     static func storage() -> SettingsHost { SettingsHost { StoragePageView() } }
@@ -95,8 +95,7 @@ struct SettingsRootView: View {
     // MARK: Blocks
 
     private func hero(_ stats: LibraryStats?, _ svc: SyncService) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-        return VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 Text(L("common.library")).font(.system(size: 22, weight: .bold, design: .rounded))
                 Spacer(minLength: 8)
@@ -106,11 +105,7 @@ struct SettingsRootView: View {
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // a sheet of glass, no coloured wash behind it
-        .background {
-            if #available(macOS 26.0, *) { Color.clear.glassEffect(.regular, in: shape) }
-            else { shape.fill(.regularMaterial).overlay(shape.strokeBorder(Color.primary.opacity(0.08))) }
-        }
+        .background { CardSurface(radius: 24) }
     }
 
     private func preferences(_ stats: LibraryStats?) -> some View {
@@ -189,8 +184,6 @@ final class DownloadModel: ObservableObject {
     @Published var interval = UserDefaults.standard.object(forKey: "dl.interval") as? Int ?? 500 { didSet { UserDefaults.standard.set(interval, forKey: "dl.interval") } }
     @Published var batch: [String] = []
     @Published var batchName: String?
-    @Published var authToken = Keychain.get("auth_token") ?? ""
-    @Published var ct0 = Keychain.get("ct0") ?? ""
 
     var routeValue: DownloadRoute { DownloadRoute.allCases[min(max(route, 0), DownloadRoute.allCases.count - 1)] }
     var folderValue: String? { folder.isEmpty ? nil : folder }
@@ -233,13 +226,6 @@ final class DownloadModel: ObservableObject {
             self?.folder = n
             NotificationCenter.default.post(name: .libraryChanged, object: nil)
         }
-    }
-
-    func saveCookies(_ window: NSWindow?) {
-        let ok1 = Keychain.set("auth_token", authToken.trimmingCharacters(in: .whitespacesAndNewlines))
-        let ok2 = Keychain.set("ct0", ct0.trimmingCharacters(in: .whitespacesAndNewlines))
-        Session.applyStoredCookies()
-        macAlert(window, ok1 && ok2 ? L("settings.cookie.saved") : L("settings.cookie.notSaved"), ok1 && ok2 ? "" : L("settings.cookie.keychainRefused"))
     }
 }
 
@@ -325,24 +311,7 @@ struct DownloadPageView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeading(L("mac.cookie"), note: L("mac.cookie.footer"),
-                               trailing: AnyView(Pill(text: (!m.authToken.isEmpty && !m.ct0.isEmpty) ? L("mac.set") : L("mac.notSet"), color: (!m.authToken.isEmpty && !m.ct0.isEmpty) ? .green : .secondary,
-                                                      symbol: (!m.authToken.isEmpty && !m.ct0.isEmpty) ? "lock.fill" : "lock.open")))
-                Card(spacing: 12) {
-                    secretField("auth_token", $m.authToken)
-                    secretField("ct0", $m.ct0)
-                    HStack(spacing: 8) {
-                        Spacer()
-                        Button(L("settings.cookie.check")) {
-                            // a network request of up to ~30 s: never on the main thread
-                            let w = env.window
-                            macRun(w, { Core.checkCookies() }) { r in macAlert(w, r.title, r.detail) }
-                        }
-                        Button(L("settings.cookie.save")) { m.saveCookies(env.window) }.buttonStyle(.borderedProminent)
-                    }
-                }
-            }
+            MacCookiesSection()
 
             if let status, !status.errors.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
@@ -405,11 +374,184 @@ struct DownloadPageView: View {
             Text(display).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit().frame(width: 70, alignment: .trailing)
         }
     }
+}
 
-    private func secretField(_ name: String, _ text: Binding<String>) -> some View {
-        HStack(spacing: 12) {
-            Text(name).font(.system(size: 13, weight: .medium, design: .monospaced)).frame(width: 90, alignment: .leading)
-            SecureField(name, text: text, prompt: Text(L("mac.notSet"))).labelsHidden().textFieldStyle(.roundedBorder)
+/// Multi-account X Cookie management, modeled after the expandable AI model / prompt cards:
+/// all accounts are equal (no default/primary) and synced across devices via the Rust core.
+private struct MacCookiesSection: View {
+    @EnvironmentObject private var env: PaneEnv
+    @State private var accounts: [Core.CookieAccount] = Core.cookiesList()
+    @State private var expanded: Set<String> = []
+    @State private var adding = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeading(
+                L("mac.cookie"),
+                note: L("cookie.multi.footer"),
+                trailing: AnyView(Pill(
+                    text: accounts.isEmpty ? L("mac.notSet") : L("cookie.count", "\(accounts.count)"),
+                    color: accounts.isEmpty ? .secondary : .green,
+                    symbol: accounts.isEmpty ? "lock.open" : "lock.fill"
+                ))
+            )
+            VStack(spacing: 12) {
+                if accounts.isEmpty && !adding {
+                    Card { Text(L("cookie.noneAdded")).foregroundStyle(.secondary) }
+                }
+                ForEach(accounts) { acc in
+                    Card(spacing: 12) {
+                        HStack(alignment: .center, spacing: 12) {
+                            IconTile(symbol: "key.fill", color: .orange, size: 36)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(acc.displayName).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                HStack(spacing: 5) {
+                                    if let sn = acc.screenName, !sn.isEmpty {
+                                        Pill(text: "@\(sn)", color: .blue)
+                                    }
+                                    Pill(text: acc.authToken.count > 4 ? "••••\(acc.authToken.suffix(4))" : "••••", color: .secondary)
+                                }
+                            }
+                            Spacer(minLength: 8)
+                            Button {
+                                withAnimation(.snappy) { if !expanded.insert(acc.id).inserted { expanded.remove(acc.id) } }
+                            } label: {
+                                Image(systemName: "chevron.down").font(.system(size: 12, weight: .semibold))
+                                    .rotationEffect(.degrees(expanded.contains(acc.id) ? 180 : 0))
+                                    .frame(width: 24, height: 24).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .accessibilityLabel(L("models.expand"))
+                        }
+                        if expanded.contains(acc.id) {
+                            Divider()
+                            MacCookieEditor(account: acc, onSaved: { saved in
+                                reload()
+                                expanded.insert(saved.id)
+                            }, onDelete: {
+                                confirmDelete(acc)
+                            }, onCancel: nil)
+                        }
+                    }
+                }
+                if adding {
+                    Card(spacing: 12) {
+                        Text(L("cookie.add")).font(.system(size: 14, weight: .semibold))
+                        MacCookieEditor(account: nil, onSaved: { saved in
+                            adding = false
+                            reload()
+                            expanded.insert(saved.id)
+                        }, onDelete: nil, onCancel: { adding = false })
+                    }
+                } else {
+                    Button { withAnimation(.snappy) { adding = true } } label: {
+                        Card(spacing: 0) {
+                            HStack(spacing: 12) {
+                                IconTile(symbol: "plus.circle.fill", color: .blue, size: 32)
+                                Text(L("cookie.add")).font(.system(size: 13.5, weight: .semibold))
+                                Spacer()
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .onAppear { reload() }
+        .onReceive(NotificationCenter.default.publisher(for: SyncService.changed)) { _ in reload() }
+    }
+
+    private func reload() { accounts = Core.cookiesList() }
+
+    private func confirmDelete(_ acc: Core.CookieAccount) {
+        macChoose(env.window, title: L("cookie.delete.title", acc.displayName), message: L("cookie.delete.message"), options: [L("common.delete")]) { _ in
+            do {
+                _ = try Core.deleteCookie(acc.id)
+                expanded.remove(acc.id)
+                reload()
+            } catch {
+                macAlert(env.window, L("mac.deleteFailed"), error.localizedDescription)
+            }
+        }
+    }
+}
+
+private struct MacCookieEditor: View {
+    let account: Core.CookieAccount?
+    let onSaved: (Core.CookieAccount) -> Void
+    let onDelete: (() -> Void)?
+    let onCancel: (() -> Void)?
+    @EnvironmentObject private var env: PaneEnv
+    @State private var label: String
+    @State private var authToken: String
+    @State private var ct0: String
+    @State private var screenName: String?
+
+    init(account: Core.CookieAccount?, onSaved: @escaping (Core.CookieAccount) -> Void, onDelete: (() -> Void)?, onCancel: (() -> Void)?) {
+        self.account = account
+        self.onSaved = onSaved
+        self.onDelete = onDelete
+        self.onCancel = onCancel
+        _label = State(initialValue: account?.label ?? "")
+        _authToken = State(initialValue: account?.authToken ?? "")
+        _ct0 = State(initialValue: account?.ct0 ?? "")
+        _screenName = State(initialValue: account?.screenName)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text(L("cookie.label")).font(.system(size: 13, weight: .medium)).frame(width: 110, alignment: .leading)
+                TextField("", text: $label).labelsHidden().accessibilityLabel(L("cookie.label")).textFieldStyle(.roundedBorder)
+            }
+            HStack(spacing: 12) {
+                Text("auth_token").font(.system(size: 13, weight: .medium, design: .monospaced)).frame(width: 110, alignment: .leading)
+                TextField("", text: $authToken).labelsHidden().accessibilityLabel("auth_token").textFieldStyle(.roundedBorder)
+            }
+            HStack(spacing: 12) {
+                Text("ct0").font(.system(size: 13, weight: .medium, design: .monospaced)).frame(width: 110, alignment: .leading)
+                TextField("", text: $ct0).labelsHidden().accessibilityLabel("ct0").textFieldStyle(.roundedBorder)
+            }
+            HStack(spacing: 8) {
+                if let onDelete {
+                    Button(L("common.delete"), role: .destructive, action: onDelete)
+                }
+                if let onCancel {
+                    Button(L("common.cancel"), action: onCancel)
+                }
+                Spacer()
+                Button(L("settings.cookie.check")) {
+                    let a = authToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let c = ct0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let w = env.window
+                    macRun(w, { Core.checkCookies(authToken: a, ct0: c) }) { r in
+                        if r.ok, let sn = r.screenName, !sn.isEmpty {
+                            screenName = sn
+                            if let existing = account, let updated = try? Core.saveCookie(id: existing.id, label: label, authToken: a, ct0: c, screenName: sn) {
+                                onSaved(updated)
+                            }
+                        }
+                        macAlert(w, r.title, r.detail)
+                    }
+                }
+                Button(L("common.save")) { save() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func save() {
+        let a = authToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let c = ct0.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !a.isEmpty, !c.isEmpty else {
+            macAlert(env.window, L("cookie.fillBoth"))
+            return
+        }
+        do {
+            let saved = try Core.saveCookie(id: account?.id, label: label, authToken: a, ct0: c, screenName: screenName)
+            onSaved(saved)
+        } catch {
+            macAlert(env.window, L("settings.cookie.notSaved"), error.localizedDescription)
         }
     }
 }

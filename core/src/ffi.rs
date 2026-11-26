@@ -180,12 +180,30 @@ pub extern "C" fn tl_download_stop(pause: bool) -> *mut c_char { with(|l| downlo
 #[no_mangle]
 pub extern "C" fn tl_download_resume(json: *const c_char) -> *mut c_char { with(|l| download::resume(l, serde_json::from_str(&s(json))?)) }
 
-/// Sets the session cookies held in memory for the cookie route; empty values clear them.
+/// Legacy no-op: cookies are now synced in the library via `tl_cookies_list` / `tl_cookie_save` / `tl_cookie_delete`.
 #[no_mangle]
-pub extern "C" fn tl_set_cookies(auth_token: *const c_char, ct0: *const c_char) { guard((), || {
-    let (a, c) = (s(auth_token), s(ct0));
-    download::set_cookies((!a.is_empty() && !c.is_empty()).then(|| crate::protected::Credentials { auth_token: a, ct0: c }));
-}) }
+pub extern "C" fn tl_set_cookies(_auth_token: *const c_char, _ct0: *const c_char) {}
+
+/// Lists all synced X account cookies as a JSON array of `CookieAccount`.
+#[no_mangle]
+pub extern "C" fn tl_cookies_list() -> *mut c_char {
+    with(|l| crate::cookies::list(&l))
+}
+
+/// Adds or updates one synced X account cookie (`CookieSaveInput` JSON); returns the saved `CookieAccount`.
+#[no_mangle]
+pub extern "C" fn tl_cookie_save(account_json: *const c_char) -> *mut c_char {
+    with(|l| {
+        let input: crate::cookies::CookieSaveInput = serde_json::from_str(&s(account_json))?;
+        crate::cookies::save(&l, input)
+    })
+}
+
+/// Deletes one synced X account cookie by id (syncs a tombstone to peers).
+#[no_mangle]
+pub extern "C" fn tl_cookie_delete(id: *const c_char) -> *mut c_char {
+    with(|l| crate::cookies::delete(&l, &s(id)))
+}
 
 /// origin: 1 = user, 2 = AI. Adding a user tag to an AI tag endorses it.
 #[no_mangle]
@@ -272,7 +290,8 @@ pub extern "C" fn tl_share_stage(dir: *const c_char, urls_json: *const c_char, r
     respond(|| {
         let urls: Vec<String> = serde_json::from_str(&urls)?;
         let route = serde_json::from_value(serde_json::json!(route)).unwrap_or_default();
-        crate::share::stage(Path::new(&dir), &urls, route)
+        let main = current_library();
+        crate::share::stage_with_cookies(Path::new(&dir), &urls, route, main.as_deref())
     })
 }
 
@@ -1147,6 +1166,22 @@ pub extern "C" fn tl_ext_clients() -> *mut c_char { with(|l| Ok(crate::extension
 /// Unbinds a browser. `{"ok": whether it was bound}`
 #[no_mangle]
 pub extern "C" fn tl_ext_remove(id: *const c_char) -> *mut c_char { with(|l| crate::extension::remove(&l, &s(id))) }
+
+/// Status of the app-hosted extension folder: `{"ok": {"installed": bool, "version": string|null, "dir": string}}`.
+#[no_mangle]
+pub extern "C" fn tl_ext_managed_status() -> *mut c_char { with(|l| Ok(crate::extension::managed_status(&l))) }
+
+/// Checks GitHub Releases for a newer extension vs the app-hosted copy. Blocks: call off main thread.
+#[no_mangle]
+pub extern "C" fn tl_ext_managed_check(repo: *const c_char) -> *mut c_char { with(|l| crate::extension::managed_check(&l, &s(repo))) }
+
+/// Downloads and extracts the latest extension into the app-hosted folder in-place. Blocks: call off main thread.
+#[no_mangle]
+pub extern "C" fn tl_ext_managed_install(repo: *const c_char) -> *mut c_char { with(|l| crate::extension::managed_install(&l, &s(repo))) }
+
+/// True once when a paired browser extension asks this desktop app to open its Extension settings page.
+#[no_mangle]
+pub extern "C" fn tl_ext_take_open_settings() -> bool { guard(false, crate::extension::take_open_settings) }
 
 // ---------------------------------------------------------------------------------------------
 // tagging with a vision model (see ai/mod.rs): every app asks the core, the core asks the model

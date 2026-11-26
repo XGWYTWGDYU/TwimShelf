@@ -213,5 +213,11 @@
   },
   "updateOpen": {
     "message": "Get it"
+  },
+  "updateInApp": {
+    "message": "Update"
+  },
+  "updateOpeningApp": {
+    "message": "Opening TwimShelf…"
   }
 }

@@ -108,6 +108,7 @@ final class SyncService: NSObject, NetServiceDelegate {
     private var resolveRetries: [String: DispatchWorkItem] = [:]
     private var resolveErrors: [String: String] = [:]
     private var needsListenerRestart = false
+    private var publishFailures = 0
     private var timer: Timer?
     private var pollTimer: Timer?
     private var lastChanges: UInt64 = 0
@@ -171,17 +172,21 @@ final class SyncService: NSObject, NetServiceDelegate {
         NotificationCenter.default.removeObserver(self, name: .libraryChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(localChange), name: .libraryChanged, object: nil)
         #if canImport(UIKit)
-        // iOS withdraws a suspended app's Bonjour advertisement and may leave the browser with
-        // stale results: advertise and browse again (and look every device up again) on return.
+        // iOS tears down a suspended app's Bonjour sockets (-65569 DefunctConnection / NSNetServices -72000).
+        // Pause advertising and browsing cleanly on entering background, then restart on return to foreground.
         if lifecycleObservers.isEmpty {
             lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.needsListenerRestart = true
+                guard let self else { return }
+                self.needsListenerRestart = true
+                self.pauseBonjour()
             })
             lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
                 let restart = self.needsListenerRestart
                 self.needsListenerRestart = false
-                self.rediscover(restartListener: restart)
+                if restart || self.browser == nil || self.service == nil {
+                    self.rediscover(restartListener: restart)
+                }
             })
         }
         #else
@@ -200,7 +205,7 @@ final class SyncService: NSObject, NetServiceDelegate {
     func rediscover(restartListener: Bool = false) {
         guard hasAccount || status != nil else { start(); return }
         if restartListener {
-            service?.stop()
+            pauseBonjour()
             switch Core.syncRestartListener() {
             case .success: refreshStatus()
             case .failure(let error):
@@ -227,11 +232,20 @@ final class SyncService: NSObject, NetServiceDelegate {
         resolveErrors.removeAll()
     }
 
+    private func pauseBonjour() {
+        browser?.stateUpdateHandler = nil
+        browser?.browseResultsChangedHandler = nil
+        browser?.cancel()
+        browser = nil
+        service?.delegate = nil
+        service?.stop()
+        service = nil
+        cancelResolvers()
+    }
+
     func stopNetworking() {
         timer?.invalidate(); pollTimer?.invalidate()
-        browser?.cancel(); browser = nil
-        service?.stop(); service = nil
-        cancelResolvers()
+        pauseBonjour()
         peers.removeAll(); endpoints.removeAll(); advertisementRevisions.removeAll(); syncWhenResolved.removeAll(); noteStarted = nil
     }
 
@@ -478,6 +492,7 @@ final class SyncService: NSObject, NetServiceDelegate {
     // MARK: Bonjour
 
     private func advertise(port: UInt16) {
+        service?.delegate = nil
         service?.stop()
         let dev = status?.deviceId ?? UUID().uuidString
         let svc = NetService(domain: "local.", type: Self.serviceType + ".", name: "\(Self.deviceName)·\(dev.prefix(4))", port: Int32(port))
@@ -489,15 +504,37 @@ final class SyncService: NSObject, NetServiceDelegate {
         service = svc
     }
 
+    func netServiceDidPublish(_ sender: NetService) {
+        guard service === sender else { return }
+        publishFailures = 0
+    }
+
     func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
-        AppLog.warn("sync", L("sync.err.publish", errorDict))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+        guard service === sender else { return }
+        #if canImport(UIKit)
+        if UIApplication.shared.applicationState == .background {
+            pauseBonjour()
+            return
+        }
+        #endif
+        let code = errorDict[NetService.errorCode]?.intValue
+        let isTransientUnknown = code == NetService.ErrorCode.unknownError.rawValue
+        publishFailures += 1
+        // A single -72000 often comes from mDNSResponder recycling sockets across lock/Wi-Fi transitions;
+        // retry silently once and only warn if publishing keeps failing.
+        if !isTransientUnknown || publishFailures >= 2 {
+            AppLog.warn("sync", L("sync.err.publish", errorDict))
+        }
+        let delay: TimeInterval = publishFailures == 1 ? 2 : 5
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, self.service === sender, let port = self.status?.port else { return }
             self.advertise(port: port)
         }
     }
 
     private func browse() {
+        browser?.stateUpdateHandler = nil
+        browser?.browseResultsChangedHandler = nil
         browser?.cancel()
         let b = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: .tcp)
         b.browseResultsChangedHandler = { [weak self, weak b] results, _ in
@@ -508,16 +545,30 @@ final class SyncService: NSObject, NetServiceDelegate {
         }
         b.stateUpdateHandler = { [weak self, weak b] state in
             // Denied local-network permission shows up as a DNS "policy denied" (-65570) error.
+            // -65569 (DefunctConnection) happens when iOS / mDNSResponder recycles the socket on suspend/network change.
             var denied = false
+            var defunct = false
             if case .waiting(let e) = state, case .dns(let code) = e, code == -65570 { denied = true }
-            if case .failed(let e) = state, case .dns(let code) = e, code == -65570 { denied = true }
-            if case .failed(let e) = state { AppLog.warn("sync", L("sync.err.browse", e)) }
+            if case .failed(let e) = state, case .dns(let code) = e {
+                if code == -65570 { denied = true }
+                if code == -65569 { defunct = true }
+            }
             DispatchQueue.main.async {
                 guard let self, let b, self.browser === b else { return }
-                if case .failed = state, !denied {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak b] in
-                        guard let self, let b, self.browser === b else { return }
-                        self.rediscover()
+                #if canImport(UIKit)
+                if UIApplication.shared.applicationState == .background {
+                    self.pauseBonjour()
+                    return
+                }
+                #endif
+                if case .failed(let e) = state {
+                    if !defunct { AppLog.warn("sync", L("sync.err.browse", e)) }
+                    if !denied {
+                        let delay: TimeInterval = defunct ? 1 : 5
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak b] in
+                            guard let self, let b, self.browser === b else { return }
+                            self.rediscover()
+                        }
                     }
                 }
                 if case .ready = state { denied = false }

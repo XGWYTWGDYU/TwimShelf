@@ -363,7 +363,7 @@ struct NavTile: View {
             .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
         .buttonStyle(.plain)
-        .background { GlassSurface(interactive: true) }
+        .background { CardSurface() }
         .scaleEffect(hovering ? 1.012 : 1)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: hovering)
         .onHover { hovering = $0 }

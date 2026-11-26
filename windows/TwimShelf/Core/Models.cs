@@ -591,6 +591,33 @@ public sealed class ExtensionClients
     public int? Port { get; init; }
 }
 
+public sealed class ExtensionManagedStatus
+{
+    public bool Installed { get; init; }
+    public string? Version { get; init; }
+    public string Dir { get; init; } = "";
+}
+
+public sealed class ExtensionUpdateCheck
+{
+    public bool Installed { get; init; }
+    public string? Current { get; init; }
+    public string Latest { get; init; } = "";
+    public bool HasUpdate { get; init; }
+    public string PageUrl { get; init; } = "";
+    public string Dir { get; init; } = "";
+}
+
+public sealed class CookieAccount
+{
+    public string Id { get; init; } = "";
+    public string Label { get; init; } = "";
+    public string AuthToken { get; init; } = "";
+    public string Ct0 { get; init; } = "";
+    public string? ScreenName { get; init; }
+    public long CreatedAt { get; init; }
+}
+
 /// The source-generated serializers (Native AOT: no reflection).
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
@@ -631,6 +658,10 @@ public sealed class ExtensionClients
 [JsonSerializable(typeof(ThumbnailResult))]
 [JsonSerializable(typeof(ExtensionClients))]
 [JsonSerializable(typeof(ExtensionPairing))]
+[JsonSerializable(typeof(ExtensionManagedStatus))]
+[JsonSerializable(typeof(ExtensionUpdateCheck))]
+[JsonSerializable(typeof(CookieAccount))]
+[JsonSerializable(typeof(List<CookieAccount>))]
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(List<long>))]
 [JsonSerializable(typeof(Dictionary<string, JsonElement>))]

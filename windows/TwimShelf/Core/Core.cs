@@ -241,6 +241,17 @@ public static unsafe class TlCore
     public static long ResumeDownload(DownloadRequest r) => OkLong(Native.tl_download_resume(Json(r, J.DownloadRequest)));
     public static void SetCookies(string authToken, string ct0) => Native.tl_set_cookies(authToken, ct0);
     public static CookieCheck CheckCookies(string authToken, string ct0) => Ok(Native.tl_check_cookies(authToken, ct0), J.CookieCheck);
+    public static List<CookieAccount> CookiesList() => Ok(Native.tl_cookies_list(), J.ListCookieAccount);
+    public static CookieAccount CookieSave(string? id, string label, string authToken, string ct0, string? screenName = null) =>
+        Ok(Native.tl_cookie_save(Json(new JsonObject
+        {
+            ["id"] = id,
+            ["label"] = label,
+            ["auth_token"] = authToken,
+            ["ct0"] = ct0,
+            ["screen_name"] = screenName,
+        })), J.CookieAccount);
+    public static bool CookieDelete(string id) => OkBool(Native.tl_cookie_delete(id));
 
     public static ShareStaged ShareStage(string dir, IEnumerable<string> urls, string route = "auto")
     {
@@ -380,6 +391,10 @@ public static unsafe class TlCore
     public static void ExtensionPairCancel() => Native.tl_ext_pair_cancel();
     public static ExtensionClients ExtensionClients() => Ok(Native.tl_ext_clients(), J.ExtensionClients);
     public static bool ExtensionRemove(string id) => OkBool(Native.tl_ext_remove(id));
+    public static ExtensionManagedStatus ExtensionManagedStatus() => Ok(Native.tl_ext_managed_status(), J.ExtensionManagedStatus);
+    public static ExtensionUpdateCheck ExtensionManagedCheck(string repo) => Ok(Native.tl_ext_managed_check(repo), J.ExtensionUpdateCheck);
+    public static ExtensionManagedStatus ExtensionManagedInstall(string repo) => Ok(Native.tl_ext_managed_install(repo), J.ExtensionManagedStatus);
+    public static bool ExtensionTakeOpenSettings() => Native.tl_ext_take_open_settings();
 
     // ---- secrets (Windows: in the data folder, sealed by the core) -----------------------------------
 

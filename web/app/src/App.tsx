@@ -8,10 +8,10 @@ import { DropImport } from './components/DropImport';
 import { PetLayer } from './components/PetLayer';
 import { ActivityPanel } from './components/ActivityPanel';
 import { WelcomeHost } from './components/WelcomeModal';
-import { useRoute, type Route } from './lib/router';
+import { go, useRoute, type Route } from './lib/router';
 import { installAppMenu } from './lib/commands';
-import { core } from './lib/core';
-import { checkForUpdate } from './lib/update';
+import { core, desktop } from './lib/core';
+import { checkExtensionUpdate, checkForUpdate, requestExtensionAutoCheck } from './lib/update';
 import { enableAutoTagging } from './pages/settings/aiTagging';
 import { ViewerHost } from './viewer/Viewer';
 import BrowsePage from './pages/browse/BrowsePage';
@@ -29,7 +29,22 @@ export default function App() {
     enableAutoTagging();
     void core.read(core.b.tl_trash_expire()).catch(() => {});
     const t = window.setTimeout(() => void checkForUpdate(false), 4000);
-    return () => window.clearTimeout(t);
+    const tExt = desktop ? window.setTimeout(() => void checkExtensionUpdate(false), 5500) : 0;
+    const poll = desktop
+      ? window.setInterval(() => {
+        void core.b.tl_ext_take_open_settings().then((open) => {
+          if (!open) return;
+          window.twimshelf?.focusWindow?.();
+          requestExtensionAutoCheck();
+          go({ page: 'settings', sub: 'extension' });
+        }).catch(() => {});
+      }, 1200)
+      : 0;
+    return () => {
+      window.clearTimeout(t);
+      if (tExt) window.clearTimeout(tExt);
+      if (poll) window.clearInterval(poll);
+    };
   }, []);
   // 浏览 keeps its search while another page is shown
   const lastBrowse = useRef<Extract<Route, { page: 'browse' }>>({ page: 'browse' });

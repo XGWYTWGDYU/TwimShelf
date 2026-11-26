@@ -72,9 +72,8 @@ void main() {
     expect(await store.delete('ct0'), isA<SecretsUnavailable<void>>());
     expect(backend.values, isEmpty);
   });
-  test('session restores both native cookie keys', () async {
-    final backend = FakeBackend()
-      ..values.addAll({'auth_token': 'a', 'ct0': 'b'});
+  test('session applyStoredCookies is a no-op since cookies live in synced core store', () async {
+    final backend = FakeBackend()..unavailable = true;
     final calls = <List<String>>[];
     expect(
       await Session.applyStoredCookies(
@@ -83,33 +82,6 @@ void main() {
       ),
       isA<SecretValue<void>>(),
     );
-    expect(calls, [
-      ['a', 'b'],
-    ]);
-  });
-  test('missing values clear cookies', () async {
-    final calls = <List<String>>[];
-    await Session.applyStoredCookies(
-      store: SecretStore(FakeBackend()),
-      setCookies: (a, b) => calls.add([a, b]),
-    );
-    expect(calls, [
-      ['', ''],
-    ]);
-  });
-  test('a partial read failure never applies half a cookie pair', () async {
-    final backend = FakeBackend()
-      ..values['auth_token'] = 'synthetic'
-      ..failingKey = 'ct0';
-    final calls = <List<String>>[];
-    final result = await Session.applyStoredCookies(
-      store: SecretStore(backend),
-      setCookies: (a, b) => calls.add([a, b]),
-    );
-    expect(result, isA<SecretsUnavailable<void>>());
-    expect(calls, [
-      ['', ''],
-    ]);
-    expect(result.toString(), isNot(contains('secret-not-for-logs')));
+    expect(calls, isEmpty);
   });
 }

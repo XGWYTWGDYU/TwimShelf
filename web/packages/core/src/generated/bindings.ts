@@ -109,6 +109,9 @@ export class CoreBindings {
   tl_export_diagnostics(a0: string | null, a1: string | null): Promise<string | null> { return this.t.call('tl_export_diagnostics', [a0, a1]) as Promise<string | null>; }
   tl_tag_to_folder(a0: string | null): Promise<string | null> { return this.t.call('tl_tag_to_folder', [a0]) as Promise<string | null>; }
   tl_check_cookies(a0: string | null, a1: string | null): Promise<string | null> { return this.t.call('tl_check_cookies', [a0, a1]) as Promise<string | null>; }
+  tl_cookies_list(): Promise<string | null> { return this.t.call('tl_cookies_list', []) as Promise<string | null>; }
+  tl_cookie_save(a0: string | null): Promise<string | null> { return this.t.call('tl_cookie_save', [a0]) as Promise<string | null>; }
+  tl_cookie_delete(a0: string | null): Promise<string | null> { return this.t.call('tl_cookie_delete', [a0]) as Promise<string | null>; }
   tl_export_status(): Promise<string | null> { return this.t.call('tl_export_status', []) as Promise<string | null>; }
   tl_export_cancel(): Promise<string | null> { return this.t.call('tl_export_cancel', []) as Promise<string | null>; }
   tl_import_loose_dir(a0: string | null): Promise<string | null> { return this.t.call('tl_import_loose_dir', [a0]) as Promise<string | null>; }
@@ -136,6 +139,10 @@ export class CoreBindings {
   tl_ext_pair_cancel(): Promise<void> { return this.t.call('tl_ext_pair_cancel', []) as Promise<void>; }
   tl_ext_clients(): Promise<string | null> { return this.t.call('tl_ext_clients', []) as Promise<string | null>; }
   tl_ext_remove(a0: string | null): Promise<string | null> { return this.t.call('tl_ext_remove', [a0]) as Promise<string | null>; }
+  tl_ext_managed_status(): Promise<string | null> { return this.t.call('tl_ext_managed_status', []) as Promise<string | null>; }
+  tl_ext_managed_check(a0: string | null): Promise<string | null> { return this.t.call('tl_ext_managed_check', [a0]) as Promise<string | null>; }
+  tl_ext_managed_install(a0: string | null): Promise<string | null> { return this.t.call('tl_ext_managed_install', [a0]) as Promise<string | null>; }
+  tl_ext_take_open_settings(): Promise<boolean> { return this.t.call('tl_ext_take_open_settings', []) as Promise<boolean>; }
   tl_ai_set_engine_dir(a0: string | null): Promise<void> { return this.t.call('tl_ai_set_engine_dir', [a0]) as Promise<void>; }
   tl_ai_tag(a0: string | null): Promise<string | null> { return this.t.call('tl_ai_tag', [a0]) as Promise<string | null>; }
   tl_ai_cancel(a0: string | null): Promise<void> { return this.t.call('tl_ai_cancel', [a0]) as Promise<void>; }
