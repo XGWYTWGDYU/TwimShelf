@@ -43,7 +43,7 @@ pub struct Choice {
     pub among: Vec<String>,
     /// The device's name (`Vulkan1`, `CUDA0`).
     pub device: String,
-    /// What each took, from loading to usable tags (ms); `None`: it failed or had no room.
+    /// What each took, from the model loaded to usable tags (ms); `None`: it failed or had no room.
     pub trials: Vec<(String, Option<u64>)>,
 }
 

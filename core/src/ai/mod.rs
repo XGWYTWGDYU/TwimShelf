@@ -145,10 +145,15 @@ fn local_gguf(models_dir: &Path, model: &engine::Gguf, bytes: u64, image: &Path,
     let mut first_error = None;
     for d in &gpus {
         if d.total > 0 && d.total < need { trials.push((d.name.clone(), None)); continue; }
+        // timed without loading the model: reading the model file is no measure of the GPU, and
+        // the GPU tried first pays for a file not yet in the system's cache (measured: CUDA0's
+        // first load 6.5 s, 3.7 s after, enough to lose to Vulkan); a chosen GPU keeps the model
+        // loaded while it tags
+        engine::take_load_time();
         let t = Instant::now();
         match run(&d.name) {
             Ok(tags) => {
-                let ms = t.elapsed().as_millis() as u64;
+                let ms = t.elapsed().saturating_sub(engine::take_load_time()).as_millis() as u64;
                 eprintln!("local ai: {} ({}) {ms} ms", d.name, d.description);
                 trials.push((d.name.clone(), Some(ms)));
                 if best.as_ref().is_none_or(|(b, _, _)| ms < *b) { best = Some((ms, d.name.clone(), tags)); }
