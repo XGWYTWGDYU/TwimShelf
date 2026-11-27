@@ -162,7 +162,7 @@ fn local_gguf(models_dir: &Path, model: &engine::Gguf, bytes: u64, image: &Path,
         }
     }
     let Some((_, device, tags)) = best else { return Err(first_error.unwrap_or_else(|| AiError::new(Kind::NoGpu))) };
-    devices::remember(models_dir, &devices::Choice { among: devices::fingerprint(&gpus), device: device.clone(), trials });
+    devices::remember(models_dir, &devices::Choice { engine: devices::ENGINE, among: devices::fingerprint(&gpus), device: device.clone(), trials });
     Ok((tags, Some(device)))
 }
 

@@ -30,8 +30,16 @@ pub fn fingerprint(gpus: &[Device]) -> Vec<String> {
     v
 }
 
+/// Which engine the choices are made with. Raise it when an engine change can change which GPU
+/// works or is fastest, so computers that chose before choose again (2: CUDA computes in FP32, so
+/// Gemma 4 works on NVIDIA's CUDA, where it had failed and the choice had gone to Vulkan).
+pub const ENGINE: u32 = 2;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Choice {
+    /// The [`ENGINE`] it was made with (none in the choices of before: 0).
+    #[serde(default)]
+    pub engine: u32,
     pub among: Vec<String>,
     /// The device's name (`Vulkan1`, `CUDA0`).
     pub device: String,
@@ -41,10 +49,10 @@ pub struct Choice {
 
 fn choice_file(models_dir: &Path) -> PathBuf { models_dir.join(".gpu-choice.json") }
 
-/// The remembered choice, if it was made among the GPUs there are now.
+/// The remembered choice, if it was made among the GPUs there are now, with this engine.
 pub fn remembered(models_dir: &Path, gpus: &[Device]) -> Option<String> {
     let c: Choice = serde_json::from_slice(&std::fs::read(choice_file(models_dir)).ok()?).ok()?;
-    (c.among == fingerprint(gpus) && gpus.iter().any(|d| d.name == c.device)).then_some(c.device)
+    (c.engine == ENGINE && c.among == fingerprint(gpus) && gpus.iter().any(|d| d.name == c.device)).then_some(c.device)
 }
 
 pub fn remember(models_dir: &Path, choice: &Choice) {
@@ -86,7 +94,7 @@ mod tests {
     fn a_choice_holds_only_among_the_same_gpus() {
         let dir = std::env::temp_dir().join(format!("tl-gpu-{}", rand::random::<u64>()));
         let g = vec![dev("CUDA0", "CUDA", 32), dev("Vulkan0", "Vulkan", 32)];
-        remember(&dir, &Choice { among: fingerprint(&g), device: "CUDA0".into(), trials: vec![] });
+        remember(&dir, &Choice { engine: ENGINE, among: fingerprint(&g), device: "CUDA0".into(), trials: vec![] });
         assert_eq!(remembered(&dir, &g).as_deref(), Some("CUDA0"));
         // the card went (a laptop on battery): choose again
         assert_eq!(remembered(&dir, &g[1..]), None);
@@ -94,6 +102,20 @@ mod tests {
         let mut more = g.clone();
         more.push(dev("Vulkan1", "Vulkan", 8));
         assert_eq!(remembered(&dir, &more), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_choice_made_with_an_older_engine_is_made_again() {
+        let dir = std::env::temp_dir().join(format!("tl-gpu-{}", rand::random::<u64>()));
+        let g = vec![dev("CUDA0", "CUDA", 32), dev("Vulkan0", "Vulkan", 32)];
+        // as 2.0.0 wrote it: no engine, CUDA failed, Vulkan chosen
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = serde_json::json!({ "among": fingerprint(&g), "device": "Vulkan0", "trials": [["CUDA0", null], ["Vulkan0", 36998]] });
+        std::fs::write(choice_file(&dir), serde_json::to_vec(&old).unwrap()).unwrap();
+        assert_eq!(remembered(&dir, &g), None);
+        remember(&dir, &Choice { engine: ENGINE, among: fingerprint(&g), device: "CUDA0".into(), trials: vec![] });
+        assert_eq!(remembered(&dir, &g).as_deref(), Some("CUDA0"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }
