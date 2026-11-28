@@ -202,7 +202,7 @@ static std::string picture_prompt(tl_llama *m, const char *system, const char *q
 }
 
 static char *describe_picture(tl_llama *m, const char *image, const char *system, const char *question,
-                                   int32_t max_tokens, char **error) {
+                                   int32_t max_tokens, int32_t *finish, char **error) {
   if (!m || !m->vision) { fail(error, "no vision model"); return nullptr; }
   const llama_vocab *vocab = llama_model_get_vocab(m->model);
   llama_memory_clear(llama_get_memory(m->ctx), true);
@@ -235,15 +235,21 @@ static char *describe_picture(tl_llama *m, const char *image, const char *system
   llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.1f));
   llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
   std::string out;
+  // what the caller needs to tell an answer from a part of one: it ended, or something cut it
+  int32_t why = TL_FINISH_LENGTH;
   for (int32_t i = 0; i < max_tokens; i++) {
     llama_token tok = llama_sampler_sample(smpl, m->ctx, -1);
-    if (llama_vocab_is_eog(vocab, tok)) break;
+    if (llama_vocab_is_eog(vocab, tok)) { why = TL_FINISH_ENDED; break; }
+    // a control token is no text: `special = false` below would write nothing for it, and the
+    // model would go on unseen (Gemma 4's <|channel> is user-defined and does show)
+    if (llama_vocab_is_control(vocab, tok)) { why = TL_FINISH_CONTROL; break; }
     char piece[256];
     int32_t k = llama_token_to_piece(vocab, tok, piece, sizeof piece, 0, false);
     if (k > 0) out.append(piece, k);
     llama_batch b = llama_batch_get_one(&tok, 1);
-    if (llama_decode(m->ctx, b) != 0) break;
+    if (llama_decode(m->ctx, b) != 0) { why = TL_FINISH_DECODE; break; }
   }
+  if (finish) *finish = why;
   llama_sampler_free(smpl);
 #ifdef __ANDROID__
   using ms = std::chrono::milliseconds;
@@ -276,8 +282,13 @@ extern "C" tl_llama *tl_llama_load(const char *weights, const char *projector, c
 
 extern "C" char *tl_llama_describe(tl_llama *m, const char *image, const char *system, const char *question,
                                    int32_t max_tokens, char **error) {
+  return tl_llama_describe_ex(m, image, system, question, max_tokens, nullptr, error);
+}
+
+extern "C" char *tl_llama_describe_ex(tl_llama *m, const char *image, const char *system, const char *question,
+                                      int32_t max_tokens, int32_t *finish, char **error) {
   const auto start = std::chrono::steady_clock::now();
-  char *answer = guarded(error, [&] { return describe_picture(m, image, system, question, max_tokens, error); });
+  char *answer = guarded(error, [&] { return describe_picture(m, image, system, question, max_tokens, finish, error); });
 #ifdef __ANDROID__
   const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
   __android_log_print(ANDROID_LOG_INFO, "tl_llama", "picture: %lld ms, %s", (long long)ms, answer ? "ok" : "failed");
