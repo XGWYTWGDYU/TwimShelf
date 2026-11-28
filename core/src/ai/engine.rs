@@ -163,7 +163,8 @@ pub fn devices() -> Vec<Device> {
 struct Loaded { key: String, handle: *mut c_void }
 unsafe impl Send for Loaded {}
 
-struct State { loaded: Option<Loaded>, last_used: Instant }
+/// `load`: what the latest load took, until [`take_load_time`] reads it.
+struct State { loaded: Option<Loaded>, last_used: Instant, load: Duration }
 
 fn state() -> &'static Mutex<State> {
     static S: OnceLock<Mutex<State>> = OnceLock::new();
@@ -176,7 +177,7 @@ fn state() -> &'static Mutex<State> {
                 if let Some(m) = g.loaded.take() { unsafe { (l.unload)(m.handle) }; }
             }
         });
-        Mutex::new(State { loaded: None, last_used: Instant::now() })
+        Mutex::new(State { loaded: None, last_used: Instant::now(), load: Duration::ZERO })
     })
 }
 
@@ -187,6 +188,10 @@ fn cpath(p: &Path) -> CString { cstr(&p.to_string_lossy()) }
 #[derive(Debug, Clone)]
 pub struct Gguf { pub weights: PathBuf, pub projector: Option<PathBuf> }
 
+/// What loading a model took since this was last asked (nothing loaded: zero), for the GPU trial,
+/// which times the GPU and not the reading of the model file.
+pub fn take_load_time() -> Duration { std::mem::take(&mut state().lock().unwrap_or_else(|e| e.into_inner()).load) }
+
 /// The model's answer about the picture at `image`, from the model loaded on `device`.
 pub fn describe_gguf(model: &Gguf, device: &str, image: &Path, system: &str, question: &str, max_tokens: i32) -> AiResult<(String, Finish)> {
     let l = llama().ok_or_else(|| AiError::new(Kind::NoGpu))?;
@@ -196,12 +201,14 @@ pub fn describe_gguf(model: &Gguf, device: &str, image: &Path, system: &str, que
         if let Some(m) = g.loaded.take() { unsafe { (l.unload)(m.handle) }; }
         let (w, p, d) = (cpath(&model.weights), model.projector.as_deref().map(cpath), cstr(device));
         let mut err: *mut c_char = std::ptr::null_mut();
+        let started = Instant::now();
         let handle = unsafe { (l.load)(w.as_ptr(), p.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()), d.as_ptr(), 4096, 0, &mut err) };
         if handle.is_null() {
             let why = unsafe { take(l, err) }.unwrap_or_default();
             return Err(AiError::detail(Kind::Engine, why));
         }
         g.loaded = Some(Loaded { key, handle });
+        g.load = started.elapsed();
     }
     let handle = g.loaded.as_ref().map(|m| m.handle).unwrap_or(std::ptr::null_mut());
     let (i, s, q) = (cpath(image), cstr(system), cstr(question));

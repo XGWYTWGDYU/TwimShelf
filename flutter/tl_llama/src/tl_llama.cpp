@@ -79,10 +79,27 @@ static const char *type_name(enum ggml_backend_dev_type t) {
   }
 }
 
+// cuBLAS computes in FP32 unless someone chose otherwise. On a card with fast FP16 (RTX 20 on),
+// ggml-cuda multiplies quantized and FP16 weights in FP16 unless the graph asks for FP32, and Gemma 4's
+// does not: it overflows (llama.cpp v0.8.0, CUDA 12.9, RTX 4070 SUPER), and every answer is one token
+// repeated ("<unused6226>…"), while the same model reads the same picture right on Vulkan. With FP32 the CUDA answers match Vulkan's, at a quarter of the time; Qwen2.5-VL's answers
+// and speed do not change. ggml-cuda reads the variable at each matrix product, so it is set before
+// any backend is loaded; a value already in the environment wins.
+static void prefer_fp32_cublas() {
+  const char *name = "GGML_CUDA_CUBLAS_COMPUTE_TYPE";
+  if (std::getenv(name)) return;
+#ifdef _WIN32
+  _putenv_s(name, "f32");
+#else
+  setenv(name, "f32", 0);
+#endif
+}
+
 extern "C" void tl_llama_init(const char *dir) {
   // once per process
   static std::once_flag once;
   std::call_once(once, [dir] {
+    prefer_fp32_cublas();
 #ifdef __ANDROID__
     llama_log_set(log_to_logcat, nullptr);
     mtmd_helper_log_set(mtmd_to_logcat, nullptr);
