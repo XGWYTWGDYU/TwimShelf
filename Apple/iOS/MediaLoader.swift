@@ -37,6 +37,21 @@ final class MediaLoader {
         return nil
     }
 
+    /// Synchronous cache-backed decode for immediate full-aspect-ratio transition posters
+    /// (avoids morphing a low-res square-cropped Metal grid thumbnail).
+    func loadSync(_ item: FeedItem, maxPixel: CGFloat) -> UIImage? {
+        let k = key(item, maxPixel)
+        if let img = cache.object(forKey: k) { return img }
+        let url = item.fileURL
+        let img: UIImage? = autoreleasepool {
+            item.kind == .video ? Self.poster(url, maxPixel) : Self.thumbnail(url, maxPixel)
+        }
+        if let img, let cg = img.cgImage {
+            cache.setObject(img, forKey: k, cost: cg.bytesPerRow * cg.height)
+        }
+        return img
+    }
+
     @discardableResult
     func load(_ item: FeedItem, maxPixel: CGFloat, completion: @escaping (UIImage?) -> Void) -> Token? {
         load(path: item.path, isVideo: item.kind == .video, maxPixel: maxPixel, completion: completion)

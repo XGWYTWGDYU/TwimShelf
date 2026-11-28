@@ -377,7 +377,13 @@ final class MacContentController: NSViewController {
                 // the recycle bin is the same grid, over the binned media
                 g = MacMediaGridPage(title: p.title, filter: p.filter ?? FeedFilter(), folder: p.folderName, bin: p == .trash)
                 g.onOpenMedia = { [weak self, weak g] it, list in
-                    self?.feed.openMedia(it, in: list) { [weak g] item in g?.viewerSourceFrame(for: item) }
+                    self?.feed.openMedia(
+                        it,
+                        in: list,
+                        source: { [weak g] item in g?.viewerSourceFrame(for: item) },
+                        gridTransition: { [weak g] item, scrollToVisible in g?.gridTransitionInfo(for: item, scrollToVisible: scrollToVisible) },
+                        setHiddenMediaId: { [weak g] mediaId in g?.setHiddenMediaId(mediaId) }
+                    )
                 }
                 g.onShowInBrowse = { [weak self] f, _ in
                     self?.feed.showFromFolders(f, title: p.title)

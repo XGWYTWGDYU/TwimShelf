@@ -476,6 +476,9 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     /// The player or photo viewer covering the feed (nil when browsing).
     private var viewer: NSView?
     private var viewerSource: ((FeedItem) -> NSRect?)?
+    private var gridTransitionInfo: ((FeedItem, Bool) -> MacGridTileTransitionInfo?)?
+    private var gridSetHiddenMediaId: ((String?) -> Void)?
+    private var gridTransitionOverlay: NSView?
     private var isClosingViewer = false
     /// A viewer or standalone player currently in picture in picture: kept hidden in its host while its floating window plays.
     private var pipViewer: NSView?
@@ -978,12 +981,16 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     /// Opens a media inside the main window (never a new window): the player or photo viewer
     /// covers the feed until it is closed.
     /// Opens a media of another list (a grid of the 文件夹 page): ← → goes through that list.
-    func openMedia(_ item: FeedItem, in list: [FeedItem], source: ((FeedItem) -> NSRect?)? = nil) {
-        open(item, list: list, source: source)
+    func openMedia(_ item: FeedItem, in list: [FeedItem], source: ((FeedItem) -> NSRect?)? = nil,
+                   gridTransition: ((FeedItem, Bool) -> MacGridTileTransitionInfo?)? = nil,
+                   setHiddenMediaId: ((String?) -> Void)? = nil) {
+        open(item, list: list, source: source, gridTransition: gridTransition, setHiddenMediaId: setHiddenMediaId)
     }
 
     private func open(_ item: FeedItem, list: [FeedItem]? = nil, from card: FeedCard? = nil,
-                      source: ((FeedItem) -> NSRect?)? = nil) {
+                      source: ((FeedItem) -> NSRect?)? = nil,
+                      gridTransition: ((FeedItem, Bool) -> MacGridTileTransitionInfo?)? = nil,
+                      setHiddenMediaId: ((String?) -> Void)? = nil) {
         guard viewer == nil else { return }
         // the viewer takes the card's own player (one player for both: nothing starts again)
         let fromBrowse = list == nil
@@ -1040,7 +1047,47 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             ph.onPiPFailed = { [weak self, weak ph] in if let ph { self?.cancelEnterPiP(for: ph) } }
             v = ph
         }
-        showViewer(v, source: sourceFrame, initialFrame: sourceFrame(item))
+        let effectiveGridTransition: ((FeedItem, Bool) -> MacGridTileTransitionInfo?)?
+        let effectiveSetHidden: ((String?) -> Void)?
+        if let gridTransition {
+            effectiveGridTransition = gridTransition
+            effectiveSetHidden = setHiddenMediaId
+        } else {
+            weak var hiddenCardMediaView: NSView?
+            effectiveGridTransition = { [weak self, weak card] current, scrollToVisible in
+                guard let self else { return nil }
+                let visible = self.collection.visibleItems().compactMap { $0 as? FeedCard }
+                let tapped = card?.current?.mediaId == item.mediaId ? card?.viewerSourceFrame : nil
+                let matching = visible.first { $0.current?.mediaId == current.mediaId }
+                let frameInWindow = (current.mediaId == item.mediaId ? tapped : nil) ?? matching?.viewerSourceFrame ?? tapped
+                guard let frameInWindow, !frameInWindow.isEmpty else { return nil }
+                let img: NSImage?
+                if !scrollToVisible {
+                    let maxPx: CGFloat = current.kind == .video ? 1280 : 2048
+                    img = MacMediaLoader.shared.loadSync(current, maxPixel: maxPx)
+                } else {
+                    img = MacMediaLoader.shared.anyCached(current, near: 2048)
+                }
+                return MacGridTileTransitionInfo(
+                    mediaId: current.mediaId,
+                    frameInWindow: frameInWindow,
+                    cornerRadius: 18,
+                    image: img
+                )
+            }
+            effectiveSetHidden = { [weak self, weak card] mediaId in
+                hiddenCardMediaView?.alphaValue = 1
+                hiddenCardMediaView = nil
+                guard let self, let mediaId else { return }
+                let visible = self.collection.visibleItems().compactMap { $0 as? FeedCard }
+                let targetCard = visible.first { $0.current?.mediaId == mediaId }
+                    ?? (card?.current?.mediaId == mediaId ? card : nil)
+                targetCard?.mediaView.alphaValue = 0
+                hiddenCardMediaView = targetCard?.mediaView
+            }
+        }
+        showViewer(v, source: sourceFrame, initialFrame: nil,
+                   gridTransition: effectiveGridTransition, setHiddenMediaId: effectiveSetHidden)
     }
 
     private func teardownPiPViewer() {
@@ -1063,6 +1110,9 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         // player backdrop or PiP placeholder frames ever flash behind the flying PiP tile.
         v.layer?.removeAllAnimations()
         v.layer?.mask = nil
+        gridTransitionOverlay?.removeFromSuperview()
+        gridTransitionOverlay = nil
+        gridSetHiddenMediaId?(nil)
         v.alphaValue = 0
         setImmersive(false)
         toast.isHidden = false
@@ -1118,10 +1168,17 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         }
     }
 
-    private func showViewer(_ v: NSView, source: ((FeedItem) -> NSRect?)? = nil, initialFrame: NSRect? = nil) {
+    private func showViewer(_ v: NSView, source: ((FeedItem) -> NSRect?)? = nil, initialFrame: NSRect? = nil,
+                            gridTransition: ((FeedItem, Bool) -> MacGridTileTransitionInfo?)? = nil,
+                            setHiddenMediaId: ((String?) -> Void)? = nil) {
         viewer?.removeFromSuperview()
+        gridTransitionOverlay?.removeFromSuperview()
+        gridTransitionOverlay = nil
+        gridSetHiddenMediaId?(nil)
         viewer = v
         viewerSource = source
+        gridTransitionInfo = gridTransition
+        gridSetHiddenMediaId = setHiddenMediaId
         isClosingViewer = false
         v.translatesAutoresizingMaskIntoConstraints = false
         // fills the content pane beside the sidebar (leaving the sidebar visible and usable)
@@ -1134,7 +1191,11 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         toast.isHidden = true
         view.window?.makeFirstResponder(v)
         host.layoutSubtreeIfNeeded()
-        animateViewer(v, source: initialFrame, opening: true)
+        if gridTransition != nil {
+            animateGridViewer(v, opening: true)
+        } else {
+            animateViewer(v, source: initialFrame, opening: true)
+        }
     }
 
     private func closeViewer(keepPlayer: Bool = false) {
@@ -1144,16 +1205,24 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         mediaViewer?.finishMotion()
         setImmersive(false)
         v.superview?.layoutSubtreeIfNeeded()
-        let source = mediaViewer.flatMap { viewerSource?($0.current) }
-        animateViewer(v, source: source, opening: false) { [weak self, weak v] in
+        let finishClose: () -> Void = { [weak self, weak v] in
             guard let self, let v, self.viewer === v else { return }
             (v as? MacPhotoView)?.teardown()
             v.removeFromSuperview()
+            self.gridSetHiddenMediaId?(nil)
             self.viewer = nil
             self.viewerSource = nil
+            self.gridTransitionInfo = nil
+            self.gridSetHiddenMediaId = nil
             self.isClosingViewer = false
             self.view.window?.makeFirstResponder(self.responderAfterViewer?() ?? self.collection)
             self.updateInline()
+        }
+        if gridTransitionInfo != nil {
+            animateGridViewer(v, opening: false, completion: finishClose)
+        } else {
+            let source = mediaViewer.flatMap { viewerSource?($0.current) }
+            animateViewer(v, source: source, opening: false, completion: finishClose)
         }
     }
 
@@ -1161,6 +1230,9 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     func dismissViewerImmediately() {
         guard let v = viewer else { return }
         isClosingViewer = false
+        gridTransitionOverlay?.removeFromSuperview()
+        gridTransitionOverlay = nil
+        gridSetHiddenMediaId?(nil)
         if let ph = v as? MacPhotoView {
             ph.teardown()
         } else if let p = v as? MacPlayerView {
@@ -1171,9 +1243,161 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         v.removeFromSuperview()
         viewer = nil
         viewerSource = nil
+        gridTransitionInfo = nil
+        gridSetHiddenMediaId = nil
         setImmersive(false)
         view.window?.makeFirstResponder(responderAfterViewer?() ?? collection)
         updateInline()
+    }
+
+    private static func aspectFillFrame(of content: CGSize, inside bounds: CGSize) -> CGRect {
+        guard content.width > 0, content.height > 0, bounds.width > 0, bounds.height > 0 else {
+            return CGRect(origin: .zero, size: bounds)
+        }
+        let scale = max(bounds.width / content.width, bounds.height / content.height)
+        let w = content.width * scale
+        let h = content.height * scale
+        return CGRect(x: (bounds.width - w) / 2, y: (bounds.height - h) / 2, width: w, height: h)
+    }
+
+    /// Apple Photos-style macOS Metal grid transition: hides the active tile in the Metal grid,
+    /// morphs a crisp uncropped image inside a continuous-corner clipping layer between the square
+    /// tile rect and the full aspect-fit media rect, and restores the Metal tile synchronously.
+    private func animateGridViewer(_ viewer: NSView, opening: Bool, completion: @escaping () -> Void = {}) {
+        guard let host = viewer.superview,
+              let photoViewer = viewer as? MacPhotoView,
+              let info = gridTransitionInfo?(photoViewer.current, !opening),
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            gridSetHiddenMediaId?(nil)
+            if opening { viewer.alphaValue = 0 }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.16
+                viewer.animator().alphaValue = opening ? 1 : 0
+            }, completionHandler: completion)
+            return
+        }
+
+        if opening, let img = info.image {
+            photoViewer.showTransitionPoster(img)
+        }
+        let media = photoViewer.mediaFrame
+        let destFrame = host.convert(media, from: photoViewer)
+        let tileFrame = host.convert(info.frameInWindow, from: nil)
+        guard !destFrame.isEmpty, !tileFrame.isEmpty else {
+            gridSetHiddenMediaId?(nil)
+            if opening { viewer.alphaValue = 0 }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.16
+                viewer.animator().alphaValue = opening ? 1 : 0
+            }, completionHandler: completion)
+            return
+        }
+
+        let morphImage = opening ? (photoViewer.currentPhotoImage ?? info.image) : (photoViewer.currentPhotoImage ?? info.image)
+        guard let cgImage = morphImage?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            // Live video without a cached poster falls back to the classic layer-mask zoom.
+            animateViewer(viewer, source: info.frameInWindow, opening: opening, completion: completion)
+            return
+        }
+
+        gridTransitionOverlay?.removeFromSuperview()
+        gridSetHiddenMediaId?(info.mediaId)
+
+        let overlay = NSView(frame: host.bounds)
+        overlay.wantsLayer = true
+        overlay.autoresizingMask = [.width, .height]
+        host.addSubview(overlay, positioned: .above, relativeTo: viewer)
+        gridTransitionOverlay = overlay
+
+        let rootLayer = overlay.layer!
+        let backdrop = CALayer()
+        backdrop.frame = overlay.bounds
+        backdrop.backgroundColor = NSColor.black.cgColor
+        backdrop.opacity = opening ? 0 : 1
+        rootLayer.addSublayer(backdrop)
+
+        let fromOuter = opening ? tileFrame : destFrame
+        let toOuter = opening ? destFrame : tileFrame
+        let contentSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let tileInner = Self.aspectFillFrame(of: contentSize, inside: tileFrame.size)
+        let fullInner = CGRect(origin: .zero, size: destFrame.size)
+        let fromInner = opening ? tileInner : fullInner
+        let toInner = opening ? fullInner : tileInner
+
+        let morph = CALayer()
+        morph.masksToBounds = true
+        morph.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        morph.cornerCurve = .continuous
+        morph.cornerRadius = opening ? info.cornerRadius : 0
+        morph.frame = fromOuter
+
+        let inner = CALayer()
+        inner.contents = cgImage
+        inner.contentsGravity = .resize
+        inner.frame = fromInner
+        morph.addSublayer(inner)
+        rootLayer.addSublayer(morph)
+
+        viewer.alphaValue = 0
+
+        func spring(_ keyPath: String, from: Any, to: Any) -> CASpringAnimation {
+            let a = CASpringAnimation(keyPath: keyPath)
+            a.mass = 1
+            a.stiffness = opening ? 320 : 380
+            a.damping = opening ? 28 : 32
+            a.initialVelocity = 0
+            a.duration = opening ? 0.34 : 0.28
+            a.fromValue = from
+            a.toValue = to
+            a.fillMode = .both
+            return a
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { [weak self, weak overlay, weak viewer] in
+            if opening {
+                viewer?.alphaValue = 1
+                overlay?.removeFromSuperview()
+                if self?.gridTransitionOverlay === overlay { self?.gridTransitionOverlay = nil }
+                self?.gridSetHiddenMediaId?(nil)
+                completion()
+            } else {
+                // Draw the tile back into the Metal grid synchronously before dropping the morph
+                // overlay on the next tick so no frame ever shows neither.
+                self?.gridSetHiddenMediaId?(nil)
+                DispatchQueue.main.async {
+                    overlay?.removeFromSuperview()
+                    if self?.gridTransitionOverlay === overlay { self?.gridTransitionOverlay = nil }
+                }
+                completion()
+            }
+        }
+
+        let fromOuterBounds = CGRect(origin: .zero, size: fromOuter.size)
+        let toOuterBounds = CGRect(origin: .zero, size: toOuter.size)
+        let fromOuterPos = CGPoint(x: fromOuter.midX, y: fromOuter.midY)
+        let toOuterPos = CGPoint(x: toOuter.midX, y: toOuter.midY)
+        let fromInnerBounds = CGRect(origin: .zero, size: fromInner.size)
+        let toInnerBounds = CGRect(origin: .zero, size: toInner.size)
+        let fromInnerPos = CGPoint(x: fromInner.midX, y: fromInner.midY)
+        let toInnerPos = CGPoint(x: toInner.midX, y: toInner.midY)
+
+        morph.bounds = toOuterBounds
+        morph.position = toOuterPos
+        morph.cornerRadius = opening ? 0 : info.cornerRadius
+        inner.bounds = toInnerBounds
+        inner.position = toInnerPos
+        backdrop.opacity = opening ? 1 : 0
+
+        morph.add(spring("bounds", from: fromOuterBounds, to: toOuterBounds), forKey: "bounds")
+        morph.add(spring("position", from: fromOuterPos, to: toOuterPos), forKey: "position")
+        morph.add(spring("cornerRadius", from: opening ? info.cornerRadius : 0, to: opening ? 0 : info.cornerRadius), forKey: "cornerRadius")
+        inner.add(spring("bounds", from: fromInnerBounds, to: toInnerBounds), forKey: "bounds")
+        inner.add(spring("position", from: fromInnerPos, to: toInnerPos), forKey: "position")
+        backdrop.add(spring("opacity", from: opening ? 0 : 1, to: opening ? 1 : 0), forKey: "opacity")
+
+        CATransaction.commit()
     }
 
     private func animateViewer(_ viewer: NSView, source: NSRect?, opening: Bool, completion: @escaping () -> Void = {}) {

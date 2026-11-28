@@ -610,6 +610,15 @@ final class MacPhotoView: NSView {
         return page.mediaFrame(in: self, size: size)
     }
 
+    var currentPhotoImage: NSImage? {
+        guard page?.player == nil else { return nil }
+        return page?.currentImage
+    }
+
+    func showTransitionPoster(_ image: NSImage) {
+        page?.showTransitionPoster(image)
+    }
+
     private func activatePage() {
         let time = videoPositions[index] ?? videoPosition?(current) ?? .zero
         videoControlsVisible = true
@@ -1030,8 +1039,8 @@ final class MacViewerPage: NSView {
         scroll.minMagnification = 1
         scroll.maxMagnification = 6
         scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
+        scroll.hasVerticalScroller = false
+        scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
         scroll.autoresizingMask = [.width, .height]
         image.imageScaling = .scaleProportionallyUpOrDown
@@ -1044,6 +1053,10 @@ final class MacViewerPage: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     var magnification: CGFloat { scroll.magnification }
+    var currentImage: NSImage? { image.image }
+    func showTransitionPoster(_ poster: NSImage) {
+        if image.image == nil { image.image = poster }
+    }
 
     func mediaFrame(in view: NSView, size: CGSize) -> CGRect {
         if let player { return player.convert(player.mediaFrame(size: size), to: view) }

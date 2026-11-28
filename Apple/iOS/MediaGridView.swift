@@ -594,8 +594,17 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
         }
         guard frame.intersects(visible) else { return nil }
         let item = scene.tiles[index].item
-        let img = renderer?.thumbnails.image(for: item).map { UIImage(cgImage: $0) }
-            ?? MediaLoader.shared.anyCached(item, near: frame.width * traitCollection.displayScale)
+        // On open (`!scrollToVisible`), decode the crisp uncropped image (cached in MediaLoader so
+        // ZoomPage reuses it immediately) instead of the square-cropped low-res Metal atlas tile.
+        let img: UIImage?
+        if !scrollToVisible {
+            let maxPx: CGFloat = item.kind == .video ? 1280 : 2048
+            img = MediaLoader.shared.loadSync(item, maxPixel: maxPx)
+                ?? renderer?.thumbnails.image(for: item).map { UIImage(cgImage: $0) }
+        } else {
+            img = MediaLoader.shared.anyCached(item, near: 2048)
+                ?? renderer?.thumbnails.image(for: item).map { UIImage(cgImage: $0) }
+        }
         return GridTileTransitionInfo(
             mediaId: mediaId,
             frame: convert(frame, to: coordinateSpace),

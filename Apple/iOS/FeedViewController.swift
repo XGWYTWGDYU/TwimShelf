@@ -1602,13 +1602,26 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                                      player: lent, giveBack: giveBack)
         vc.videoPosition = { [weak self] in self?.inline.position(for: $0.mediaId) ?? .zero }
         vc.saveVideoPosition = { [weak self] in self?.inline.savePosition($1, for: $0.mediaId) }
+        weak var hiddenBrowsePageView: UIView?
+        let setHiddenBrowseMedia: (String?) -> Void = { [weak self, weak cell] mediaId in
+            hiddenBrowsePageView?.alpha = 1
+            hiddenBrowsePageView = nil
+            guard let self, let mediaId else { return }
+            let visible = self.collectionView.visibleCells.compactMap { $0 as? FeedCell }
+            let target = visible.first(where: { $0.currentItem?.mediaId == mediaId })?.currentPageView
+                ?? (cell?.currentItem?.mediaId == mediaId ? cell?.currentPageView : nil)
+            target?.alpha = 0
+            hiddenBrowsePageView = target
+        }
         vc.onEnteringPiP = { [weak self] in
+            setHiddenBrowseMedia(nil)
             guard let self else { return }
             for case let c as FeedCell in self.collectionView.visibleCells {
                 c.rebuildCurrentPageView()
             }
         }
         vc.onDismissed = { [weak self, weak vc] in
+            setHiddenBrowseMedia(nil)
             guard let self else { return }
             self.showingMediaViewer = false
             if vc?.didMutate == true { self.reload(keepPosition: true) }
@@ -1618,19 +1631,37 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                 self.updateInlinePlayback()
             }
         }
-        vc.setZoomSource { [weak self, weak cell] media in
-            guard let self else { return nil }
-            let visible = self.collectionView.visibleCells.compactMap { $0 as? FeedCell }
-            if let live = visible.first(where: { $0.currentItem?.mediaId == media.mediaId })?.currentPageView {
-                return live
-            }
-            let tapped = cell.flatMap { card -> MediaPageView? in
-                guard card.currentItem?.mediaId == item.mediaId, card.isDescendant(of: self.collectionView),
-                      card.frame.intersects(self.collectionView.bounds), card.currentPageView?.window != nil else { return nil }
-                return card.currentPageView
-            }
-            return tapped
-        }
+        vc.setGridTransition(
+            source: { [weak self, weak cell] media, space, scrollToVisible in
+                guard let self else { return nil }
+                let visible = self.collectionView.visibleCells.compactMap { $0 as? FeedCell }
+                let live = visible.first(where: { $0.currentItem?.mediaId == media.mediaId })?.currentPageView
+                let tapped = cell.flatMap { card -> MediaPageView? in
+                    guard card.currentItem?.mediaId == item.mediaId, card.isDescendant(of: self.collectionView),
+                          card.frame.intersects(self.collectionView.bounds), card.currentPageView?.window != nil else { return nil }
+                    return card.currentPageView
+                }
+                guard let pageView = live ?? tapped, pageView.window != nil else { return nil }
+                let img: UIImage?
+                if !scrollToVisible {
+                    let maxPx: CGFloat = media.kind == .video ? 1280 : 2048
+                    img = MediaLoader.shared.loadSync(media, maxPixel: maxPx) ?? pageView.transitionImage
+                } else {
+                    img = MediaLoader.shared.anyCached(media, near: 2048) ?? pageView.transitionImage
+                }
+                let naturalSize = img?.size
+                    ?? (media.width > 0 && media.height > 0 ? CGSize(width: media.width, height: media.height) : pageView.bounds.size)
+                let fitted = AVMakeRect(aspectRatio: naturalSize, insideRect: pageView.bounds)
+                guard !fitted.isEmpty else { return nil }
+                return GridTileTransitionInfo(
+                    mediaId: media.mediaId,
+                    frame: pageView.convert(fitted, to: space),
+                    cornerRadius: 22,
+                    image: img
+                )
+            },
+            setHiddenMediaId: setHiddenBrowseMedia
+        )
         showingMediaViewer = true
         detachInline()
         present(vc, animated: true)

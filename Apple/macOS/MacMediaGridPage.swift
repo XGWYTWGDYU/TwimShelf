@@ -157,6 +157,15 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
         return grid.viewerSourceFrame(for: tile.mediaId)
     }
 
+    func gridTransitionInfo(for item: FeedItem, scrollToVisible: Bool) -> MacGridTileTransitionInfo? {
+        guard let tile = entries.first(where: { $0.contains { $0.mediaId == item.mediaId } })?.first else { return nil }
+        return grid.transitionInfo(for: tile.mediaId, scrollToVisible: scrollToVisible)
+    }
+
+    func setHiddenMediaId(_ mediaId: String?) {
+        grid.setHiddenMediaId(mediaId)
+    }
+
     func mediaGrid(_ g: MacMediaGridView, didSettleAt level: Int) {
         UserDefaults.standard.set(level, forKey: "mac.grid.level")
         onStateChanged?()

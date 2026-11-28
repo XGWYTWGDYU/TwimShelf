@@ -28,6 +28,26 @@ final class MacMediaLoader {
     /// Whether a picture is already decoded (shown at once, no fade).
     func isCached(_ item: FeedItem, maxPixel: CGFloat) -> Bool { cache.object(forKey: "\(item.path)@\(Int(maxPixel))" as NSString) != nil }
 
+    func anyCached(_ item: FeedItem, near maxPixel: CGFloat) -> NSImage? {
+        for size in [maxPixel, 600, 1200, 1280, 1600, 2048].sorted(by: { abs($0 - maxPixel) < abs($1 - maxPixel) }) {
+            if let img = cache.object(forKey: "\(item.path)@\(Int(size))" as NSString) { return img }
+        }
+        return nil
+    }
+
+    /// Synchronous cache-backed decode for immediate full-aspect-ratio transition posters
+    /// (avoids morphing a low-res square-cropped Metal grid thumbnail).
+    func loadSync(_ item: FeedItem, maxPixel: CGFloat) -> NSImage? {
+        let key = "\(item.path)@\(Int(maxPixel))"
+        if let img = cache.object(forKey: key as NSString) { return img }
+        let job = Job(key: key, path: item.path, isVideo: item.kind == .video, maxPixel: maxPixel)
+        let img = autoreleasepool { Self.decode(job) }
+        if let img, let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            cache.setObject(img, forKey: key as NSString, cost: cg.width * cg.height * 4)
+        }
+        return img
+    }
+
     /// Media that failed to decode are reported to the core once per launch, which verifies the
     /// file and records the damage (the card then shows a badge and offers a re-download).
     private var reported = Set<String>()

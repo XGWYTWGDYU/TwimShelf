@@ -2,6 +2,14 @@ import AppKit
 import IOSurface
 import MetalKit
 
+/// Pure geometry + crisp uncropped image for the Apple Photos-style macOS grid viewer transition.
+struct MacGridTileTransitionInfo {
+    let mediaId: String
+    let frameInWindow: NSRect
+    let cornerRadius: CGFloat
+    let image: NSImage?
+}
+
 protocol MacMediaGridDelegate: AnyObject {
     func mediaGrid(_ g: MacMediaGridView, didOpen index: Int)
     func mediaGrid(_ g: MacMediaGridView, didTapFavoriteAt index: Int)
@@ -438,6 +446,73 @@ final class MacMediaGridView: NSView {
         let frame = scene.engine.restFrame(index, scene.engine.rest)
         guard frame.intersects(visibleRect) else { return nil }
         return convert(frame, to: nil)
+    }
+
+    /// Pure geometry + crisp uncropped image for the Apple Photos-style viewer transition.
+    /// When `scrollToVisible` is true (on dismiss), scrolls the grid minimally so a tile paged to
+    /// inside the viewer is visible before flying back into it.
+    func transitionInfo(for mediaId: String, scrollToVisible: Bool) -> MacGridTileTransitionInfo? {
+        guard window != nil, let scene,
+              let index = scene.tiles.firstIndex(where: { $0.item.mediaId == mediaId }) else { return nil }
+        let topInset = min(safeAreaInsets.top, bounds.height)
+        let visible = NSRect(x: 0, y: topInset, width: bounds.width, height: max(0, bounds.height - topInset))
+        var frame = scene.engine.restFrame(index, scene.engine.rest)
+        if scrollToVisible, !visible.isEmpty, (frame.minY < visible.minY || frame.maxY > visible.maxY) {
+            let cfg = scene.engine.cfg
+            let r = scene.engine.rest
+            var nextOffset = r.offset
+            if frame.minY < visible.minY {
+                nextOffset -= (visible.minY - frame.minY) + 12
+            } else if frame.maxY > visible.maxY {
+                nextOffset += (frame.maxY - visible.maxY) + 12
+            }
+            let maxOffset = cfg.maxOffset(level: r.level, phase: r.phase)
+            let clamped = min(max(nextOffset, 0), maxOffset)
+            scene.engine.rest.offset = clamped
+            syncingScroll = true
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: clamped))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            syncingScroll = false
+            metalView.draw()
+            needsDraw = false
+            frame = scene.engine.restFrame(index, scene.engine.rest)
+        }
+        guard frame.intersects(visible) else { return nil }
+        let item = scene.tiles[index].item
+        let img: NSImage?
+        if !scrollToVisible {
+            let maxPx: CGFloat = item.kind == .video ? 1280 : 2048
+            img = MacMediaLoader.shared.loadSync(item, maxPixel: maxPx)
+                ?? renderer?.thumbnails.image(for: item).map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        } else {
+            img = MacMediaLoader.shared.anyCached(item, near: 2048)
+                ?? renderer?.thumbnails.image(for: item).map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        }
+        return MacGridTileTransitionInfo(
+            mediaId: mediaId,
+            frameInWindow: convert(frame, to: nil),
+            cornerRadius: GridConfig.cornerRadius,
+            image: img
+        )
+    }
+
+    /// Hides or reveals one tile in the Metal renderer during a viewer transition (matching Apple
+    /// Photos' `setHiddenAssetReferences:`) and redraws synchronously to prevent double-image flashes.
+    func setHiddenMediaId(_ mediaId: String?) {
+        guard let scene else { return }
+        if let mediaId, let index = scene.tiles.firstIndex(where: { $0.item.mediaId == mediaId }),
+           index < scene.engine.items.count {
+            let key = scene.engine.items[index]
+            if scene.engine.hiddenPhoto != key {
+                scene.engine.hiddenPhoto = key
+                metalView.draw()
+                needsDraw = false
+            }
+        } else if scene.engine.hiddenPhoto != nil {
+            scene.engine.hiddenPhoto = nil
+            metalView.draw()
+            needsDraw = false
+        }
     }
 
     fileprivate func index(at p: NSPoint) -> Int? {

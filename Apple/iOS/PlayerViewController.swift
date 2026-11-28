@@ -1534,27 +1534,36 @@ private final class GridViewerTransition: NSObject, UIViewControllerTransitionin
         backdrop.alpha = 0
         container.addSubview(backdrop)
 
-        let morph = UIImageView(frame: source.frame)
-        morph.image = viewer.currentMediaImage ?? source.image
-        morph.contentMode = .scaleAspectFill
-        morph.backgroundColor = .secondarySystemBackground
-        morph.clipsToBounds = true
-        morph.layer.cornerCurve = .continuous
-        morph.layer.cornerRadius = source.cornerRadius
-        container.addSubview(morph)
+        // Explicit clipping container + inner image view: starts at exact center-cropped square
+        // matching the Metal grid tile and smoothly un-crops into the full aspect-ratio destFrame
+        // with zero blur-to-sharp or square-to-aspect pop.
+        let morphContainer = UIView(frame: source.frame)
+        morphContainer.backgroundColor = .secondarySystemBackground
+        morphContainer.clipsToBounds = true
+        morphContainer.layer.cornerCurve = .continuous
+        morphContainer.layer.cornerRadius = source.cornerRadius
+
+        let morphImage = viewer.currentMediaImage ?? source.image
+        let inner = UIImageView(image: morphImage)
+        inner.contentMode = .scaleToFill
+        let contentSize = morphImage?.size ?? destFrame.size
+        inner.frame = Self.aspectFillFrame(of: contentSize, inside: source.frame.size)
+        morphContainer.addSubview(inner)
+        container.addSubview(morphContainer)
 
         viewer.view.alpha = 0
 
         let animator = UIViewPropertyAnimator(duration: transitionDuration(using: context), dampingRatio: 0.88) {
-            morph.frame = destFrame
-            morph.layer.cornerRadius = 0
+            morphContainer.frame = destFrame
+            morphContainer.layer.cornerRadius = 0
+            inner.frame = CGRect(origin: .zero, size: destFrame.size)
             backdrop.alpha = 1
         }
         animator.addCompletion { [weak self] _ in
             viewer.view.alpha = 1
             viewer.revealChrome()
             backdrop.removeFromSuperview()
-            morph.removeFromSuperview()
+            morphContainer.removeFromSuperview()
             // Viewer now fully covers the grid; restore the hidden tile immediately so PiP or
             // non-animated dismiss never leaves a hole in the Metal grid.
             self?.setHiddenMediaId(nil)
@@ -1611,23 +1620,23 @@ private final class GridViewerTransition: NSObject, UIViewControllerTransitionin
         morphContainer.layer.cornerRadius = 0
         morphContainer.isUserInteractionEnabled = false
 
-        var videoInnerView: UIView?
+        var innerView: UIView?
         if let photoImage = viewer.currentMediaImage {
             let iv = UIImageView(image: photoImage)
-            iv.contentMode = .scaleAspectFill
+            iv.contentMode = .scaleToFill
             iv.frame = morphContainer.bounds
-            iv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             morphContainer.addSubview(iv)
+            innerView = iv
         } else if let snap = viewer.currentVideoSnapshot(in: startFrame) {
             snap.frame = morphContainer.bounds
             morphContainer.addSubview(snap)
-            videoInnerView = snap
+            innerView = snap
         } else if let thumb = target.image {
             let iv = UIImageView(image: thumb)
-            iv.contentMode = .scaleAspectFill
+            iv.contentMode = .scaleToFill
             iv.frame = morphContainer.bounds
-            iv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             morphContainer.addSubview(iv)
+            innerView = iv
         }
         container.addSubview(morphContainer)
 
@@ -1650,7 +1659,7 @@ private final class GridViewerTransition: NSObject, UIViewControllerTransitionin
         animator.addAnimations {
             morphContainer.frame = target.frame
             morphContainer.layer.cornerRadius = target.cornerRadius
-            videoInnerView?.frame = targetInnerFrame
+            innerView?.frame = targetInnerFrame
             backdrop.alpha = 0
         }
         animator.addCompletion { [weak self] _ in
@@ -2563,6 +2572,8 @@ final class ZoomPage: UIViewController, UIScrollViewDelegate, ViewerPage {
         scroll.delegate = self
         scroll.maximumZoomScale = item.kind == .video ? 1 : 5
         scroll.contentInsetAdjustmentBehavior = .never
+        scroll.showsVerticalScrollIndicator = false
+        scroll.showsHorizontalScrollIndicator = false
         imageView.contentMode = .scaleAspectFit
         imageView.frame = scroll.bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
