@@ -1,3 +1,4 @@
+import AVFoundation
 import Flutter
 import UIKit
 
@@ -7,6 +8,8 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+    try? AVAudioSession.sharedInstance().setActive(true)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 

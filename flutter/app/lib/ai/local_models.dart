@@ -161,14 +161,6 @@ class LocalModels extends ChangeNotifier {
       await coreRunAsync(Core.aiUnload);
     }
   }
-
-  // ---- models between devices of the same kind (MLX between Apple devices, GGUF between the others)
-
-  Future<int> export(String id, String out) => Core.exportModelZipAsync(id, out);
-  Future<void> import(String path) async {
-    await Core.importModelAsync(path);
-    refresh();
-  }
 }
 
 class LocalModelError implements Exception {

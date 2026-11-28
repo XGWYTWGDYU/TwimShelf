@@ -28,6 +28,10 @@ public static class MediaActions
         }
         // where it is in 浏览: a loose media on its own, a post's media with its post (as the other apps)
         m.Items.Add(I(item.IsLoose() ? L("grid.revealMedia") : L("grid.revealPost"), "", () => lib.Reveal(item)));
+        m.Items.Add(I(
+            item.Favorite ? L("common.unfavorite") : L("common.favorite"),
+            item.Favorite ? "\uE8D9" : "\uE735",
+            () => _ = Run(item.Favorite ? ActionKind.Unfavorite : ActionKind.Favorite, media: [item.MediaId], done: n => L(item.Favorite ? "favorite.removed" : "favorite.added", n))));
         m.Items.Add(I(L("card.menu.tagMedia"), "", () => _ = TagPicker.Show(item, wholePost: false)));
         if (!item.IsLoose()) m.Items.Add(I(L("card.menu.tagPost"), "", () => _ = TagPicker.Show(item, wholePost: true)));
         m.Items.Add(I(L("common.addToFolder"), "", () => _ = AddToFolder([item])));

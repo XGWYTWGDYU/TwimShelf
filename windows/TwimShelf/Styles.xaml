@@ -38,8 +38,50 @@
             <TextBlock Margin="2,0,0,0" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
     </DataTemplate>
-    <!-- 标签 settings: one tag -->
-    <DataTemplate x:Key="TagRowTemplate">
-        <tk:SettingsCard Margin="0,0,0,4"><tk:SettingsCard.HeaderIcon><FontIcon /></tk:SettingsCard.HeaderIcon><Button><FontIcon Glyph="&#xE712;" FontSize="14" /></Button></tk:SettingsCard>
+    <!-- 标签 settings: one tag card (Mac/Web TagCard in Fluent 2) -->
+    <DataTemplate x:Key="TagCardTemplate">
+        <Border CornerRadius="8" Padding="14,12,14,12"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" FontSize="15" FontWeight="SemiBold"
+                               TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                               LineHeight="20" Height="40" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2"
+                                VerticalAlignment="Top" Margin="4,-4,-6,0">
+                        <Button Width="28" Height="28" Padding="0" CornerRadius="4"
+                                Background="Transparent" BorderThickness="0">
+                            <FontIcon Glyph="&#xE712;" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Button>
+                        <Button Width="28" Height="28" Padding="0" CornerRadius="4"
+                                Background="Transparent" BorderThickness="0">
+                            <FontIcon Glyph="&#xE8A7;" FontSize="13" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="5" Margin="0,6,0,0">
+                    <TextBlock FontSize="26" FontWeight="SemiBold" LineHeight="32" />
+                    <TextBlock FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               VerticalAlignment="Bottom" Margin="0,0,0,3" />
+                </StackPanel>
+                <Border Grid.Row="2" Height="7" CornerRadius="3.5" Margin="0,10,0,0"
+                        Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                    <Grid ColumnSpacing="2" />
+                </Border>
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0" Height="18" />
+            </Grid>
+        </Border>
     </DataTemplate>
 </ResourceDictionary>

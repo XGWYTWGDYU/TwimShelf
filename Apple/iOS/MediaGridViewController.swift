@@ -80,6 +80,16 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
     }
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        grid.forceRedraw()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        grid.forceRedraw()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         if grid.selecting { setSelecting(false) }
@@ -129,32 +139,80 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         var parts: [String] = []
         if photos > 0 { parts.append(L("grid.photos", photos)) }
         if videos > 0 { parts.append(L("grid.videos", videos)) }
-        grid.setTiles(entries.compactMap { e in e.first.map { ZoomGridTile(item: $0, count: e.count) } }, footer: parts.joined(separator: L("list.separator")))
+        grid.setTiles(entries.compactMap { e in e.first.map { ZoomGridTile(item: $0, count: e.count, favorited: e.contains(where: \.isFavorite)) } }, footer: parts.joined(separator: L("list.separator")))
         updateSelectionUI()
     }
 
     // MARK: Grid
 
+    /// Tap queued while the previous media viewer is finishing its dismiss settle.
+    private var pendingGridOpen: (() -> Void)?
+
     func mediaGrid(_ g: MediaGridView, didTap i: Int) {
+        if presentedViewController != nil {
+            if presentedViewController?.isBeingDismissed == true {
+                pendingGridOpen = { [weak self, weak g] in
+                    guard let self, let g else { return }
+                    self.mediaGrid(g, didTap: i)
+                }
+            }
+            return
+        }
         guard i < entries.count, let first = entries[i].first else { return }
+        pendingGridOpen = nil
         // swipe through every media of the grid, photos and videos alike, starting here
         let all = grouped ? entries.flatMap { $0 } : items
         let vc = PhotoViewController(items: all, index: all.firstIndex(of: first) ?? 0)
-        let source = UIImageView()
-        source.contentMode = .scaleAspectFill
-        source.backgroundColor = .secondarySystemBackground
-        source.clipsToBounds = true
-        source.layer.cornerRadius = GridConfig.cornerRadius
-        vc.setZoomSource { [weak self] item in
-            guard let self else { return nil }
-            let tile = self.entries.first { $0.contains { $0.mediaId == item.mediaId } }?.first
-            if let tile, self.grid.placeViewerSource(source, for: tile.mediaId) { return source }
-            if self.grid.placeViewerSource(source, for: first.mediaId) { return source }
-            source.removeFromSuperview()
-            return nil
+        vc.setGridTransition(
+            source: { [weak self] item, space, scrollToVisible in
+                guard let self else { return nil }
+                let tile = self.entries.first { $0.contains { $0.mediaId == item.mediaId } }?.first
+                if let tile, let info = self.grid.transitionInfo(for: tile.mediaId, in: space, scrollToVisible: scrollToVisible) {
+                    return info
+                }
+                if let info = self.grid.transitionInfo(for: first.mediaId, in: space, scrollToVisible: scrollToVisible) {
+                    return info
+                }
+                return nil
+            },
+            setHiddenMediaId: { [weak self] mediaId in
+                self?.grid.setHiddenMediaId(mediaId)
+            }
+        )
+        vc.onEnteringPiP = { [weak self] in
+            self?.grid.setHiddenMediaId(nil)
+            self?.grid.forceRedraw()
         }
-        vc.onDismissed = { source.removeFromSuperview() }
+        vc.onDismissed = { [weak self] in
+            self?.grid.setHiddenMediaId(nil)
+            self?.grid.forceRedraw()
+            self?.flushPendingGridOpen()
+        }
         present(vc, animated: true)
+    }
+
+    func mediaGrid(_ g: MediaGridView, didTapFavoriteAt i: Int) {
+        guard !bin, i < entries.count else { return }
+        let ids = entries[i].filter(\.isFavorite).map(\.mediaId)
+        guard !ids.isEmpty else { return }
+        setFavorite(false, media: ids)
+    }
+
+    /// Runs a queued tile tap once UIKit finishes clearing `presentedViewController` after dismissal.
+    private func flushPendingGridOpen(attempts: Int = 20) {
+        guard let next = pendingGridOpen else { return }
+        if presentedViewController == nil {
+            pendingGridOpen = nil
+            next()
+            return
+        }
+        guard attempts > 0 else {
+            pendingGridOpen = nil
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.flushPendingGridOpen(attempts: attempts - 1)
+        }
     }
 
     func mediaGrid(_ g: MediaGridView, didSettleAt level: Int) {
@@ -199,6 +257,10 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         }
         // tags and folders, as on a card in 浏览 (the same in every app)
         if let first = entry.first {
+            let fav = entry.contains(where: \.isFavorite)
+            acts.append(UIAction(title: fav ? L("common.unfavorite") : L("common.favorite"), image: UIImage(systemName: fav ? "star.slash" : "star.fill")) { [weak self] _ in
+                self?.grid.afterMenuCloses { self?.setFavorite(!fav, media: ids) }
+            })
             acts.append(UIAction(title: L("card.menu.tagMedia"), image: UIImage(systemName: "tag")) { [weak self] _ in
                 self?.grid.afterMenuCloses { self?.showTagPicker(first, wholePost: false) }
             })
@@ -345,23 +407,32 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         }
     }
 
+    private func selectionCountItem(_ count: Int) -> UIBarButtonItem {
+        let label = UILabel()
+        label.text = count == 0 ? L("grid.selectItems") : L("grid.selected", count)
+        label.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold)
+        label.sizeToFit()
+        let pad: CGFloat = 8
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: ceil(label.bounds.width) + pad * 2, height: max(28, ceil(label.bounds.height))))
+        label.frame = CGRect(x: pad, y: (container.bounds.height - label.bounds.height) / 2, width: ceil(label.bounds.width), height: ceil(label.bounds.height))
+        container.addSubview(label)
+        return UIBarButtonItem(customView: container)
+    }
+
     private func updateSelectionUI() {
         guard grid.selecting else { return }
         let n = selectedMedia.count
         navigationItem.leftBarButtonItem?.title = !entries.isEmpty && grid.selected.count == entries.count ? L("grid.deselectAll") : L("grid.selectAll")
+        let count = selectionCountItem(n)
         if bin {
             let restore = UIBarButtonItem(title: L("common.restore"), image: UIImage(systemName: "arrow.uturn.backward"), primaryAction: UIAction { [weak self] _ in self?.restore(self?.selectedMedia.map(\.mediaId) ?? []) })
             restore.accessibilityIdentifier = "gridRestore"
             let purge = UIBarButtonItem(title: L("common.deletePermanently"), image: UIImage(systemName: "trash.slash"), primaryAction: UIAction { [weak self] _ in self?.confirmPurge(self?.selectedMedia.map(\.mediaId) ?? []) })
             purge.accessibilityIdentifier = "gridPurge"
             purge.tintColor = .systemRed
-            let label = UILabel()
-            label.text = n == 0 ? L("grid.selectItems") : L("grid.selected", n)
-            label.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold)
-            label.sizeToFit()
             restore.isEnabled = n > 0
             purge.isEnabled = n > 0
-            setToolbarItems([restore, .flexibleSpace(), UIBarButtonItem(customView: label), .flexibleSpace(), purge], animated: false)
+            setToolbarItems([restore, .flexibleSpace(), count, .flexibleSpace(), purge], animated: false)
             return
         }
         let share = UIBarButtonItem(image: UIImage(systemName: "square.and.arrow.up"), primaryAction: UIAction { [weak self] _ in self?.shareSelected() })
@@ -370,26 +441,27 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         let addTo = UIBarButtonItem(image: UIImage(systemName: "folder.badge.plus"), menu: UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] done in done(self?.addToFolderItems() ?? []) }]))
         addTo.accessibilityLabel = L("common.addToFolder")
         addTo.accessibilityIdentifier = "gridAddToFolder"
-        let label = UILabel()
-        label.text = n == 0 ? L("grid.selectItems") : L("grid.selected", n)
-        label.font = .systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold)
-        label.sizeToFit()
-        let count = UIBarButtonItem(customView: label)
         let trash = UIBarButtonItem(image: UIImage(systemName: "trash"), primaryAction: UIAction { [weak self] _ in self?.trashSelected() })
         trash.accessibilityLabel = L("grid.moveToTrash")
         trash.accessibilityIdentifier = "gridTrash"
-        var actions: [UIBarButtonItem] = [share, addTo, trash]
-        var items: [UIBarButtonItem] = [share, .flexibleSpace(), addTo]
+        // Balanced 3-zone toolbar (matching Photos): Share on the left, count centered, and
+        // folder/trash actions grouped cleanly together on the right.
+        var trailing: [UIBarButtonItem] = [addTo]
         if folder != nil {
             let out = UIBarButtonItem(image: UIImage(systemName: "folder.badge.minus"), primaryAction: UIAction { [weak self] _ in self?.removeSelectedFromFolder() })
             out.accessibilityLabel = L("common.removeFromFolder")
             out.accessibilityIdentifier = "gridRemoveFromFolder"
-            items += [.flexibleSpace(), out]
-            actions.append(out)
+            trailing.append(out)
         }
-        items += [.flexibleSpace(), count, .flexibleSpace(), trash]
-        for i in actions { i.isEnabled = n > 0 }
-        setToolbarItems(items, animated: false)
+        if filter.favoriteOnly {
+            let unfav = UIBarButtonItem(image: UIImage(systemName: "star.slash"), primaryAction: UIAction { [weak self] _ in self?.unfavoriteSelected() })
+            unfav.accessibilityLabel = L("common.unfavorite")
+            unfav.accessibilityIdentifier = "gridUnfavorite"
+            trailing.append(unfav)
+        }
+        trailing.append(trash)
+        for i in [share] + trailing { i.isEnabled = n > 0 }
+        setToolbarItems([share, .flexibleSpace(), count, .flexibleSpace()] + trailing, animated: false)
     }
 
     private func shareSelected() {
@@ -452,6 +524,20 @@ final class MediaGridViewController: UIViewController, MediaGridViewDelegate {
         NotificationCenter.default.post(name: .libraryChanged, object: nil)
         setSelecting(false)
         notice(L("folder.removed", ids.count, folder))
+    }
+
+    private func setFavorite(_ on: Bool, media ids: [String]) {
+        guard let receipt = try? Core.action(on ? .favorite : .unfavorite, media: ids), receipt.count > 0 else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        NotificationCenter.default.post(name: .libraryChanged, object: nil)
+        notice(L(on ? "favorite.added" : "favorite.removed", receipt.count))
+    }
+
+    private func unfavoriteSelected() {
+        let ids = selectedMedia.map(\.mediaId)
+        guard !ids.isEmpty else { return }
+        setSelecting(false)
+        setFavorite(false, media: ids)
     }
 
     private func trashSelected() {

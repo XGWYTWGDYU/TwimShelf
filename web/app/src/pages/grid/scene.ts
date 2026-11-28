@@ -9,6 +9,8 @@ export interface ZoomGridTile {
   item: FeedItem;
   /** Media in the post (grouped); a badge shows it when more than one. */
   count: number;
+  /** Whether this tile (or any media in its grouped post) is favorited. */
+  favorited?: boolean;
 }
 
 const now = () => performance.now() / 1000;

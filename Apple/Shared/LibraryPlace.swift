@@ -4,7 +4,7 @@ import Foundation
 /// foldable): 浏览, the media kinds, the folders, and the special collections — like the
 /// sidebar of Photos.
 enum LibraryPlace: Hashable {
-    case browse, photos, videos, allFolders, folder(String), loose, album, unreviewed, reviewed, bad, trash, settings
+    case browse, photos, videos, allFolders, folder(String), loose, album, favorites, unreviewed, reviewed, bad, trash, settings
 
     /// A stable name (sidebar identifiers, accessibility, restoring the selection).
     var id: String {
@@ -16,6 +16,7 @@ enum LibraryPlace: Hashable {
         case .folder(let n): "folder:" + n
         case .loose: "loose"
         case .album: "album"
+        case .favorites: "favorites"
         case .unreviewed: "unreviewed"
         case .reviewed: "reviewed"
         case .bad: "bad"
@@ -40,6 +41,7 @@ enum LibraryPlace: Hashable {
         case .folder: "folder"
         case .loose: "square.dashed"
         case .album: "photo.on.rectangle"
+        case .favorites: "star.fill"
         case .unreviewed: "seal"
         case .reviewed: "checkmark.seal"
         case .bad: "exclamationmark.triangle"
@@ -57,6 +59,7 @@ enum LibraryPlace: Hashable {
         case .folder(let n): f.folder = n
         case .loose: f.looseOnly = true
         case .album: f.albumOnly = true
+        case .favorites: f.favoriteOnly = true
         case .unreviewed: f.review = .unreviewed
         case .reviewed: f.review = .reviewed
         case .bad: f.badOnly = true

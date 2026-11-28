@@ -6,6 +6,8 @@ struct ZoomGridTile {
     var item: FeedItem
     /// Media in the post (grouped mode); a badge shows it when more than one.
     var count: Int
+    /// Whether this tile (or any media in its grouped post) is favorited.
+    var favorited: Bool = false
 }
 
 /// The media of a folder or collection on the zoomable grid, shared by iOS (`MediaGridView`)

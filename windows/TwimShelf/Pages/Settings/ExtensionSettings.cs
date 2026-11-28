@@ -59,7 +59,6 @@ public sealed partial class ExtensionSettings(LibraryModel library, bool autoChe
         Load();
         Clear();
         _ = library;
-        Add(new TextBlock { Text = L("ext.intro"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(2, 8, 0, 8) });
         BuildManagedSection();
         if (_state?.Pairing is { } p)
         {

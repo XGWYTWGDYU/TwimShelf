@@ -3,12 +3,14 @@ import AppKit
 /// What the main window shows, chosen in the sidebar (shared with the iPad's sidebar).
 typealias MacPlace = LibraryPlace
 
-/// The window's content: a sidebar and the content beside it, and above both the media viewer
-/// when one is open (it takes the whole window).
+/// The window's content: a sidebar and the content beside it; when a media viewer is open, it
+/// fills only the content pane outside the sidebar.
 final class MacRootViewController: NSViewController {
     let split = NSSplitViewController()
     let sidebar = MacSidebarViewController()
     let content: MacContentController
+    /// The media viewer opened (true) or closed (false); the window updates its toolbar chrome.
+    var onViewerChanged: ((Bool) -> Void)?
 
     init(feed: MacFeedViewController) {
         content = MacContentController(feed: feed)
@@ -44,8 +46,13 @@ final class MacRootViewController: NSViewController {
             activity.trailingAnchor.constraint(equalTo: content.view.trailingAnchor, constant: -18),
             activity.bottomAnchor.constraint(equalTo: content.view.bottomAnchor, constant: -18),
         ])
-        content.feed.onViewer = { [weak activity] open in activity?.suppressed = open }
-        view.addSubview(MascotPetView(frame: view.bounds))
+        let pet = MascotPetView(frame: view.bounds)
+        content.feed.onViewer = { [weak self, weak activity, weak pet] open in
+            activity?.suppressed = open
+            pet?.suppressed = open
+            self?.onViewerChanged?(open)
+        }
+        view.addSubview(pet)
         main.isCollapsed = false
         sidebar.onSelect = { [weak self] p in self?.content.show(p) }
         content.onOpenPlace = { [weak self] p in self?.sidebar.select(p) }
@@ -127,7 +134,7 @@ final class MacSidebarViewController: NSViewController, NSOutlineViewDataSource,
         let key = "\(String(describing: o))|\(stats?.bad ?? 0)|\(stats?.trashed ?? 0)|\(LibraryPrefs.aboutExtras)"
         guard key != lastKey else { return }
         lastKey = key
-        var other: [Row] = [Row(.loose, nil), Row(.album, nil), Row(.unreviewed, nil), Row(.reviewed, nil)]
+        var other: [Row] = [Row(.loose, nil), Row(.album, nil), Row(.favorites, nil), Row(.unreviewed, nil), Row(.reviewed, nil)]
         if LibraryPrefs.aboutExtras { other.append(Row(.bad, (stats?.bad ?? 0) > 0 ? stats?.bad : nil)) }
         other.append(Row(.trash, (stats?.trashed ?? 0) > 0 ? stats?.trashed : nil))
         sections = [
@@ -193,7 +200,8 @@ final class MacSidebarViewController: NSViewController, NSOutlineViewDataSource,
         guard let r = item as? Row else { return nil }
         let v = o.makeView(withIdentifier: .init("row"), owner: self) as? SidebarCell ?? SidebarCell()
         v.identifier = .init("row")
-        v.set(title: r.place.title, symbol: r.place.symbol, count: r.count, tint: r.place == .bad ? .systemRed : nil)
+        let tint: NSColor? = r.place == .bad ? .systemRed : (r.place == .favorites ? NSColor(red: 0.96, green: 0.72, blue: 0.0, alpha: 1) : nil)
+        v.set(title: r.place.title, symbol: r.place.symbol, count: r.count, tint: tint)
         v.setAccessibilityIdentifier("side-" + r.place.id)
         return v
     }
@@ -205,7 +213,12 @@ final class MacSidebarViewController: NSViewController, NSOutlineViewDataSource,
         onSelect?(r.place)
     }
 
-    @objc private func pulseClickedRow() { pulseRow(outline.clickedRow) }
+    @objc private func pulseClickedRow() {
+        pulseRow(outline.clickedRow)
+        if outline.clickedRow >= 0, let r = outline.item(atRow: outline.clickedRow) as? Row, r.place == current {
+            onSelect?(r.place)
+        }
+    }
 
     private func pulseRow(_ row: Int) {
         guard row >= 0, Mascot.isOn, let place = (outline.item(atRow: row) as? Row)?.place,
@@ -294,7 +307,11 @@ final class MacContentController: NSViewController {
     private(set) var place: MacPlace = .browse
     private(set) var page: MacMediaGridPage?
     private var overview: MacFoldersOverview?
-    /// 整理 is kept between visits: coming back shows the same post at once (no rebuild, no flash).
+    /// Every visited sidebar page stays alive in memory (hidden when inactive) so switching
+    /// between places is instantaneous with no blank frame or re-query.
+    private var gridPages: [MacPlace: MacMediaGridPage] = [:]
+    private var foldersOverview: MacFoldersOverview?
+    private var settingsSurface: NSView?
     /// The settings panel, shown here when 设置 is chosen (it lives on in the settings controller).
     var settingsPanel: MacSettingsPanel?
     private var cover: NSView?
@@ -305,11 +322,33 @@ final class MacContentController: NSViewController {
     init(feed: MacFeedViewController) {
         self.feed = feed
         super.init(nibName: nil, bundle: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(pruneDeletedFolders), name: .libraryChanged, object: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    @objc private func pruneDeletedFolders() {
+        let folderKeys = gridPages.keys.filter { $0.folderName != nil }
+        guard !folderKeys.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let live = Set(Core.folders().map(\.name))
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                for key in folderKeys {
+                    if let name = key.folderName, !live.contains(name), let stale = self.gridPages.removeValue(forKey: key) {
+                        stale.setActive(false)
+                        if self.page === stale { self.page = nil }
+                        if self.cover === stale { self.cover = nil }
+                        stale.removeFromSuperview()
+                    }
+                }
+            }
+        }
+    }
+
     override func loadView() {
         view = NSView()
+        view.wantsLayer = true
+        view.layer?.masksToBounds = true
         addChild(feed)
         feed.view.frame = view.bounds
         feed.view.autoresizingMask = [.width, .height]
@@ -317,67 +356,98 @@ final class MacContentController: NSViewController {
     }
 
     func show(_ p: MacPlace) {
+        if feed.isShowingViewer { feed.dismissViewerImmediately() }
         let same = p == place && (page != nil || overview != nil || p == .browse || (p == .settings && cover != nil))
+        let previousPlace = place
         place = p
         guard !same else { onChange?(); return }
-        page?.setSelecting(false)
-        cover?.removeFromSuperview()
+        page?.setActive(false)
+        overview?.setActive(false)
+        if previousPlace == .settings, let sp = settingsPanel { sp.didHide() }
+        cover?.isHidden = true
         cover = nil
         page = nil
         overview = nil
-        if let sp = settingsPanel, sp.parent === self { sp.didHide(); sp.removeFromParent() }
         let v: NSView?
         if p.filter != nil || p == .trash {
-            // the recycle bin is the same grid, over the binned media
-            let g = MacMediaGridPage(title: p.title, filter: p.filter ?? FeedFilter(), folder: p.folderName, bin: p == .trash)
-            g.onOpenMedia = { [weak self, weak g] it, list in
-                self?.feed.openMedia(it, in: list) { [weak g] item in g?.viewerSourceFrame(for: item) }
-            }
-            g.onShowInBrowse = { [weak self] f, _ in
-                self?.feed.showFromFolders(f, title: p.title)
-                self?.onOpenPlace?(.browse)
-            }
-            g.onStateChanged = { [weak self] in self?.onChange?() }
-            g.onFolderRenamed = { [weak self] new in self?.onOpenPlace?(.folder(new)) }
-            if p != .trash {
-                g.onRevealPost = { [weak self] it in
-                    self?.onOpenPlace?(.browse)
-                    self?.feed.reveal(it)
+            let g: MacMediaGridPage
+            if let cached = gridPages[p] {
+                g = cached
+            } else {
+                // the recycle bin is the same grid, over the binned media
+                g = MacMediaGridPage(title: p.title, filter: p.filter ?? FeedFilter(), folder: p.folderName, bin: p == .trash)
+                g.onOpenMedia = { [weak self, weak g] it, list in
+                    self?.feed.openMedia(it, in: list) { [weak g] item in g?.viewerSourceFrame(for: item) }
                 }
+                g.onShowInBrowse = { [weak self] f, _ in
+                    self?.feed.showFromFolders(f, title: p.title)
+                    self?.onOpenPlace?(.browse)
+                }
+                g.onStateChanged = { [weak self] in self?.onChange?() }
+                g.onFolderRenamed = { [weak self] new in self?.onOpenPlace?(.folder(new)) }
+                if p != .trash {
+                    g.onRevealPost = { [weak self] it in
+                        self?.onOpenPlace?(.browse)
+                        self?.feed.reveal(it)
+                    }
+                }
+                g.frame = view.bounds
+                g.autoresizingMask = [.width, .height]
+                view.addSubview(g)
+                gridPages[p] = g
             }
             page = g
             v = g
+            g.isHidden = false
+            g.setActive(true)
         } else if p == .allFolders {
-            let o = MacFoldersOverview()
-            o.onOpen = { [weak self] name in self?.onOpenPlace?(.folder(name)) }
+            let o: MacFoldersOverview
+            if let cached = foldersOverview {
+                o = cached
+            } else {
+                o = MacFoldersOverview()
+                o.onOpen = { [weak self] name in self?.onOpenPlace?(.folder(name)) }
+                o.frame = view.bounds
+                o.autoresizingMask = [.width, .height]
+                view.addSubview(o)
+                foldersOverview = o
+            }
             overview = o
             v = o
+            o.isHidden = false
+            o.setActive(true)
         } else if p == .settings, let sp = settingsPanel {
-            sp.embedded = true
-            sp.onStackChanged = { [weak self] in self?.onChange?() }
-            addChild(sp)
-            // The form owns its margins. Keep the scroll view at the detail area's
-            // edges so wide windows are usable and the scroller stays at the edge.
-            let surface = MacOpaqueView(color: .windowBackgroundColor)
-            sp.view.translatesAutoresizingMaskIntoConstraints = false
-            surface.addSubview(sp.view)
-            NSLayoutConstraint.activate([
-                sp.view.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
-                sp.view.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
-                sp.view.topAnchor.constraint(equalTo: surface.safeAreaLayoutGuide.topAnchor),
-                sp.view.bottomAnchor.constraint(equalTo: surface.bottomAnchor),
-            ])
+            let surface: NSView
+            if let cached = settingsSurface {
+                surface = cached
+            } else {
+                sp.embedded = true
+                sp.onStackChanged = { [weak self] in self?.onChange?() }
+                addChild(sp)
+                // The form owns its margins. Keep the scroll view at the detail area's
+                // edges so wide windows are usable and the scroller stays at the edge.
+                let s = MacOpaqueView(color: .windowBackgroundColor)
+                sp.view.translatesAutoresizingMaskIntoConstraints = false
+                s.addSubview(sp.view)
+                NSLayoutConstraint.activate([
+                    sp.view.leadingAnchor.constraint(equalTo: s.leadingAnchor),
+                    sp.view.trailingAnchor.constraint(equalTo: s.trailingAnchor),
+                    sp.view.topAnchor.constraint(equalTo: s.safeAreaLayoutGuide.topAnchor),
+                    sp.view.bottomAnchor.constraint(equalTo: s.bottomAnchor),
+                ])
+                s.frame = view.bounds
+                s.autoresizingMask = [.width, .height]
+                view.addSubview(s)
+                settingsSurface = s
+                surface = s
+            }
             v = surface
+            surface.isHidden = false
             sp.willShow()
         } else {
             v = nil
         }
-        if let v {
-            v.frame = view.bounds
-            v.autoresizingMask = [.width, .height]
-            view.addSubview(v)
-            cover = v
-        }
+        cover = v
         feed.setCovered(v != nil)
         if let g = page { view.window?.makeFirstResponder(g.grid) }
         onChange?()
@@ -387,7 +457,7 @@ final class MacContentController: NSViewController {
     var titles: (String, String) {
         switch place {
         // 浏览 shows no title or totals in the toolbar: the cards run up under it on their own
-        case .browse: return (L("place.browse"), "")
+        case .browse: return ("", "")
         case .allFolders: return (L("place.folders"), overview?.subtitle ?? "")
         case .settings: return (settingsPanel?.currentTitle ?? L("place.settings"), "")
         default: return (place.title, page?.subtitle ?? "")
@@ -445,6 +515,8 @@ final class MacFoldersOverview: NSView, NSCollectionViewDataSource, NSCollection
     private let emptyLabel = NSTextField(labelWithString: L("folders.empty.mac"))
     private var folders: [FolderOverview.Folder] = []
     private(set) var subtitle = ""
+    private var isActive = true
+    private var needsReload = false
     private static let margin: CGFloat = 20, gap: CGFloat = 16, minTile: CGFloat = 170, caption: CGFloat = 40
 
     override init(frame: NSRect) {
@@ -480,7 +552,18 @@ final class MacFoldersOverview: NSView, NSCollectionViewDataSource, NSCollection
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    func setActive(_ active: Bool) {
+        guard isActive != active else { return }
+        isActive = active
+        if active, needsReload {
+            needsReload = false
+            reload()
+        }
+    }
+
     @objc private func reload() {
+        guard isActive else { needsReload = true; return }
+        needsReload = false
         DispatchQueue.global(qos: .userInitiated).async {
             let o = Core.folderOverview()
             DispatchQueue.main.async { [weak self] in

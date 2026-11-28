@@ -63,6 +63,7 @@ final class AdaptiveRootViewController: UIViewController {
             bar = next
         }
         feed.onShowBrowse = { [weak next] in next?.select(.browse) }
+        feed.onOpenDownloads = { [weak next] links in next?.openDownloads(links: links) }
         // The search goes with the layout: into the search tab's page, or back into 浏览.
         if next.searchFeed != nil {
             let keys = feed.takeSearch()
@@ -176,6 +177,7 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
     private var searchTab: UISearchTab?
     private let folderGroup: UITabGroup
     private let otherGroup: UITabGroup
+    private weak var settingsController: SettingsViewController?
     private var folderNames: [String] = []
     private var observers: [NSObjectProtocol] = []
 
@@ -221,9 +223,10 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         otherGroup.children = otherPlaces()
         otherGroup.defaultChildIdentifier = LibraryPlace.loose.id
         otherGroup.preferredPlacement = .sidebarOnly
-        let settings = tab(.settings) {
+        let settings = tab(.settings) { [weak self] in
             let m = SettingsViewController()
             m.onLibraryChanged = { [weak feed] in feed?.reload(keepPosition: true) }
+            self?.settingsController = m
             return NavContainer(root: m)
         }
         if railOnly {
@@ -757,6 +760,15 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
         if let t = tab(forIdentifier: p.id) { selectedTab = t }
     }
 
+    func openDownloads(links: String) {
+        select(.settings)
+        DispatchQueue.main.async { [weak self] in
+            guard let s = self?.settingsController else { return }
+            s.loadViewIfNeeded()
+            s.openDownloads(links: links)
+        }
+    }
+
     var isShowingSearch: Bool { searchTab != nil && selectedTab === searchTab }
 
     /// 浏览 in this layout: with a search tab it has no search of its own and sends its
@@ -823,12 +835,14 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
 
     /// 损坏或丢失 is there while the maintenance rows of 关于 are out.
     private func otherPlaces() -> [UITab] {
-        [grid(.loose), grid(.album), grid(.unreviewed), grid(.reviewed)] + (LibraryPrefs.aboutExtras ? [grid(.bad)] : []) + [grid(.trash)]
+        [grid(.loose), grid(.album), grid(.favorites), grid(.unreviewed), grid(.reviewed)] + (LibraryPrefs.aboutExtras ? [grid(.bad)] : []) + [grid(.trash)]
     }
 
     private func updateOtherPlaces() {
         guard !railOnly, (otherGroup.children.contains { $0.identifier == LibraryPlace.bad.id }) != LibraryPrefs.aboutExtras else { return }
-        otherGroup.children = otherPlaces()
+        let existing = Dictionary(uniqueKeysWithValues: otherGroup.children.map { ($0.identifier, $0) })
+        let wanted: [LibraryPlace] = [.loose, .album, .favorites, .unreviewed, .reviewed] + (LibraryPrefs.aboutExtras ? [.bad] : []) + [.trash]
+        otherGroup.children = wanted.map { existing[$0.id] ?? grid($0) }
         Self.lock([otherGroup])
     }
 
@@ -862,7 +876,9 @@ final class TabletRootController: UITabBarController, UITabBarControllerDelegate
             guard let self, names != self.folderNames else { return }
             self.folderNames = names
             let selected = self.selectedTab?.identifier
-            self.folderGroup.children = [self.overviewTab()] + names.map { self.grid(.folder($0)) }
+            let existing = Dictionary(uniqueKeysWithValues: self.folderGroup.children.map { ($0.identifier, $0) })
+            self.folderGroup.children = [existing[LibraryPlace.allFolders.id] ?? self.overviewTab()]
+                + names.map { name in existing[LibraryPlace.folder(name).id] ?? self.grid(.folder(name)) }
             Self.lock([self.folderGroup])
             // a deleted folder that was open: back to all folders
             if let s = selected, s.hasPrefix("folder:"), self.tab(forIdentifier: s) == nil { self.select(.allFolders) }

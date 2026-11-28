@@ -36,7 +36,7 @@ pub struct TrashItem { #[serde(flatten)] pub item: FeedItem, /// When it was mov
 /// Schema version. Versions from `OLDEST` (the first release's) on are migrated in place;
 /// anything older, or a newer one (written by a newer app), is refused: a library is never
 /// rebuilt from nothing or downgraded.
-const VERSION: i64 = 19;
+const VERSION: i64 = 20;
 const OLDEST: i64 = 14;
 
 const SCHEMA: &str = "
@@ -91,6 +91,9 @@ CREATE TABLE IF NOT EXISTS recent(post_id TEXT PRIMARY KEY, at INTEGER NOT NULL)
 CREATE TABLE IF NOT EXISTS post_added(post_id TEXT PRIMARY KEY, at INTEGER NOT NULL);
 -- Media brought in through a share extension as media (从相册导入). Grow-only, synced.
 CREATE TABLE IF NOT EXISTS album(media_id TEXT PRIMARY KEY);
+-- Favorites (收藏): one LWW register per media (present 0/1, hlc). Synced.
+CREATE TABLE IF NOT EXISTS favorite(media_id TEXT PRIMARY KEY, present INTEGER NOT NULL, hlc INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS favorite_present ON favorite(present);
 -- Settings shared by every device (the AI prompt…): LWW register (hlc, value), NULL = default. Synced.
 CREATE TABLE IF NOT EXISTS setting(key TEXT PRIMARY KEY, value TEXT, hlc INTEGER NOT NULL);
 -- AI analysis attempts that failed ON THIS DEVICE, per (media, model). LOCAL ONLY: never in the
@@ -1018,6 +1021,8 @@ impl Store {
         if f.loose_only { sql += " AND m.post_id LIKE 'loose:%'"; }
         if f.exclude_loose { sql += " AND m.post_id NOT LIKE 'loose:%'"; }
         if f.album_only { sql += " AND m.id IN (SELECT media_id FROM album)"; }
+        if f.favorite_only { sql += " AND EXISTS(SELECT 1 FROM favorite fv WHERE fv.media_id=m.id AND fv.present=1)"; }
+        if f.exclude_favorite { sql += " AND NOT EXISTS(SELECT 1 FROM favorite fv WHERE fv.media_id=m.id AND fv.present=1)"; }
         if f.recent_only { sql += " AND m.post_id IN (SELECT post_id FROM recent)"; }
         match f.kind { Some(MediaKind::Video) => sql += " AND m.kind='video'", Some(MediaKind::Photo) => sql += " AND m.kind!='video'", None => {} }
         if let Some(name) = f.folder.as_ref().filter(|n| !n.is_empty()) {
@@ -1272,13 +1277,15 @@ impl Store {
         let mut items: Vec<FeedItem> = st.query_map(rusqlite::params_from_iter(args.iter()), |r| Ok(FeedItem {
             media_id: r.get(0)?, post_id: r.get(1)?, ordinal: r.get(2)?,
             kind: if r.get::<_, String>(3)? == "video" { MediaKind::Video } else { MediaKind::Photo },
-            path: r.get(4)?, text: r.get(5)?, author_name: r.get(6)?, screen_name: r.get(7)?, url: r.get(8)?, created_at: r.get(9)?, tags: vec![], bad: None, recent: false, album: false, size: None,
+            path: r.get(4)?, text: r.get(5)?, author_name: r.get(6)?, screen_name: r.get(7)?, url: r.get(8)?, created_at: r.get(9)?, tags: vec![], bad: None, recent: false, album: false, favorite: false, size: None,
         }))?.collect::<Result<_, _>>()?;
         {
             let recent = self.recent_posts(now_ms())?;
             if !recent.is_empty() { for it in &mut items { it.recent = recent.contains(&it.post_id); } }
             let album = self.album_media()?;
             if !album.is_empty() { for it in &mut items { it.album = album.contains(&it.media_id); } }
+            let fav = self.favorite_media()?;
+            if !fav.is_empty() { for it in &mut items { it.favorite = fav.contains(&it.media_id); } }
         }
         // Limit detail queries to this result set, including narrow searches and exports.
         // Chunking stays below SQLite's parameter limit and avoids one query per media.
@@ -1622,6 +1629,42 @@ impl Store {
         v
     }
 
+    // ---------- favorites ----------
+
+    pub(crate) fn favorite_reg(&self, media_id: &str) -> rusqlite::Result<Option<crate::crdt::TagReg>> {
+        use rusqlite::OptionalExtension;
+        self.conn.query_row("SELECT present, hlc FROM favorite WHERE media_id=?1", [media_id],
+            |r| Ok(crate::crdt::TagReg { origin: r.get(0)?, hlc: r.get::<_, i64>(1)? as u64 })).optional()
+    }
+
+    fn put_favorite(&self, media_id: &str, r: crate::crdt::TagReg) -> rusqlite::Result<()> {
+        self.conn.execute("INSERT INTO favorite VALUES(?1,?2,?3) ON CONFLICT(media_id) DO UPDATE SET present=excluded.present, hlc=excluded.hlc",
+            params![media_id, r.origin, r.hlc as i64])?;
+        Ok(())
+    }
+
+    /// Sets or clears a media's favorite mark locally (LWW register, synced). Returns whether it changed.
+    pub fn set_favorite(&self, media_id: &str, present: bool) -> rusqlite::Result<bool> { self.atomic(|| {
+        if self.favorite_reg(media_id)?.map_or(0, |r| r.origin) == present as u8 { return Ok(false); }
+        let r = crate::crdt::TagReg { origin: present as u8, hlc: self.next_hlc()? };
+        self.put_favorite(media_id, r)?;
+        self.record(&crate::oplog::Op::Favorite { media_id: media_id.into(), present, hlc: r.hlc })?;
+        Ok(true)
+    }) }
+
+    pub(crate) fn apply_favorite(&self, media_id: &str, incoming: crate::crdt::TagReg) -> rusqlite::Result<()> {
+        let cur = self.favorite_reg(media_id)?;
+        let m = cur.map_or(incoming, |c| crate::crdt::merge_tag(c, incoming));
+        if Some(m) != cur { self.put_favorite(media_id, m)?; }
+        Ok(())
+    }
+
+    pub fn favorite_media(&self) -> rusqlite::Result<std::collections::HashSet<String>> {
+        let mut st = self.conn.prepare_cached("SELECT media_id FROM favorite WHERE present=1")?;
+        let v = st.query_map([], |r| r.get(0))?.collect();
+        v
+    }
+
     /// Merges a mark (max of the two times, `rules::merge_recent`).
     pub(crate) fn apply_recent(&self, post_id: &str, at: u64) -> rusqlite::Result<()> {
         let cur = self.recent_at(post_id)?;
@@ -1686,7 +1729,7 @@ impl Store {
 
     /// Wipes every row. Never recorded in the sync log.
     pub fn wipe(&self) -> rusqlite::Result<()> {
-        self.atomic(|| self.conn.execute_batch("DELETE FROM album; DELETE FROM tag_src; DELETE FROM tag_media; DELETE FROM tag_vec; DELETE FROM ai_done; DELETE FROM tag; DELETE FROM media; DELETE FROM post; DELETE FROM job; DELETE FROM op; DELETE FROM want_blob; DELETE FROM media_claim; DELETE FROM setting; DELETE FROM meta; DELETE FROM trash; DELETE FROM gc; DELETE FROM verified_media; DELETE FROM media_size; DELETE FROM bad_media; DELETE FROM tag_alias; DELETE FROM folder; DELETE FROM folder_media; DELETE FROM recent; DELETE FROM op_pending; DELETE FROM ai_fail;"))
+        self.atomic(|| self.conn.execute_batch("DELETE FROM album; DELETE FROM favorite; DELETE FROM tag_src; DELETE FROM tag_media; DELETE FROM tag_vec; DELETE FROM ai_done; DELETE FROM tag; DELETE FROM media; DELETE FROM post; DELETE FROM job; DELETE FROM op; DELETE FROM want_blob; DELETE FROM media_claim; DELETE FROM setting; DELETE FROM meta; DELETE FROM trash; DELETE FROM gc; DELETE FROM verified_media; DELETE FROM media_size; DELETE FROM bad_media; DELETE FROM tag_alias; DELETE FROM folder; DELETE FROM folder_media; DELETE FROM recent; DELETE FROM post_added; DELETE FROM op_pending; DELETE FROM ai_fail;"))
     }
 
     pub fn conn(&self) -> &Connection { &self.conn }

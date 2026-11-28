@@ -309,6 +309,17 @@ class _GridPageState extends State<GridPage> {
                       _endSelecting();
                     },
                   ),
+                  if (widget.place == Place.favorites)
+                    TextButton.icon(
+                      key: const ValueKey('gridUnfavorite'),
+                      icon: const Icon(Icons.star_border),
+                      label: Text(L('common.unfavorite')),
+                      onPressed: () {
+                        runMediaAction(context, widget.library, ActionKind.unfavorite,
+                            media: [for (final i in _chosen) i.media_id], done: (n) => L('favorite.removed', [n]));
+                        _endSelecting();
+                      },
+                    ),
                   TextButton.icon(
                     key: const ValueKey('gridTrash'),
                     icon: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
@@ -340,6 +351,10 @@ class _GridPageState extends State<GridPage> {
                         _canZoomOut = zoomOut;
                       });
                     }
+                  },
+                  onUnfavorite: inBin ? null : (i) {
+                    runMediaAction(context, widget.library, ActionKind.unfavorite,
+                        media: [items[i].media_id], done: (n) => L('favorite.removed', [n]));
                   },
                   onLongPress: (i, at) {
                     HapticFeedback.mediumImpact();

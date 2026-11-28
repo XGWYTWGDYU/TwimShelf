@@ -25,6 +25,7 @@ class ZoomGrid extends StatefulWidget {
     required this.items,
     required this.store,
     this.onOpen,
+    this.onUnfavorite,
     this.onLongPress,
     this.initialLevel = 1,
     this.padding = EdgeInsets.zero,
@@ -36,6 +37,7 @@ class ZoomGrid extends StatefulWidget {
   final List<FeedItem> items;
   final ThumbStore store;
   final void Function(int index)? onOpen;
+  final void Function(int index)? onUnfavorite;
   final void Function(int index, Offset globalPosition)? onLongPress;
   final int initialLevel;
   /// Room kept free at the top and bottom (bars over the grid); the grid scrolls under it.
@@ -380,6 +382,18 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
 
   int? _indexAt(Offset p) => _zooming ? null : _engine?.indexAt(p.dx, p.dy);
 
+  Rect? _tileLocalRect(int index) {
+    final e = _engine;
+    if (e == null) return null;
+    Rect? found;
+    e.tiles((t) {
+      if (found == null && t.index == index) {
+        found = Rect.fromLTWH(t.x, t.y, t.side, t.side);
+      }
+    });
+    return found;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -407,7 +421,16 @@ class ZoomGridState extends State<ZoomGrid> with SingleTickerProviderStateMixin 
           behavior: HitTestBehavior.opaque,
           onTapUp: (d) {
             final i = _indexAt(d.localPosition);
-            if (i != null) widget.onOpen?.call(i);
+            if (i != null) {
+              if (widget.selected == null && widget.items[i].favorite && widget.onUnfavorite != null) {
+                final r = _tileLocalRect(i);
+                if (r != null && r.width >= 40 && d.localPosition.dx - r.left <= 34 && r.bottom - d.localPosition.dy <= 34) {
+                  widget.onUnfavorite!(i);
+                  return;
+                }
+              }
+              widget.onOpen?.call(i);
+            }
           },
           onLongPressStart: (d) {
             final i = _indexAt(d.localPosition);
@@ -478,6 +501,13 @@ class _GridPainter extends CustomPainter {
     textDirection: TextDirection.ltr,
   )..layout();
 
+  static final _star = TextPainter(
+    text: TextSpan(text: String.fromCharCode(Icons.star.codePoint),
+        style: TextStyle(fontFamily: Icons.star.fontFamily, package: Icons.star.fontPackage, fontSize: 16, color: const Color(0xFFF5B800),
+            shadows: const [Shadow(color: Color(0x88000000), blurRadius: 3)])),
+    textDirection: TextDirection.ltr,
+  )..layout();
+
   @override
   void paint(Canvas canvas, Size size) {
     final e = state._engine;
@@ -513,6 +543,9 @@ class _GridPainter extends CustomPainter {
         canvas.clipRRect(rrect);
         canvas.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()), rect, paint);
         canvas.restore();
+      }
+      if (item.favorite && t.side >= 40 && t.alpha > 0.5) {
+        _star.paint(canvas, Offset(rect.left + 4, rect.bottom - 20));
       }
       if (item.kind == MediaKind.video && t.side >= 40 && t.alpha > 0.5) {
         _play.paint(canvas, Offset(rect.right - 22, rect.bottom - 22));

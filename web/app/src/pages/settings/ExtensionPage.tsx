@@ -122,10 +122,6 @@ export default function ExtensionPage() {
 
   return (
     <SettingsScreen title={L('ext.title')}>
-      <div style={{ fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.5, padding: '0 4px' }}>
-        {L('ext.intro')}
-      </div>
-
       {desktop && (
         <SectionGroup title={L('ext.managed.title')}>
           <Card spacing={12}>

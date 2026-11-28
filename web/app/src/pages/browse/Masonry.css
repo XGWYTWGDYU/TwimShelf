@@ -1,4 +1,5 @@
-.masonry-scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
+.masonry-scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; outline: none; overscroll-behavior: contain; }
+.masonry-scroller:focus-visible { outline: none; }
 .masonry { position: relative; }
 .masonry-cell { position: absolute; top: 0; left: 0; contain: layout style; }
 .masonry-footer { position: absolute; left: 0; right: 0; height: 56px; }

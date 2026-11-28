@@ -9,6 +9,8 @@ final class MascotPetView: NSView {
     private var lastTime: CFTimeInterval = 0
     private var tracking: NSTrackingArea?
     private var observers: [NSObjectProtocol] = []
+    /// Hidden while the media viewer is open over the content area.
+    var suppressed = false { didSet { if suppressed != oldValue { update() } } }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -40,7 +42,7 @@ final class MascotPetView: NSView {
     }
 
     private func update() {
-        let show = Mascot.isOn && Mascot.petFits(bounds.size) && window != nil
+        let show = !suppressed && Mascot.isOn && Mascot.petFits(bounds.size) && window != nil
         isHidden = !show
         if show {
             engine.setBounds(bounds.size, margin: 18)

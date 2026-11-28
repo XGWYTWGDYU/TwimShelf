@@ -188,11 +188,16 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
     /// [links]: what the quick download card held, carried over to this page's field.
     func openDownloads(links: String = "") {
         linksView.text = links
+        if navigationController?.topViewController !== self {
+            navigationController?.popToRootViewController(animated: false)
+        }
         openSub(L("common.downloadPosts")) { [weak self] in self?.downloadSections() ?? [] }
-        // The search-bar shortcut opens this page directly; allow closing the whole sheet.
-        subpage?.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in
-            self?.navigationController?.dismiss(animated: true)
-        })
+        // Only add a Done dismiss button if presented as a standalone modal sheet.
+        if presentingViewController != nil {
+            subpage?.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in
+                self?.navigationController?.dismiss(animated: true)
+            })
+        }
     }
 
     private func openSub(_ title: String, _ make: @escaping () -> [Section]) {
@@ -380,18 +385,47 @@ final class SettingsViewController: FormViewController, UIDocumentPickerDelegate
     }
 
     func exportDiagnostics() {
+        Self.exportDiagnostics(from: self)
+    }
+
+    /// Collects the diagnostics archive off the main thread and presents the system share sheet
+    /// directly from [presenter] without pulling up a Settings modal view.
+    static func exportDiagnostics(from presenter: UIViewController) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("diagnostics", isDirectory: true)
         try? FileManager.default.removeItem(at: dir)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmm"
         let out = dir.appendingPathComponent(L("settings.diagnostics.fileName", f.string(from: Date())))
-        runBusy(L("settings.diagnostics.collecting"), { try Diagnostics.export(to: out) }) { [weak self] _ in
-            guard let self else { return }
-            let share = UIActivityViewController(activityItems: [out], applicationActivities: nil)
-            share.popoverPresentationController?.sourceView = self.view
-            share.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.maxY - 80, width: 1, height: 1)
-            share.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: dir) }
-            self.present(share, animated: true)
+        let busy = UIAlertController(title: L("settings.diagnostics.collecting"), message: "\n\n", preferredStyle: .alert)
+        let sp = UIActivityIndicatorView(style: .medium)
+        sp.translatesAutoresizingMaskIntoConstraints = false
+        sp.startAnimating()
+        busy.view.addSubview(sp)
+        NSLayoutConstraint.activate([
+            sp.centerXAnchor.constraint(equalTo: busy.view.centerXAnchor),
+            sp.bottomAnchor.constraint(equalTo: busy.view.bottomAnchor, constant: -20),
+        ])
+        presenter.present(busy, animated: true) {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result: Result<Int, Error> = Result { try Diagnostics.export(to: out) }
+                DispatchQueue.main.async {
+                    busy.dismiss(animated: true) {
+                        switch result {
+                        case .success:
+                            let share = UIActivityViewController(activityItems: [out], applicationActivities: nil)
+                            share.popoverPresentationController?.sourceView = presenter.view
+                            share.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.maxY - 80, width: 1, height: 1)
+                            share.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: dir) }
+                            presenter.present(share, animated: true)
+                        case .failure(let error):
+                            try? FileManager.default.removeItem(at: dir)
+                            let a = UIAlertController(title: L("common.notDone"), message: error.localizedDescription, preferredStyle: .alert)
+                            a.addAction(UIAlertAction(title: L("common.ok"), style: .default))
+                            presenter.present(a, animated: true)
+                        }
+                    }
+                }
+            }
         }
     }
 

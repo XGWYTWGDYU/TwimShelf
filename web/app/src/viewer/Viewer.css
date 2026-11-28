@@ -1,10 +1,25 @@
-/* The viewer as MacPhotoView lays it out: black, the whole window; the media fill it edge to
-   edge; the counter top left (20 from the edge, 16 below the title bar strip); round arrow buttons
-   40 pt at the sides (20 in); share and close 34 pt in the bottom right corner (20 in, 10 apart);
-   the caption over the bottom. The buttons: a white symbol on dark glass (black 40 %, 55 % while
-   hovered, 70 % pressed) with a hairline white edge (ViewerRoundButton). */
-.viewer { position: fixed; inset: 0; z-index: 50; color: #fff; overflow: hidden; outline: none; --viewer-top: 16px; }
-.viewer-surface { position: absolute; inset: 0; background: #000; overflow: hidden; transform-origin: top left; }
+/* The media viewer: always pure black backdrop so the solid black bottom dock blends seamlessly;
+   Twitter-style solid black bottom dock with top-edge scrubber for videos (and portrait photos);
+   a single frosted dark glass capsule holding Share & Close for landscape photos; post caption in
+   a frosted dark glass card in the media region. */
+.viewer {
+  position: absolute; inset: 0; z-index: 50; overflow: hidden; outline: none;
+  --viewer-top: 16px;
+  --viewer-bg: #000;
+  --viewer-ink: #fff;
+  --viewer-ink-2: rgba(255, 255, 255, 0.65);
+  --viewer-ink-more: rgba(255, 255, 255, 0.84);
+  --viewer-halo: 0 0.5px 1.5px rgba(0, 0, 0, 0.75), 0 0 6px rgba(0, 0, 0, 0.55);
+  --viewer-link: rgb(115, 184, 255);
+  --viewer-glass-bg: rgba(28, 28, 30, 0.72);
+  --viewer-glass-hover: rgba(44, 44, 46, 0.84);
+  --viewer-glass-active: rgba(58, 58, 60, 0.92);
+  --viewer-glass-border: rgba(255, 255, 255, 0.18);
+  --viewer-glass-shadow: 0 4px 18px rgba(0, 0, 0, 0.42);
+  color: var(--viewer-ink);
+}
+.viewer:focus-visible { outline: none; }
+.viewer-surface { position: absolute; inset: 0; background: var(--viewer-bg); overflow: hidden; transform-origin: top left; }
 html .viewer.idle, html .viewer.idle * { cursor: none !important; }
 .viewer-strip { position: absolute; inset: 0; }
 .viewer-page { position: absolute; top: 0; left: 0; height: 100%; will-change: transform; }
@@ -15,44 +30,56 @@ html .viewer.idle, html .viewer.idle * { cursor: none !important; }
 .photo-img.square-preview { object-fit: contain; }
 .poster-img { max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain; }
 
-.viewer-round, .viewer-counter, .viewer-corner, .caption { transition: opacity 0.2s; }
-.viewer-counter { position: absolute; top: var(--viewer-top); left: 20px; font: 600 13px/16px var(--font); font-variant-numeric: tabular-nums; color: #fff; text-shadow: 0 0 4px rgba(0, 0, 0, 0.6); pointer-events: none; }
-.viewer-round { position: absolute; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, 0.4); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.18); transition: background 0.12s; }
-.viewer-round:hover { background: rgba(0, 0, 0, 0.55); }
-.viewer-round:active { background: rgba(0, 0, 0, 0.7); }
-.viewer-round.small { position: static; width: 34px; height: 34px; }
+.viewer-round, .viewer-counter, .viewer-photo-pill, .viewer-photo-dock, .caption { transition: opacity 0.2s; }
+.viewer-counter { position: absolute; top: var(--viewer-top); left: 20px; font: 600 13px/16px var(--font); font-variant-numeric: tabular-nums; color: var(--viewer-ink); text-shadow: var(--viewer-halo); pointer-events: none; z-index: 3; }
+.viewer-round { position: absolute; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; color: var(--viewer-ink); background: var(--viewer-glass-bg); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); box-shadow: inset 0 0 0 0.5px var(--viewer-glass-border), var(--viewer-glass-shadow); transition: background 0.12s; z-index: 3; }
+.viewer-round:hover { background: var(--viewer-glass-hover); }
+.viewer-round:active { background: var(--viewer-glass-active); }
 .viewer-prev { left: 20px; top: 50%; margin-top: -20px; }
 .viewer-next { right: 20px; top: 50%; margin-top: -20px; }
-.viewer-corner { position: absolute; right: 20px; bottom: 20px; display: flex; gap: 10px; z-index: 3; }
 
-/* the caption (PostCaptionView): 16 in on the left, up to 680 wide, 28 above and 10 below, no
-   shade — a tight dark edge and a soft halo on the text */
-.caption { position: absolute; left: 0; right: 0; padding: 28px 16px 10px 16px; z-index: 2; transition: opacity 0.22s ease-in-out; }
-.caption-inner { max-width: 680px; display: flex; flex-direction: column; gap: 6px; text-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.7), 0 0 6px rgba(0, 0, 0, 0.5); }
+/* Landscape photo viewer: Share & Close together on a single frosted glass capsule */
+.viewer-photo-pill { position: absolute; right: 20px; bottom: 20px; height: 40px; padding: 0 6px; border-radius: 999px; display: flex; align-items: center; gap: 4px; z-index: 3; background: var(--viewer-glass-bg); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); box-shadow: inset 0 0 0 0.5px var(--viewer-glass-border), var(--viewer-glass-shadow); }
+.viewer-pill-btn { width: 32px; height: 32px; border-radius: 50%; border: 0; padding: 0; background: transparent; color: var(--viewer-ink); display: grid; place-items: center; transition: background 0.12s; }
+.viewer-pill-btn:hover { background: rgba(128, 128, 128, 0.18); }
+.viewer-pill-btn:active { background: rgba(128, 128, 128, 0.3); }
+
+/* Portrait photo viewer: Twitter-style solid black bottom dock */
+.viewer-photo-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; padding: 0 18px; background: #000; color: #fff; display: flex; align-items: center; gap: 12px; z-index: 3; }
+.viewer-dock-counter { font: 600 13px/16px var(--font); font-variant-numeric: tabular-nums; color: #fff; }
+.viewer-dock-spacer { flex: 1; }
+
+/* the caption (PostCaptionView): frosted glass card in the media region right above the bottom dock */
+.caption { position: absolute; left: 0; right: 0; padding: 12px 16px 10px 16px; z-index: 2; pointer-events: none; transition: opacity 0.22s ease-in-out; }
+.caption-inner { pointer-events: auto; width: fit-content; max-width: min(680px, 100%); padding: 10px 14px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; background: var(--viewer-glass-bg); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); box-shadow: inset 0 0 0 0.5px var(--viewer-glass-border), var(--viewer-glass-shadow); }
 .caption-author { display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; }
-.caption-name { font-size: 13px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; }
-.caption-handle { font-size: 11px; color: rgba(255, 255, 255, 0.65); overflow: hidden; text-overflow: ellipsis; }
-.caption-text { font-size: 13px; line-height: 17px; color: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }
+.caption-name { font-size: 13px; font-weight: 700; color: var(--viewer-ink); overflow: hidden; text-overflow: ellipsis; }
+.caption-handle { font-size: 11px; color: var(--viewer-ink-2); overflow: hidden; text-overflow: ellipsis; }
+.caption-text { font-size: 13px; line-height: 18px; color: var(--viewer-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .caption-cut { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .caption-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.caption-date { font-size: 10px; color: rgba(255, 255, 255, 0.6); }
-.caption-more { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.8); }
-.caption-link { color: rgb(115, 184, 255); }
+.caption-date { font-size: 10px; color: var(--viewer-ink-2); }
+.caption-more { font-size: 11px; font-weight: 600; color: var(--viewer-ink-more); }
+.caption-link { color: var(--viewer-link); }
 
-/* the player (MacPlayerView): the video fills the page; the controls 24 in from the sides and 20
-   from the bottom, 44 high, 12 apart (16 after the time), white with a shadow, no bar behind */
-.player { position: absolute; inset: 0; background: #000; }
-.player-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+/* Video player: adaptive backdrop behind the video; Twitter-style solid black bottom dock with
+   full-width hairline progress bar sitting flush along the dock's top edge */
+.player { position: absolute; inset: 0; background: var(--viewer-bg); display: flex; align-items: center; justify-content: center; }
+.player-video { position: relative; max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; background: transparent; }
 .player-square-preview { position: absolute; inset: 0; margin: auto; pointer-events: none; }
 .player-video::-webkit-media-controls { display: none !important; }
-.player-controls { position: absolute; left: 24px; right: 24px; bottom: 20px; height: 44px; padding: 0 14px; display: flex; align-items: center; gap: 12px; filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.6)); transition: opacity 0.3s; z-index: 3; }
-.player-controls.hidden { opacity: 0; pointer-events: none; }
-.player-btn { flex: none; min-width: 26px; height: 26px; padding: 0; border: 0; background: none; color: #fff; display: grid; place-items: center; }
+.player-dock { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; background: #000; color: #fff; transition: opacity 0.25s; z-index: 3; }
+.player-dock.hidden { opacity: 0; pointer-events: none; }
+.player-top-bar { position: absolute; left: 0; right: 0; top: -9px; height: 18px; display: flex; align-items: center; touch-action: none; cursor: pointer; }
+.player-top-track { position: relative; width: 100%; height: 2.5px; background: rgba(255, 255, 255, 0.28); overflow: hidden; transition: height 0.12s; }
+.player-top-bar:hover .player-top-track, .player-top-bar.scrubbing .player-top-track { height: 4px; }
+.player-top-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #fff; }
+.player-top-knob { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: #fff; opacity: 0; transform: scale(0.7); transition: opacity 0.12s, transform 0.12s; pointer-events: none; }
+.player-top-bar:hover .player-top-knob, .player-top-bar.scrubbing .player-top-knob { opacity: 1; transform: scale(1); }
+.player-dock-row { height: 100%; padding: 0 18px; display: flex; align-items: center; gap: 12px; }
+.player-dock-spacer { flex: 1; }
+.player-btn { flex: none; min-width: 28px; height: 28px; padding: 0; border: 0; background: none; color: #fff; display: grid; place-items: center; }
 .player-btn:active { opacity: 0.6; }
-.player-speed { font: 600 12px/1 var(--font); font-variant-numeric: tabular-nums; padding: 0 2px; }
-.player-time { flex: none; margin-right: 4px; font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; color: #fff; white-space: nowrap; }
-.player-bar { position: relative; flex: 1; min-width: 60px; height: 24px; display: flex; align-items: center; touch-action: none; }
-.player-track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.35); overflow: hidden; }
-.player-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #fff; }
-.player-knob { position: absolute; top: 50%; width: 20px; height: 14px; margin: -7px 0 0 -10px; border-radius: 7px; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
-.player-hud { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 14px; background: rgba(28, 28, 30, 0.56); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36); font: 600 15px/20px var(--font); font-variant-numeric: tabular-nums; color: #fff; text-align: center; pointer-events: none; z-index: 4; }
+.player-speed { font: 600 12px/1 var(--font); font-variant-numeric: tabular-nums; padding: 0 4px; }
+.player-time { flex: none; font: 500 12px/1 var(--font); font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.78); white-space: nowrap; }
+.player-hud { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); padding: 10px 18px; border-radius: 14px; background: rgba(28, 28, 30, 0.64); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36); font: 600 15px/20px var(--font); font-variant-numeric: tabular-nums; color: #fff; text-align: center; pointer-events: none; z-index: 4; }

@@ -722,7 +722,7 @@ class _PostCardState extends State<PostCard> {
                 child: Text(first.url!, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.primary)),
               ),
             ],
-            if (tags.isNotEmpty || !loose) ...[
+            if (tags.isNotEmpty || current.favorite || !loose) ...[
               const SizedBox(height: 10),
               // one row of tags that scrolls sideways, the + at its end (as native)
               Row(children: [
@@ -731,9 +731,18 @@ class _PostCardState extends State<PostCard> {
                     height: tagRowHeight(MediaQuery.textScalerOf(context)),
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
-                      itemCount: tags.length,
+                      itemCount: (current.favorite ? 1 : 0) + tags.length,
                       separatorBuilder: (_, _) => const SizedBox(width: 6),
-                      itemBuilder: (context, i) => _TagChip(tag: tags[i], marks: widget.marks?.tags ?? const []),
+                      itemBuilder: (context, i) {
+                        if (current.favorite && i == 0) {
+                          return _FavoriteChip(
+                            onTap: () => widget.library.showInBrowse(FeedFilter(favorite_only: true)),
+                            onUnfavorite: () => runMediaAction(context, widget.library, ActionKind.unfavorite,
+                                media: [current.media_id], done: (n) => L('favorite.removed', [n])),
+                          );
+                        }
+                        return _TagChip(tag: tags[i - (current.favorite ? 1 : 0)], marks: widget.marks?.tags ?? const []);
+                      },
                     ),
                   ),
                 ),
@@ -785,7 +794,7 @@ class CardHeights {
     final text = first.text ?? '';
     if (text.isNotEmpty) h += _gap + m.lines(text, width - _sides - _caret) * m.body;
     if (first.url != null) h += _gap + m.small;
-    if (media[at].tags.isNotEmpty || !loose) h += _tagsGap + m.tags;
+    if (media[at].tags.isNotEmpty || media[at].favorite || !loose) h += _tagsGap + m.tags;
     return h + _bottom;
   }
 }
@@ -1003,6 +1012,62 @@ BoxDecoration _tagBox(ColorScheme scheme, double height) => BoxDecoration(
       border: Border.all(color: scheme.onSurface.withValues(alpha: 0.12)),
       borderRadius: BorderRadius.circular((height * 0.3).roundToDouble()),
     );
+
+/// Favorited badge shown before all tags: the exact same box as [_TagChip], with a golden star.
+class _FavoriteChip extends StatelessWidget {
+  const _FavoriteChip({required this.onTap, required this.onUnfavorite});
+  final VoidCallback onTap;
+  final VoidCallback onUnfavorite;
+
+  Future<void> _showMenu(BuildContext context, Offset position) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final error = Theme.of(context).colorScheme.error;
+    final chosen = await showMenu<bool>(
+      context: context,
+      position: RelativeRect.fromRect(overlay.globalToLocal(position) & const Size(1, 1), Offset.zero & overlay.size),
+      popUpAnimationStyle: menuAnimation,
+      items: [
+        PopupMenuItem<bool>(
+          value: true,
+          child: Row(children: [
+            Icon(Icons.star_border, size: 20, color: error),
+            const SizedBox(width: 12),
+            Text(L('common.unfavorite'), style: TextStyle(color: error)),
+          ]),
+        ),
+      ],
+    );
+    if (chosen == true) onUnfavorite();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final scaler = MediaQuery.textScalerOf(context);
+    final h = tagRowHeight(scaler), font = scaler.scale(13);
+    return GestureDetector(
+      onTap: onTap,
+      onLongPressStart: (d) => _showMenu(context, d.globalPosition),
+      onSecondaryTapUp: (d) => _showMenu(context, d.globalPosition),
+      child: Semantics(
+        label: L('card.favoritePill'),
+        button: true,
+        excludeSemantics: true,
+        child: Container(
+          key: const ValueKey('favoriteBadge'),
+          height: h,
+          decoration: _tagBox(scheme, h),
+          padding: EdgeInsets.only(left: font * 0.62, right: font * 0.78),
+          child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Icon(Icons.star, size: font * 0.92, color: const Color(0xFFF5B800)),
+            SizedBox(width: font * 0.36),
+            Text(L('card.favoritePill'), style: TextStyle(color: scheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
 
 /// A tag as the native cards show it: a neutral box, a dot in the colour of where it comes from
 /// (blue mine, purple an AI's, green an AI's I approved), the name in the text colour.

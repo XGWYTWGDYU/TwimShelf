@@ -148,6 +148,7 @@ public static unsafe class TlCore
                 Bad = bad.Length == 0 ? null : bad,
                 Recent = Bool(p, "recent"),
                 Album = Bool(p, "album"),
+                Favorite = f.GetArrayLength() > 9 && f[9].ValueKind == JsonValueKind.True,
                 Width = f[7].GetInt32(),
                 Height = f[8].GetInt32(),
             });
@@ -292,6 +293,7 @@ public static unsafe class TlCore
             Bad = S("bad"),
             Recent = j.TryGetProperty("recent", out var r) && r.ValueKind == JsonValueKind.True,
             Album = j.TryGetProperty("album", out var a) && a.ValueKind == JsonValueKind.True,
+            Favorite = j.TryGetProperty("favorite", out var fav) && fav.ValueKind == JsonValueKind.True,
             Tags = tags,
             Width = w,
             Height = h,

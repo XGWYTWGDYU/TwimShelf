@@ -4,7 +4,7 @@
 // opens the viewer; a two-finger sideways swipe over it turns the page; a pill searches for its
 // tag, right-click gives its menu, "+" adds a tag.
 import { memo, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Star } from 'lucide-react';
 import { cardAspectRatio, L, type FeedItem } from '@twimshelf/core';
 import { cachedThumb, sideFor, thumb } from '../../lib/thumbs';
 import { core } from '../../lib/core';
@@ -31,6 +31,8 @@ export interface PostCardProps {
   onContext?: (post: Post, media: number, e: React.MouseEvent) => void;
   onTag?: (label: string) => void;
   onTagMenu?: (item: FeedItem, label: string, e: React.MouseEvent) => void;
+  onFavorite?: () => void;
+  onFavoriteMenu?: (item: FeedItem, e: React.MouseEvent) => void;
   onAddTag?: (item: FeedItem) => void;
   /** Shown from elsewhere: turned to this page and briefly marked. */
   highlight?: number;
@@ -38,7 +40,7 @@ export interface PostCardProps {
 
 const savedPages = new Map<string, number>();
 
-export const PostCard = memo(function PostCard({ post, width, onOpen, onContext, onTag, onTagMenu, onAddTag, marks, highlight }: PostCardProps) {
+export const PostCard = memo(function PostCard({ post, width, onOpen, onContext, onTag, onTagMenu, onFavorite, onFavoriteMenu, onAddTag, marks, highlight }: PostCardProps) {
   const [page, setPageState] = useState(() => savedPages.get(post.id) ?? 0);
   const setPage = (to: number) => {
     savedPages.set(post.id, to);
@@ -124,14 +126,17 @@ export const PostCard = memo(function PostCard({ post, width, onOpen, onContext,
             : <span className="card-link">{m.url}</span>)}
         </div>
       )}
-      <TagStrip item={m} marks={marks} onTag={onTag} onTagMenu={onTagMenu} onAdd={onAddTag} />
+      <TagStrip item={m} marks={marks} onTag={onTag} onTagMenu={onTagMenu} onFavorite={onFavorite} onFavoriteMenu={onFavoriteMenu} onAdd={onAddTag} />
     </article>
   );
 });
 
-/** The tags as pills in one row that scrolls sideways (TagStripView): "◷ Recently Added" first,
+/** The tags as pills in one row that scrolls sideways (TagStripView): "★ Favorited" and "◷ Recently Added" first,
  *  then each tag with a dot in its colour (yours blue, an AI's purple, approved green), "+" last. */
-function TagStrip({ item, marks, onTag, onTagMenu, onAdd }: { item: FeedItem; marks?: Marks; onTag?: (l: string) => void; onTagMenu?: (it: FeedItem, l: string, e: React.MouseEvent) => void; onAdd?: (it: FeedItem) => void }) {
+function TagStrip({ item, marks, onTag, onTagMenu, onFavorite, onFavoriteMenu, onAdd }: {
+  item: FeedItem; marks?: Marks; onTag?: (l: string) => void; onTagMenu?: (it: FeedItem, l: string, e: React.MouseEvent) => void;
+  onFavorite?: () => void; onFavoriteMenu?: (it: FeedItem, e: React.MouseEvent) => void; onAdd?: (it: FeedItem) => void;
+}) {
   const row = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = row.current!;
@@ -146,6 +151,14 @@ function TagStrip({ item, marks, onTag, onTagMenu, onAdd }: { item: FeedItem; ma
   }, []);
   return (
     <div className="card-tags" ref={row}>
+      {item.favorite && (
+        <span className="pill pill-favorite" title={L('place.favorites')}
+          onClick={(e) => { e.stopPropagation(); onFavorite?.(); }}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onFavoriteMenu?.(item, e); }}>
+          <Star size={11} fill="#F5B800" color="#F5B800" strokeWidth={1.6} />
+          <span>{L('card.favoritePill')}</span>
+        </span>
+      )}
       {item.recent && <span className="pill pill-recent">{L('card.recentPill')}</span>}
       {item.tags.map((t) => {
         const mine = (t.origin & 1) !== 0, ai = (t.origin & 2) !== 0;

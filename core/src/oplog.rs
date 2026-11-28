@@ -32,6 +32,9 @@ pub enum Op {
     Recent { post_id: String, at: u64 },
     /// A media came in through a share extension (从相册导入); grow-only.
     Album { media_id: String },
+    /// Favorite mark (收藏) of a media: LWW register (present 0/1, clock).
+    /// Older versions keep it as an unknown record and pass it on (`Op::Unknown`).
+    Favorite { media_id: String, present: bool, hlc: u64 },
     /// When a post first came into the library (ms): the earliest wins (`rules::merge_added`).
     /// Older versions keep it as an unknown record and pass it on.
     Added { post_id: String, at: u64 },
@@ -48,7 +51,7 @@ pub enum Op {
 /// Kinds this version understands (the `t` field). A record of any other kind is a newer
 /// app's and is kept as `Op::Unknown`; a record of a known kind that does not parse is an
 /// error (never skipped silently).
-pub const KNOWN_OPS: &[&str] = &["post", "media", "tag", "tagsrc", "aidone", "trash", "alias", "folder", "foldermedia", "recent", "setting", "album", "added"];
+pub const KNOWN_OPS: &[&str] = &["post", "media", "tag", "tagsrc", "aidone", "trash", "alias", "folder", "foldermedia", "recent", "setting", "album", "favorite", "added"];
 
 /// Parses a stored or received record.
 fn both_bits() -> u8 { 3 }
@@ -188,7 +191,7 @@ impl Store {
             let clock = match op {
                 Op::Post { hlc, .. } | Op::Tag { hlc, .. } | Op::TagSrc { hlc, .. } |
                 Op::Trash { hlc, .. } | Op::Alias { hlc, .. } | Op::Folder { hlc, .. } |
-                Op::FolderMedia { hlc, .. } | Op::Setting { hlc, .. } => Some(*hlc),
+                Op::FolderMedia { hlc, .. } | Op::Favorite { hlc, .. } | Op::Setting { hlc, .. } => Some(*hlc),
                 _ => None,
             };
             if clock.is_some_and(|h| !crate::rules::remote_clock_ready(h, crate::store::now_ms())) {
@@ -239,6 +242,10 @@ impl Store {
                 }
                 Op::Recent { post_id, at } => self.apply_recent(post_id, *at)?,
                 Op::Album { media_id } => self.apply_album(media_id)?,
+                Op::Favorite { media_id, present, hlc } => {
+                    self.observe_hlc(*hlc)?;
+                    self.apply_favorite(media_id, TagReg { origin: *present as u8, hlc: *hlc })?;
+                }
                 Op::Added { post_id, at } => self.apply_added(post_id, *at)?,
                 Op::Setting { key, value, hlc } => {
                     self.observe_hlc(*hlc)?;

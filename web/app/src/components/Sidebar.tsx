@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { CheckCircle2, Folder, GalleryVerticalEnd, Image, Images, Layers2, LogOut, Settings, SquareDashed, TriangleAlert, Trash2, Video, BadgeCheck } from 'lucide-react';
+import { CheckCircle2, Folder, GalleryVerticalEnd, Image, Images, Layers2, LogOut, Settings, SquareDashed, Star, TriangleAlert, Trash2, Video, BadgeCheck } from 'lucide-react';
 import { L, store } from '@twimshelf/core';
 import { useStore } from '../lib/hooks';
 import { folders, stats } from '../lib/library';
@@ -7,6 +7,7 @@ import { folderRoute, go, href, useRoute, type Route } from '../lib/router';
 import { openMenu, type MenuEntry } from './Menu';
 import { createFolder, deleteFolder, renameFolder } from '../lib/folderActions';
 import { MascotSwap, useMascotPress, type MascotName } from './Mascot';
+import { closeViewerImmediately } from '../viewer/Viewer';
 import './Sidebar.css';
 
 function readNumber(k: string, d: number): number { try { const v = Number(localStorage.getItem(k)); return v > 0 ? v : d; } catch { return d; } }
@@ -22,7 +23,7 @@ function Row({ to, icon, mascotName, label, count, tint, menu }: { to: Route; ic
   const r = useRoute();
   const on = same(r, to) || (to.page === 'settings' && r.page === 'settings');
   const { mascot, phase, pulse } = useMascotPress(mascotName);
-  const activate = () => { pulse(); go(to); };
+  const activate = () => { closeViewerImmediately(); pulse(); go(to); };
   return (
     <div className={`side-row${on ? ' on' : ''}`} role="treeitem" tabIndex={0} aria-selected={on}
       onMouseDown={(e) => { if (e.button === 0) activate(); }}
@@ -91,6 +92,7 @@ export function Sidebar() {
         <Section title={L('sidebar.other')}>
           <Row to={{ page: 'grid', place: 'loose' }} icon={<SquareDashed size={z} strokeWidth={sw} />} label={L('place.loose')} />
           <Row to={{ page: 'grid', place: 'album' }} icon={<Images size={z} strokeWidth={sw} />} label={L('place.album')} />
+          <Row to={{ page: 'grid', place: 'favorites' }} icon={<Star size={z} strokeWidth={sw} fill="currentColor" />} tint="#E5A900" label={L('place.favorites')} />
           <Row to={{ page: 'grid', place: 'unreviewed' }} icon={<BadgeCheck size={z} strokeWidth={sw} className="seal-open" />} label={L('place.unreviewed')} />
           <Row to={{ page: 'grid', place: 'reviewed' }} icon={<CheckCircle2 size={z} strokeWidth={sw} />} label={L('place.reviewed')} />
           {(s?.bad ?? 0) > 0 && <Row to={{ page: 'grid', place: 'bad' }} icon={<TriangleAlert size={z} strokeWidth={sw} />} label={L('place.bad')} count={s?.bad} tint="var(--danger)" />}

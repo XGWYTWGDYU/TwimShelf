@@ -14,7 +14,7 @@ export const KEYWORDS: SearchKeyword[] = [
   ['tags', 'f:tags'], ['text', 'f:text'], ['author', 'f:author'],
   ['mine', 's:mine'], ['ai', 's:ai'], ['common', 's:common'], ['all', 's:both'],
   ['video', 'k:video'], ['photo', 'k:photo'], ['folder', 'p:folder'], ['recent', 'r:recent'],
-  ['external', 'x:external'], ['album', 'a:album'], ['reviewed', 'v:reviewed'],
+  ['external', 'x:external'], ['album', 'a:album'], ['favorite', 'fav:favorite'], ['reviewed', 'v:reviewed'],
   ['unreviewed', 'v:unreviewed'], ['damaged', 'b:damaged'],
 ].map(([id, key]) => ({ id, key, excludable: !['all', 'album', 'reviewed', 'unreviewed', 'damaged'].includes(id) }));
 
@@ -117,6 +117,7 @@ export class TokenQuery {
   folder: string | null = null;
   private reviews = new Set<ReviewFilter>();
   private album = false; private damaged = false;
+  favorite = false; private exFavorite = false;
   recent = false; private external = false; private exRecent = false; private exExternal = false;
 
   static parse(text: string): TokenQuery { return new TokenQuery(splitQuery(`${text} `).keys); }
@@ -144,6 +145,7 @@ export class TokenQuery {
         const k = key.slice(2) as MediaKind;
         if (k === 'photo' || k === 'video') (ex ? this.exKinds : this.kinds).add(k);
       } else if (!ex && key === 'a:album') this.album = true;
+      else if (key === 'fav:favorite') { if (ex) this.exFavorite = true; else this.favorite = true; }
       else if (!ex && key === 'v:reviewed') this.reviews.add('reviewed');
       else if (!ex && key === 'v:unreviewed') this.reviews.add('unreviewed');
       else if (!ex && key === 'b:damaged') this.damaged = true;
@@ -193,13 +195,15 @@ export class TokenQuery {
   get isContradictory(): boolean {
     const f = this.searchFields;
     return this.allowedKinds.length === 0 || this.reviews.size > 1 || (this.recent && this.exRecent)
-      || (this.external && this.exExternal) || (this.folder != null && this.exFolders.includes(this.folder))
+      || (this.external && this.exExternal) || (this.favorite && this.exFavorite)
+      || (this.folder != null && this.exFolders.includes(this.folder))
       || (this.terms.length > 0 && !f.tags && !f.text && !f.author);
   }
 
   filter(over: Partial<FeedFilter> = {}): Partial<FeedFilter> {
     const f: Partial<FeedFilter> = { ...over };
     if (this.album) f.album_only = true;
+    if (this.favorite) f.favorite_only = true;
     if (this.damaged) f.bad_only = true;
     if (this.reviews.size === 1) f.review = [...this.reviews][0];
     if (this.folder != null) f.folder = this.folder;
@@ -212,6 +216,7 @@ export class TokenQuery {
     f.exclude_folders = this.exFolders;
     f.exclude_recent = this.exRecent;
     f.exclude_loose = this.exExternal;
+    if (this.exFavorite) f.exclude_favorite = true;
     f.require = this.require;
     return f;
   }

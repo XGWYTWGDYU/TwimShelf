@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using TwimShelf.Controls.ViewerEngine;
 using TwimShelf.Core;
+using TwimShelf.Models;
 using TwimShelf.Search;
 using TwimShelf.Services;
 using Windows.Foundation;
@@ -340,10 +341,55 @@ public sealed partial class PostCard : UserControl
         // tags of the page shown
         _tagShift.X = 0;
         _tags.Children.Clear();
+        if (item.Favorite) _tags.Children.Add(FavoriteChip(item));
         foreach (var t in item.Tags) _tags.Children.Add(Chip(t));
         var loose = Media[0].IsLoose();
-        _tagRow.Visibility = item.Tags.Count > 0 || !loose ? Visibility.Visible : Visibility.Collapsed;
+        _tagRow.Visibility = item.Tags.Count > 0 || item.Favorite || !loose ? Visibility.Visible : Visibility.Collapsed;
         LoadMedia();
+    }
+
+    Border FavoriteChip(FeedItem item)
+    {
+        var dark = ActualTheme == ElementTheme.Dark;
+        var text = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+        row.Children.Add(new FontIcon
+        {
+            Glyph = "\uE735",
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 184, 0)),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        row.Children.Add(new TextBlock
+        {
+            Text = L("card.favoritePill"),
+            FontSize = 13,
+            Foreground = text,
+            FontWeight = FontWeights.Medium,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var b = new Border
+        {
+            Child = row,
+            Height = 28,
+            Padding = new Thickness(9, 0, 10, 0),
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
+        };
+        TagStyle.Box(b, dark);
+        b.Tapped += (_, e) =>
+        {
+            e.Handled = true;
+            LibraryModel.Current.ShowInBrowse(new FeedFilter { FavoriteOnly = true });
+        };
+        b.RightTapped += (_, e) =>
+        {
+            e.Handled = true;
+            var m = new MenuFlyout();
+            m.Items.Add(FolderActions.Item(L("common.unfavorite"), "\uE8D9", () => _ = MediaActions.Run(ActionKind.Unfavorite, [item.MediaId], done: n => L("favorite.removed", n))));
+            m.ShowAt(b, e.GetPosition(b));
+        };
+        return b;
     }
 
     /// A tag as the other apps show it (TagStyle): a neutral box with a hairline edge, a dot in the

@@ -96,6 +96,9 @@ Future<void> showCardMenu(
         _E(Icons.sync, L('card.menu.retagReplace'), action: () => library.tagger.retag([_ref(item)], model: model, replaceOld: true)),
       ];
   final tagging = <_E>[
+    _E(item.favorite ? Icons.star_border : Icons.star, item.favorite ? L('common.unfavorite') : L('common.favorite'),
+        action: () => runMediaAction(context, library, item.favorite ? ActionKind.unfavorite : ActionKind.favorite,
+            media: [item.media_id], done: (n) => L(item.favorite ? 'favorite.removed' : 'favorite.added', [n]))),
     _E(Icons.sell_outlined, L('card.menu.tagMedia'), key: 'menu-tagMedia', action: () => showTagPicker(context, library, item)),
     if (!loose) _E(Icons.layers_outlined, L('card.menu.tagPost'), action: () => showTagPicker(context, library, item, wholePost: true)),
     if (pending.isNotEmpty)

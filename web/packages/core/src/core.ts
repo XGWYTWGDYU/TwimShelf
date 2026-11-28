@@ -54,8 +54,8 @@ export function feedRequest(q: FeedQuery): FeedRequest {
     fields: { tags: true, text: false, author: false, ...q.fields },
     filter: {
       author: null, labels: [], review: 'any', bad_only: false, folder: null, loose_only: false,
-      album_only: false, recent_only: false, kind: null, exclude_terms: [], origins: null,
-      exclude_folders: [], exclude_recent: false, exclude_loose: false, require: null, ...q.filter,
+      album_only: false, favorite_only: false, recent_only: false, kind: null, exclude_terms: [], origins: null,
+      exclude_folders: [], exclude_recent: false, exclude_loose: false, exclude_favorite: false, require: null, ...q.filter,
     },
   };
 }
@@ -65,13 +65,13 @@ export interface PackedFeed {
   posts: Array<{ id: string; text?: string | null; author_name?: string | null; screen_name?: string | null;
     url?: string | null; created_at?: string | null; recent?: boolean; album?: boolean }>;
   tag_lists: Array<Array<[string, number, string[]]>>;
-  /** [media_id, post index, ordinal, 'p' | 'v', path, tag list index, bad, width, height] */
-  media: Array<[string, number, number, string, string, number, string, number, number]>;
+  /** [media_id, post index, ordinal, 'p' | 'v', path, tag list index, bad, width, height, favorite?] */
+  media: Array<[string, number, number, string, string, number, string, number, number, boolean?]>;
 }
 
 export function unpackFeed(packed: PackedFeed): FeedItem[] {
   const lists: TagView[][] = packed.tag_lists.map((l) => l.map(([label, origin, models]) => ({ label, origin, models })));
-  return packed.media.map(([media_id, post, ordinal, kind, path, tags, bad, w, h]) => {
+  return packed.media.map(([media_id, post, ordinal, kind, path, tags, bad, w, h, fav]) => {
     const p = packed.posts[post];
     return {
       media_id, post_id: p.id, ordinal, kind: kind === 'v' ? 'video' : 'photo',
@@ -79,6 +79,7 @@ export function unpackFeed(packed: PackedFeed): FeedItem[] {
       text: p.text ?? null, author_name: p.author_name ?? null, screen_name: p.screen_name ?? null,
       url: p.url ?? null, created_at: p.created_at ?? null, tags: lists[tags],
       bad: bad === '' ? null : bad, recent: p.recent ?? false, album: p.album ?? false,
+      favorite: fav ?? false,
       size: w > 0 && h > 0 ? [w, h] : null,
     };
   });

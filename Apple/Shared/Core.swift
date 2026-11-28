@@ -26,14 +26,15 @@ struct PackedFeed: Decodable {
             view = TagView(label: try c.decode(String.self), origin: try c.decode(UInt8.self), models: try c.decode([String].self))
         }
     }
-    /// [media id, post, ordinal, kind, path below root, tag list, damage, width, height]
+    /// [media id, post, ordinal, kind, path below root, tag list, damage, width, height, favorite]
     struct Media: Decodable {
-        let id: String, post: Int, ordinal: Int, kind: String, path: String, tags: Int, bad: String, width: Int, height: Int
+        let id: String, post: Int, ordinal: Int, kind: String, path: String, tags: Int, bad: String, width: Int, height: Int, favorite: Bool
         init(from d: Decoder) throws {
             var c = try d.unkeyedContainer()
             id = try c.decode(String.self); post = try c.decode(Int.self); ordinal = try c.decode(Int.self)
             kind = try c.decode(String.self); path = try c.decode(String.self); tags = try c.decode(Int.self); bad = try c.decode(String.self)
             width = try c.decode(Int.self); height = try c.decode(Int.self)
+            favorite = c.isAtEnd ? false : ((try? c.decode(Bool.self)) ?? false)
         }
     }
     let root: String
@@ -50,7 +51,7 @@ struct PackedFeed: Decodable {
             return FeedItem(mediaId: m.id, postId: p.id, ordinal: m.ordinal, kind: m.kind == "v" ? .video : .photo,
                             path: m.path.hasPrefix("/") ? m.path : root + m.path,
                             text: p.text, authorName: p.authorName, screenName: p.screenName, url: p.url,
-                            tags: lists[m.tags], createdAt: p.createdAt, bad: m.bad.isEmpty ? nil : m.bad, recent: p.recent, album: p.album, width: m.width, height: m.height)
+                            tags: lists[m.tags], createdAt: p.createdAt, bad: m.bad.isEmpty ? nil : m.bad, recent: p.recent, album: p.album, favorite: m.favorite, width: m.width, height: m.height)
         }
     }
 }
@@ -85,6 +86,9 @@ struct FeedItem: Codable, Hashable {
     /// Brought in through a share extension (从相册导入).
     var album: Bool? = nil
     var isAlbum: Bool { album ?? false }
+    /// Marked as a favorite.
+    var favorite: Bool? = nil
+    var isFavorite: Bool { favorite ?? false }
     /// Size as displayed, 0 until read from the file.
     var width = 0
     var height = 0
@@ -135,6 +139,8 @@ struct FeedFilter: Codable, Equatable {
     var looseOnly = false
     /// Only media brought in through a share extension (从相册导入).
     var albumOnly = false
+    /// Only favorited media.
+    var favoriteOnly = false
     /// Only "最近添加" posts.
     var recentOnly = false
     /// Only photos or only videos.
@@ -146,6 +152,7 @@ struct FeedFilter: Codable, Equatable {
     var excludeFolders: [String] = []
     var excludeRecent = false
     var excludeLoose = false
+    var excludeFavorite = false
     /// Conditions without words ("共同", "用户"): something in one of these fields (a tag that
     /// counts, post text, an author). All off: nothing.
     var require: SearchFields? = nil
@@ -571,7 +578,7 @@ enum Core {
     @discardableResult static func exportImportIssues(report: String, to url: URL) throws -> Int { try call(tl_import_export_issues(report, url.path), as: Int.self) }
 
     // UI action receipts identify exactly what changed, including a clock for safe undo.
-    enum ActionKind: String, Codable { case trash, restore, purge, folderAdd = "folder_add", folderRemove = "folder_remove", tag }
+    enum ActionKind: String, Codable { case trash, restore, purge, folderAdd = "folder_add", folderRemove = "folder_remove", tag, favorite, unfavorite }
     struct ActionStamp: Codable { let id: String; let hlc: UInt64; let inc: UInt32; let state: UInt8 }
     struct ActionReceipt: Codable {
         let kind: ActionKind; let label: String?; let folder: String?; let folderHlc: UInt64?; let epoch: UInt64; let changes: [ActionStamp]

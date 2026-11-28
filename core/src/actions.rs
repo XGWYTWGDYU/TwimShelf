@@ -5,12 +5,13 @@ use std::collections::{BTreeSet, BTreeMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ActionKind { Trash, Restore, Purge, FolderAdd, FolderRemove, Tag }
+pub enum ActionKind { Trash, Restore, Purge, FolderAdd, FolderRemove, Tag, Favorite, Unfavorite }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stamp { pub id: String, pub hlc: u64, pub inc: u32, pub state: u8 }
 impl Stamp {
     fn trash(db: &Store, id: &str) -> rusqlite::Result<Self> { let r = db.trash_reg(id)?; Ok(Self { id: id.into(), hlc: r.hlc, inc: r.inc, state: r.state }) }
     fn member(db: &Store, folder: &str, id: &str) -> rusqlite::Result<Self> { let r = db.member_reg(folder, id)?; Ok(Self { id: id.into(), hlc: r.map_or(0, |r| r.hlc), inc: 0, state: r.map_or(0, |r| r.origin) }) }
+    fn favorite(db: &Store, id: &str) -> rusqlite::Result<Self> { let r = db.favorite_reg(id)?; Ok(Self { id: id.into(), hlc: r.map_or(0, |r| r.hlc), inc: 0, state: r.map_or(0, |r| r.origin) }) }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Receipt { #[serde(default)] pub label: Option<String>, pub kind: ActionKind, pub folder: Option<String>, pub folder_hlc: Option<u64>, pub epoch: u64, pub changes: Vec<Stamp> }
@@ -76,6 +77,8 @@ impl Library {
                     ActionKind::Purge => db.trash_action(&id, TrashAction::Purge)?,
                     ActionKind::FolderAdd => db.add_to_folder(folder, &[id.clone()])? > 0,
                     ActionKind::FolderRemove => db.remove_from_folder(folder, &[id.clone()])? > 0,
+                    ActionKind::Favorite => db.set_favorite(&id, true)?,
+                    ActionKind::Unfavorite => db.set_favorite(&id, false)?,
                     ActionKind::Tag => {
                         if db.trash_reg(&id)?.state != rules::LIVE { continue; }
                         let label = receipt.label.as_deref().unwrap();
@@ -87,7 +90,13 @@ impl Library {
                         continue;
                     }
                 };
-                if changed { receipt.changes.push(if matches!(a.kind, ActionKind::FolderAdd | ActionKind::FolderRemove) { Stamp::member(&db, folder, &id)? } else { Stamp::trash(&db, &id)? }); }
+                if changed {
+                    receipt.changes.push(match a.kind {
+                        ActionKind::FolderAdd | ActionKind::FolderRemove => Stamp::member(&db, folder, &id)?,
+                        ActionKind::Favorite | ActionKind::Unfavorite => Stamp::favorite(&db, &id)?,
+                        _ => Stamp::trash(&db, &id)?,
+                    });
+                }
             }
             if matches!(a.kind, ActionKind::FolderAdd | ActionKind::FolderRemove) { receipt.folder_hlc = db.folder_reg(folder)?.map(|r| r.hlc); }
             tx.commit()?;
@@ -113,6 +122,11 @@ impl Library {
                     let f = receipt.folder.as_deref().unwrap_or("");
                     if Stamp::member(&db, f, &stamp.id)? == *stamp {
                         n += if receipt.kind == ActionKind::FolderAdd { db.remove_from_folder(f, &[stamp.id.clone()])? } else { db.add_to_folder(f, &[stamp.id.clone()])? };
+                    }
+                }
+                ActionKind::Favorite | ActionKind::Unfavorite => {
+                    if Stamp::favorite(&db, &stamp.id)? == *stamp {
+                        if db.set_favorite(&stamp.id, receipt.kind == ActionKind::Unfavorite)? { n += 1; }
                     }
                 }
                 ActionKind::Tag => {

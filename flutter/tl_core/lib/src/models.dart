@@ -46,7 +46,9 @@ enum ActionKind {
   purge('purge'),
   folderAdd('folder_add'),
   folderRemove('folder_remove'),
-  tag('tag');
+  tag('tag'),
+  favorite('favorite'),
+  unfavorite('unfavorite');
 
   const ActionKind(this.wireValue);
   final String wireValue;
@@ -110,6 +112,7 @@ class FeedItem implements JsonModel {
       this.bad,
       this.recent = false,
       this.album = false,
+      this.favorite = false,
       this.width = 0,
       this.height = 0})
       : tags = List<TagView>.unmodifiable(tags.map((v) => v));
@@ -138,6 +141,7 @@ class FeedItem implements JsonModel {
   final String? bad;
   final bool recent;
   final bool album;
+  final bool favorite;
   factory FeedItem.fromJson(Map<String, dynamic> json) => FeedItem(
         media_id: json['media_id'] as String,
         post_id: json['post_id'] as String,
@@ -160,6 +164,7 @@ class FeedItem implements JsonModel {
         bad: json['bad'] == null ? null : json['bad'] as String,
         recent: json['recent'] == null ? false : json['recent'] as bool,
         album: json['album'] == null ? false : json['album'] as bool,
+        favorite: json['favorite'] == null ? false : json['favorite'] as bool,
         width: (json['size'] as List?)?.first as int? ?? 0,
         height: (json['size'] as List?)?.last as int? ?? 0,
       );
@@ -179,6 +184,7 @@ class FeedItem implements JsonModel {
         'bad': bad == null ? null : bad!,
         'recent': recent,
         'album': album,
+        'favorite': favorite,
       };
 }
 
@@ -267,6 +273,7 @@ class FeedFilter implements JsonModel {
       this.folder,
       this.loose_only = false,
       this.album_only = false,
+      this.favorite_only = false,
       this.recent_only = false,
       this.kind,
       List<String> exclude_terms = const [],
@@ -274,6 +281,7 @@ class FeedFilter implements JsonModel {
       List<String> exclude_folders = const [],
       this.exclude_recent = false,
       this.exclude_loose = false,
+      this.exclude_favorite = false,
       this.require})
       : labels = List<String>.unmodifiable(labels.map((v) => v)),
         exclude_terms = List<String>.unmodifiable(exclude_terms.map((v) => v)),
@@ -289,6 +297,7 @@ class FeedFilter implements JsonModel {
   final String? folder;
   final bool loose_only;
   final bool album_only;
+  final bool favorite_only;
   final bool recent_only;
   final MediaKind? kind;
   final List<String> exclude_terms;
@@ -296,6 +305,7 @@ class FeedFilter implements JsonModel {
   final List<String> exclude_folders;
   final bool exclude_recent;
   final bool exclude_loose;
+  final bool exclude_favorite;
   final SearchFields? require;
   factory FeedFilter.fromJson(Map<String, dynamic> json) => FeedFilter(
         author: json['author'] == null ? null : json['author'] as String,
@@ -311,6 +321,7 @@ class FeedFilter implements JsonModel {
         loose_only:
             json['loose_only'] == null ? false : json['loose_only'] as bool,
         album_only: json['album_only'] == null ? false : json['album_only'] as bool,
+        favorite_only: json['favorite_only'] == null ? false : json['favorite_only'] as bool,
         recent_only:
             json['recent_only'] == null ? false : json['recent_only'] as bool,
         kind: json['kind'] == null
@@ -333,6 +344,9 @@ class FeedFilter implements JsonModel {
         exclude_loose: json['exclude_loose'] == null
             ? false
             : json['exclude_loose'] as bool,
+        exclude_favorite: json['exclude_favorite'] == null
+            ? false
+            : json['exclude_favorite'] as bool,
         require: json['require'] == null
             ? null
             : SearchFields.fromJson(json['require'] as Map<String, dynamic>),
@@ -346,6 +360,7 @@ class FeedFilter implements JsonModel {
         'folder': folder == null ? null : folder!,
         'loose_only': loose_only,
         'album_only': album_only,
+        'favorite_only': favorite_only,
         'recent_only': recent_only,
         'kind': kind == null ? null : kind!.wireValue,
         'exclude_terms': exclude_terms.map((v) => v).toList(),
@@ -353,6 +368,7 @@ class FeedFilter implements JsonModel {
         'exclude_folders': exclude_folders.map((v) => v).toList(),
         'exclude_recent': exclude_recent,
         'exclude_loose': exclude_loose,
+        'exclude_favorite': exclude_favorite,
         'require': require == null ? null : require!.toJson(),
       };
 }

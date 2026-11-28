@@ -90,7 +90,7 @@ public sealed partial class ViewerPhotoPage : Grid
         }
         else if (!string.IsNullOrEmpty(squarePreviewPath) && File.Exists(squarePreviewPath))
         {
-            _preview.Stretch = _cropSquarePreview ? Stretch.Fill : Stretch.Uniform;
+            _preview.Stretch = Stretch.Uniform;
             try
             {
                 var pBmp = new BitmapImage();
@@ -120,13 +120,13 @@ public sealed partial class ViewerPhotoPage : Grid
         bmp.ImageOpened += (_, _) =>
         {
             if (ct.IsCancellationRequested) return;
+            _fullLoaded = true;
             if (bmp.PixelWidth > 0 && bmp.PixelHeight > 0)
             {
                 _natW = bmp.PixelWidth;
                 _natH = bmp.PixelHeight;
                 UpdateLayoutSize(_viewW, _viewH);
             }
-            _fullLoaded = true;
             _full.Opacity = 1;
             _preview.Visibility = Visibility.Collapsed;
             MarkPreviewReady();

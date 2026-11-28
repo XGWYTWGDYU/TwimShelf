@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using TwimShelf.Core;
 using TwimShelf.Services;
 using Windows.Foundation;
 using Windows.UI;
@@ -32,6 +33,9 @@ public sealed partial class ZoomGridView : UserControl, IDisposable
     readonly List<int> _prefetchKeys = [];
 
     bool _renderingHooked;
+    bool _loaded;
+    bool _active = true;
+    bool _coveredByViewer;
     bool _needsDraw = true;
     bool _syncingScroll;
     bool _disposed;
@@ -69,6 +73,7 @@ public sealed partial class ZoomGridView : UserControl, IDisposable
     public IReadOnlySet<string> Selected => _selected;
 
     public event Action<int>? TileOpened;
+    public event Action<FeedItem>? TileUnfavoriteRequested;
     public event Action<int, Point>? TileContextRequested;
     public event Action? SelectionChanged;
     public event Action<int>? SettledAtLevel;
@@ -161,10 +166,11 @@ public sealed partial class ZoomGridView : UserControl, IDisposable
     void OnLoaded(object sender, RoutedEventArgs e)
     {
         if (_disposed) return;
+        _loaded = true;
         EnsureRenderer();
         ApplyThemeColors();
         OnLayoutChanged();
-        if (!_renderingHooked)
+        if (_active && !_renderingHooked)
         {
             CompositionTarget.Rendering += OnRendering;
             _renderingHooked = true;
@@ -174,12 +180,44 @@ public sealed partial class ZoomGridView : UserControl, IDisposable
 
     void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _loaded = false;
         if (_renderingHooked)
         {
             CompositionTarget.Rendering -= OnRendering;
             _renderingHooked = false;
         }
         _pinchReleaseTimer.Stop();
+    }
+
+    /// Pauses or resumes the vsync render loop while this grid stays cached in the visual tree.
+    public void SetActive(bool active)
+    {
+        if (_disposed || _active == active) return;
+        _active = active;
+        if (active)
+        {
+            if (_loaded)
+            {
+                EnsureRenderer();
+                ApplyThemeColors();
+                OnLayoutChanged();
+                if (!_renderingHooked)
+                {
+                    CompositionTarget.Rendering += OnRendering;
+                    _renderingHooked = true;
+                }
+            }
+            _needsDraw = true;
+        }
+        else
+        {
+            if (_renderingHooked)
+            {
+                CompositionTarget.Rendering -= OnRendering;
+                _renderingHooked = false;
+            }
+            _pinchReleaseTimer.Stop();
+        }
     }
 
     void EnsureRenderer()
@@ -286,6 +324,36 @@ public sealed partial class ZoomGridView : UserControl, IDisposable
         if (_scene.Engine.HiddenPhoto == key) return;
         _scene.Engine.HiddenPhoto = key;
         _needsDraw = true;
+    }
+
+    /// Hides the underlying SwapChainPanel while the opaque full-screen Viewer covers the grid so
+    /// D3D11 SwapChainPresent calls never punch through the overlay during horizontal swipes, and
+    /// redraws one synchronized frame immediately when revealed for dismiss/close zoom.
+    public void SetCoveredByViewer(bool covered)
+    {
+        if (_disposed || _coveredByViewer == covered) return;
+        _coveredByViewer = covered;
+        _panel.Visibility = covered ? Visibility.Collapsed : Visibility.Visible;
+        if (!covered)
+        {
+            _needsDraw = true;
+            DrawNow();
+        }
+    }
+
+    void DrawNow()
+    {
+        if (_disposed || !_active || _coveredByViewer || _scene == null || _renderer == null || !_renderer.IsReady) return;
+        SyncScrollOffset();
+        var now = GridScene.Now();
+        if (_step != null) AdvanceStep(now);
+        var wasZooming = _scene.Engine.IsZooming;
+        var zoomFinished = _scene.Frame(now, _drawn);
+        if (wasZooming && zoomFinished) ZoomDidEnd();
+        var cfg = _scene.Engine.Cfg;
+        var moreUploads = _renderer.Draw(_drawn, cfg.Width, cfg.Height, cfg.Scale, key =>
+            _scene.TileByKey(key) is { } tile ? (tile.Item, tile.Count, _scene.IsSelected(key)) : null);
+        _needsDraw = moreUploads || _scene.IsAnimating;
     }
 
     /// Returns the tile's current rect in `relativeTo` coordinates if visible in the grid viewport.
@@ -476,7 +544,7 @@ public sealed partial class ZoomGridView : UserControl, IDisposable
 
     void OnRendering(object? sender, object e)
     {
-        if (_disposed || _scene == null || _renderer == null || !_renderer.IsReady) return;
+        if (_disposed || !_active || _coveredByViewer || _scene == null || _renderer == null || !_renderer.IsReady) return;
 
         // Pull latest ScrollViewer offset directly on vsync so scrolling is locked with zero lag.
         SyncScrollOffset();
@@ -730,6 +798,17 @@ public sealed partial class ZoomGridView : UserControl, IDisposable
         }
         else
         {
+            if (_scene?.TileAt(s) is { } tile && tile.Item.Favorite)
+            {
+                var frame = _scene.Engine.RestFrame(s, _scene.Engine.Rest);
+                var lx = pt.X - frame.X;
+                var ly = pt.Y - frame.Y;
+                if (frame.Width >= 40 && lx >= 0 && lx <= 30 && ly >= frame.Height - 30 && ly <= frame.Height)
+                {
+                    TileUnfavoriteRequested?.Invoke(tile.Item);
+                    return;
+                }
+            }
             TileOpened?.Invoke(s);
         }
     }

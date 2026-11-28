@@ -9,7 +9,7 @@ struct GridTileInstance {
     float2 origin;      // points
     float  side;        // points
     float  alpha;
-    uint   flags;       // bit0 has picture, bit1 video, bit2 selected
+    uint   flags;       // bit0 has picture, bit1 video, bit2 selected, bit3 favorited
     uint   count;       // media in the post (badge when > 1)
     float2 pad;
     float4 radii;       // tl, tr, br, bl (points)
@@ -83,6 +83,20 @@ static float triangleSDF(float2 q, float2 a, float2 b, float2 c) {
     return m;
 }
 
+/// Signed distance (negative inside) to a 5-pointed star centered at the origin, pointing up (+y).
+static float star5SDF(float2 p, float r, float rf) {
+    const float2 k1 = float2(0.809016994375, -0.587785252292);
+    const float2 k2 = float2(-k1.x, k1.y);
+    p.x = abs(p.x);
+    p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+    p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+    p.x = abs(p.x);
+    p.y -= r;
+    float2 ba = rf * float2(-k1.y, k1.x) - float2(0.0, 1.0);
+    float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+    return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+}
+
 /// Coverage (0…1) of a shape whose signed distance in points is d.
 static float cover(float d, float scale) { return clamp(0.5 - d * scale, 0.0, 1.0); }
 
@@ -98,9 +112,18 @@ fragment float4 gridTileFragment(GridVOut in [[stage_in]],
     float2 p = in.local;
     float3 rgb = (in.flags & 1u) ? picture.sample(smp, clamp(p / s, 0.0, 1.0)).rgb : in.placeholder.rgb;
 
-    // a video: a small play triangle bottom left (with a soft shadow), on tiles of 40 pt and up
+    // favorited: a golden five-pointed star bottom left, on tiles of 40 pt and up
+    bool hasStar = (in.flags & 8u) != 0u && s >= 40;
+    if (hasStar) {
+        float2 sp = float2(p.x - 12.5, (s - 12.5) - p.y);
+        float star = star5SDF(sp, 6.5, 0.46);
+        rgb = mix(rgb, float3(0), cover(star - 1.0, u.scale * 0.35) * 0.38);
+        rgb = mix(rgb, float3(0.98, 0.76, 0.08), cover(star, u.scale));
+    }
+
+    // a video: a small play triangle bottom left (shifted right when favorited), on tiles of 40 pt and up
     if ((in.flags & 2u) && s >= 40) {
-        float2 q = p - float2(6, s - 18);                       // 12×12 box
+        float2 q = p - float2(hasStar ? 22.0 : 6.0, s - 18);    // 12×12 box
         float tri = triangleSDF(q, float2(1.5, 0), float2(1.5, 12), float2(12, 6));
         rgb = mix(rgb, float3(0), cover(tri - 1.0, u.scale * 0.35) * 0.35);
         rgb = mix(rgb, float3(1), cover(tri, u.scale));

@@ -54,10 +54,28 @@ private struct PostCaptionContent: View {
     let maxExpandedHeight: CGFloat
     let trailingInset: CGFloat
     let onExpandedChange: (Bool) -> Void
+    @Environment(\.colorScheme) private var colorScheme
     @State var expanded = false
     @State private var cut = false
 
+    private var isDark: Bool { colorScheme == .dark }
+    private var primaryInk: Color { isDark ? .white : Color(white: 0.08) }
+    private var secondaryInk: Color { isDark ? .white.opacity(0.68) : Color(white: 0.08).opacity(0.65) }
+    private var hintInk: Color { isDark ? .white.opacity(0.84) : Color(white: 0.08).opacity(0.82) }
+    private var dateInk: Color { isDark ? .white.opacity(0.62) : Color(white: 0.08).opacity(0.6) }
+    private var linkTint: Color { isDark ? Color(red: 0.45, green: 0.72, blue: 1) : .accentColor }
+
     var body: some View { content(item) }
+
+    @ViewBuilder private var cardBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            Color.clear.glassEffect(.regular, in: shape)
+        } else {
+            shape.fill(.regularMaterial)
+                .overlay(shape.strokeBorder(isDark ? Color.white.opacity(0.16) : Color.black.opacity(0.10), lineWidth: 0.5))
+        }
+    }
 
     private func content(_ item: FeedItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -68,15 +86,15 @@ private struct PostCaptionContent: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(PostCaptionView.linked(text))
                                 .font(.body)
-                                .foregroundStyle(.white)
-                                .tint(Color(red: 0.45, green: 0.72, blue: 1))
+                                .foregroundStyle(primaryInk)
+                                .tint(linkTint)
                                 .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
                             if let d = PostCaptionView.dateText(item.createdAt) {
-                                Text(d).font(.footnote).foregroundStyle(.white.opacity(0.6))
+                                Text(d).font(.footnote).foregroundStyle(dateInk)
                             }
                         }
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                     .scrollBounceBehavior(.basedOnSize)
                     .frame(maxHeight: maxExpandedHeight)
@@ -84,35 +102,33 @@ private struct PostCaptionContent: View {
                 } else {
                     Text(text)
                         .font(.body)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(primaryInk)
                         .lineLimit(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(truncationProbe(text))
                 }
                 if cut || expanded {
                     Text(expanded ? L("caption.less") : L("caption.more"))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(hintInk)
                         .accessibilityHidden(true)
                 }
             }
         }
-        // legible on any picture without a shade: a tight dark edge and a soft halo
-        .shadow(color: .black.opacity(0.7), radius: 1.5, y: 0.5)
-        .shadow(color: .black.opacity(0.5), radius: 6)
-        // a comfortable line length on a wide window
-        .frame(maxWidth: 680, alignment: .leading)
-        .padding(.leading, 16)
-        .padding(.trailing, trailingInset)
-        .padding(.top, 28)
-        .padding(.bottom, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background { cardBackground }
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .onTapGesture {
             guard cut || expanded else { return }
             withAnimation(.snappy(duration: 0.28)) { expanded.toggle() }
             onExpandedChange(expanded)
         }
+        .frame(maxWidth: 680, alignment: .leading)
+        .padding(.leading, 16)
+        .padding(.trailing, trailingInset)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("postCaption")
         .accessibilityValue(expanded ? L("caption.expanded") : L("caption.collapsed"))
@@ -122,12 +138,11 @@ private struct PostCaptionContent: View {
     private func author(_ item: FeedItem) -> some View {
         HStack(spacing: 6) {
             if let name = item.authorName {
-                Text(name).font(.headline).foregroundStyle(.white).lineLimit(1)
+                Text(name).font(.headline).foregroundStyle(primaryInk).lineLimit(1)
             }
             if let sn = item.screenName {
-                Text("@" + sn).font(.subheadline).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
+                Text("@" + sn).font(.subheadline).foregroundStyle(secondaryInk).lineLimit(1)
             }
-            Spacer(minLength: 8)
         }
     }
 

@@ -10,10 +10,13 @@ final class FeedCard: NSCollectionViewItem {
     var onOpen: ((FeedItem) -> Void)?
     var onTag: ((String) -> Void)?
     var onAddTag: ((FeedCard, NSView, NSRect) -> Void)?
+    var onFavorite: (() -> Void)?
     var onRecent: (() -> Void)?
     var onPage: (() -> Void)?
     /// Right-click menu of a tag pill.
     var menuForTag: ((TagView, FeedItem) -> NSMenu?)?
+    /// Right-click menu of the favorite pill.
+    var menuForFavorite: ((FeedItem) -> NSMenu?)?
     private(set) var items: [FeedItem] = []
     private(set) var page = 0
 
@@ -101,9 +104,11 @@ final class FeedCard: NSCollectionViewItem {
         link.target = self; link.action = #selector(openLink)
         tags.sideInset = 14
         tags.onTag = { [weak self] l in self?.onTag?(l) }
+        tags.onFavorite = { [weak self] in self?.onFavorite?() }
         tags.onRecent = { [weak self] in self?.onRecent?() }
         tags.onAdd = { [weak self] v, r in if let self { self.onAddTag?(self, v, r) } }
         tags.menuForTag = { [weak self] t in self?.current.flatMap { it in self?.menuForTag?(t, it) } }
+        tags.menuForFavorite = { [weak self] in self?.current.flatMap { it in self?.menuForFavorite?(it) } }
         // laid out by hand (`MacCardLayout`): the grid knows every card's height without laying it out
         [mediaView, author, body, link, tagScroll].forEach { $0.translatesAutoresizingMaskIntoConstraints = true; root.addSubview($0) }
         NSLayoutConstraint.activate([
@@ -304,7 +309,7 @@ final class FeedCard: NSCollectionViewItem {
         body.isHidden = (it.text ?? "").isEmpty
         link.title = it.url ?? ""
         link.isHidden = it.url == nil
-        tags.set(it.tags, recent: it.isRecent, highlight: highlight.tags)
+        tags.set(it.tags, favorite: it.isFavorite, recent: it.isRecent, highlight: highlight.tags)
         tagScroll.needsLayout = true
         view.needsLayout = true
     }
@@ -472,8 +477,8 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     private var viewer: NSView?
     private var viewerSource: ((FeedItem) -> NSRect?)?
     private var isClosingViewer = false
-    /// A player that went to picture in picture: kept alive while its floating window plays.
-    private var pipPlayer: MacPlayerView?
+    /// A viewer or standalone player currently in picture in picture: kept hidden in its host while its floating window plays.
+    private var pipViewer: NSView?
 
     private let scroll = NSScrollView()
     private let collection = ResizingFeedCollectionView()
@@ -841,12 +846,14 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         #endif
         let card = cv.makeItem(withIdentifier: FeedCard.id, for: ip) as! FeedCard
         card.menuForTag = { [weak self] t, item in self?.tagMenu(t, item: item) }
+        card.menuForFavorite = { [weak self] item in self?.favoriteMenu(item: item) }
         card.highlight = query.marks
         let e = entries[ip.item % entries.count]
         card.startPage = cardPages.page(of: entryKey(e), count: e.count)
         card.refresh(e)
         card.onOpen = { [weak self, weak card] it in self?.open(it, from: card) }
         card.onTag = { [weak self] l in self?.addTerm(l) }
+        card.onFavorite = { [weak self] in guard let self, !self.query.favorite else { return }; self.toggleFavoriteOnly() }
         card.onRecent = { [weak self] in guard let self, !self.query.recent else { return }; self.toggleRecentOnly() }
         card.onAddTag = { [weak self] card, anchor, rect in self?.showTagPicker(card, anchor: anchor, rect: rect) }
         card.onPage = { [weak self, weak card] in
@@ -992,22 +999,28 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             return matching?.viewerSourceFrame ?? tapped
         }
         detachInline()
-        if let p = pipPlayer { p.teardown(); pipPlayer = nil }
+        teardownPiPViewer()
         let v: NSView
         if item.kind == .video, list == nil, entries.allSatisfy({ !$0.contains { $0.mediaId == item.mediaId } }) {
             // a video on its own (not in any list here): the player alone, with picture in picture
             let p = MacPlayerView(url: item.fileURL, startAt: t, player: lent)
+            p.isFavorited = item.isFavorite
+            p.onToggleFavorite = { [weak p] in
+                guard let p else { return }
+                let next = !p.isFavorited
+                guard (try? Core.action(next ? .favorite : .unfavorite, media: [item.mediaId])) != nil else { return }
+                p.isFavorited = next
+                NotificationCenter.default.post(name: .libraryChanged, object: nil)
+            }
             p.onClose = { [weak self, weak p] in
                 if let p, p.isLent { giveBack(p.handBack()) } else { p?.teardown() }
                 self?.closeViewer()
             }
-            p.onPiPStart = { [weak self, weak p] in self?.pipPlayer = p; self?.closeViewer(keepPlayer: true) }
-            p.onPiPRestore = { [weak self, weak p] in if let p { self?.showViewer(p) } }
-            p.onPiPEnd = { [weak self, weak p] in
-                guard let self, let p, self.pipPlayer === p else { return }
-                if self.viewer !== p { p.teardown() }
-                self.pipPlayer = nil
-            }
+            p.onPiPWillStart = { [weak self, weak p] in if let p { self?.willEnterPiP(for: p) } }
+            p.onPiPStart = { [weak self, weak p] in if let p { self?.enterPiP(for: p) } }
+            p.onPiPRestore = { [weak self, weak p] in if let p { self?.restoreFromPiP(p) } }
+            p.onPiPEnd = { [weak self, weak p] in if let p { self?.endPiP(for: p) } }
+            p.onPiPFailed = { [weak self, weak p] in if let p { self?.cancelEnterPiP(for: p) } }
             v = p
         } else {
             // every media of the list in its order, so ← → goes on past the post into the next
@@ -1020,9 +1033,89 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
                                   videoPosition: fromBrowse ? { [weak self] in self?.inline.position(for: $0.mediaId) ?? .zero } : nil,
                                   saveVideoPosition: fromBrowse ? { [weak self] in self?.inline.savePosition($1, for: $0.mediaId) } : nil)
             ph.onClose = { [weak self] in self?.closeViewer() }
+            ph.onPiPWillStart = { [weak self, weak ph] in if let ph { self?.willEnterPiP(for: ph) } }
+            ph.onPiPStart = { [weak self, weak ph] in if let ph { self?.enterPiP(for: ph) } }
+            ph.onPiPRestore = { [weak self, weak ph] in if let ph { self?.restoreFromPiP(ph) } }
+            ph.onPiPEnd = { [weak self, weak ph] in if let ph { self?.endPiP(for: ph) } }
+            ph.onPiPFailed = { [weak self, weak ph] in if let ph { self?.cancelEnterPiP(for: ph) } }
             v = ph
         }
         showViewer(v, source: sourceFrame, initialFrame: sourceFrame(item))
+    }
+
+    private func teardownPiPViewer() {
+        guard let v = pipViewer else { return }
+        pipViewer = nil
+        // Remove from superview BEFORE stopping PiP so macOS PIP.framework has no window rect
+        // to fly the old PiP window back into while the new video opens.
+        v.removeFromSuperview()
+        if let ph = v as? MacPhotoView {
+            ph.closePiPImmediately()
+        } else if let p = v as? MacPlayerView {
+            if let returned = p.closePiPImmediately() { inline.giveBack(returned) }
+        }
+    }
+
+    private func willEnterPiP(for v: NSView) {
+        guard viewer === v else { return }
+        // Hide the viewer visuals at Frame 0 of `willStartPictureInPicture` (keeping `v` in the
+        // window until `didStart` so AVKit reads `playerLayer`'s source rect cleanly) so no black
+        // player backdrop or PiP placeholder frames ever flash behind the flying PiP tile.
+        v.layer?.removeAllAnimations()
+        v.layer?.mask = nil
+        v.alphaValue = 0
+        setImmersive(false)
+        toast.isHidden = false
+        view.window?.makeFirstResponder(responderAfterViewer?() ?? collection)
+    }
+
+    private func cancelEnterPiP(for v: NSView) {
+        guard viewer === v else { return }
+        v.alphaValue = 1
+        setImmersive(true)
+        toast.isHidden = true
+        view.window?.makeFirstResponder(v)
+    }
+
+    private func enterPiP(for v: NSView) {
+        guard viewer === v else { return }
+        pipViewer = v
+        viewer = nil
+        isClosingViewer = false
+        v.alphaValue = 0
+        v.isHidden = true
+        setImmersive(false)
+        toast.isHidden = false
+        view.window?.makeFirstResponder(responderAfterViewer?() ?? collection)
+        updateInline()
+    }
+
+    private func restoreFromPiP(_ v: NSView) {
+        if let other = viewer, other !== v { dismissViewerImmediately() }
+        pipViewer = nil
+        viewer = v
+        isClosingViewer = false
+        v.isHidden = false
+        v.alphaValue = 1
+        v.layer?.opacity = 1
+        v.superview?.addSubview(v, positioned: .above, relativeTo: nil)
+        setImmersive(true)
+        toast.isHidden = true
+        view.window?.makeFirstResponder(v)
+    }
+
+    private func endPiP(for v: NSView) {
+        guard pipViewer === v else { return }
+        pipViewer = nil
+        if viewer !== v {
+            if let ph = v as? MacPhotoView {
+                ph.teardown()
+            } else if let p = v as? MacPlayerView {
+                if p.isLent { inline.giveBack(p.handBack()) } else { p.teardown() }
+            }
+            v.removeFromSuperview()
+            updateInline()
+        }
     }
 
     private func showViewer(_ v: NSView, source: ((FeedItem) -> NSRect?)? = nil, initialFrame: NSRect? = nil) {
@@ -1031,13 +1124,12 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         viewerSource = source
         isClosingViewer = false
         v.translatesAutoresizingMaskIntoConstraints = false
-        // the whole window (over the sidebar too), not only 浏览's pane
+        // fills the content pane beside the sidebar (leaving the sidebar visible and usable)
         let host = viewerHost?() ?? view
         host.addSubview(v)
         NSLayoutConstraint.activate([v.topAnchor.constraint(equalTo: host.topAnchor), v.bottomAnchor.constraint(equalTo: host.bottomAnchor),
                                      v.leadingAnchor.constraint(equalTo: host.leadingAnchor), v.trailingAnchor.constraint(equalTo: host.trailingAnchor)])
-        // Media gets the whole window: hide the toolbar (it overlapped the viewer's close button)
-        // and the undo toast; the viewer itself covers the rest of the feed.
+        // Hide detail-pane toolbar chrome and floating overlays while the viewer covers the content area.
         setImmersive(true)
         toast.isHidden = true
         view.window?.makeFirstResponder(v)
@@ -1063,6 +1155,25 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             self.view.window?.makeFirstResponder(self.responderAfterViewer?() ?? self.collection)
             self.updateInline()
         }
+    }
+
+    /// Closes the viewer immediately without a zoom-out animation (e.g. when switching sidebar items).
+    func dismissViewerImmediately() {
+        guard let v = viewer else { return }
+        isClosingViewer = false
+        if let ph = v as? MacPhotoView {
+            ph.teardown()
+        } else if let p = v as? MacPlayerView {
+            if p.isLent { inline.giveBack(p.handBack()) } else { p.teardown() }
+        }
+        v.layer?.removeAllAnimations()
+        v.layer?.mask = nil
+        v.removeFromSuperview()
+        viewer = nil
+        viewerSource = nil
+        setImmersive(false)
+        view.window?.makeFirstResponder(responderAfterViewer?() ?? collection)
+        updateInline()
     }
 
     private func animateViewer(_ viewer: NSView, source: NSRect?, opening: Bool, completion: @escaping () -> Void = {}) {
@@ -1120,21 +1231,12 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
 
     var isShowingViewer: Bool { viewer != nil }
 
-    /// Viewer mode: no toolbar, no traffic lights, transparent title bar — the media fills the
-    /// whole window. Leaving restores the normal window chrome.
-    /// The media viewer opened (true) or closed (false); the settings panel steps aside.
+    /// The media viewer opened (true) or closed (false); the window updates its detail-pane
+    /// toolbar chrome and suppresses floating overlays while keeping the sidebar visible.
     var onViewer: ((Bool) -> Void)?
 
     private func setImmersive(_ on: Bool) {
         onViewer?(on)
-        guard let w = view.window else { return }
-        w.toolbar?.isVisible = !on
-        // the title bar is always see-through: the feed background runs under the toolbar
-        w.titlebarAppearsTransparent = true
-        w.titlebarSeparatorStyle = .none
-        // the window title would otherwise show over the media's top-left corner
-        w.titleVisibility = on ? .hidden : .visible
-        for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { w.standardWindowButton(b)?.isHidden = on }
     }
 
     #if DEBUG
@@ -1285,6 +1387,9 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
             }
             menu.addItem(.separator())
         }
+        menu.addItem(ClosureMenuItem(item.isFavorite ? L("common.unfavorite") : L("common.favorite")) { [weak self] in
+            self?.setFavorite(!item.isFavorite, for: item)
+        })
         menu.addItem(ClosureMenuItem(L("card.menu.tagMedia")) { [weak self] in self?.showTagPicker(card, anchor: card.view, rect: card.view.bounds, wholePost: false) })
         if !item.isLoose { menu.addItem(ClosureMenuItem(L("card.menu.tagPost")) { [weak self] in self?.showTagPicker(card, anchor: card.view, rect: card.view.bounds, wholePost: true) }) }
         let pending = item.tags.filter { $0.isAI && !$0.isUser }
@@ -1362,6 +1467,23 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
         return sub
     }
 
+    private func favoriteMenu(item: FeedItem) -> NSMenu {
+        let sub = NSMenu()
+        sub.addItem(ClosureMenuItem(L("common.unfavorite")) { [weak self] in self?.setFavorite(false, for: item) })
+        return sub
+    }
+
+    private func setFavorite(_ on: Bool, for item: FeedItem) {
+        guard let receipt = try? Core.action(on ? .favorite : .unfavorite, media: [item.mediaId]), receipt.count > 0 else { return }
+        NotificationCenter.default.post(name: .libraryChanged, object: nil)
+        reload(keepPosition: true)
+        toast.show(L(on ? "favorite.added" : "favorite.removed", receipt.count), action: L("common.undo")) { [weak self] in
+            do { self?.toast.show(try Core.undo(receipt)) } catch { self?.toast.show(error.localizedDescription) }
+            NotificationCenter.default.post(name: .libraryChanged, object: nil)
+            self?.reload(keepPosition: true)
+        }
+    }
+
     // MARK: Folders
 
     /// Where the media viewer goes (the window's root view: over the sidebar too).
@@ -1391,6 +1513,10 @@ final class MacFeedViewController: NSViewController, NSCollectionViewDataSource,
     func toggleRecentOnly() {
         guard query.recent else { var f = FeedFilter(); f.recentOnly = true; return search(f) }
         onSearchKeys?(currentKeys().filter { $0 != SearchKeyword.recent.key }, true)
+    }
+    func toggleFavoriteOnly() {
+        guard query.favorite else { var f = FeedFilter(); f.favoriteOnly = true; return search(f) }
+        onSearchKeys?(currentKeys().filter { $0 != SearchKeyword.favorite.key }, true)
     }
     func showMessage(_ text: String) { toast.show(text) }
 
@@ -1795,28 +1921,33 @@ final class TagStripView: NSView, NSViewToolTipOwner {
     }
 
     var onTag: ((String) -> Void)?
+    var onFavorite: (() -> Void)?
     var onRecent: (() -> Void)?
     var onAdd: ((NSView, NSRect) -> Void)?
     var menuForTag: ((TagView) -> NSMenu?)?
+    var menuForFavorite: (() -> NSMenu?)?
     var onResize: (() -> Void)?
     /// Room before the first and after the last pill (the card's margin).
     var sideInset: CGFloat = 0
 
-    private enum Kind { case recent, tag(TagView), add }
+    private enum Kind { case favorite, recent, tag(TagView), add }
     private struct Pill { let kind: Kind; let text: NSAttributedString?; var rect: NSRect }
     private var pills: [Pill] = []
     private(set) var contentWidth: CGFloat = 0
     var count: Int { pills.count }
     /// A pill: a neutral rounded box with a hairline edge, a dot in the tag's colour (as Finder's
     /// tags), then the name in the text colour.
-    private static let height: CGFloat = 20, gap: CGFloat = 5, pad: CGFloat = 7, dot: CGFloat = 6, dotGap: CGFloat = 5
+    private static let height: CGFloat = 20, gap: CGFloat = 5, pad: CGFloat = 7, dot: CGFloat = 6, star: CGFloat = 10, dotGap: CGFloat = 5
     private static let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+    private static let starImage: NSImage = NSImage(systemSymbolName: "star.fill", accessibilityDescription: L("card.favoritePill"))?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9.5, weight: .semibold).applying(.init(paletteColors: [MacPlayerView.starGold]))) ?? NSImage()
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
 
-    func set(_ tags: [TagView], recent: Bool, highlight: [String] = []) {
+    func set(_ tags: [TagView], favorite: Bool = false, recent: Bool, highlight: [String] = []) {
         var list: [Pill] = []
+        if favorite { list.append(Pill(kind: .favorite, text: NSAttributedString(string: L("card.favoritePill"), attributes: [.font: Self.font, .foregroundColor: NSColor.labelColor]), rect: .zero)) }
         if recent { list.append(Pill(kind: .recent, text: NSAttributedString(string: L("card.recentPill"), attributes: [.font: Self.font, .foregroundColor: NSColor.labelColor]), rect: .zero)) }
         for t in tags {
             let text = NSMutableAttributedString(string: t.label, attributes: [.font: Self.font, .foregroundColor: NSColor.labelColor])
@@ -1826,7 +1957,9 @@ final class TagStripView: NSView, NSViewToolTipOwner {
         list.append(Pill(kind: .add, text: nil, rect: .zero))
         var x: CGFloat = sideInset
         for i in list.indices {
-            let w = list[i].text.map { ceil($0.size().width) + Self.pad * 2 + Self.dot + Self.dotGap - 1 } ?? Self.height
+            let lead: CGFloat
+            if case .favorite = list[i].kind { lead = Self.star } else { lead = Self.dot }
+            let w = list[i].text.map { ceil($0.size().width) + Self.pad * 2 + lead + Self.dotGap - 1 } ?? Self.height
             list[i].rect = NSRect(x: x, y: 0, width: w, height: Self.height)
             x += w + Self.gap
         }
@@ -1843,6 +1976,7 @@ final class TagStripView: NSView, NSViewToolTipOwner {
     private static func tip(for p: Pill) -> String? {
         switch p.kind {
         case .tag(let t) where !t.models.isEmpty: return L("format.labelValue", "AI", t.models.map { ModelStore.shared.displayName($0) }.joined(separator: L("list.separator")))
+        case .favorite: return L("place.favorites")
         case .recent: return L("card.recent.tip")
         case .add: return L("card.addTag")
         default: return nil
@@ -1858,16 +1992,24 @@ final class TagStripView: NSView, NSViewToolTipOwner {
             box.lineWidth = 1
             box.stroke()
             if let text = p.text {
-                let dotColor: NSColor
-                switch p.kind {
-                case .recent: dotColor = .systemOrange
-                case .tag(let t): dotColor = NSColor.tagColor(t)
-                case .add: dotColor = .clear
+                let lead: CGFloat
+                if case .favorite = p.kind {
+                    lead = Self.star
+                    let z = Self.starImage.size
+                    Self.starImage.draw(in: NSRect(x: p.rect.minX + Self.pad + (Self.star - z.width) / 2, y: p.rect.midY - z.height / 2, width: z.width, height: z.height))
+                } else {
+                    lead = Self.dot
+                    let dotColor: NSColor
+                    switch p.kind {
+                    case .recent: dotColor = .systemOrange
+                    case .tag(let t): dotColor = NSColor.tagColor(t)
+                    case .favorite, .add: dotColor = .clear
+                    }
+                    dotColor.setFill()
+                    NSBezierPath(ovalIn: NSRect(x: p.rect.minX + Self.pad, y: p.rect.midY - Self.dot / 2, width: Self.dot, height: Self.dot)).fill()
                 }
-                dotColor.setFill()
-                NSBezierPath(ovalIn: NSRect(x: p.rect.minX + Self.pad, y: p.rect.midY - Self.dot / 2, width: Self.dot, height: Self.dot)).fill()
                 let size = text.size()
-                text.draw(at: NSPoint(x: p.rect.minX + Self.pad + Self.dot + Self.dotGap, y: p.rect.midY - size.height / 2))
+                text.draw(at: NSPoint(x: p.rect.minX + Self.pad + lead + Self.dotGap, y: p.rect.midY - size.height / 2))
             } else {
                 let z = Self.plus.size
                 Self.plus.draw(in: NSRect(x: p.rect.midX - z.width / 2, y: p.rect.midY - z.height / 2, width: z.width, height: z.height))
@@ -1894,14 +2036,18 @@ final class TagStripView: NSView, NSViewToolTipOwner {
     override func mouseUp(with event: NSEvent) {
         guard let p = pill(at: event) else { return }
         switch p.kind {
+        case .favorite: onFavorite?()
         case .recent: onRecent?()
         case .tag(let t): onTag?(t.label)
         case .add: onAdd?(self, p.rect)
         }
     }
     override func menu(for event: NSEvent) -> NSMenu? {
-        if case .tag(let t)? = pill(at: event)?.kind { return menuForTag?(t) }
-        return nil
+        switch pill(at: event)?.kind {
+        case .tag(let t): return menuForTag?(t)
+        case .favorite: return menuForFavorite?()
+        default: return nil
+        }
     }
 
     // VoiceOver: each pill is a button
@@ -1913,6 +2059,7 @@ final class TagStripView: NSView, NSViewToolTipOwner {
             e.setAccessibilityRole(.button)
             e.setAccessibilityFrameInParentSpace(p.rect)
             switch p.kind {
+            case .favorite: e.setAccessibilityLabel(L("card.favoritePill")); e.setAccessibilityIdentifier("favoriteBadge")
             case .recent: e.setAccessibilityLabel(L("place.recent")); e.setAccessibilityIdentifier("recentBadge")
             case .tag(let t): e.setAccessibilityLabel(t.label); e.setAccessibilityIdentifier(t.label)
             case .add: e.setAccessibilityLabel(L("card.addTag")); e.setAccessibilityIdentifier("addTag")

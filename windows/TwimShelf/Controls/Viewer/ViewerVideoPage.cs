@@ -42,6 +42,8 @@ public sealed partial class ViewerVideoPage : Grid
     {
         AreTransportControlsEnabled = false,
         Stretch = Stretch.Uniform,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
         AutoPlay = true,
         Opacity = 0,
         IsHitTestVisible = false,
@@ -56,7 +58,6 @@ public sealed partial class ViewerVideoPage : Grid
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    readonly bool _cropSquarePreview;
     CancellationTokenSource? _posterLoading;
     DispatcherQueueTimer? _clock;
     DispatcherQueueTimer? _holdTimer;
@@ -85,7 +86,7 @@ public sealed partial class ViewerVideoPage : Grid
     public ViewerVideoPage(FeedItem item, ImageSource? previewImage = null, string? squarePreviewPath = null, bool cropSquarePreview = false)
     {
         Item = item;
-        _cropSquarePreview = cropSquarePreview && previewImage == null && !string.IsNullOrEmpty(squarePreviewPath);
+        _ = cropSquarePreview;
 
         IsHitTestVisible = false;
         _hud = new Border
@@ -125,7 +126,7 @@ public sealed partial class ViewerVideoPage : Grid
         }
         else if (!string.IsNullOrEmpty(squarePreviewPath) && File.Exists(squarePreviewPath))
         {
-            _poster.Stretch = _cropSquarePreview ? Stretch.Fill : Stretch.Uniform;
+            _poster.Stretch = Stretch.Uniform;
             try { _poster.Source = new BitmapImage(new Uri(squarePreviewPath)); } catch { }
         }
         else
@@ -158,18 +159,17 @@ public sealed partial class ViewerVideoPage : Grid
         if (w <= 0 || h <= 0) return;
         _viewW = w;
         _viewH = h;
-        if (_cropSquarePreview && !_hasFrame)
-        {
-            var fitted = FittedRect(new Rect(0, 0, w, h));
-            var side = Math.Min(fitted.Width, fitted.Height);
-            _poster.Width = side;
-            _poster.Height = side;
-        }
-        else
-        {
-            _poster.Width = double.NaN;
-            _poster.Height = double.NaN;
-        }
+        UpdatePlayerSize();
+        _poster.Width = double.NaN;
+        _poster.Height = double.NaN;
+    }
+
+    void UpdatePlayerSize()
+    {
+        if (_viewW <= 0 || _viewH <= 0) return;
+        var fitted = FittedRect(new Rect(0, 0, _viewW, _viewH));
+        _player.Width = Math.Max(1, fitted.Width);
+        _player.Height = Math.Max(1, fitted.Height);
     }
 
     Rect FittedRect(Rect bounds)
@@ -321,6 +321,7 @@ public sealed partial class ViewerVideoPage : Grid
             {
                 _videoW = s.NaturalVideoWidth;
                 _videoH = s.NaturalVideoHeight;
+                UpdatePlayerSize();
             }
         }
         catch { }

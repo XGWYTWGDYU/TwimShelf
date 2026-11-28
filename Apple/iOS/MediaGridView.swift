@@ -3,6 +3,7 @@ import UIKit
 
 protocol MediaGridViewDelegate: AnyObject {
     func mediaGrid(_ g: MediaGridView, didTap index: Int)
+    func mediaGrid(_ g: MediaGridView, didTapFavoriteAt index: Int)
     func mediaGrid(_ g: MediaGridView, menuFor index: Int) -> UIMenu?
     func mediaGrid(_ g: MediaGridView, didSettleAt level: Int)
     func mediaGridSelectionChanged(_ g: MediaGridView)
@@ -95,16 +96,30 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil, displayLink == nil {
-            let link = CADisplayLink(target: self, selector: #selector(frameTick(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
-            link.add(to: .main, forMode: .common)       // keeps firing while the user scrolls
-            displayLink = link
-            linkAtFullRate = false
-        } else if window == nil {
+        if window != nil {
+            if displayLink == nil {
+                let link = CADisplayLink(target: self, selector: #selector(frameTick(_:)))
+                link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+                link.add(to: .main, forMode: .common)       // keeps firing while the user scrolls
+                displayLink = link
+                linkAtFullRate = false
+            }
+            forceRedraw()
+            DispatchQueue.main.async { [weak self] in self?.forceRedraw() }
+        } else {
             displayLink?.invalidate()
             displayLink = nil
         }
+    }
+
+    /// Forces an immediate Metal draw when returning to a window (e.g. after a fullscreen viewer
+    /// dismisses directly into PiP without an animated transition).
+    func forceRedraw() {
+        drawnFrame = -1
+        needsDraw = true
+        guard window != nil, scene != nil, bounds.width > 0, bounds.height > 0 else { return }
+        frameTime = CACurrentMediaTime()
+        metalView.draw()
     }
 
     /// While the grid animates (a zoom, its settle, a re-align, a removal) the display link asks
@@ -385,7 +400,7 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
         renderer.placeholder = Self.simd(ph)
         let c = Self.simd(bg)
         renderer.draw(drawn, in: metalView, scale: scale, background: MTLClearColor(red: Double(c.x), green: Double(c.y), blue: Double(c.z), alpha: 1)) { key in
-            scene.tile(key: key).map { ($0.item, $0.count, scene.isSelected(key: key)) }
+            scene.tile(key: key).map { ($0.item, $0.count, scene.isSelected(key: key), $0.favorited) }
         }
         prefetch()
     }
@@ -425,8 +440,20 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
     }
 
     @objc private func tapped(_ g: UITapGestureRecognizer) {
-        guard let i = index(at: g.location(in: self)) else { return }
-        if selecting { toggle(i) } else { delegate?.mediaGrid(self, didTap: i) }
+        let p = g.location(in: self)
+        guard let i = index(at: p) else { return }
+        if selecting {
+            toggle(i)
+        } else if let scene, let tile = scene.tile(at: i), tile.favorited {
+            let f = scene.engine.restFrame(i, scene.engine.rest)
+            if f.width >= 40, p.x - f.minX <= 36, f.maxY - p.y <= 36 {
+                delegate?.mediaGrid(self, didTapFavoriteAt: i)
+                return
+            }
+            delegate?.mediaGrid(self, didTap: i)
+        } else {
+            delegate?.mediaGrid(self, didTap: i)
+        }
     }
 
     private func toggle(_ i: Int) {
@@ -539,17 +566,63 @@ final class MediaGridView: UIView, UIScrollViewDelegate, UIGestureRecognizerDele
         return iv
     }
 
-    /// The Metal grid has no UIKit view for an individual tile.
-    func placeViewerSource(_ imageView: UIImageView, for mediaId: String) -> Bool {
-        guard let scene, let index = scene.tiles.firstIndex(where: { $0.item.mediaId == mediaId }) else { return false }
-        let frame = scene.engine.restFrame(index, scene.engine.rest)
-        guard frame.intersects(bounds.inset(by: scrollView.adjustedContentInset)) else { return false }
+    /// Pure geometry + thumbnail snapshot for the custom Apple Photos-style viewer transition.
+    /// Does not add any subview to the Metal grid or hand any grid view to UIKit.
+    func transitionInfo(for mediaId: String, in coordinateSpace: UICoordinateSpace, scrollToVisible: Bool = false) -> GridTileTransitionInfo? {
+        guard let scene, let index = scene.tiles.firstIndex(where: { $0.item.mediaId == mediaId }) else { return nil }
+        let visible = bounds.inset(by: scrollView.adjustedContentInset)
+        var frame = scene.engine.restFrame(index, scene.engine.rest)
+        if scrollToVisible, !visible.isEmpty, (frame.minY < visible.minY || frame.maxY > visible.maxY) {
+            let cfg = scene.engine.cfg
+            let r = scene.engine.rest
+            var nextOffset = r.offset
+            if frame.minY < visible.minY {
+                nextOffset -= (visible.minY - frame.minY) + 12
+            } else if frame.maxY > visible.maxY {
+                nextOffset += (frame.maxY - visible.maxY) + 12
+            }
+            let maxOffset = cfg.maxOffset(level: r.level, phase: r.phase)
+            let clamped = min(max(nextOffset, 0), maxOffset)
+            scene.engine.rest.offset = clamped
+            syncingScroll = true
+            scrollView.contentOffset = CGPoint(x: 0, y: clamped - cfg.insetTop)
+            syncingScroll = false
+            frameTime = CACurrentMediaTime()
+            metalView.draw()
+            needsDraw = false
+            frame = scene.engine.restFrame(index, scene.engine.rest)
+        }
+        guard frame.intersects(visible) else { return nil }
         let item = scene.tiles[index].item
-        imageView.image = renderer?.thumbnails.image(for: item).map { UIImage(cgImage: $0) }
+        let img = renderer?.thumbnails.image(for: item).map { UIImage(cgImage: $0) }
             ?? MediaLoader.shared.anyCached(item, near: frame.width * traitCollection.displayScale)
-        imageView.frame = convert(frame, to: scrollView)
-        if imageView.superview == nil { scrollView.addSubview(imageView) }
-        return true
+        return GridTileTransitionInfo(
+            mediaId: mediaId,
+            frame: convert(frame, to: coordinateSpace),
+            cornerRadius: GridConfig.cornerRadius,
+            image: img
+        )
+    }
+
+    /// Hides or reveals one tile in the Metal renderer during a viewer transition (matching Apple
+    /// Photos' `setHiddenAssetReferences:`) and redraws synchronously to prevent double-image flashes.
+    func setHiddenMediaId(_ mediaId: String?) {
+        guard let scene else { return }
+        if let mediaId, let index = scene.tiles.firstIndex(where: { $0.item.mediaId == mediaId }),
+           index < scene.engine.items.count {
+            let key = scene.engine.items[index]
+            if scene.engine.hiddenPhoto != key {
+                scene.engine.hiddenPhoto = key
+                frameTime = CACurrentMediaTime()
+                metalView.draw()
+                needsDraw = false
+            }
+        } else if menuOverlay == nil, scene.engine.hiddenPhoto != nil {
+            scene.engine.hiddenPhoto = nil
+            frameTime = CACurrentMediaTime()
+            metalView.draw()
+            needsDraw = false
+        }
     }
 
     // MARK: Accessibility

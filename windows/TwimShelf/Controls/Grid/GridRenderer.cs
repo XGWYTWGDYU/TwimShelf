@@ -113,6 +113,19 @@ internal sealed unsafe class GridGpuDevice
             return m;
         }
 
+        float star5SDF(float2 p, float r, float rf) {
+            static const float2 k1 = float2(0.809016994375, -0.587785252292);
+            static const float2 k2 = float2(-k1.x, k1.y);
+            p.x = abs(p.x);
+            p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+            p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+            p.x = abs(p.x);
+            p.y -= r;
+            float2 ba = rf * float2(-k1.y, k1.x) - float2(0.0, 1.0);
+            float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+            return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+        }
+
         float cover(float d, float sc) { return saturate(0.5 - d * sc); }
 
         float4 gridTileFragment(VOut i) : SV_Target {
@@ -126,9 +139,19 @@ internal sealed unsafe class GridGpuDevice
                 ? picture.Sample(smp, saturate(p / s)).rgb
                 : i.placeholder.rgb;
 
-            // Video play triangle bottom-left (tiles >= 40 dip)
+            // Favorite star bottom-left (tiles >= 40 dip)
+            bool isFav = (i.flags & 8u) != 0u;
+            if (isFav && s >= 40.0) {
+                float2 sp = float2(p.x - 12.5, (s - 12.5) - p.y);
+                float star = star5SDF(sp, 6.8, 0.42);
+                rgb = lerp(rgb, float3(0.0, 0.0, 0.0), cover(star - 1.2, scale * 0.35) * 0.4);
+                rgb = lerp(rgb, float3(0.98, 0.76, 0.08), cover(star, scale));
+            }
+
+            // Video play triangle bottom-left (shifted right when favorited, tiles >= 40 dip)
             if ((i.flags & 2u) != 0u && s >= 40.0) {
-                float2 q = p - float2(6.0, s - 18.0);
+                float vx = isFav ? 22.0 : 6.0;
+                float2 q = p - float2(vx, s - 18.0);
                 float tri = triangleSDF(q, float2(1.5, 0.0), float2(1.5, 12.0), float2(12.0, 6.0));
                 rgb = lerp(rgb, float3(0.0, 0.0, 0.0), cover(tri - 1.0, scale * 0.35) * 0.35);
                 rgb = lerp(rgb, float3(1.0, 1.0, 1.0), cover(tri, scale));
@@ -598,6 +621,7 @@ internal sealed unsafe partial class GridRenderer : IDisposable
                         if (srv != 0) flags |= 1u;
                         if (meta.Item.IsVideo) flags |= 2u;
                         if (meta.Selected) flags |= 4u;
+                        if (meta.Item.Favorite) flags |= 8u;
                         count = (uint)Math.Max(0, meta.Count);
                     }
                     _srvs.Add(srv);

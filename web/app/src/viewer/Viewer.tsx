@@ -8,9 +8,11 @@
 // and text; a click on a photo hides or shows them with the buttons. A video page is the player,
 // which has its own share and close.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Share, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Share, Star, X } from 'lucide-react';
 import { L, store, type FeedItem } from '@twimshelf/core';
+import { action } from '../lib/actions';
 import { useStore } from '../lib/hooks';
+import { libraryChanged } from '../lib/library';
 import { saveFile } from '../lib/saveFile';
 import { openMenuBelow, type MenuEntry } from '../components/Menu';
 import { toast } from '../components/toast';
@@ -34,7 +36,14 @@ export function openViewer(items: FeedItem[], index: number, options?: ViewerOpt
   if (items.length && !viewer.get()) viewer.set({ items, index: Math.max(0, Math.min(index, items.length - 1)), ...options });
 }
 export const viewerOpen = () => viewer.get() != null;
-/** Whether the viewer covers the window (inline videos stop under it). */
+/** Closes the viewer immediately without a zoom-out animation (e.g. switching sidebar items). */
+export function closeViewerImmediately(): void {
+  const v = viewer.get();
+  if (!v) return;
+  viewer.set(null);
+  v.onClose?.(v.items[v.index]);
+}
+/** Whether the viewer covers the content pane (inline videos stop under it). */
 export const viewerState = viewer;
 
 export function ViewerHost() {
@@ -66,9 +75,23 @@ function Viewer({ items, index: start, source, squarePreview, onClose }: {
   const [offset, setOffset] = useState(0);
   const [chromeHidden, setChromeHidden] = useState(false);
   const [idle, setIdle] = useState(false);
+  const [favOverrides, setFavOverrides] = useState<Map<string, boolean>>(() => new Map());
   const photos = useRef(new Map<number, PhotoHandle | null>());
   const player = useRef<PlayerHandle | null>(null);
   const item = items[index];
+  const isFav = (it: FeedItem) => favOverrides.get(it.media_id) ?? Boolean(it.favorite);
+  const toggleFavorite = useCallback(async () => {
+    const it = items[st.current.index];
+    if (!it) return;
+    const next = !(favOverrides.get(it.media_id) ?? Boolean(it.favorite));
+    setFavOverrides((prev) => new Map(prev).set(it.media_id, next));
+    try {
+      await action(next ? 'favorite' : 'unfavorite', { media: [it.media_id] });
+      libraryChanged();
+    } catch {
+      setFavOverrides((prev) => new Map(prev).set(it.media_id, !next));
+    }
+  }, [items, favOverrides]);
   const stride = size.w + GAP;
   const st = useRef({ index, offset, stride });
   st.current = { index, offset, stride };
@@ -90,15 +113,14 @@ function Viewer({ items, index: start, source, squarePreview, onClose }: {
     animations.current = [];
   }, []);
 
-  // the window's buttons go while the viewer covers it (the desktop app on the Mac)
   useEffect(() => {
-    window.twimshelf?.setViewerMode?.(true);
     box.current?.focus();
-    return () => window.twimshelf?.setViewerMode?.(false);
   }, []);
   useLayoutEffect(() => {
     const el = box.current!;
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -363,6 +385,7 @@ function Viewer({ items, index: start, source, squarePreview, onClose }: {
   const leaving = offset !== 0 && towards && towards.post_id !== item.post_id;
   const captionOpacity = leaving ? Math.max(0, 1 - Math.abs(offset) / Math.max(1, stride * 0.4)) : 1;
   const video = item.kind === 'video';
+  const portrait = size.w > 0 && size.h >= size.w;
   const initialVideoPreview = video && index === start && squarePreview
     ? fitMedia(new DOMRectReadOnly(0, 0, size.w, size.h), item.size?.[0] ?? 0, item.size?.[1] ?? 0)
     : null;
@@ -379,12 +402,13 @@ function Viewer({ items, index: start, source, squarePreview, onClose }: {
                 : i === index
                   ? <Player ref={player} item={items[i]} poster={previewOf(items[i])}
                       squarePreview={initialVideoPreview && squarePreview ? { url: squarePreview, side: Math.min(initialVideoPreview.width, initialVideoPreview.height) } : undefined}
+                      favorited={isFav(items[i])} onToggleFavorite={() => void toggleFavorite()}
                       onClose={close} onShare={share} onIdle={setIdle} />
                   : <Poster item={items[i]} />}
             </div>
           ))}
         </div>
-        {counter && !chromeHidden && <div className="viewer-counter">{counter}</div>}
+        {counter && !chromeHidden && !(video && idle) && (video || !portrait) && <div className="viewer-counter">{counter}</div>}
         {multi && index > 0 && !chromeHidden && !(video && idle) && (
           <button className="viewer-round viewer-prev" aria-label={L('viewer.previous.mac')} title={L('viewer.previous.mac')} onMouseDown={(e) => e.stopPropagation()} onClick={() => step(-1)}><ChevronLeft size={20} strokeWidth={2.4} /></button>
         )}
@@ -392,12 +416,26 @@ function Viewer({ items, index: start, source, squarePreview, onClose }: {
           <button className="viewer-round viewer-next" aria-label={L('viewer.next.mac')} title={L('viewer.next.mac')} onMouseDown={(e) => e.stopPropagation()} onClick={() => step(1)}><ChevronRight size={20} strokeWidth={2.4} /></button>
         )}
         {!chromeHidden && captionShows(item) && (
-          <Caption item={item} maxHeight={size.h * 0.5} trailing={video ? 16 : 110} bottom={video ? 76 : 0} opacity={video && idle ? 0 : captionOpacity} />
+          <Caption item={item} maxHeight={size.h * 0.5} trailing={video || portrait ? 16 : 160} bottom={video ? 56 : portrait ? 52 : 0} opacity={video && idle ? 0 : captionOpacity} />
         )}
-        {!video && !chromeHidden && (
-          <div className="viewer-corner" onMouseDown={(e) => e.stopPropagation()}>
-            <button className="viewer-round small" aria-label={L('viewer.share.mac')} title={L('viewer.share.mac')} onClick={(e) => share(e.currentTarget)}><Share size={15} strokeWidth={2.2} /></button>
-            <button className="viewer-round small" aria-label={L('viewer.close.mac')} title={L('viewer.close.mac')} onClick={close}><X size={16} strokeWidth={2.4} /></button>
+        {!video && !chromeHidden && !portrait && (
+          <div className="viewer-photo-pill" onMouseDown={(e) => e.stopPropagation()}>
+            <button className="viewer-pill-btn" aria-label={isFav(item) ? L('common.unfavorite') : L('common.favorite')} title={isFav(item) ? L('common.unfavorite') : L('common.favorite')} onClick={() => void toggleFavorite()}>
+              <Star size={15} strokeWidth={2.2} fill={isFav(item) ? '#F5B800' : 'none'} color={isFav(item) ? '#F5B800' : 'currentColor'} />
+            </button>
+            <button className="viewer-pill-btn" aria-label={L('viewer.share.mac')} title={L('viewer.share.mac')} onClick={(e) => share(e.currentTarget)}><Share size={15} strokeWidth={2.2} /></button>
+            <button className="viewer-pill-btn" aria-label={L('viewer.close.mac')} title={L('viewer.close.mac')} onClick={close}><X size={16} strokeWidth={2.4} /></button>
+          </div>
+        )}
+        {!video && !chromeHidden && portrait && (
+          <div className="viewer-photo-dock" onMouseDown={(e) => e.stopPropagation()}>
+            {counter && <span className="viewer-dock-counter">{counter}</span>}
+            <div className="viewer-dock-spacer" />
+            <button className="player-btn" aria-label={isFav(item) ? L('common.unfavorite') : L('common.favorite')} title={isFav(item) ? L('common.unfavorite') : L('common.favorite')} onClick={() => void toggleFavorite()}>
+              <Star size={15} strokeWidth={2.2} fill={isFav(item) ? '#F5B800' : 'none'} color={isFav(item) ? '#F5B800' : 'currentColor'} />
+            </button>
+            <button className="player-btn" aria-label={L('viewer.share.mac')} title={L('viewer.share.mac')} onClick={(e) => share(e.currentTarget)}><Share size={15} strokeWidth={2.2} /></button>
+            <button className="player-btn" aria-label={L('viewer.close.mac')} title={L('viewer.close.mac')} onClick={close}><X size={16} strokeWidth={2.4} /></button>
           </div>
         )}
       </div>

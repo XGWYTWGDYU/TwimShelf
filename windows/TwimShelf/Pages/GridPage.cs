@@ -34,6 +34,7 @@ public sealed partial class GridPage : UserControl, IShellPage
     List<GridEntry> _entries = [];
     Dictionary<string, long> _trashedAt = [];
     int _revision = -1, _generation;
+    bool _active = true;
     string _counts = "";
     bool Bin => _place == Place.Trash;
     bool Grouped => Prefs.Instance.FeedGrouped;
@@ -54,6 +55,7 @@ public sealed partial class GridPage : UserControl, IShellPage
             KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden,
         };
         _grid.TileOpened += OnTileOpened;
+        _grid.TileUnfavoriteRequested += item => _ = MediaActions.Run(ActionKind.Unfavorite, [item.MediaId], done: n => L("favorite.removed", n));
         _grid.TileContextRequested += OnTileContextRequested;
         _grid.SelectionChanged += () => { BuildCommands(); ChromeChanged?.Invoke(); };
         _grid.SettledAtLevel += level =>
@@ -64,10 +66,10 @@ public sealed partial class GridPage : UserControl, IShellPage
         _grid.ZoomStateChanged += BuildCommands;
         // (no shortcut tips: WinUI would float "Ctrl+-" over the grid on hover)
         KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
-        KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Add, () => _grid.Step(-1)));
-        KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)187, () => _grid.Step(-1)));
-        KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Subtract, () => _grid.Step(1)));
-        KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)189, () => _grid.Step(1)));
+        KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Add, () => { if (_active) _grid.Step(-1); }));
+        KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)187, () => { if (_active) _grid.Step(-1); }));
+        KeyboardAccelerators.Add(Accelerator(Windows.System.VirtualKey.Subtract, () => { if (_active) _grid.Step(1); }));
+        KeyboardAccelerators.Add(Accelerator((Windows.System.VirtualKey)189, () => { if (_active) _grid.Step(1); }));
 
         _empty = new TextBlock
         {
@@ -96,7 +98,7 @@ public sealed partial class GridPage : UserControl, IShellPage
 
     void OnLibraryChanged()
     {
-        if (_library.Revision != _revision) _ = Reload();
+        if (_active && _library.Revision != _revision) _ = Reload();
     }
 
     async Task Reload()
@@ -145,7 +147,7 @@ public sealed partial class GridPage : UserControl, IShellPage
         var e = _entries[index];
         // ← → goes through every media of the grid, starting here
         var all = Grouped ? _entries.SelectMany(x => x.Items).ToList() : _items;
-        var root = MainWindow.Current?.Content as UIElement;
+        var root = MainWindow.Current?.ViewerHost as UIElement;
 
         string? CoverIdFor(string mediaId) =>
             _entries.FirstOrDefault(entry => entry.Items.Any(m => m.MediaId == mediaId))?.First.MediaId;
@@ -164,6 +166,7 @@ public sealed partial class GridPage : UserControl, IShellPage
                 return item.MediaId == e.First.MediaId ? initialRect : null;
             },
             ActiveMediaChanged = id => _grid.SetHiddenMedia(id == null ? null : CoverIdFor(id)),
+            UnderlayCoveredChanged = covered => _grid.SetCoveredByViewer(covered),
             SquarePreviewPath = item => Thumbnails.PeekCachedTilePath(item),
         });
     }
@@ -269,6 +272,13 @@ public sealed partial class GridPage : UserControl, IShellPage
             else
             {
                 bar.PrimaryCommands.Add(B("\uE8F4", L("common.addToFolder"), async () => { await MediaActions.AddToFolder(SelectedMedia); SetSelecting(false); }, any));
+                if (_place == Place.Favorites)
+                    bar.PrimaryCommands.Add(B("\uE8D9", L("common.unfavorite"), async () =>
+                    {
+                        var ids = SelectedMedia.Select(i => i.MediaId).ToList();
+                        SetSelecting(false);
+                        await MediaActions.Run(ActionKind.Unfavorite, ids, done: n => L("favorite.removed", n));
+                    }, any));
                 if (_place.Folder is { } folder)
                     bar.PrimaryCommands.Add(B("\uE8F6", L("common.removeFromFolder"), async () =>
                     {
@@ -358,8 +368,24 @@ public sealed partial class GridPage : UserControl, IShellPage
         catch (Exception e) { await Dialogs.Alert(w, L("common.notDone"), e.Message); }
     }
 
+    public void Shown()
+    {
+        _active = true;
+        _grid.SetActive(true);
+        if (_library.Revision != _revision) _ = Reload();
+        ChromeChanged?.Invoke();
+    }
+
     public void Hidden()
     {
+        _active = false;
+        if (Selecting) SetSelecting(false);
+        _grid.SetActive(false);
+    }
+
+    public void Close()
+    {
+        _active = false;
         _library.Changed -= OnLibraryChanged;
         _grid.Dispose();
     }

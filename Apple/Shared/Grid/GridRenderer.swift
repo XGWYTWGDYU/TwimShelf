@@ -82,9 +82,9 @@ final class GridRenderer {
     /// Draw the next frames here instead of on the view's drawable.
     var target: MTLTexture?
 
-    /// One frame. `info` gives a tile's media, its post's count and whether it is selected.
+    /// One frame. `info` gives a tile's media, its post's count, whether it is selected, and whether it is favorited.
     func draw(_ tiles: [Tile], in view: MTKView, scale: CGFloat, background: MTLClearColor,
-              info: (Int) -> (item: FeedItem, count: Int, selected: Bool)?) {
+              info: (Int) -> (item: FeedItem, count: Int, selected: Bool, favorited: Bool)?) {
         // a bounded wait: the main thread drives scrolling, never stall it for long
         guard inflight.wait(timeout: .now() + .milliseconds(target == nil ? 4 : 33)) == .success else { return }
         let pass: MTLRenderPassDescriptor
@@ -128,6 +128,7 @@ final class GridRenderer {
                 if tex != nil { flags |= 1 }
                 if i.item.kind == .video { flags |= 2 }
                 if i.selected { flags |= 4 }
+                if i.favorited { flags |= 8 }
                 count = UInt32(max(0, i.count))
             }
             textures.append(tex)
@@ -182,7 +183,7 @@ final class GridRenderer {
     /// The same frame drawn offscreen and read back (tour pictures: window snapshots do not
     /// contain Metal content).
     func snapshot(_ tiles: [Tile], size: CGSize, scale: CGFloat, background: MTLClearColor,
-                  info: (Int) -> (item: FeedItem, count: Int, selected: Bool)?) -> CGImage? {
+                  info: (Int) -> (item: FeedItem, count: Int, selected: Bool, favorited: Bool)?) -> CGImage? {
         let w = Int(size.width * scale), h = Int(size.height * scale)
         let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
         td.usage = [.renderTarget, .shaderRead]
@@ -200,6 +201,7 @@ final class GridRenderer {
                 if tex != nil { flags |= 1 }
                 if i.item.kind == .video { flags |= 2 }
                 if i.selected { flags |= 4 }
+                if i.favorited { flags |= 8 }
                 count = UInt32(max(0, i.count))
             }
             texs.append(tex)

@@ -27,7 +27,7 @@ class FakeVideo implements VideoEngine {
   final positions = StreamController<Duration>.broadcast(),
       durations = StreamController<Duration>.broadcast();
   final calls = <String>[];
-  bool audio = true, looping = false;
+  bool audio = true, looping = false, audioEnabled = false;
   double volumeNow = 0;
   @override
   Stream<Duration> get position => positions.stream;
@@ -69,6 +69,11 @@ class FakeVideo implements VideoEngine {
   Future<void> volume(double value) async {
     volumeNow = value;
     calls.add('volume:$value');
+  }
+
+  @override
+  Future<void> setAudioEnabled(bool enabled) async {
+    audioEnabled = enabled;
   }
 
   @override

@@ -16,6 +16,7 @@ class Place {
   static const allFolders = Place._('folders');
   static const loose = Place._('loose');
   static const album = Place._('album');
+  static const favorites = Place._('favorites');
   static const unreviewed = Place._('unreviewed');
   static const reviewed = Place._('reviewed');
   static const bad = Place._('bad');
@@ -36,6 +37,7 @@ class Place {
         'folders' => Icons.folder_copy_outlined,
         'loose' => Icons.crop_free,
         'album' => Icons.photo_album_outlined,
+        'favorites' => Icons.star,
         'unreviewed' => Icons.new_releases_outlined,
         'reviewed' => Icons.verified_outlined,
         'bad' => Icons.warning_amber_outlined,
@@ -67,6 +69,7 @@ class Place {
         'videos' => FeedFilter(kind: MediaKind.video),
         'loose' => FeedFilter(loose_only: true),
         'album' => FeedFilter(album_only: true),
+        'favorites' => FeedFilter(favorite_only: true),
         'unreviewed' => FeedFilter(review: ReviewFilter.unreviewed),
         'reviewed' => FeedFilter(review: ReviewFilter.reviewed),
         'bad' => FeedFilter(bad_only: true),
@@ -78,7 +81,7 @@ class Place {
   /// The places of the bar, in the native order.
   static const primary = [browse, allFolders, settings];
   static const mediaKinds = [photos, videos];
-  static const others = [loose, album, unreviewed, reviewed, bad, trash];
+  static const others = [loose, album, favorites, unreviewed, reviewed, bad, trash];
   /// 损坏或丢失 is offered while the maintenance rows of 关于 are out.
   static List<Place> get offered => [for (final p in others) if (p != bad || Prefs.instance.aboutExtras) p];
 

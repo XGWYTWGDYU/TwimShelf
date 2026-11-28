@@ -67,10 +67,16 @@ final class MediaPageView: UIView {
     static func prefetch(_ item: FeedItem) { MediaLoader.shared.prefetch([item], maxPixel: pixelSize) }
 
     var transitionImage: UIImage? { inlineStill.image ?? imageView.image }
+    var currentInlineStill: UIImage? { inlineStill.image }
 
     func showInlineStill(_ image: CGImage?) {
         inlineStill.image = image.map { UIImage(cgImage: $0) }
         if playerLayer.player == nil { playBadge.isHidden = item?.kind != .video || image != nil }
+    }
+
+    func restoreInlineStillImage(_ image: UIImage) {
+        inlineStill.image = image
+        if playerLayer.player == nil { playBadge.isHidden = true }
     }
 
     /// New data for the same media (tags, damage state): badges only.
@@ -112,6 +118,8 @@ protocol FeedCellDelegate: AnyObject {
     func feedCell(_ cell: FeedCell, heightChangedTo height: CGFloat)
     func feedCellDidTapAddTag(_ cell: FeedCell)
     func feedCell(_ cell: FeedCell, menuForTag tag: TagView, of item: FeedItem) -> UIMenu
+    func feedCell(_ cell: FeedCell, menuForFavoriteOf item: FeedItem) -> UIMenu
+    func feedCellDidTapFavorite(_ cell: FeedCell)
     func feedCellDidTapRecent(_ cell: FeedCell)
 }
 
@@ -145,6 +153,26 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
 
     var currentItem: FeedItem? { items.indices.contains(page) ? items[page] : nil }
     var currentPageView: MediaPageView? { pages.indices.contains(page) ? pages[page] : nil }
+
+    /// Replaces the current `MediaPageView` with a fresh view carrying the same decoded preview
+    /// when a PiP transition dismisses the viewer without running UIKit's `.zoom` reverse transition
+    /// (which otherwise leaves UIKit's internal source-view hiding state on the original view).
+    func rebuildCurrentPageView() {
+        guard pages.indices.contains(page), items.indices.contains(page) else { return }
+        let old = pages[page]
+        let prevImage = old.imageView.image
+        let prevStill = old.currentInlineStill
+        let v = MediaPageView()
+        v.frame = old.frame
+        v.configure(items[page])
+        if v.imageView.image == nil, let prevImage { v.imageView.image = prevImage }
+        if let prevStill { v.restoreInlineStillImage(prevStill) }
+        pager.insertSubview(v, aboveSubview: old)
+        old.playerLayer.player = nil
+        old.cancelImage()
+        old.removeFromSuperview()
+        pages[page] = v
+    }
 
     /// The white part of the card under a layer of glass (one per card, created once).
     private lazy var captionGlass: UIVisualEffectView? = {
@@ -350,6 +378,12 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
         tagChips.forEach { $0.removeFromSuperview() }
         var chips: [UIButton] = []
         let m = CardLayout.Metrics.of(traitCollection)
+        if it.isFavorite {
+            let chip = TagChip.favorite(metrics: m, target: self, action: #selector(favoriteTapped))
+            chip.menu = delegate?.feedCell(self, menuForFavoriteOf: it)
+            chip.showsMenuAsPrimaryAction = false
+            chips.append(chip)
+        }
         if it.isRecent { chips.append(TagChip.recent(metrics: m, target: self, action: #selector(recentTapped))) }
         for t in it.tags {
             let chip = TagChip.make(t, metrics: m, target: self, action: #selector(tagTapped(_:)), highlight: highlight.tags)
@@ -369,6 +403,7 @@ final class FeedCell: UICollectionViewCell, UIScrollViewDelegate, UITextViewDele
     @objc private func tagTapped(_ b: UIButton) {
         if let label = b.accessibilityIdentifier { delegate?.feedCell(self, didTapTag: label) }
     }
+    @objc private func favoriteTapped() { delegate?.feedCellDidTapFavorite(self) }
     @objc private func recentTapped() { delegate?.feedCellDidTapRecent(self) }
     @objc private func addTagTapped() { UISelectionFeedbackGenerator().selectionChanged(); delegate?.feedCellDidTapAddTag(self) }
     @objc private func tapped() { delegate?.feedCell(self, didTapPage: page) }
@@ -679,6 +714,20 @@ enum TagChip {
 }
 
 extension TagChip {
+    /// Favorited pill shown before all tags: the exact same box, with a golden five-pointed star.
+    static func favorite(metrics m: CardLayout.Metrics = .regular, target: Any?, action: Selector) -> UIButton {
+        var cfg = base(m)
+        cfg.title = L("card.favoritePill")
+        let star = UIImage(systemName: "star.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: m.tagFont - 2, weight: .semibold))?
+            .withTintColor(UIColor(red: 0.96, green: 0.72, blue: 0.0, alpha: 1), renderingMode: .alwaysOriginal)
+        cfg.image = star
+        let b = UIButton(configuration: cfg)
+        b.accessibilityIdentifier = "favoriteBadge"
+        b.accessibilityLabel = L("card.favoritePill")
+        b.addTarget(target, action: action, for: .touchUpInside)
+        return b
+    }
+
     /// L("place.recent"): not a tag (cannot be edited or removed); it expires 5 days after the
     /// download. The same box, an orange dot.
     static func recent(metrics m: CardLayout.Metrics = .regular, target: Any?, action: Selector) -> UIButton {

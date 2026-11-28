@@ -211,11 +211,26 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
   static double _edgeWidthFor(double screenWidth) => (screenWidth * 0.10).clamp(32.0, 48.0);
   late int _index = widget.index;
   final _videos = <String, GlobalKey<VideoPageState>>{};
+  final _favoriteOverrides = <String, bool>{};
   bool _zoomed = false;
   final _shareAnchor = GlobalKey();
 
   FeedItem get _item => widget.items[_index];
   bool get _isVideo => _item.kind == MediaKind.video;
+  bool _isFavorited(FeedItem i) => _favoriteOverrides[i.media_id] ?? i.favorite;
+
+  Future<void> _toggleFavorite() async {
+    final item = _item;
+    final next = !_isFavorited(item);
+    setState(() => _favoriteOverrides[item.media_id] = next);
+    HapticFeedback.lightImpact();
+    try {
+      await Core.actionAsync(next ? ActionKind.favorite : ActionKind.unfavorite, media: [item.media_id]);
+      unawaited(widget.library.refresh());
+    } catch (_) {
+      if (mounted) setState(() => _favoriteOverrides[item.media_id] = !next);
+    }
+  }
 
   VideoPageState? get _video => _isVideo ? _videoKey(_item).currentState : null;
 
@@ -529,6 +544,8 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
                 onClose: _close,
                 onStep: _step,
                 onShare: _share,
+                isFavorited: _isFavorited(item),
+                onToggleFavorite: _toggleFavorite,
                 canPrevious: i > 0,
                 canNext: i < widget.items.length - 1,
                 onTurn: _turn,
@@ -554,23 +571,96 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
       ),
     );
 
-    final Widget photoBar = _Shade(
+    final baseTheme = Theme.of(context);
+    final scheme = baseTheme.brightness == Brightness.dark
+        ? baseTheme.colorScheme
+        : ColorScheme.fromSeed(seedColor: baseTheme.colorScheme.primary, brightness: Brightness.dark);
+    final viewerTheme = baseTheme.copyWith(brightness: Brightness.dark, colorScheme: scheme);
+    const backdropColor = Colors.black;
+    final screenSize = MediaQuery.sizeOf(context);
+    final landscape = screenSize.width > screenSize.height;
+    final counterText = '${_index + 1} / ${widget.items.length}';
+
+    // Portrait photo viewer: caption in media area right above a solid black bottom dock.
+    final Widget portraitPhotoChrome = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_hasCaption(_item))
+          Padding(
+            padding: EdgeInsets.fromLTRB(16 + pad.left, 0, 16 + pad.right, 8),
+            child: _Caption(key: ValueKey('cap-${_item.post_id}'), item: _item, onExpandedChanged: _setExpandedCaption),
+          ),
+        ColoredBox(
+          color: Colors.black,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16 + pad.left, 4, 8 + pad.right, 4 + pad.bottom),
+            child: Row(children: [
+              Text(counterText,
+                  key: const ValueKey('photoCounter'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),
+              const Spacer(),
+              IconButton(
+                key: const ValueKey('viewerFavorite'),
+                color: _isFavorited(_item) ? const Color(0xFFF5B800) : Colors.white,
+                tooltip: _isFavorited(_item) ? L('common.unfavorite') : L('common.favorite'),
+                icon: Icon(_isFavorited(_item) ? Icons.star : Icons.star_border),
+                onPressed: _toggleFavorite,
+              ),
+              IconButton(key: _shareAnchor, color: Colors.white, tooltip: L('viewer.share'), icon: const Icon(Icons.ios_share), onPressed: _share),
+              IconButton(key: const ValueKey('viewerClose'), color: Colors.white, tooltip: L('viewer.close'), icon: const Icon(Icons.close), onPressed: _close),
+            ]),
+          ),
+        ),
+      ],
+    );
+
+    // Landscape photo viewer: Favorite, Share & Close together on a single Material 3 Expressive surface capsule.
+    final Widget landscapePhotoPill = Material(
+      color: scheme.surfaceContainerHigh.withValues(alpha: 0.92),
+      elevation: 4,
+      shadowColor: Colors.black38,
+      shape: StadiumBorder(side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.45))),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16 + pad.left, 36, 16 + pad.right, 8 + pad.bottom),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (_hasCaption(_item)) _Caption(key: ValueKey('cap-${_item.post_id}'), item: _item, onExpandedChanged: _setExpandedCaption),
-          Row(children: [
-            Text('${_index + 1} / ${widget.items.length}',
-                key: const ValueKey('photoCounter'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            IconButton(key: _shareAnchor, color: Colors.white, tooltip: L('viewer.share'), icon: const Icon(Icons.ios_share), onPressed: _share),
-            IconButton(key: const ValueKey('viewerClose'), color: Colors.white, tooltip: L('viewer.close'), icon: const Icon(Icons.close), onPressed: _close),
-          ]),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          IconButton(
+            key: const ValueKey('viewerFavorite'),
+            color: _isFavorited(_item) ? const Color(0xFFF5B800) : scheme.onSurface,
+            tooltip: _isFavorited(_item) ? L('common.unfavorite') : L('common.favorite'),
+            icon: Icon(_isFavorited(_item) ? Icons.star : Icons.star_border, size: 20),
+            onPressed: _toggleFavorite,
+          ),
+          IconButton(
+            key: _shareAnchor,
+            color: scheme.onSurface,
+            tooltip: L('viewer.share'),
+            icon: const Icon(Icons.ios_share, size: 20),
+            onPressed: _share,
+          ),
+          IconButton(
+            key: const ValueKey('viewerClose'),
+            color: scheme.onSurface,
+            tooltip: L('viewer.close'),
+            icon: const Icon(Icons.close, size: 20),
+            onPressed: _close,
+          ),
         ]),
       ),
     );
 
-    return CallbackShortcuts(
+    Widget fadeChrome(Widget child) => AnimatedBuilder(
+          animation: Listenable.merge([flightAnim, _dismiss]),
+          child: child,
+          builder: (context, c) => Opacity(
+            opacity: Curves.easeIn.transform(((flightAnim.value - 0.25) / 0.75).clamp(0.0, 1.0)) *
+                (1 - _dismiss.value.progress * 4).clamp(0.0, 1.0),
+            child: c,
+          ),
+        );
+
+    return Theme(
+      data: viewerTheme,
+      child: CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): _close,
         const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _step(-1),
@@ -600,7 +690,7 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
                 child: AnimatedBuilder(
                   animation: Listenable.merge([flightAnim, _dismiss]),
                   builder: (context, _) => ColoredBox(
-                    color: Colors.black.withValues(
+                    color: backdropColor.withValues(
                       alpha: Curves.easeOut.transform(flightAnim.value.clamp(0.0, 1.0)) * (1 - _dismiss.value.progress),
                     ),
                   ),
@@ -617,20 +707,46 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
                   child: pager,
                 ),
               ),
-              if (!_isVideo)
+              if (!_isVideo && !landscape)
                 Positioned(
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  child: AnimatedBuilder(
-                    animation: Listenable.merge([flightAnim, _dismiss]),
-                    child: photoBar,
-                    builder: (context, child) => Opacity(
-                      opacity: Curves.easeIn.transform(((flightAnim.value - 0.25) / 0.75).clamp(0.0, 1.0)) *
-                          (1 - _dismiss.value.progress * 4).clamp(0.0, 1.0),
-                      child: child,
+                  child: fadeChrome(portraitPhotoChrome),
+                ),
+              if (!_isVideo && landscape && widget.items.length > 1)
+                Positioned(
+                  left: 16 + pad.left,
+                  top: 12 + pad.top,
+                  child: IgnorePointer(
+                    child: fadeChrome(
+                      Text(
+                        counterText,
+                        key: const ValueKey('photoCounter'),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                          shadows: [
+                            Shadow(color: Colors.black.withValues(alpha: 0.7), blurRadius: 4),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
+                ),
+              if (!_isVideo && landscape && _hasCaption(_item))
+                Positioned(
+                  left: 16 + pad.left,
+                  right: 184 + pad.right,
+                  bottom: 12 + pad.bottom,
+                  child: fadeChrome(_Caption(key: ValueKey('cap-${_item.post_id}'), item: _item, onExpandedChanged: _setExpandedCaption)),
+                ),
+              if (!_isVideo && landscape)
+                Positioned(
+                  right: 16 + pad.right,
+                  bottom: 12 + pad.bottom,
+                  child: fadeChrome(landscapePhotoPill),
                 ),
               // Translucent dismiss overlay sits top-most so side-edge and downward swipes enter the
               // gesture arena ahead of PageView, InteractiveViewer, and VideoPage even on a fast
@@ -666,6 +782,7 @@ class _ViewerPageState extends State<ViewerPage> with SingleTickerProviderStateM
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -849,25 +966,6 @@ class _RectClipper extends CustomClipper<RRect> {
   bool shouldReclip(_RectClipper old) => old.rect != rect || old.radius != radius;
 }
 
-/// The shade under the caption and the controls: clear at its top, dark at the bottom edge,
-/// one piece (it never ends in a line across the media).
-class _Shade extends StatelessWidget {
-  const _Shade({required this.child});
-  final Widget child;
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0x00000000), Color(0x8C000000), Color(0xB3000000)],
-            stops: [0, 0.35, 1],
-          ),
-        ),
-        child: child,
-      );
-}
-
 /// One photo: pinch or double-tap to zoom; unzoomed, a tap or a swipe down closes the viewer.
 class _PhotoPage extends StatefulWidget {
   const _PhotoPage({
@@ -1020,8 +1118,10 @@ class _CaptionState extends State<_Caption> {
   Widget build(BuildContext context) {
     final i = widget.item;
     final h = MediaQuery.sizeOf(context).height;
+    final scheme = Theme.of(context).colorScheme;
+    final ink = scheme.onSurface;
     final author = [if (i.author_name != null) i.author_name!, if (i.screen_name != null) '@${i.screen_name}'].join('  ');
-    const textStyle = TextStyle(color: Colors.white, fontSize: 15, height: 1.35);
+    final textStyle = TextStyle(color: ink, fontSize: 14.5, height: 1.35);
     return GestureDetector(
       key: const ValueKey('postCaption'),
       behavior: HitTestBehavior.opaque,
@@ -1030,19 +1130,34 @@ class _CaptionState extends State<_Caption> {
         alignment: AlignmentDirectional.centerStart,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: 680, maxHeight: _open ? h * 0.45 : double.infinity),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            if (author.isNotEmpty) Text(author, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-            if ((i.text ?? '').isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Flexible(
-                child: _open
-                    ? SingleChildScrollView(child: SelectableText(contextMenuBuilder: appTextMenu, i.text!, style: textStyle))
-                    : Text(i.text!, maxLines: 3, overflow: TextOverflow.ellipsis, style: textStyle),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHigh.withValues(alpha: 0.82),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.42)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    if (author.isNotEmpty) Text(author, style: TextStyle(color: ink, fontWeight: FontWeight.w600, fontSize: 14)),
+                    if ((i.text ?? '').isNotEmpty) ...[
+                      if (author.isNotEmpty) const SizedBox(height: 3),
+                      Flexible(
+                        child: _open
+                            ? SingleChildScrollView(child: SelectableText(contextMenuBuilder: appTextMenu, i.text!, style: textStyle))
+                            : Text(i.text!, maxLines: 3, overflow: TextOverflow.ellipsis, style: textStyle),
+                      ),
+                    ],
+                    if (_open) TextButton(onPressed: () => _toggle(false), child: Text(L('caption.less'))),
+                  ]),
+                ),
               ),
-            ],
-            if (_open) TextButton(onPressed: () => _toggle(false), child: Text(L('caption.less'))),
-            const SizedBox(height: 4),
-          ]),
+            ),
+          ),
         ),
       ),
     );

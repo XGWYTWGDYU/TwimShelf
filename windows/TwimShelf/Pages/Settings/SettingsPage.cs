@@ -173,7 +173,15 @@ public sealed partial class SettingsPage : UserControl, IShellPage
         ChromeChanged?.Invoke();
     }
 
-    public void Hidden()
+    public void Shown()
+    {
+        if (_stack.TryPeek(out var top)) top.Build();
+        ChromeChanged?.Invoke();
+    }
+
+    public void Hidden() { }
+
+    public void Close()
     {
         foreach (var p in _stack) p.Closed();
     }

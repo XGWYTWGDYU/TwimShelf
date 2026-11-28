@@ -55,6 +55,9 @@ Future<void> showMediaMenu(
       ] else ...[
         // where it is in 浏览: a loose media on its own, a post's media with its post
         entry(Icons.dynamic_feed_outlined, loose ? L('grid.revealMedia') : L('grid.revealPost'), () => library.reveal(item), key: 'menu-reveal'),
+        entry(item.favorite ? Icons.star_border : Icons.star, item.favorite ? L('common.unfavorite') : L('common.favorite'),
+            () => runMediaAction(context, library, item.favorite ? ActionKind.unfavorite : ActionKind.favorite,
+                media: [item.media_id], done: (n) => L(item.favorite ? 'favorite.removed' : 'favorite.added', [n]))),
         entry(Icons.sell_outlined, L('card.menu.tagMedia'), () => showTagPicker(context, library, item)),
         if (!loose) entry(Icons.sell, L('card.menu.tagPost'), () => showTagPicker(context, library, item, wholePost: true)),
         entry(Icons.create_new_folder_outlined, L('common.addToFolder'), () => addToFolder(context, library, [item])),

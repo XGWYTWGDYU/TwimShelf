@@ -144,6 +144,7 @@ class Core {
         bad: bad.isEmpty ? null : bad,
         recent: p['recent'] as bool? ?? false,
         album: p['album'] as bool? ?? false,
+        favorite: f.length > 9 ? (f[9] as bool? ?? false) : false,
         width: (f[7] as num).toInt(),
         height: (f[8] as num).toInt(),
       );

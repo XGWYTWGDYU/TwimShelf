@@ -9,7 +9,7 @@ export type ReviewFilter = 'any' | 'unreviewed' | 'reviewed';
 
 export type DownloadRoute = 'auto' | 'fx' | 'cookie';
 
-export type ActionKind = 'trash' | 'restore' | 'purge' | 'folder_add' | 'folder_remove' | 'tag';
+export type ActionKind = 'trash' | 'restore' | 'purge' | 'folder_add' | 'folder_remove' | 'tag' | 'favorite' | 'unfavorite';
 
 export type RepairResult = 'replaced' | 'replaced_new' | 'from_peers';
 
@@ -36,6 +36,7 @@ export interface FeedItem {
   bad?: string | null;
   recent: boolean;
   album: boolean;
+  favorite: boolean;
   /** [width, height] as displayed; absent until read from the file. */
   size?: [number, number] | null;
 }
@@ -69,6 +70,7 @@ export interface FeedFilter {
   folder?: string | null;
   loose_only: boolean;
   album_only: boolean;
+  favorite_only: boolean;
   recent_only: boolean;
   kind?: MediaKind | null;
   exclude_terms: string[];
@@ -76,6 +78,7 @@ export interface FeedFilter {
   exclude_folders: string[];
   exclude_recent: boolean;
   exclude_loose: boolean;
+  exclude_favorite: boolean;
   require?: SearchFields | null;
 }
 
@@ -248,6 +251,15 @@ export interface HubDetail {
   variants: HubVariant[];
   skipped: HubSkipped[];
   problem?: string | null;
+}
+
+export interface CookieAccount {
+  id: string;
+  label: string;
+  authToken: string;
+  ct0: string;
+  screenName?: string | null;
+  createdAt: number;
 }
 
 export interface UpdateInfo {

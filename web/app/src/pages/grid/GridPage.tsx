@@ -2,7 +2,7 @@
 // MacMediaGridPage: the zoomable grid and nothing else; the title (on glass), the zoom, 选择 and the
 // selection's actions live in the toolbar (AppDelegate's grid / folderGrid / selecting modes).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Ellipsis, FolderMinus, FolderPlus, Minus, Plus, Trash2, Undo2 } from 'lucide-react';
+import { Ellipsis, FolderMinus, FolderPlus, Minus, Plus, StarOff, Trash2, Undo2 } from 'lucide-react';
 import { KEYWORDS, keywordWord, L, quoteSearchWord, type ExportReport, type FeedItem, type TrashItem } from '@twimshelf/core';
 import { Toolbar, ToolButton, ToolGroup, ToolSegment } from '../../components/Toolbar';
 import { openMenu, openMenuBelow, type MenuEntry } from '../../components/Menu';
@@ -37,6 +37,7 @@ function browseQuery(place: GridPlace, folder?: string): string {
     case 'folder': return `${kw('folder')} ${quoteSearchWord(folder ?? '')}`;
     case 'loose': return kw('external');
     case 'album': return kw('album');
+    case 'favorites': return kw('favorite');
     case 'unreviewed': return kw('unreviewed');
     case 'reviewed': return kw('reviewed');
     case 'bad': return kw('damaged');
@@ -50,15 +51,19 @@ function title(place: GridPlace, folder?: string): string {
 
 const fromTrash = (t: TrashItem): FeedItem => ({
   media_id: t.media_id, post_id: t.post_id, ordinal: t.ordinal, kind: t.kind, path: t.path, text: t.text, author_name: t.author_name,
-  screen_name: t.screen_name, url: t.url, tags: t.tags, created_at: null, bad: null, recent: false, album: false, size: null,
+  screen_name: t.screen_name, url: t.url, tags: t.tags, created_at: null, bad: null, recent: false, album: false, favorite: false, size: null,
 });
 
 const KEEP = [7, 30, 90, 365, 0];
 const keepTitle = (days: number) => days === 0 ? L('trash.neverShort') : KEEP.includes(days) ? L(`trash.keep.${days}`) : L('trash.keep.days', days);
 
-export default function GridPage({ place, folder }: { place: GridPlace; folder?: string }) {
+export default function GridPage({ place, folder, active = true }: { place: GridPlace; folder?: string; active?: boolean }) {
   const bin = place === 'trash';
   const version = useStore(libraryVersion);
+  const [loadedVersion, setLoadedVersion] = useState(version);
+  useEffect(() => {
+    if (active && loadedVersion !== version) setLoadedVersion(version);
+  }, [active, version, loadedVersion]);
   const grid = useRef<ZoomGridHandle>(null);
   const [level, setLevel] = useState(() => Math.min(2, Math.max(0, Number(readPref('grid.level') ?? 1))));
   const [selecting, setSelecting] = useState(false);
@@ -71,11 +76,11 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
     const filter = {
       kind: place === 'photos' ? 'photo' as const : place === 'videos' ? 'video' as const : null,
       folder: place === 'folder' ? folder ?? null : null,
-      loose_only: place === 'loose', album_only: place === 'album', bad_only: place === 'bad',
+      loose_only: place === 'loose', album_only: place === 'album', favorite_only: place === 'favorites', bad_only: place === 'bad',
       review: place === 'unreviewed' ? 'unreviewed' as const : place === 'reviewed' ? 'reviewed' as const : 'any' as const,
     };
     return { items: await core.feed({ filter }), trashedAt: new Map<string, number>(), keep: 0 };
-  }, [place, folder, version]);
+  }, [place, folder, loadedVersion]);
 
   // media past the retention period leave the bin when it is opened
   useEffect(() => {
@@ -94,7 +99,7 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
     }
     return order.map((id) => by.get(id)!.sort((a, b) => a.ordinal - b.ordinal));
   }, [items]);
-  const tiles = useMemo<ZoomGridTile[]>(() => entries.map((e) => ({ item: e[0], count: e.length })), [entries]);
+  const tiles = useMemo<ZoomGridTile[]>(() => entries.map((e) => ({ item: e[0], count: e.length, favorited: e.some((m) => m.favorite) })), [entries]);
   const countsLine = useMemo(() => {
     const videos = items.filter((m) => m.kind === 'video').length, photos = items.length - videos;
     const parts: string[] = [];
@@ -108,16 +113,17 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
   const allSelected = entries.length > 0 && selected.size === entries.length;
   const setSel = useCallback((on: boolean) => { setSelecting(on); if (!on) setSelected(new Set()); }, []);
 
-  // ⌘+ / ⌘− and the View menu; Esc ends selecting
-  useEffect(() => onCommand('zoomIn', () => grid.current?.step(-1)), []);
-  useEffect(() => onCommand('zoomOut', () => grid.current?.step(1)), []);
-  useEffect(() => onCommand('select', () => setSelecting((s) => { if (s) setSelected(new Set()); return !s; })), []);
+  // ⌘+ / ⌘− and the View menu; Esc ends selecting (only while this page is active)
+  useEffect(() => { if (!active) setSel(false); }, [active, setSel]);
+  useEffect(() => onCommand('zoomIn', () => { if (active) grid.current?.step(-1); }), [active]);
+  useEffect(() => onCommand('zoomOut', () => { if (active) grid.current?.step(1); }), [active]);
+  useEffect(() => onCommand('select', () => { if (active) setSelecting((s) => { if (s) setSelected(new Set()); return !s; }); }), [active]);
   useEffect(() => {
-    if (!selecting) return;
+    if (!active || !selecting) return;
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.viewer, .dialog-scrim, .menu-scrim')) setSel(false); };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [selecting, setSel]);
+  }, [active, selecting, setSel]);
 
   // ── actions ──
   const afterTrash = (n: number, receipt: Awaited<ReturnType<typeof action>>) => { libraryChanged(); offerUndo(L('trash.moved', n), receipt); };
@@ -163,6 +169,14 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
       offerUndo(L('folder.removed', r.changes.length, folder), r);
     } catch (e) { toast(L(String((e as Error).message))); }
   };
+  const setFav = async (on: boolean, ids: string[]) => {
+    try {
+      const r = await action(on ? 'favorite' : 'unfavorite', { media: ids });
+      libraryChanged();
+      setSel(false);
+      if (r.changes.length) offerUndo(L(on ? 'favorite.added' : 'favorite.removed', r.changes.length), r);
+    } catch (e) { toast(L(String((e as Error).message))); }
+  };
 
   const daysLeft = (entry: FeedItem[]): string | null => {
     const at = entry.map((m) => data.data?.trashedAt.get(m.media_id)).filter((x): x is number => x != null);
@@ -195,6 +209,8 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
     }
     const loose = first.post_id.startsWith('loose:');
     m.push({ label: loose ? L('grid.revealMedia') : L('grid.revealPost'), run: () => revealInBrowse(first) });
+    const fav = entry.some((x) => x.favorite);
+    m.push({ label: fav ? L('common.unfavorite') : L('common.favorite'), run: () => void setFav(!fav, ids) });
     // tags and folders, as on a card in 浏览 (the same in every app)
     m.push({ label: L('card.menu.tagMedia'), run: () => void openTagPicker({ item: first, post: entry, initialScope: 'media' }).then(libraryChanged) });
     if (!loose) m.push({ label: L('card.menu.tagPost'), run: () => void openTagPicker({ item: first, post: entry, initialScope: 'post' }).then(libraryChanged) });
@@ -285,6 +301,7 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
       </> : <>
         <ToolButton label={L('common.addToFolder')} disabled={!has} onClick={(e) => openMenuBelow(e.currentTarget, addToFolderMenu())}><FolderPlus size={16} strokeWidth={1.9} /></ToolButton>
         {folder && <ToolButton label={L('common.removeFromFolder')} disabled={!has} onClick={() => void takeOut(selectedIds)}><FolderMinus size={16} strokeWidth={1.9} /></ToolButton>}
+        {place === 'favorites' && <ToolButton label={L('common.unfavorite')} disabled={!has} onClick={() => void setFav(false, selectedIds)}><StarOff size={16} strokeWidth={1.9} /></ToolButton>}
         <ToolButton label={L('grid.moveToTrash')} disabled={!has} onClick={() => void trashSelected()}><Trash2 size={16} strokeWidth={1.9} /></ToolButton>
       </>}
       <ToolButton label={L('common.done')} prominent onClick={() => setSel(false)}>{L('common.done')}</ToolButton>
@@ -302,7 +319,7 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
 
   return (
     <div className="grid-page">
-      <ZoomGrid ref={grid} tiles={tiles} footer={countsLine} selecting={selecting} selected={selected} initialLevel={level} insetTop={52}
+      <ZoomGrid ref={grid} active={active} tiles={tiles} footer={countsLine} selecting={selecting} selected={selected} initialLevel={level} insetTop={52}
         onOpen={(i) => {
           const list = grouped() ? entries.flat() : items;
           const first = entries[i]?.[0];
@@ -315,6 +332,10 @@ export default function GridPage({ place, folder }: { place: GridPlace; folder?:
             squarePreview: cachedThumb(first, 1024) ?? cachedThumb(first, 512) ?? cachedThumb(first, 256),
             onClose: () => grid.current?.focus(),
           });
+        }}
+        onUnfavorite={bin ? undefined : (i) => {
+          const ids = entries[i]?.filter((m) => m.favorite).map((m) => m.media_id) ?? [];
+          if (ids.length) void setFav(false, ids);
         }}
         onMenu={(i, e) => openMenu(e, tileMenu(i))}
         onSelected={setSelected}

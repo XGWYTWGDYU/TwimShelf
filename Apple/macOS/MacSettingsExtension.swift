@@ -128,7 +128,6 @@ struct ExtensionPageView: View {
 
     var body: some View {
         SettingsCanvas {
-            Text(L("ext.intro")).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             managedSection
             if let p = state?.pairing { codeCard(p) } else {
                 Card(spacing: 12) {

@@ -3276,6 +3276,35 @@
         }
       }
     },
+    "card.favoritePill": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorited"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入り済み"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收藏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收藏"
+          }
+        }
+      }
+    },
     "card.loose": {
       "extractionState": "manual",
       "localizations": {
@@ -5248,6 +5277,35 @@
         }
       }
     },
+    "common.favorite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorite"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りに追加"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
+          }
+        }
+      }
+    },
     "common.folderName": {
       "extractionState": "manual",
       "localizations": {
@@ -6118,6 +6176,35 @@
         }
       }
     },
+    "common.unfavorite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unfavorite"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入り解除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消收藏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消收藏"
+          }
+        }
+      }
+    },
     "common.unknownAuthor": {
       "extractionState": "manual",
       "localizations": {
@@ -6214,6 +6301,12 @@
             "value": "Add Account Cookie"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウント Cookie を追加"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6224,12 +6317,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "新增帳號 Cookie"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アカウント Cookie を追加"
           }
         }
       }
@@ -6272,6 +6359,12 @@
             "value": "%@ accounts"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 件"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6282,12 +6375,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 個帳號"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 件"
           }
         }
       }
@@ -6301,6 +6388,12 @@
             "value": "This account cookie will be removed from all synced devices."
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアカウント Cookie は同期されたすべてのデバイスから削除されます。"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6311,12 +6404,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "該帳號 Cookie 會從同一帳戶下的所有同步裝置中移除。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "このアカウント Cookie は同期されたすべてのデバイスから削除されます。"
           }
         }
       }
@@ -6330,6 +6417,12 @@
             "value": "Delete Cookie “%@”?"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cookie「%@」を削除しますか？"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6340,12 +6433,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "刪除 Cookie「%@」？"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cookie「%@」を削除しますか？"
           }
         }
       }
@@ -6359,6 +6446,12 @@
             "value": "Enter both auth_token and ct0."
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "auth_token と ct0 の両方を入力してください。"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6369,12 +6462,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "請同時填寫 auth_token 和 ct0。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "auth_token と ct0 の両方を入力してください。"
           }
         }
       }
@@ -6417,6 +6504,12 @@
             "value": "Label (optional)"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ラベル（任意）"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6427,12 +6520,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "備註名稱（選填）"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ラベル（任意）"
           }
         }
       }
@@ -6446,6 +6533,12 @@
             "value": "e.g. Main / Alt"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例：メイン / サブ"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6456,12 +6549,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "例如：主帳 / 小帳"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "例：メイン / サブ"
           }
         }
       }
@@ -6475,6 +6562,12 @@
             "value": "For posts from locked accounts. Add multiple account cookies; the app picks one automatically."
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "非公開アカウントの投稿のダウンロードに使用します。複数のアカウント Cookie を追加でき、自動で選択されます"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6485,12 +6578,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "用於下載鎖定帳號的貼文，可新增多個帳號 Cookie，將自動選擇"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "非公開アカウントの投稿のダウンロードに使用します。複数のアカウント Cookie を追加でき、自動で選択されます"
           }
         }
       }
@@ -6562,6 +6649,12 @@
             "value": "No account cookies added yet"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アカウント Cookie はまだ追加されていません"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6572,12 +6665,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "尚未新增帳號 Cookie"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アカウント Cookie はまだ追加されていません"
           }
         }
       }
@@ -6620,6 +6707,12 @@
             "value": "X Account"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X アカウント"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -6630,12 +6723,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "X 帳號"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "X アカウント"
           }
         }
       }
@@ -8904,41 +8991,18 @@
         }
       }
     },
-    "ext.intro": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "With the TwimShelf extension in Chrome, Edge or another Chromium browser, every post on X gets a download button that sends it here. Bind the browser once with a code from this page."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chrome や Edge などの Chromium ブラウザに TwimShelf 拡張機能を入れると、X の各投稿にダウンロードボタンが付き、押すとここでダウンロードします。このページのコードで一度連携してください。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在 Chrome、Edge 等 Chromium 浏览器中安装 TwimShelf 扩展后，X 上的每条帖子旁都会出现下载按钮，点一下就交给这里下载。用本页的绑定码绑定一次即可。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在 Chrome、Edge 等 Chromium 瀏覽器中安裝 TwimShelf 擴充功能後，X 上的每則貼文旁都會出現下載按鈕，點一下就交給這裡下載。用本頁的綁定碼綁定一次即可。"
-          }
-        }
-      }
-    },
     "ext.managed.checkFailed": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Could not check for extension updates: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能のアップデート確認に失敗しました：%@"
           }
         },
         "zh-Hans": {
@@ -8952,12 +9016,6 @@
             "state": "translated",
             "value": "檢查擴充功能更新失敗：%@"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能のアップデート確認に失敗しました：%@"
-          }
         }
       }
     },
@@ -8967,6 +9025,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Check for Updates"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アップデートを確認"
           }
         },
         "zh-Hans": {
@@ -8980,12 +9044,6 @@
             "state": "translated",
             "value": "檢查更新"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アップデートを確認"
-          }
         }
       }
     },
@@ -8995,6 +9053,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Checking for extension updates…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能のアップデートを確認中…"
           }
         },
         "zh-Hans": {
@@ -9008,12 +9072,6 @@
             "state": "translated",
             "value": "正在檢查擴充功能更新…"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能のアップデートを確認中…"
-          }
         }
       }
     },
@@ -9023,6 +9081,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Copy Path"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パスをコピー"
           }
         },
         "zh-Hans": {
@@ -9036,12 +9100,6 @@
             "state": "translated",
             "value": "複製路徑"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "パスをコピー"
-          }
         }
       }
     },
@@ -9051,6 +9109,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Download Extension"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能をダウンロード"
           }
         },
         "zh-Hans": {
@@ -9064,12 +9128,6 @@
             "state": "translated",
             "value": "下載擴充功能"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能をダウンロード"
-          }
         }
       }
     },
@@ -9079,6 +9137,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Could not download the extension: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能のダウンロードに失敗しました：%@"
           }
         },
         "zh-Hans": {
@@ -9092,12 +9156,6 @@
             "state": "translated",
             "value": "下載擴充功能失敗：%@"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能のダウンロードに失敗しました：%@"
-          }
         }
       }
     },
@@ -9107,6 +9165,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Saved to:\n%@\n\nOpen chrome://extensions, enable Developer mode, click \"Load unpacked\", and select this folder."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存先：\n%@\n\nchrome://extensions を開いてデベロッパー モードを有効にし、「パッケージ化されていない拡張機能を読み込む」からこのフォルダを選択してください。"
           }
         },
         "zh-Hans": {
@@ -9120,12 +9184,6 @@
             "state": "translated",
             "value": "已儲存至：\n%@\n\n在 Chrome / Edge 開啟 chrome://extensions，開啟「開發人員模式」，點擊「載入未封裝項目」並選擇此資料夾即可完成安裝。"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "保存先：\n%@\n\nchrome://extensions を開いてデベロッパー モードを有効にし、「パッケージ化されていない拡張機能を読み込む」からこのフォルダを選択してください。"
-          }
         }
       }
     },
@@ -9135,6 +9193,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Extension Downloaded"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能をダウンロードしました"
           }
         },
         "zh-Hans": {
@@ -9148,12 +9212,6 @@
             "state": "translated",
             "value": "擴充功能已下載"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能をダウンロードしました"
-          }
         }
       }
     },
@@ -9163,6 +9221,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Downloading extension…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能をダウンロード中…"
           }
         },
         "zh-Hans": {
@@ -9176,12 +9240,6 @@
             "state": "translated",
             "value": "正在下載擴充功能…"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能をダウンロード中…"
-          }
         }
       }
     },
@@ -9191,6 +9249,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "How to install:\n1. Open chrome://extensions (or edge://extensions) and enable Developer mode.\n2. Click \"Load unpacked\" and choose the extension folder above (do not delete it).\n3. Click \"Bind browser\" below and enter the code in the extension.\n\nNo need to quit the browser when updating — just click Reload on TwimShelf in chrome://extensions afterward."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "インストール方法：\n1. Chrome / Edge で chrome://extensions を開き、右上の「デベロッパー モード」を有効にします。\n2. 「パッケージ化されていない拡張機能を読み込む」から上の拡張機能フォルダを選択します（フォルダは削除しないでください）。\n3. 下の「ブラウザを紐付ける」から拡張機能で 6 桁のコードを入力します。\n\n更新時にブラウザを終了する必要はありません。更新後 chrome://extensions で再読み込みをクリックするだけで反映されます。"
           }
         },
         "zh-Hans": {
@@ -9204,12 +9268,6 @@
             "state": "translated",
             "value": "安裝方式：\n1. 在 Chrome / Edge 開啟 chrome://extensions，開啟右上角「開發人員模式」\n2. 點擊「載入未封裝項目」，選擇上方的擴充功能資料夾（請勿刪除）\n3. 載入後在下方點擊「綁定瀏覽器」，於擴充功能輸入 6 位綁定碼\n\n更新時無需關閉瀏覽器，覆蓋完成後在 chrome://extensions 點擊重新載入即可生效。"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "インストール方法：\n1. Chrome / Edge で chrome://extensions を開き、右上の「デベロッパー モード」を有効にします。\n2. 「パッケージ化されていない拡張機能を読み込む」から上の拡張機能フォルダを選択します（フォルダは削除しないでください）。\n3. 下の「ブラウザを紐付ける」から拡張機能で 6 桁のコードを入力します。\n\n更新時にブラウザを終了する必要はありません。更新後 chrome://extensions で再読み込みをクリックするだけで反映されます。"
-          }
         }
       }
     },
@@ -9219,6 +9277,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Download the extension into this app's data folder to install and update it here. Existing extensions installed elsewhere are left untouched."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能をアプリのデータフォルダにダウンロードすると、ここから更新できるようになります。別の場所に手動インストール済みの拡張機能には触れません。"
           }
         },
         "zh-Hans": {
@@ -9232,12 +9296,6 @@
             "state": "translated",
             "value": "將擴充功能下載到應用程式資料夾，之後可直接在此檢查與更新。若已在別處手動安裝，不會改動原目錄。"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能をアプリのデータフォルダにダウンロードすると、ここから更新できるようになります。別の場所に手動インストール済みの拡張機能には触れません。"
-          }
         }
       }
     },
@@ -9247,6 +9305,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Open Folder"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダを開く"
           }
         },
         "zh-Hans": {
@@ -9260,12 +9324,6 @@
             "state": "translated",
             "value": "開啟資料夾"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "フォルダを開く"
-          }
         }
       }
     },
@@ -9275,6 +9333,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Path copied"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パスをコピーしました"
           }
         },
         "zh-Hans": {
@@ -9288,12 +9352,6 @@
             "state": "translated",
             "value": "路徑已複製"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "パスをコピーしました"
-          }
         }
       }
     },
@@ -9303,6 +9361,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Managed extension version %@ is installed. Updating replaces files in place without quitting your browser."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在管理中のバージョンは %@ です。更新はブラウザを終了せずにそのまま上書きできます。"
           }
         },
         "zh-Hans": {
@@ -9316,12 +9380,6 @@
             "state": "translated",
             "value": "目前託管版本為 %@。更新會直接覆蓋應用程式資料夾中的擴充功能檔案，無需關閉瀏覽器。"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "現在管理中のバージョンは %@ です。更新はブラウザを終了せずにそのまま上書きできます。"
-          }
         }
       }
     },
@@ -9331,6 +9389,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Browser Extension %@ Available"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブラウザ拡張機能 %@ が利用可能です"
           }
         },
         "zh-Hans": {
@@ -9344,12 +9408,6 @@
             "state": "translated",
             "value": "瀏覽器擴充功能有新版本 %@"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ブラウザ拡張機能 %@ が利用可能です"
-          }
         }
       }
     },
@@ -9359,6 +9417,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Browser Extension Package"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能"
           }
         },
         "zh-Hans": {
@@ -9372,12 +9436,6 @@
             "state": "translated",
             "value": "擴充功能"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能"
-          }
         }
       }
     },
@@ -9387,6 +9445,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Extension is up to date (%@)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能は最新です（%@）"
           }
         },
         "zh-Hans": {
@@ -9400,12 +9464,6 @@
             "state": "translated",
             "value": "擴充功能已是最新版本（%@）"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能は最新です（%@）"
-          }
         }
       }
     },
@@ -9415,6 +9473,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Update to %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ に更新"
           }
         },
         "zh-Hans": {
@@ -9428,12 +9492,6 @@
             "state": "translated",
             "value": "更新至 %@"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ に更新"
-          }
         }
       }
     },
@@ -9443,6 +9501,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Update Now"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今すぐ更新"
           }
         },
         "zh-Hans": {
@@ -9455,12 +9519,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "立即更新"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "今すぐ更新"
           }
         }
       }
@@ -9473,6 +9531,12 @@
             "value": "Version %@ available"
           }
         },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しいバージョン %@ が利用可能です"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -9484,12 +9548,6 @@
             "state": "translated",
             "value": "有新版本 %@ 可用"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新しいバージョン %@ が利用可能です"
-          }
         }
       }
     },
@@ -9499,6 +9557,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "The managed extension files have been updated in place. No need to quit the browser — just click Reload on TwimShelf in chrome://extensions."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理中の拡張機能ファイルを上書き更新しました。ブラウザを終了する必要はありません。chrome://extensions で TwimShelf の再読み込みボタンをクリックしてください。"
           }
         },
         "zh-Hans": {
@@ -9512,12 +9576,6 @@
             "state": "translated",
             "value": "已直接覆蓋更新應用程式託管的擴充功能資料夾。無需關閉瀏覽器，開啟 chrome://extensions 點擊 TwimShelf 卡片上的重新載入按鈕即可生效。"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "管理中の拡張機能ファイルを上書き更新しました。ブラウザを終了する必要はありません。chrome://extensions で TwimShelf の再読み込みボタンをクリックしてください。"
-          }
         }
       }
     },
@@ -9527,6 +9585,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Extension Updated to %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能を %@ に更新しました"
           }
         },
         "zh-Hans": {
@@ -9540,12 +9604,6 @@
             "state": "translated",
             "value": "擴充功能已更新至 %@"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能を %@ に更新しました"
-          }
         }
       }
     },
@@ -9555,6 +9613,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Updating extension…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張機能を更新中…"
           }
         },
         "zh-Hans": {
@@ -9568,12 +9632,6 @@
             "state": "translated",
             "value": "正在更新擴充功能…"
           }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拡張機能を更新中…"
-          }
         }
       }
     },
@@ -9583,6 +9641,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Managed version %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理中のバージョン %@"
           }
         },
         "zh-Hans": {
@@ -9595,12 +9659,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已託管版本 %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "管理中のバージョン %@"
           }
         }
       }
@@ -9804,6 +9862,88 @@
           "stringUnit": {
             "state": "translated",
             "value": "接收服務無法啟動：%@"
+          }
+        }
+      }
+    },
+    "favorite.added": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Added %lld item to Favorites"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Added %lld items to Favorites"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 件をお気に入りに追加しました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收藏 %lld 个媒体"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收藏 %lld 個媒體"
+          }
+        }
+      }
+    },
+    "favorite.removed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Removed %lld item from Favorites"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Removed %lld items from Favorites"
+                }
+              }
+            }
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 件のお気に入りを解除しました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消收藏 %lld 个媒体"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消收藏 %lld 個媒體"
           }
         }
       }
@@ -22794,6 +22934,35 @@
         }
       }
     },
+    "place.favorites": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorites"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入り"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
+          }
+        }
+      }
+    },
     "place.folders": {
       "extractionState": "manual",
       "localizations": {
@@ -25151,6 +25320,122 @@
           "stringUnit": {
             "state": "translated",
             "value": "外部匯入"
+          }
+        }
+      }
+    },
+    "search.kw.favorite.aliases": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "fav,favorite,starred,star"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入り済み,スター,fav,favorite"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收藏,星标,fav,favorite"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收藏,星標,fav,favorite"
+          }
+        }
+      }
+    },
+    "search.kw.favorite.exclude": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No favorited media"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りのメディアを除く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不要已收藏的媒体"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不要已收藏的媒體"
+          }
+        }
+      }
+    },
+    "search.kw.favorite.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only favorited media"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りのメディアだけ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只看已收藏的媒体"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只看已收藏的媒體"
+          }
+        }
+      }
+    },
+    "search.kw.favorite.word": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorites"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入り"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
           }
         }
       }

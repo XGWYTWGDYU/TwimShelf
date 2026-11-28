@@ -47,6 +47,7 @@
 .pill-ai { --dot: var(--ai); }
 .pill-approved { --dot: var(--approved); }
 .pill-recent { --dot: var(--orange); }
+.pill-favorite::before { display: none; }
 .pill-add { width: 20px; padding: 0; justify-content: center; color: var(--fg-2); }
 .pill-add::before { display: none; }
 

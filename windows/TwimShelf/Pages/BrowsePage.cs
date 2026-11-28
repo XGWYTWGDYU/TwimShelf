@@ -369,7 +369,7 @@ public sealed partial class BrowsePage : UserControl, IShellPage
     void OpenViewer(FeedItem item)
     {
         var all = (_cards ?? []).SelectMany(c => c).ToList();
-        var root = MainWindow.Current?.Content as UIElement;
+        var root = MainWindow.Current?.ViewerHost as UIElement;
         var initialRect = root != null ? _masonry.ViewerSourceFrame(item, root) : null;
         Viewer.Open(all, Math.Max(0, all.FindIndex(i => i.MediaId == item.MediaId)), new ViewerOpenOptions
         {

@@ -128,15 +128,6 @@ public sealed partial class AiSettings : SettingsSubpage
                 if (Ai.Models.ActiveTaggerId == model.Id) await Ai.Models.SetActiveTagger(null);
             };
             ex.Items.Add(del);
-            var export = new SettingsCard { Header = L("models.exportZip"), HeaderIcon = Icon("\uEDE1"), IsClickEnabled = true };
-            export.Click += async (_, _) =>
-            {
-                var to = await Pickers.SaveFile(W, m.Id + ".zip", ("ZIP", ".zip"));   // i18n-exempt: file type name
-                if (to == null) return;
-                try { await Local.Export(m.Id, to); }
-                catch (Exception e) { await Dialogs.Alert(W, L("models.exportZip"), e.Message); }
-            };
-            ex.Items.Add(export);
             Add(ex);
         }
         Nav(L("models.addExternalEllipsis"), L("mac.models.external.hint"), "", () => new ExternalModelSettings(_library, ExternalModel.Create(), true), "ai-add");
@@ -221,22 +212,10 @@ public sealed partial class AiSettings : SettingsSubpage
         TransferSection();
     }
 
-    /// Models between devices of the same kind: import a ZIP, pull one from another device of the
-    /// account (the core keeps the GGUF ones). Export is on each model.
+    /// Models between devices of the same kind: pull one from another device of the account on the LAN.
     void TransferSection()
     {
-        Header(L("models.appleOnly"));
-        var import = new Button { Content = L("models.import.button") };
-        import.Click += async (_, _) =>
-        {
-            var path = await Pickers.OpenFile(W, ".zip");
-            if (path == null) return;
-            import.IsEnabled = false;
-            try { await Local.Import(path); await Dialogs.Alert(W, L("models.import.button"), L("models.imported")); }
-            catch (Exception e) { await Dialogs.Alert(W, L("models.import.button"), e.Message); }
-            finally { import.IsEnabled = true; }
-        };
-        Card(L("models.import.button"), null, "\uE8B5", import);
+        Header(L("models.peers.title"));
         var query = new Button { Content = _querying ? L("models.peers.querying") : L("models.peers.query"), IsEnabled = !_querying };
         query.Click += async (_, _) => await QueryPeers();
         Card(L("models.peers.query"), _offers == null ? null : _offers.Count == 0 ? L("models.peers.nothing") : null, "\uE8F1", query);

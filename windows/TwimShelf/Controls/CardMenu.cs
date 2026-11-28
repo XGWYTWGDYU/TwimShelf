@@ -46,7 +46,13 @@ public static class CardMenu
             s.Items.Add(I(L("card.menu.retagReplace"), "", () => lib.Ai.Tagger.Retag([Ref(item)], model, replaceOld: true)));
             return s;
         }
-        var tagging = new List<MenuFlyoutItemBase> { I(L("card.menu.tagMedia"), "", () => _ = TagPicker.Show(item, false)) };
+        var tagging = new List<MenuFlyoutItemBase>
+        {
+            I(item.Favorite ? L("common.unfavorite") : L("common.favorite"),
+                item.Favorite ? "\uE8D9" : "\uE735",
+                () => _ = MediaActions.Run(item.Favorite ? ActionKind.Unfavorite : ActionKind.Favorite, media: [item.MediaId], done: n => L(item.Favorite ? "favorite.removed" : "favorite.added", n))),
+            I(L("card.menu.tagMedia"), "", () => _ = TagPicker.Show(item, false)),
+        };
         if (!loose) tagging.Add(I(L("card.menu.tagPost"), "", () => _ = TagPicker.Show(item, true)));
         if (pending.Count > 0)
             tagging.Add(I(L("card.menu.approveAll"), "", async () =>

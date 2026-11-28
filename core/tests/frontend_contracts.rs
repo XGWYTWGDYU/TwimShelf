@@ -160,3 +160,57 @@ fn wait(mut done: impl FnMut() -> bool) { let until = Instant::now() + Duration:
     assert_eq!(f.lib.db().media_tags(&id(2)).unwrap(), vec![("label".into(), 1)]);
     assert_eq!(f.lib.undo_action(&r).unwrap(), 0);
 }
+
+#[test] fn favorite_actions_undo_sync_filter_and_backup_compat() {
+    use tl_core::{archive, library::{FeedFilter, FeedRequest, PackedFeed}, model::SearchScope};
+    let f = Fixture::new(3);
+    // Action favorite + conditional undo
+    let r = f.lib.apply_action(&action(K::Favorite, vec![id(0), id(1)], vec![])).unwrap();
+    assert_eq!(r.changes.len(), 2);
+    assert!(f.lib.db().favorite_media().unwrap().contains(&id(0)));
+    assert!(f.lib.db().favorite_media().unwrap().contains(&id(1)));
+    // Mutating id(1) later prevents undo from overwriting it
+    f.lib.apply_action(&action(K::Unfavorite, vec![id(1)], vec![])).unwrap();
+    f.lib.apply_action(&action(K::Favorite, vec![id(1)], vec![])).unwrap();
+    assert_eq!(f.lib.undo_action(&r).unwrap(), 1);
+    assert!(!f.lib.db().favorite_media().unwrap().contains(&id(0)));
+    assert!(f.lib.db().favorite_media().unwrap().contains(&id(1)));
+    assert_eq!(f.lib.undo_action(&r).unwrap(), 0);
+
+    // Filter favorite_only / exclude_favorite and PackedFeed roundtrip
+    let req = |filter: FeedFilter| FeedRequest { terms: vec![], scope: SearchScope::Both, seed: None, newest_first: false, fuzzy: false, term_vectors: vec![], embed_model: None, threshold: 0.55, fields: Default::default(), filter, whole_posts: false };
+    let favs = f.lib.feed(&req(FeedFilter { favorite_only: true, ..Default::default() })).unwrap();
+    assert_eq!(favs.len(), 1);
+    assert_eq!(favs[0].media_id, id(1));
+    assert!(favs[0].favorite);
+    let non_favs = f.lib.feed(&req(FeedFilter { exclude_favorite: true, ..Default::default() })).unwrap();
+    assert_eq!(non_favs.len(), 2);
+    assert!(non_favs.iter().all(|i| !i.favorite));
+    let packed = f.lib.feed_packed(&req(FeedFilter::default())).unwrap();
+    let unpacked = PackedFeed::unpack(&packed);
+    assert_eq!(unpacked.iter().filter(|i| i.favorite).count(), 1);
+
+    // Multi-device CRDT convergence (any arrival order)
+    let ops = f.lib.db().ops_since(&Default::default(), 1000).unwrap();
+    let peer = Fixture::new(0);
+    peer.lib.db().apply_remote(&ops, |_, _| false).unwrap();
+    assert_eq!(peer.lib.db().favorite_media().unwrap(), f.lib.db().favorite_media().unwrap());
+
+    // Backup export + restore preserves favorites while keeping archive format VERSION = 4
+    let dir = std::env::temp_dir().join(format!("tl-fav-pack-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lib1 = Library::open(dir.join("l1")).unwrap();
+    let (sha, rel) = lib1.put_blob(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0], "png").unwrap();
+    {
+        let db = lib1.db();
+        db.upsert_post(&PostMeta { id: "p1".into(), ..Default::default() }).unwrap();
+        db.add_media(&sha, "p1", 0, &MediaKind::Photo, &rel, false).unwrap();
+        db.set_favorite(&sha, true).unwrap();
+    }
+    let pack = dir.join("b.tlpack");
+    archive::export_backup(&lib1, &pack).unwrap();
+    let lib2 = Library::open(dir.join("l2")).unwrap();
+    archive::import_pack(&lib2, &pack).unwrap();
+    assert!(lib2.db().favorite_media().unwrap().contains(&sha));
+    let _ = std::fs::remove_dir_all(&dir);
+}

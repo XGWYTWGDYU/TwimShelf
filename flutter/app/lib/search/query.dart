@@ -18,8 +18,9 @@ enum SearchKeyword {
   folder('folder', 'p:folder', 'folder'),
   recent('recent', 'r:recent', 'clock.badge.checkmark'),
   external('external', 'x:external', 'square.and.arrow.down'),
-  // only media from the photo library; with / without a tag you added or approved; damaged
+  // only media from the photo library; favorited; with / without a tag you added or approved; damaged
   album('album', 'a:album', 'photo.on.rectangle'),
+  favorite('favorite', 'fav:favorite', 'star'),
   reviewed('reviewed', 'v:reviewed', 'checkmark.circle'),
   unreviewed('unreviewed', 'v:unreviewed', 'circle.dashed'),
   damaged('damaged', 'b:damaged', 'exclamationmark.triangle');
@@ -110,6 +111,12 @@ class TokenQuery {
         }
       } else if (!excluded && key == 'a:album') {
         _album = true;
+      } else if (key == 'fav:favorite') {
+        if (excluded) {
+          _excludeFavorite = true;
+        } else {
+          _favorite = true;
+        }
       } else if (!excluded && key == 'v:reviewed') {
         _reviews.add(ReviewFilter.reviewed);
       } else if (!excluded && key == 'v:unreviewed') {
@@ -136,6 +143,8 @@ class TokenQuery {
     if (f.recent_only) k.add(SearchKeyword.recent.key);
     if (f.loose_only) k.add(SearchKeyword.external.key);
     if (f.album_only) k.add(SearchKeyword.album.key);
+    if (f.favorite_only) k.add(SearchKeyword.favorite.key);
+    if (f.exclude_favorite) k.add('-${SearchKeyword.favorite.key}');
     if (f.review == ReviewFilter.reviewed) k.add(SearchKeyword.reviewed.key);
     if (f.review == ReviewFilter.unreviewed) k.add(SearchKeyword.unreviewed.key);
     if (f.bad_only) k.add(SearchKeyword.damaged.key);
@@ -165,12 +174,14 @@ class TokenQuery {
   String? _folder;
   final _reviews = <ReviewFilter>{};
   bool _album = false, _damaged = false;
+  bool _favorite = false, _excludeFavorite = false;
   bool _recent = false,
       _external = false,
       _excludeRecent = false,
       _excludeExternal = false;
   List<String> get terms => List.unmodifiable(_terms);
   bool get recent => _recent;
+  bool get favorite => _favorite;
   String? get folder => _folder;
   Set<MediaKind> get allowedKinds =>
       (_kinds.isEmpty ? MediaKind.values.toSet() : _kinds).difference(
@@ -242,6 +253,7 @@ class TokenQuery {
         _reviews.length > 1 ||
         (_recent && _excludeRecent) ||
         (_external && _excludeExternal) ||
+        (_favorite && _excludeFavorite) ||
         (_folder != null && _excludedFolders.contains(_folder)) ||
         (_terms.isNotEmpty && !f.tags && !f.text && !f.author);
   }
@@ -249,6 +261,7 @@ class TokenQuery {
   FeedFilter filter({FeedFilter? over}) {
     final json = (over ?? FeedFilter()).toJson();
     if (_album) json['album_only'] = true;
+    if (_favorite) json['favorite_only'] = true;
     if (_damaged) json['bad_only'] = true;
     if (_reviews.length == 1) json['review'] = _reviews.single.wireValue;
     if (_folder != null) json['folder'] = _folder;
@@ -264,6 +277,7 @@ class TokenQuery {
       'exclude_folders': _excludedFolders,
       'exclude_recent': _excludeRecent,
       'exclude_loose': _excludeExternal,
+      'exclude_favorite': _excludeFavorite || (json['exclude_favorite'] == true),
       'require': require?.toJson(),
     });
     return FeedFilter.fromJson(json);

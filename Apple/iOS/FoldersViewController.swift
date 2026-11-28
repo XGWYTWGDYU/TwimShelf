@@ -7,7 +7,7 @@ import UIKit
 /// media types and the other collections (loose media, unreviewed, damaged, bin).
 final class FoldersViewController: UIViewController, UICollectionViewDelegate {
     enum Section: Int { case folders, more }
-    enum More: String { case loose, album, unreviewed, reviewed, bad, trash }
+    enum More: String { case loose, album, favorites, unreviewed, reviewed, bad, trash }
     enum Item: Hashable {
         case folder(FolderOverview.Folder)
         case newFolder
@@ -148,7 +148,7 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
             c.text = title
             c.secondaryText = detail
             c.image = UIImage(systemName: symbol)
-            c.imageProperties.tintColor = .label
+            c.imageProperties.tintColor = m == .favorites ? UIColor(red: 0.96, green: 0.72, blue: 0.0, alpha: 1) : .label
             cell.contentConfiguration = c
             cell.accessories = [.disclosureIndicator()]
             cell.accessibilityIdentifier = "more-" + m.rawValue
@@ -178,6 +178,7 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
         switch m {
         case .loose: (L("place.loose"), "square.dashed")
         case .album: (L("place.album"), "photo.on.rectangle")
+        case .favorites: (L("place.favorites"), "star.fill")
         case .unreviewed: (L("place.unreviewed"), "seal")
         case .reviewed: (L("place.reviewed"), "checkmark.seal")
         case .bad: (L("place.bad"), "exclamationmark.triangle")
@@ -227,7 +228,7 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
 
     private func appendKindsAndMore(_ snap: inout NSDiffableDataSourceSnapshot<Section, Item>, _ o: FolderOverview?) {
         let stats = ActivityCenter.shared.stats
-        var more: [Item] = [.kind(.photo, o?.photos ?? 0), .kind(.video, o?.videos ?? 0), .more(.loose, nil), .more(.album, nil), .more(.unreviewed, nil), .more(.reviewed, nil)]
+        var more: [Item] = [.kind(.photo, o?.photos ?? 0), .kind(.video, o?.videos ?? 0), .more(.loose, nil), .more(.album, nil), .more(.favorites, nil), .more(.unreviewed, nil), .more(.reviewed, nil)]
         if LibraryPrefs.aboutExtras { more.append(.more(.bad, (stats?.bad ?? 0) > 0 ? "\(stats?.bad ?? 0)" : nil)) }
         let trashed = stats?.trashed ?? 0
         more.append(.more(.trash, trashed > 0 ? "\(trashed)" : nil))
@@ -261,6 +262,7 @@ final class FoldersViewController: UIViewController, UICollectionViewDelegate {
             switch m {
             case .loose: open(MediaGridViewController(title: L("place.loose"), filter: FeedFilter(looseOnly: true)))
             case .album: open(MediaGridViewController(title: L("place.album"), filter: FeedFilter(albumOnly: true)))
+            case .favorites: open(MediaGridViewController(title: L("place.favorites"), filter: FeedFilter(favoriteOnly: true)))
             case .reviewed: open(MediaGridViewController(title: L("place.reviewed"), filter: FeedFilter(review: .reviewed)))
             case .unreviewed: open(MediaGridViewController(title: L("place.unreviewed"), filter: FeedFilter(review: .unreviewed)))
             case .bad: open(MediaGridViewController(title: L("place.bad"), filter: FeedFilter(badOnly: true)))

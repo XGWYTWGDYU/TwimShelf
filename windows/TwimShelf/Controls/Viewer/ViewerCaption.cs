@@ -18,10 +18,18 @@ namespace TwimShelf.Controls.ViewerEngine;
 public sealed partial class ViewerCaption : UserControl
 {
     readonly StackPanel _root = new() { Spacing = 4, MaxWidth = 680, HorizontalAlignment = HorizontalAlignment.Left };
-    readonly TextBlock _author = new() { Foreground = new SolidColorBrush(Colors.White), FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 };
+    readonly Border _plate = new()
+    {
+        CornerRadius = new CornerRadius(8),
+        BorderThickness = new Thickness(1),
+        Padding = new Thickness(12, 8, 12, 8),
+        Shadow = new ThemeShadow(),
+        Translation = new System.Numerics.Vector3(0, 0, 24),
+        HorizontalAlignment = HorizontalAlignment.Left,
+    };
+    readonly TextBlock _author = new() { FontSize = 14, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 1 };
     readonly TextBlock _collapsed = new()
     {
-        Foreground = new SolidColorBrush(Colors.White),
         FontSize = 14,
         TextWrapping = TextWrapping.Wrap,
         MaxLines = 3,
@@ -37,7 +45,6 @@ public sealed partial class ViewerCaption : UserControl
     readonly StackPanel _expandedBody = new() { Spacing = 6 };
     readonly TextBlock _expandedText = new()
     {
-        Foreground = new SolidColorBrush(Colors.White),
         FontSize = 14,
         TextWrapping = TextWrapping.Wrap,
         IsTextSelectionEnabled = true,
@@ -45,12 +52,10 @@ public sealed partial class ViewerCaption : UserControl
     };
     readonly TextBlock _date = new()
     {
-        Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 255, 255, 255)),
         FontSize = 12,
     };
     readonly TextBlock _toggleHint = new()
     {
-        Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(0xCC, 255, 255, 255)),
         FontSize = 12,
         FontWeight = FontWeights.SemiBold,
         Visibility = Visibility.Collapsed,
@@ -74,8 +79,8 @@ public sealed partial class ViewerCaption : UserControl
         _root.Children.Add(_expandedScroll);
         _root.Children.Add(_toggleHint);
 
-        // Background transparent so hits inside the caption block don't leak to the photo behind.
-        var wrap = new Grid { Background = new SolidColorBrush(Colors.Transparent), Children = { _root } };
+        _plate.Child = _root;
+        var wrap = new Grid { Background = new SolidColorBrush(Colors.Transparent), Children = { _plate } };
         wrap.Tapped += OnTapped;
         wrap.DoubleTapped += (_, e) => e.Handled = true;
         wrap.PointerPressed += (_, e) => e.Handled = true;
@@ -85,6 +90,30 @@ public sealed partial class ViewerCaption : UserControl
 
         Content = wrap;
         Visibility = Visibility.Collapsed;
+        Loaded += (_, _) => ApplyTheme();
+        ActualThemeChanged += (_, _) => ApplyTheme();
+        ApplyTheme();
+    }
+
+    public void ApplyTheme()
+    {
+        var primary = new SolidColorBrush(Colors.White);
+        var secondary = new SolidColorBrush(Windows.UI.Color.FromArgb(0xB3, 255, 255, 255));
+        var hint = new SolidColorBrush(Windows.UI.Color.FromArgb(0xCC, 255, 255, 255));
+        _author.Foreground = primary;
+        _collapsed.Foreground = primary;
+        _expandedText.Foreground = primary;
+        _date.Foreground = secondary;
+        _toggleHint.Foreground = hint;
+        // Explicit dark Acrylic so the card never picks up light-mode white Acrylic over the dark viewer.
+        _plate.Background = new AcrylicBrush
+        {
+            TintColor = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20),
+            TintOpacity = 0.68,
+            TintLuminosityOpacity = 0.74,
+            FallbackColor = Windows.UI.Color.FromArgb(0xE0, 0x24, 0x24, 0x24),
+        };
+        _plate.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x28, 255, 255, 255));
     }
 
     public static bool Shows(FeedItem? item)

@@ -56,6 +56,8 @@ class Shell extends StatefulWidget {
 class _ShellState extends State<Shell> {
   Place _place = Place.browse;
   final _navigators = <String, GlobalKey<NavigatorState>>{};
+  /// Every visited place stays mounted in the IndexedStack (switching is instant, no blank frame).
+  final List<Place> _mounted = [..._barPlaces];
   /// The sidebar's width while its edge is being dragged.
   double? _dragWidth;
 
@@ -218,10 +220,20 @@ class _ShellState extends State<Shell> {
   }
 
   Widget _primaryStacks(Place current, ShellLayout layout) {
-    final places = [..._barPlaces, if (!_barPlaces.contains(current)) current];
+    final liveFolders = library.folders?.folders.map((f) => f.name).toSet();
+    if (liveFolders != null) {
+      _mounted.removeWhere((p) {
+        if (p.folder != null && !liveFolders.contains(p.folder) && p != current) {
+          _navigators.remove(p.id);
+          return true;
+        }
+        return false;
+      });
+    }
+    if (!_mounted.contains(current)) _mounted.add(current);
     return IndexedStack(
-      index: places.indexOf(current),
-      children: [for (final p in places) _stack(p, layout)],
+      index: _mounted.indexOf(current),
+      children: [for (final p in _mounted) _stack(p, layout)],
     );
   }
 
@@ -255,7 +267,7 @@ class _ShellState extends State<Shell> {
             selected: selected,
             selectedColor: scheme.onSecondaryContainer,
             selectedTileColor: scheme.secondaryContainer,
-            leading: MascotIcon(mascot, fallback: Icon(selected ? p.selectedIcon : p.icon)),
+            leading: MascotIcon(mascot, fallback: Icon(selected ? p.selectedIcon : p.icon, color: p == Place.favorites ? const Color(0xFFF5B800) : null)),
             title: Text(p.title, overflow: TextOverflow.ellipsis),
             trailing: count == null ? null : Text(count, style: Theme.of(context).textTheme.labelMedium),
             onTap: press,

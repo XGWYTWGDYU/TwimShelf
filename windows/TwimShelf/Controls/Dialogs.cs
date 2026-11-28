@@ -1,7 +1,10 @@
 // The app's dialogs (ContentDialog): a question with a field, a choice, a message, and work with
 // progress. One at a time per window, as WinUI allows.
+using System.Numerics;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using static TwimShelf.Services.Strings;
 
 namespace TwimShelf.Controls;
@@ -125,10 +128,18 @@ public static class Dialogs
         finally { timer.Stop(); }
     }
 
-    /// A short message that goes by itself (a TeachingTip at the bottom of the window).
+    static (Panel Root, Border Toast, DispatcherQueueTimer Timer)? _activeToast;
+
+    /// A short message that goes by itself: plain messages use a compact self-sizing toast with
+    /// centered text at the bottom of the window; messages with an action (e.g. Undo) use TeachingTip.
     public static void Toast(Window w, string message, string? action = null, Action? onAction = null)
     {
         if (w.Content is not Panel root) return;
+        if (action == null && onAction == null)
+        {
+            ShowCompactToast(w, root, message);
+            return;
+        }
         var tip = new TeachingTip
         {
             Subtitle = message,
@@ -145,6 +156,69 @@ public static class Dialogs
         t.Interval = TimeSpan.FromSeconds(onAction != null ? 6 : 3.5);
         t.IsRepeating = false;
         t.Tick += (_, _) => tip.IsOpen = false;
+        t.Start();
+    }
+
+    static void ShowCompactToast(Window w, Panel root, string message)
+    {
+        if (_activeToast is { } prev)
+        {
+            prev.Timer.Stop();
+            prev.Root.Children.Remove(prev.Toast);
+            _activeToast = null;
+        }
+        var toast = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(24),
+            MaxWidth = 420,
+            Padding = new Thickness(16, 10, 16, 10),
+            CornerRadius = new CornerRadius(8),
+            Background = (Brush)Application.Current.Resources["AcrylicInAppFillColorDefaultBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["SurfaceStrokeColorFlyoutBrush"],
+            BorderThickness = new Thickness(1),
+            Shadow = new ThemeShadow(),
+            Translation = new Vector3(0, 0, 32),
+            IsHitTestVisible = false,
+            Opacity = 0,
+            OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) },
+            Child = new TextBlock
+            {
+                Text = message,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"],
+            },
+        };
+        if (root is Grid grid)
+        {
+            if (grid.RowDefinitions.Count > 1) Grid.SetRowSpan(toast, grid.RowDefinitions.Count);
+            if (grid.ColumnDefinitions.Count > 1) Grid.SetColumnSpan(toast, grid.ColumnDefinitions.Count);
+        }
+        Canvas.SetZIndex(toast, 1000);
+        toast.Loaded += (_, _) => toast.Opacity = 1;
+        root.Children.Add(toast);
+
+        var t = w.DispatcherQueue.CreateTimer();
+        t.Interval = TimeSpan.FromSeconds(3.5);
+        t.IsRepeating = false;
+        t.Tick += (_, _) =>
+        {
+            toast.Opacity = 0;
+            var remove = w.DispatcherQueue.CreateTimer();
+            remove.Interval = TimeSpan.FromMilliseconds(180);
+            remove.IsRepeating = false;
+            remove.Tick += (_, _) =>
+            {
+                root.Children.Remove(toast);
+                if (_activeToast?.Toast == toast) _activeToast = null;
+            };
+            remove.Start();
+        };
+        _activeToast = (root, toast, t);
         t.Start();
     }
 }

@@ -101,14 +101,5 @@ public sealed class LocalModels
         await Refresh();
     }
 
-    // ---- models between devices of the same kind (GGUF between Android, Windows and Linux)
-    public Task<ulong> Export(string id, string outPath) => TlCore.Run(() => TlCore.ModelExportZip(id, outPath));
-
-    public async Task Import(string path)
-    {
-        await TlCore.Run(() => TlCore.ModelImport(path));
-        await Refresh();
-    }
-
     public Task Unload() => Supported ? TlCore.Run(TlCore.AiUnload) : Task.CompletedTask;
 }

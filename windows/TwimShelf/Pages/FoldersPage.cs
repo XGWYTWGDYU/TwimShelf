@@ -20,6 +20,7 @@ public sealed partial class FoldersPage : UserControl, IShellPage
     readonly TextBlock _empty;
     List<Folder> _folders = [];
     double _side = MinTile;
+    bool _active = true;
 
     public event Action? ChromeChanged;
     public string Title => L("place.folders");
@@ -61,19 +62,31 @@ public sealed partial class FoldersPage : UserControl, IShellPage
         };
         Content = new Grid { Children = { _grid, _empty, _bar } };
         var add = new AppBarButton { Icon = new FontIcon { Glyph = "" }, Label = L("common.newFolder") };
-        add.Click += async (_, _) => { if (await FolderActions.Create(MainWindow.Current!) is { } n) _open(n); };
+        add.Click += async (_, _) => { if (!_active) return; if (await FolderActions.Create(MainWindow.Current!) is { } n) _open(n); };
         var k = new Microsoft.UI.Xaml.Input.KeyboardAccelerator { Key = Windows.System.VirtualKey.N, Modifiers = Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift };
         add.KeyboardAccelerators.Add(k);
         _bar.Child = new CommandBar { DefaultLabelPosition = CommandBarDefaultLabelPosition.Right, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), PrimaryCommands = { add } };
         _library.Changed += Reload;
-        Unloaded += (_, _) =>
-        {
-            _library.Changed -= Reload;
-            _alive.Cancel();
-            foreach (var c in _loads.Values) c.Dispose();
-            _loads.Clear();
-        };
+        Unloaded += (_, _) => Close();
         Reload();
+    }
+
+    public void Shown()
+    {
+        _active = true;
+        Layout();
+        Reload();
+    }
+
+    public void Hidden() => _active = false;
+
+    public void Close()
+    {
+        _active = false;
+        _library.Changed -= Reload;
+        if (!_alive.IsCancellationRequested) _alive.Cancel();
+        foreach (var c in _loads.Values) c.Dispose();
+        _loads.Clear();
     }
 
     void Reload()

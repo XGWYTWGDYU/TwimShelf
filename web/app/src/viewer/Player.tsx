@@ -4,7 +4,7 @@
 // (the pointer too). Double-click plays or pauses; press and hold plays at 2.5×; Space, ↑ ↓
 // (volume) and F come from the viewer. Loops at the end.
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Pause, PictureInPicture2, Play, Share, X } from 'lucide-react';
+import { Pause, PictureInPicture2, Play, Share, Star, X } from 'lucide-react';
 import { L, type FeedItem } from '@twimshelf/core';
 import { core } from '../lib/core';
 import { openMenuBelow } from '../components/Menu';
@@ -28,8 +28,8 @@ export function fmt(s: number): string {
   return i >= 3600 ? `${Math.floor(i / 3600)}:${mm}:${ss}` : `${Math.floor(i / 60)}:${ss}`;
 }
 
-export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string; squarePreview?: { url: string; side: number }; onClose: () => void; onShare: (el: Element) => void; onIdle: (idle: boolean) => void }>(
-  function Player({ item, poster, squarePreview, onClose, onShare, onIdle }, ref) {
+export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string; squarePreview?: { url: string; side: number }; favorited?: boolean; onToggleFavorite?: () => void; onClose: () => void; onShare: (el: Element) => void; onIdle: (idle: boolean) => void }>(
+  function Player({ item, poster, squarePreview, favorited = false, onToggleFavorite, onClose, onShare, onIdle }, ref) {
     const video = useRef<HTMLVideoElement>(null);
     const [t, setT] = useState(position(item.media_id));
     const [d, setD] = useState(0);
@@ -54,17 +54,11 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
       if (!sticky) hudTimer.current = window.setTimeout(() => setHud(null), 700);
     }, []);
 
-    /** The controls show; they go again after 2.5 s while it plays. */
+    /** The bottom black dock stays visible without auto-hiding on inactivity. */
     const wake = useCallback(() => {
       window.clearTimeout(hideTimer.current);
       setShown(true);
       onIdle(false);
-      hideTimer.current = window.setTimeout(() => {
-        const v = video.current;
-        if (!v || v.paused) return;
-        setShown(false);
-        onIdle(true);
-      }, 2500);
     }, [onIdle]);
 
     const togglePlay = useCallback(() => {
@@ -137,16 +131,18 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
       setT(v.currentTime);
     };
 
+    const [isScrubbing, setIsScrubbing] = useState(false);
     const bar = useRef<HTMLDivElement>(null);
     const scrub = (e: React.PointerEvent) => {
       e.stopPropagation();
       const el = bar.current!;
       el.setPointerCapture(e.pointerId);
       scrubbing.current = true;
+      setIsScrubbing(true);
       const at = (x: number) => { const r = el.getBoundingClientRect(); seekTo(Math.min(1, Math.max(0, (x - r.left) / r.width))); };
       at(e.clientX);
       const move = (ev: PointerEvent) => at(ev.clientX);
-      const up = () => { scrubbing.current = false; el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); };
+      const up = () => { scrubbing.current = false; setIsScrubbing(false); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); };
       el.addEventListener('pointermove', move);
       el.addEventListener('pointerup', up);
       el.addEventListener('pointercancel', up);
@@ -206,29 +202,37 @@ export const Player = forwardRef<PlayerHandle, { item: FeedItem; poster?: string
         {squarePreview && !poster && !hasFrame && <img className="player-square-preview" src={squarePreview.url} alt="" draggable={false}
           width={squarePreview.side} height={squarePreview.side} />}
         {hud && <div className="player-hud">{hud.text}</div>}
-        <div className={`player-controls${shown ? '' : ' hidden'}`} onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
-          <button className="player-btn" aria-label={paused ? L('viewer.play') : L('viewer.pause')} onClick={togglePlay}>
-            {paused ? <Play size={15} fill="currentColor" strokeWidth={0} /> : <Pause size={15} fill="currentColor" strokeWidth={0} />}
-          </button>
-          <div className="player-bar" ref={bar} onPointerDown={scrub} role="slider" aria-valuemin={0} aria-valuemax={d} aria-valuenow={t}>
-            <div className="player-track"><div className="player-fill" style={{ width: `${frac * 100}%` }} /></div>
-            <div className="player-knob" style={{ left: `${frac * 100}%` }} />
+        <div className={`player-dock${shown ? '' : ' hidden'}`} onMouseDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+          <div className={`player-top-bar${isScrubbing ? ' scrubbing' : ''}`} ref={bar} onPointerDown={scrub} role="slider" aria-valuemin={0} aria-valuemax={d} aria-valuenow={t}>
+            <div className="player-top-track"><div className="player-top-fill" style={{ width: `${frac * 100}%` }} /></div>
+            <div className="player-top-knob" style={{ left: `${frac * 100}%` }} />
           </div>
-          <span className="player-time">{fmt(t)} / {fmt(d)}</span>
-          <button className="player-btn player-speed" aria-label={L('player.speed')} title={L('player.speed')}
-            onClick={(e) => openMenuBelow(e.currentTarget, SPEEDS.map((r) => ({ label: speedText(r), checked: r === speed, run: () => {
-              setSpeed(r);
-              const v = video.current;
-              if (v && !v.paused) v.playbackRate = r;
-              wake();
-            } })))}>{speedText(speed)}</button>
-          {canPip && (
-            <button className="player-btn" aria-label={L('viewer.pip')} aria-pressed={pip} title={L('viewer.pip')} onClick={() => void togglePip()}>
-              <PictureInPicture2 size={15} strokeWidth={2.2} />
+          <div className="player-dock-row">
+            <button className="player-btn" aria-label={paused ? L('viewer.play') : L('viewer.pause')} onClick={togglePlay}>
+              {paused ? <Play size={16} fill="currentColor" strokeWidth={0} /> : <Pause size={16} fill="currentColor" strokeWidth={0} />}
             </button>
-          )}
-          <button className="player-btn" aria-label={L('viewer.share')} title={L('viewer.share')} onClick={(e) => onShare(e.currentTarget)}><Share size={15} strokeWidth={2.2} /></button>
-          <button className="player-btn" aria-label={L('viewer.close')} title={L('viewer.close')} onClick={onClose}><X size={16} strokeWidth={2.4} /></button>
+            <span className="player-time">{fmt(t)} / {fmt(d)}</span>
+            <div className="player-dock-spacer" />
+            <button className="player-btn player-speed" aria-label={L('player.speed')} title={L('player.speed')}
+              onClick={(e) => openMenuBelow(e.currentTarget, SPEEDS.map((r) => ({ label: speedText(r), checked: r === speed, run: () => {
+                setSpeed(r);
+                const v = video.current;
+                if (v && !v.paused) v.playbackRate = r;
+                wake();
+              } })))}>{speedText(speed)}</button>
+            {canPip && (
+              <button className="player-btn" aria-label={L('viewer.pip')} aria-pressed={pip} title={L('viewer.pip')} onClick={() => void togglePip()}>
+                <PictureInPicture2 size={15} strokeWidth={2.2} />
+              </button>
+            )}
+            {onToggleFavorite && (
+              <button className="player-btn" aria-label={favorited ? L('common.unfavorite') : L('common.favorite')} title={favorited ? L('common.unfavorite') : L('common.favorite')} onClick={onToggleFavorite}>
+                <Star size={15} strokeWidth={2.2} fill={favorited ? '#F5B800' : 'none'} color={favorited ? '#F5B800' : 'currentColor'} />
+              </button>
+            )}
+            <button className="player-btn" aria-label={L('viewer.share')} title={L('viewer.share')} onClick={(e) => onShare(e.currentTarget)}><Share size={15} strokeWidth={2.2} /></button>
+            <button className="player-btn" aria-label={L('viewer.close')} title={L('viewer.close')} onClick={onClose}><X size={16} strokeWidth={2.4} /></button>
+          </div>
         </div>
       </div>
     );

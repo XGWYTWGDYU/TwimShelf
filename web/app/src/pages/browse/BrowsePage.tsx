@@ -4,12 +4,12 @@
 // search capsule and its round buttons on the right; the cards scroll under the toolbar.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Clock, Layers, Share, Shuffle, X } from 'lucide-react';
-import { L, TokenQuery, quoteSearchWord, type FeedItem, type FeedQuery } from '@twimshelf/core';
+import { L, KEYWORDS, keywordWord, TokenQuery, quoteSearchWord, type FeedItem, type FeedQuery } from '@twimshelf/core';
 import { Spinner } from '../../components/ui';
 import { Toolbar } from '../../components/Toolbar';
 import { openMenu } from '../../components/Menu';
 import { toast } from '../../components/toast';
-import { cardMenu, tagMenu } from './cardMenu';
+import { cardMenu, favoriteMenu, tagMenu } from './cardMenu';
 import { core } from '../../lib/core';
 import { onCommand, setMenuState } from '../../lib/commands';
 import { useAsync, useStore } from '../../lib/hooks';
@@ -48,6 +48,7 @@ export function queryFor(r: BrowseRoute, order: { newest: boolean; seed: number 
       folder: r.folder ?? null,
       loose_only: r.view === 'loose',
       album_only: r.view === 'album',
+      favorite_only: r.view === 'favorites',
       review: r.view === 'unreviewed' ? 'unreviewed' : r.view === 'reviewed' ? 'reviewed' : 'any',
     },
   });
@@ -146,6 +147,13 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
     const t = item.tags.find((x) => x.label === label);
     if (t) openMenu({ clientX: e.clientX, clientY: e.clientY }, tagMenu(item, t, host));
   }, [host]);
+  const onFavorite = useCallback(() => {
+    const k = KEYWORDS.find((x) => x.id === 'favorite');
+    if (k) addTerm(keywordWord(k));
+  }, [addTerm]);
+  const onFavoriteMenu = useCallback((item: FeedItem, e: React.MouseEvent) => {
+    openMenu({ clientX: e.clientX, clientY: e.clientY }, favoriteMenu(item));
+  }, []);
   const onAddTag = useCallback((item: FeedItem, post: FeedItem[]) => {
     void openTagPicker({ item, post, initialScope: 'media' });
   }, []);
@@ -215,7 +223,7 @@ export default function BrowsePage({ route, active }: { route: BrowseRoute; acti
         : posts.length === 0 ? <div className="browse-empty">{L(route.q ? 'feed.empty.noMatch' : 'feed.empty.library')}</div>
         : <Masonry ref={masonry} items={posts} active={active} density={density} keyOf={(p) => p.id} estimate={estimateCard} top={52 + 12} footer={end} onScrollTop={onScrollTop}
           render={(p, w) => <PostCard post={p} width={w} onOpen={openPost} onContext={(post, m, e) => void context(post, m, e)}
-            onTag={addTerm} onTagMenu={onTagMenu} onAddTag={(it) => onAddTag(it, p.media)}
+            onTag={addTerm} onTagMenu={onTagMenu} onFavorite={onFavorite} onFavoriteMenu={onFavoriteMenu} onAddTag={(it) => onAddTag(it, p.media)}
             marks={marks} highlight={flash?.id === p.id ? flash.page : undefined} />} />}
       {toolbar}
     </div>

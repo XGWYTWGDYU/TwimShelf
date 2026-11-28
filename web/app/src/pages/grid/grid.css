@@ -4,6 +4,7 @@
 .zoom-grid { position: absolute; inset: 0; overflow: hidden; }
 .zoom-grid-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
 .zoom-grid-scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; outline: none; overscroll-behavior: contain; }
+.zoom-grid-scroller:focus-visible { outline: none; }
 .zoom-grid-spacer { position: relative; width: 100%; }
 .zoom-grid-footer { position: absolute; left: 0; right: 0; height: 18px; text-align: center; font-size: 12px; line-height: 18px; color: var(--fg-2); transition: opacity 0.2s; pointer-events: none; }
 .grid-empty { position: absolute; inset: 0; display: grid; place-items: center; font-size: 15px; color: var(--fg-2); pointer-events: none; }

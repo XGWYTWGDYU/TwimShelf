@@ -157,18 +157,6 @@ final class ModelsModel: ObservableObject {
         }
     }
 
-    func export(_ m: Core.ModelInfo, _ window: NSWindow?) {
-        macSavePanel(m.id + ".zip") { url in
-            macRun(window, { try Core.exportModelZip(m.id, to: url) }) { macAlert(window, L("mac.models.exported"), url.lastPathComponent) }
-        }
-    }
-
-    func importModel(_ window: NSWindow?) {
-        macOpenPanel([.zip, .folder], directories: true) { u in
-            macRun(window, { try Core.importModel(u) }) { m in ModelStore.shared.reload(); macAlert(window, L("models.imported"), ModelStore.shared.displayName(m.id)) }
-        }
-    }
-
     // MARK: External models
 
     func test(_ e: ExternalModel) {
@@ -207,12 +195,6 @@ struct ModelsPageView: View {
             external(store)
             hubEntry
             remote(store)
-
-            Card(spacing: 0) {
-                CardRow(symbol: "square.and.arrow.down.fill", color: .green, title: L("mac.models.import"), detail: L("models.appleOnly")) {
-                    Button(L("mac.importEllipsis")) { m.importModel(env.window) }
-                }
-            }
         }
         .onAppear {
             live.onTick = { [weak m] in m?.tick(env.window) }
@@ -245,11 +227,10 @@ struct ModelsPageView: View {
         let c = AutoTagger.shared.counts
         let failures = Core.aiFailures()
         let value = c.total > 0 ? Double(c.done) / Double(c.total) : 0
-        let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
         return VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center, spacing: 22) {
                 ZStack {
-                    ProgressRing(value: value, lineWidth: 11, color: .purple)
+                    ProgressRing(value: value, lineWidth: 11, color: .accentColor)
                     VStack(spacing: 0) {
                         Text("\(Int((value * 100).rounded()))%").font(.system(size: 24, weight: .bold, design: .rounded)).monospacedDigit()
                         Text(L("models.analysed")).font(.caption2).foregroundStyle(.secondary)
@@ -269,18 +250,18 @@ struct ModelsPageView: View {
             }
 
             HStack(spacing: 12) {
-                defaultPicker(L("mac.models.tagger"), symbol: "eye.fill", color: .purple, ids: store.taggerIds, selected: store.activeTaggerId, name: { store.displayName($0) }) { store.activeTaggerId = $0 }
-                defaultPicker(L("mac.models.embedder"), symbol: "magnifyingglass", color: .teal, ids: store.embedders.map(\.id), selected: store.activeEmbedderId, name: { store.displayName($0) }) {
+                defaultPicker(L("mac.models.tagger"), symbol: "eye.fill", color: .accentColor, ids: store.taggerIds, selected: store.activeTaggerId, name: { store.displayName($0) }) { store.activeTaggerId = $0 }
+                defaultPicker(L("mac.models.embedder"), symbol: "magnifyingglass", color: .accentColor, ids: store.embedders.map(\.id), selected: store.activeEmbedderId, name: { store.displayName($0) }) {
                     store.activeEmbedderId = $0; Task { await AutoTagger.shared.embedMissingLabels() }
                 }
             }
 
-            if let e = AutoTagger.shared.lastError { Banner(text: e, symbol: "exclamationmark.octagon.fill", color: .red) }
+            if let e = AutoTagger.shared.lastError { Banner(text: e, symbol: "exclamationmark.octagon.fill", color: .accentColor) }
             if !failures.isEmpty {
                 // shown, never dropped silently: which media, why, and a way to try again
                 let reasons = Dictionary(grouping: failures, by: \.reason).sorted { $0.value.count > $1.value.count }
                 HStack(alignment: .top, spacing: 10) {
-                    Banner(text: L("mac.models.failures", failures.count) + reasons.prefix(2).map { L("mac.models.failures.group", $0.value.count, $0.key) }.joined(separator: L("list.semicolon")) + L("mac.models.failures.tail"))
+                    Banner(text: L("mac.models.failures", failures.count) + reasons.prefix(2).map { L("mac.models.failures.group", $0.value.count, $0.key) }.joined(separator: L("list.semicolon")) + L("mac.models.failures.tail"), color: .accentColor)
                     VStack(spacing: 6) {
                         Button(L("mac.detailsEllipsis")) {
                             let lines = failures.prefix(30).map { L("models.failure.line", $0.mediaId.prefix(12), $0.attempts, $0.reason) }
@@ -297,12 +278,7 @@ struct ModelsPageView: View {
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            shape.fill(LinearGradient(colors: [Color.purple.opacity(0.18), Color.indigo.opacity(0.08), Color.blue.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay(shape.fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
-                .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
-                .shadow(color: Color.purple.opacity(0.12), radius: 16, y: 6)
-        }
+        .background { CardSurface(radius: 24) }
     }
 
     private func defaultPicker(_ title: String, symbol: String, color: Color, ids: [String], selected: String?, name: @escaping (String) -> String, set: @escaping (String) -> Void) -> some View {
@@ -323,7 +299,7 @@ struct ModelsPageView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.7), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     /// A model the whole width of the page: what it is, whether it is the default and its menu in
@@ -338,7 +314,7 @@ struct ModelsPageView: View {
                     HStack(spacing: 5) { pills() }
                 }
                 Spacer(minLength: 8)
-                if isDefault { Pill(text: L("prompt.default"), color: .yellow, symbol: "star.fill") }
+                if isDefault { Pill(text: L("prompt.default"), color: .accentColor, symbol: "star.fill") }
                 else { Button(L("mac.models.setDefault"), action: setDefault) }
                 menu()
                 if canOpen {
@@ -377,19 +353,18 @@ struct ModelsPageView: View {
             } else {
                 VStack(spacing: 12) {
                     ForEach(store.installed, id: \.id) { mi in
-                        modelCard(id: mi.id, symbol: mi.vision ? "eye.fill" : "magnifyingglass", color: mi.vision ? .purple : .teal, title: store.displayName(mi.id),
+                        modelCard(id: mi.id, symbol: mi.vision ? "eye.fill" : "magnifyingglass", color: .accentColor, title: store.displayName(mi.id),
                                   isDefault: mi.vision ? store.activeTaggerId == mi.id : store.activeEmbedderId == mi.id,
                                   setDefault: {
                                       if mi.vision { store.activeTaggerId = mi.id } else { store.activeEmbedderId = mi.id; Task { await AutoTagger.shared.embedMissingLabels() } }
                                   },
                                   canOpen: mi.vision,
                                   pills: {
-                                      Pill(text: mi.vision ? L("mac.models.role.tagger") : L("models.semanticSearch"), color: mi.vision ? .purple : .teal)
+                                      Pill(text: mi.vision ? L("mac.models.role.tagger") : L("models.semanticSearch"), color: .accentColor)
                                       Pill(text: ActivityCenter.bytes(mi.bytes), color: .secondary)
                                   },
                                   menu: {
                                       moreMenu {
-                                          Button(L("mac.models.exportZip")) { m.export(mi, env.window) }
                                           Button(L("mac.showInFinder")) { NSWorkspace.shared.activateFileViewerSelecting([mi.url]) }
                                           Divider()
                                           Button(L("mac.deleteEllipsis"), role: .destructive) { m.delete(mi, env.window) }
@@ -407,10 +382,10 @@ struct ModelsPageView: View {
             SectionHeading(L("models.external"))
             VStack(spacing: 12) {
                 ForEach(ExternalModels.all, id: \.id) { e in
-                    modelCard(id: e.id, symbol: e.isLocal ? "desktopcomputer" : "cloud.fill", color: .blue, title: e.title, isDefault: e.id == store.activeTaggerId,
+                    modelCard(id: e.id, symbol: e.isLocal ? "desktopcomputer" : "cloud.fill", color: .accentColor, title: e.title, isDefault: e.id == store.activeTaggerId,
                               setDefault: { store.activeTaggerId = e.id },
                               pills: {
-                                  Pill(text: e.kindLabel, color: .blue)
+                                  Pill(text: e.kindLabel, color: .accentColor)
                                   if !e.host.isEmpty { Pill(text: e.host, color: .secondary) }
                                   if !e.model.isEmpty { Text(e.model).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                               },
@@ -444,13 +419,13 @@ struct ModelsPageView: View {
     private var hubEntry: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(L("models.available"))
-            Card(spacing: 0) {
-                CardRow(symbol: "square.grid.2x2.fill", color: .blue, title: L("hub.title"), detail: L("hub.entry.detail")) {
+            Card(spacing: 14) {
+                CardRow(symbol: "square.grid.2x2.fill", color: .accentColor, title: L("hub.title"), detail: L("hub.entry.detail")) {
                     Button(L("hub.open")) { env.open(L("hub.title"), MacSettingsPages.modelHub()) }
                         .accessibilityIdentifier("openModelHub")
                 }
-                RowDivider()
-                CardRow(symbol: "arrow.down.circle.fill", color: .green, title: L("models.source"), detail: L("models.source.footer")) {
+                RowDivider(inset: 42)
+                CardRow(symbol: "arrow.down.circle.fill", color: .accentColor, title: L("models.source"), detail: L("models.source.footer")) {
                     Picker("", selection: Binding(get: { m.source }, set: { m.source = $0; Core.setModelSource($0) })) {
                         ForEach(ModelHub.sources, id: \.0) { Text($0.1).tag($0.0) }
                     }
@@ -472,7 +447,7 @@ struct ModelsPageView: View {
                         Text(m.remoteError ?? (SyncService.shared.reachablePeers.isEmpty ? (SyncService.shared.discoveredAccountPeers.isEmpty ? L("models.peers.none") : L("models.peers.connecting")) : (m.remoteState == "done" ? L("models.peers.nothing") : L("mac.models.peers.tap")))).foregroundStyle(.secondary)
                     }
                     ForEach(m.remote, id: \.info.id) { r in
-                        CardRow(symbol: "laptopcomputer.and.iphone", color: .indigo, title: store.displayName(r.info.id), detail: "\(r.peer.name) · \(ActivityCenter.bytes(r.info.bytes))") {
+                        CardRow(symbol: "laptopcomputer.and.iphone", color: .accentColor, title: store.displayName(r.info.id), detail: "\(r.peer.name) · \(ActivityCenter.bytes(r.info.bytes))") {
                             Button(L("models.pull")) {
                                 do { try SyncService.shared.pull(r); m.remote.removeAll { $0 == r } }
                                 catch { macAlert(env.window, L("models.pull.failed"), error.localizedDescription) }
@@ -509,7 +484,7 @@ private struct ExternalEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                IconTile(symbol: "network", color: .blue, size: 40)
+                IconTile(symbol: "network", color: .accentColor, size: 40)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(draft.isNew ? L("models.addExternal") : L("mac.models.edit", draft.model.title)).font(.system(size: 17, weight: .semibold))
                     Text(L("mac.models.external.hint")).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -522,7 +497,7 @@ private struct ExternalEditor: View {
                 TextField(L("models.external.model"), text: $model).accessibilityIdentifier("extModel")
             }
             .textFieldStyle(.roundedBorder)
-            if let error { Banner(text: error, symbol: "exclamationmark.triangle.fill", color: .red) }
+            if let error { Banner(text: error, symbol: "exclamationmark.triangle.fill", color: .accentColor) }
             HStack {
                 Spacer()
                 Button(L("common.cancel"), role: .cancel) { close() }.keyboardShortcut(.cancelAction)

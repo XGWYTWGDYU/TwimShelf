@@ -26,11 +26,12 @@ public sealed record SearchKeyword(string Id, string Key, string Glyph)
     public static readonly SearchKeyword Recent = new("recent", "r:recent", "");
     public static readonly SearchKeyword External = new("external", "x:external", "");
     public static readonly SearchKeyword Album = new("album", "a:album", "");
+    public static readonly SearchKeyword Favorite = new("favorite", "fav:favorite", "\uE735");
     public static readonly SearchKeyword Reviewed = new("reviewed", "v:reviewed", "");
     public static readonly SearchKeyword Unreviewed = new("unreviewed", "v:unreviewed", "");
     public static readonly SearchKeyword Damaged = new("damaged", "b:damaged", "");
 
-    public static readonly SearchKeyword[] Values = [Tags, Text, Author, Mine, Ai, Common, All, Video, Photo, Folder, Recent, External, Album, Reviewed, Unreviewed, Damaged];
+    public static readonly SearchKeyword[] Values = [Tags, Text, Author, Mine, Ai, Common, All, Video, Photo, Folder, Recent, External, Album, Favorite, Reviewed, Unreviewed, Damaged];
 
     string Localized(string suffix) => L($"search.kw.{Id}.{suffix}");
     public string Word => Localized("word");
@@ -58,7 +59,7 @@ public sealed partial class TokenQuery
     readonly List<string> _terms = [], _excludedTerms = [], _excludedFolders = [];
     readonly HashSet<ReviewFilter> _reviews = [];
     string? _folder;
-    bool _album, _damaged, _recent, _external, _excludeRecent, _excludeExternal;
+    bool _album, _damaged, _recent, _external, _favorite, _excludeRecent, _excludeExternal, _excludeFavorite;
 
     public TokenQuery(IEnumerable<string>? keys = null)
     {
@@ -92,6 +93,7 @@ public sealed partial class TokenQuery
             }
             else if (key == "r:recent") { if (excluded) _excludeRecent = true; else _recent = true; }
             else if (key == "x:external") { if (excluded) _excludeExternal = true; else _external = true; }
+            else if (key == "fav:favorite") { if (excluded) _excludeFavorite = true; else _favorite = true; }
             else if (key.StartsWith("k:"))
             {
                 if (key == "k:photo") (excluded ? _excludedKinds : _kinds).Add(MediaKind.Photo);
@@ -118,6 +120,8 @@ public sealed partial class TokenQuery
         if (f.RecentOnly) k.Add(SearchKeyword.Recent.Key);
         if (f.LooseOnly) k.Add(SearchKeyword.External.Key);
         if (f.AlbumOnly) k.Add(SearchKeyword.Album.Key);
+        if (f.FavoriteOnly) k.Add(SearchKeyword.Favorite.Key);
+        if (f.ExcludeFavorite) k.Add("-" + SearchKeyword.Favorite.Key);
         if (f.Review == ReviewFilter.Reviewed) k.Add(SearchKeyword.Reviewed.Key);
         if (f.Review == ReviewFilter.Unreviewed) k.Add(SearchKeyword.Unreviewed.Key);
         if (f.BadOnly) k.Add(SearchKeyword.Damaged.Key);
@@ -213,7 +217,7 @@ public sealed partial class TokenQuery
         get
         {
             var f = Fields;
-            return AllowedKinds.Count == 0 || _reviews.Count > 1 || (_recent && _excludeRecent) || (_external && _excludeExternal)
+            return AllowedKinds.Count == 0 || _reviews.Count > 1 || (_recent && _excludeRecent) || (_external && _excludeExternal) || (_favorite && _excludeFavorite)
                 || (_folder != null && _excludedFolders.Contains(_folder)) || (_terms.Count > 0 && !f.Tags && !f.Text && !f.Author);
         }
     }
@@ -227,6 +231,7 @@ public sealed partial class TokenQuery
         if (_folder != null) f.Folder = _folder;
         if (_recent) f.RecentOnly = true;
         if (_external) f.LooseOnly = true;
+        if (_favorite) f.FavoriteOnly = true;
         if (Kind != null) f.Kind = Kind;
         var fields = Fields;
         if (fields.Tags || fields.Text || fields.Author) f.ExcludeTerms = [.. _excludedTerms];
@@ -234,6 +239,7 @@ public sealed partial class TokenQuery
         f.ExcludeFolders = [.. _excludedFolders];
         f.ExcludeRecent = _excludeRecent;
         f.ExcludeLoose = _excludeExternal;
+        f.ExcludeFavorite = _excludeFavorite;
         f.Require = Require;
         return f;
     }

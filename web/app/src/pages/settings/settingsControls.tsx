@@ -109,8 +109,8 @@ export function SlimBar({ value, color = 'blue' }: { value?: number; color?: Til
   );
 }
 
-export function ProgressRing({ value, size = 104, lineWidth = 11, color = 'purple', children }: {
-  value: number; size?: number; lineWidth?: number; color?: 'purple' | 'blue' | 'green'; children?: ReactNode;
+export function ProgressRing({ value, size = 104, lineWidth = 11, color = 'accent', children }: {
+  value: number; size?: number; lineWidth?: number; color?: 'accent' | 'purple' | 'blue' | 'green'; children?: ReactNode;
 }) {
   const r = (size - lineWidth) / 2;
   const c = 2 * Math.PI * r;
@@ -247,7 +247,7 @@ export function ChipButton({ title, icon, selected = false, dashed = false, disa
   );
 }
 
-export function Banner({ text, icon, color = 'orange' }: { text: ReactNode; icon?: ReactNode; color?: 'orange' | 'red' | 'blue' }) {
+export function Banner({ text, icon, color = 'orange' }: { text: ReactNode; icon?: ReactNode; color?: 'orange' | 'red' | 'blue' | 'accent' }) {
   return (
     <div className={`s-banner banner-${color}`}>
       <span className="s-banner-icon">{icon ?? <Info size={15} />}</span>

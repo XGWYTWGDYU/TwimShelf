@@ -1,9 +1,8 @@
 import UIKit
-import UniformTypeIdentifiers
 
 /// Installed models (several can coexist), defaults, re-tag all, the model store, and
-/// import/export in the standard Hugging Face / MLX folder format.
-final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
+/// pulling models from other devices of the same account on the LAN.
+final class ModelsViewController: FormViewController {
     private var observers: [NSObjectProtocol] = []
     private var cards: [Activity.Kind: ActivityCardView] = [:]
     /// The model cards that are open, and the prompt editors they have shown.
@@ -146,7 +145,6 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
             if !m.vision, store.activeEmbedderId != m.id {
                 rows.append(.button(L("models.setDefaultEmbedder"), icon: .init("star", .systemYellow), id: "e:\(m.id)") { store.activeEmbedderId = m.id })
             }
-            rows.append(.button(L("models.exportZip"), icon: .init("square.and.arrow.up", .systemBlue), id: "z:\(m.id)") { [weak self] in self?.export(m) })
             rows.append(.button(L("common.delete"), icon: .init("trash", .systemRed), destructive: true, id: "x:\(m.id)") { [weak self] in self?.confirmDelete(m) })
             return rows
         }
@@ -193,9 +191,6 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
             rows.append(.button(L("models.peers.query"), icon: .init("arrow.clockwise", .systemBlue), enabled: !remoteLoading, id: "r:refresh") { [weak self] in self?.loadRemote() })
             s.append(Section(id: "remote", header: L("models.peers.title"), footer: L("models.appleOnly"), rows: rows))
         }
-        s.append(Section(id: "io", header: L("common.import"), footer: L("models.appleOnly"), rows: [
-            .button(L("models.import.button"), icon: .init("square.and.arrow.down.fill", .systemGreen)) { [weak self] in self?.pickModel() },
-        ]))
         sections = s
         reloadForm()
     }
@@ -309,40 +304,6 @@ final class ModelsViewController: FormViewController, UIDocumentPickerDelegate {
     }
 
     private func anchor(_ sheet: UIAlertController) { anchorSheet(sheet) }
-
-    private func export(_ m: Core.ModelInfo) {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("model-export", isDirectory: true)
-        try? FileManager.default.removeItem(at: dir)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let out = dir.appendingPathComponent(m.id).appendingPathExtension("zip")
-        runBusy(L("models.packing"), { try Core.exportModelZip(m.id, to: out) }) { [weak self] in
-            guard let self else { return }
-            let share = UIActivityViewController(activityItems: [out], applicationActivities: nil)
-            share.popoverPresentationController?.sourceView = self.view
-            share.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: 80, width: 1, height: 1)
-            share.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: dir) }
-            self.present(share, animated: true)
-        }
-    }
-
-    private func pickModel() {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder, .zip], asCopy: false)
-        picker.delegate = self
-        present(picker, animated: true)
-    }
-
-    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let url = urls.first else { return }
-        runBusy(L("models.importing"), {
-            let ok = url.startAccessingSecurityScopedResource()
-            defer { if ok { url.stopAccessingSecurityScopedResource() } }
-            return try Core.importModel(url)
-        }) { [weak self] m in
-            ModelStore.shared.reload()
-            self?.build()
-            self?.alert(L("models.imported"), ModelStore.shared.displayName(m.id))
-        }
-    }
 }
 
 /// Edits the AI tagging prompt (an app setting). Saving applies to all future tagging; the user

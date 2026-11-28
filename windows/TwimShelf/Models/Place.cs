@@ -14,6 +14,7 @@ public sealed record Place(string Id, string? Folder = null)
     public static readonly Place AllFolders = new("folders");
     public static readonly Place Loose = new("loose");
     public static readonly Place Album = new("album");
+    public static readonly Place Favorites = new("favorites");
     public static readonly Place Unreviewed = new("unreviewed");
     public static readonly Place Reviewed = new("reviewed");
     public static readonly Place Bad = new("bad");
@@ -33,6 +34,7 @@ public sealed record Place(string Id, string? Folder = null)
         "folders" => "\uE8F1",    // library (rectangle.stack)
         "loose" => "\uE7C3",      // page (square.dashed)
         "album" => "\uE91B",      // photo collection (photo.on.rectangle)
+        "favorites" => "\uE735",  // favorite star (star.fill)
         "unreviewed" => "\uE739", // empty check (seal)
         "reviewed" => "\uE73E",   // check mark (checkmark.seal)
         "bad" => "\uE7BA",        // warning
@@ -48,6 +50,7 @@ public sealed record Place(string Id, string? Folder = null)
         "videos" => new FeedFilter { Kind = MediaKind.Video },
         "loose" => new FeedFilter { LooseOnly = true },
         "album" => new FeedFilter { AlbumOnly = true },
+        "favorites" => new FeedFilter { FavoriteOnly = true },
         "unreviewed" => new FeedFilter { Review = ReviewFilter.Unreviewed },
         "reviewed" => new FeedFilter { Review = ReviewFilter.Reviewed },
         "bad" => new FeedFilter { BadOnly = true },
@@ -57,7 +60,7 @@ public sealed record Place(string Id, string? Folder = null)
     public bool IsGrid => Filter != null || Id == "trash";
 
     public static readonly Place[] MediaKinds = [Photos, Videos];
-    static readonly Place[] Others = [Loose, Album, Unreviewed, Reviewed, Bad, Trash];
+    static readonly Place[] Others = [Loose, Album, Favorites, Unreviewed, Reviewed, Bad, Trash];
     /// 损坏或丢失 is offered while the maintenance rows of 关于 are out.
     public static IEnumerable<Place> Offered => Others.Where(p => p != Bad || Prefs.Instance.AboutExtras);
 }

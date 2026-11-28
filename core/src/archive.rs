@@ -96,6 +96,8 @@ pub struct PackMedia {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub trashed: bool,
     /// Came in through a share extension (从相册导入).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub album: bool,
+    /// Favorited (收藏).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub favorite: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -300,11 +302,11 @@ fn write_pack_inner(lib: &Library, live: Vec<FeedItem>, bin: Vec<FeedItem>, opts
             set_export(|p| p.bytes += n);
             rep.media += 1;
             if *trashed { rep.trashed += 1; }
-            if opts.media_only { media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models: vec![], tags: vec![], folders: vec![], trashed: false, album: false }); continue; }
+            if opts.media_only { media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models: vec![], tags: vec![], folders: vec![], trashed: false, album: false, favorite: false }); continue; }
             let ai_models = if opts.tags { snap.ai_models.get(&it.media_id).cloned().unwrap_or_default() } else { vec![] };
             let tags = if opts.tags { it.tags.iter().map(|t| PackTag { label: t.label.clone(), origin: t.origin, models: t.models.clone() }).collect() } else { vec![] };
             let folders = if opts.folders { snap.folders.get(&it.media_id).cloned().unwrap_or_default() } else { vec![] };
-            media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models, tags, folders, trashed: *trashed, album: it.album });
+            media.push(PackMedia { sha256: it.media_id.clone(), kind: it.kind.clone(), ordinal: it.ordinal, file, ai_models, tags, folders, trashed: *trashed, album: it.album, favorite: it.favorite });
         }
         if media.is_empty() { continue; }
         let recent_at = if extras.kind == "backup" { snap.recent.get(&meta.id).copied().unwrap_or(0) } else { 0 };
@@ -450,6 +452,7 @@ fn import_pack_inner(lib: &Library, path: &Path, folder: Option<&str>) -> anyhow
                 for model in &m.ai_models { db.mark_ai_done(&m.sha256, model)?; }
                 for f in &m.folders { db.add_to_folder(f, &[m.sha256.clone()])?; }
                 if m.album { db.mark_album(&m.sha256)?; }
+                if m.favorite { db.set_favorite(&m.sha256, true)?; }
                 if m.trashed && new_here { db.trash_action(&m.sha256, crate::rules::TrashAction::Trash)?; rep.to_bin += 1; }
                 rep.media += 1;
             }

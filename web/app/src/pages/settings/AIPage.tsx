@@ -8,7 +8,7 @@ import {
   Network, PlusCircle, RefreshCw, Search, Star, TriangleAlert,
 } from 'lucide-react';
 import { Button, Dialog, TextField, Toggle } from '../../components/ui';
-import { change, FileButton, LoadState, useTask } from '../../components/libraryControls';
+import { change, LoadState, useTask } from '../../components/libraryControls';
 import { openMenuBelow } from '../../components/Menu';
 import { alertMessage, choose } from '../../components/pickers';
 import { core } from '../../lib/core';
@@ -20,7 +20,7 @@ import {
   setAuto, setSetting, stopTagging, tagging, testModel, unloadLocalModels, type ExternalModel, type Prompt,
 } from './aiTagging';
 import { MODEL_SOURCES, ModelProgress } from './ModelHubPage';
-import { exportFile, readSecret, removeFile, size, upload } from './serverFiles';
+import { readSecret, size } from './serverFiles';
 import {
   ActivityRow, Banner, Card, CardRow, IconTile, Pill, PlaceholderEditor,
   PopupSelect, ProgressRing, RowDivider, SectionGroup, SegmentedControl, settings, SettingsScreen,
@@ -251,9 +251,9 @@ export default function AIPage() {
         </Card>
       )}
 
-      <div className="s-hero hero-purple">
+      <div className="s-hero">
         <div style={{ display: 'flex', alignItems: 'center', gap: 22, flexWrap: 'wrap' }}>
-          <ProgressRing value={ratio} size={104} lineWidth={11} color="purple">
+          <ProgressRing value={ratio} size={104} lineWidth={11} color="accent">
             <span style={{ fontSize: 24, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--fg)' }}>
               {Math.round(ratio * 100)}%
             </span>
@@ -286,7 +286,7 @@ export default function AIPage() {
 
         <div className="ai-default-grid">
           <div className="ai-default-card">
-            <IconTile icon={<Eye size={15} strokeWidth={2} />} color="purple" size={30} />
+            <IconTile icon={<Eye size={15} strokeWidth={2} />} color="accent" size={30} />
             <div className="ai-default-meta">
               <span className="ai-default-label">{L('mac.models.tagger')}</span>
               {!taggerOptions.length ? (
@@ -313,7 +313,7 @@ export default function AIPage() {
 
         {activity.error && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Banner text={L(activity.error)} icon={<TriangleAlert size={15} />} color="red" />
+            <Banner text={L(activity.error)} icon={<TriangleAlert size={15} />} color="accent" />
             <Button onClick={() => void runTagging()}>{L('models.retry')}</Button>
           </div>
         )}
@@ -327,7 +327,7 @@ export default function AIPage() {
                 + L('mac.models.failures.tail')
               }
               icon={<TriangleAlert size={15} />}
-              color="orange"
+              color="accent"
             />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 'none' }}>
               <Button
@@ -383,7 +383,7 @@ export default function AIPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <IconTile
                       icon={item.vision ? <Eye size={17} strokeWidth={2} /> : <Search size={17} strokeWidth={2} />}
-                      color={item.vision ? 'purple' : 'teal'}
+                      color="accent"
                       size={36}
                     />
                     <div className="card-row-texts" style={{ gap: 4 }}>
@@ -391,10 +391,10 @@ export default function AIPage() {
                       <div className="chips-row" style={{ gap: 5 }}>
                         <Pill
                           text={item.vision ? L('mac.models.role.tagger') : L('models.semanticSearch')}
-                          color={item.vision ? 'purple' : 'teal'}
+                          color="accent"
                         />
                         <Pill text={size(item.bytes)} color="secondary" />
-                        {isDefault && runnable && <Pill text={L('prompt.default')} color="blue" />}
+                        {isDefault && runnable && <Pill text={L('prompt.default')} color="accent" />}
                       </div>
                     </div>
 
@@ -417,16 +417,7 @@ export default function AIPage() {
                         ...(window.twimshelf?.showItemInFolder ? [{
                           label: L('mac.showInFinder'),
                           run: () => window.twimshelf?.showItemInFolder?.(item.path),
-                        }] : []),
-                        {
-                          label: L('mac.models.exportZip'),
-                          disabled: task.busy,
-                          run: () => void task.run(async () => {
-                            const name = `${item.id.replaceAll('/', '-')}.zip`;
-                            await exportFile(name, (path) => core.read(core.b.tl_model_export_zip(item.id, path)));
-                          }),
-                        },
-                        'separator',
+                        }, 'separator' as const] : []),
                         {
                           label: L('mac.deleteEllipsis'),
                           danger: true,
@@ -480,20 +471,20 @@ export default function AIPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <IconTile
                       icon={local ? <Monitor size={17} strokeWidth={2} /> : <Cloud size={17} strokeWidth={2} />}
-                      color="blue"
+                      color="accent"
                       size={36}
                     />
                     <div className="card-row-texts" style={{ gap: 4 }}>
                       <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>{modelTitle(e)}</div>
                       <div className="chips-row" style={{ gap: 5 }}>
-                        <Pill text={local ? L('models.external.local') : L('models.external.cloud')} color="blue" />
+                        <Pill text={local ? L('models.external.local') : L('models.external.cloud')} color="accent" />
                         {host && <Pill text={host} color="secondary" />}
                         {e.model && <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>{e.model}</span>}
                       </div>
                     </div>
 
                     {isDef ? (
-                      <Pill text={L('prompt.default')} color="yellow" icon={<Star size={10} strokeWidth={2.5} />} />
+                      <Pill text={L('prompt.default')} color="accent" icon={<Star size={10} strokeWidth={2.5} />} />
                     ) : (
                       <Button
                         disabled={activity.running}
@@ -562,18 +553,18 @@ export default function AIPage() {
       </SectionGroup>
 
       <SectionGroup title={L('models.available')}>
-        <Card spacing={0}>
+        <Card spacing={14}>
           <CardRow
             icon={<LayoutGrid size={15} strokeWidth={2} />}
-            color="blue"
+            color="accent"
             title={L('hub.title')}
             detail={L('hub.entry.detail')}
             trailing={<Button onClick={() => settings('model-hub')}>{L('hub.open')}</Button>}
           />
-          <RowDivider />
+          <RowDivider inset={42} />
           <CardRow
             icon={<Download size={15} strokeWidth={2} />}
-            color="green"
+            color="accent"
             title={L('models.source')}
             detail={L('models.source.footer')}
             trailing={
@@ -612,7 +603,7 @@ export default function AIPage() {
                   {i > 0 && <RowDivider inset={42} />}
                   <CardRow
                     icon={<Monitor size={15} strokeWidth={2} />}
-                    color="indigo"
+                    color="accent"
                     title={r.info.repo || r.info.id}
                     detail={`${r.peer.name} · ${size(r.info.bytes)}`}
                     trailing={
@@ -641,31 +632,6 @@ export default function AIPage() {
           </Card>
         </SectionGroup>
       )}
-
-      <Card spacing={0}>
-        <CardRow
-          icon={<Download size={15} strokeWidth={2} />}
-          color="green"
-          title={L('mac.models.import')}
-          detail={L('models.appleOnly')}
-          trailing={
-            <FileButton
-              label={L('mac.importEllipsis')}
-              accept=".zip"
-              disabled={task.busy}
-              onPick={(file) => void task.run(async () => {
-                const path = await upload(file);
-                try {
-                  const imported = await change(core.read<ModelInfo>(core.b.tl_model_import(path)));
-                  await alertMessage(L('models.imported'), imported.repo || imported.id);
-                } finally {
-                  await removeFile(path).catch(() => {});
-                }
-              })}
-            />
-          }
-        />
-      </Card>
 
       {edit && (
         <ExternalModelEditor
@@ -824,7 +790,7 @@ function ExternalModelEditor({ initial, isNew, onClose }: {
       }>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <IconTile icon={<Network size={19} strokeWidth={2} />} color="blue" size={40} />
+          <IconTile icon={<Network size={19} strokeWidth={2} />} color="accent" size={40} />
           <div className="card-row-texts">
             <div className="card-row-detail" style={{ fontSize: 12.5 }}>{L('mac.models.external.hint')}</div>
           </div>
@@ -860,7 +826,7 @@ function ExternalModelEditor({ initial, isNew, onClose }: {
           )}
         </div>
 
-        {error && <Banner text={error} icon={<TriangleAlert size={15} />} color="red" />}
+        {error && <Banner text={error} icon={<TriangleAlert size={15} />} color="accent" />}
       </div>
     </Dialog>
   );

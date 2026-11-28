@@ -181,22 +181,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820),
                           styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
-        window.title = L("place.browse")
+        window.title = ""
         // kept when closed: 开机自启 shows it again
         window.isReleasedWhenClosed = false
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.mainWindowClosed() }
         }
-        // the toolbar shows what is open (title and subtitle), as in Photos
-        window.titleVisibility = .visible
+        // the toolbar shows what is open (title and subtitle), except on Browse and in the viewer
+        window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.titlebarSeparatorStyle = .automatic
+        window.titlebarSeparatorStyle = .none
         window.contentViewController = root
         // a split view controller sizes the window to its smallest; start at a useful size
         window.setContentSize(NSSize(width: 1180, height: 820))
         window.contentMinSize = NSSize(width: 720, height: 480)
         installDropImport()
-        feed.viewerHost = { [weak self] in self?.root.view ?? NSView() }
+        feed.viewerHost = { [weak self] in self?.root.content.view ?? NSView() }
         feed.responderAfterViewer = { [weak self] in self?.root.content.page?.grid }
         feed.onSearchTag = { [weak self] t in self?.tokenSearch.addTerm(t) }
         feed.onRenameTerm = { [weak self] o, n in self?.tokenSearch.renameTerm(o, to: n) }
@@ -232,6 +232,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             MainActor.assumeIsolated { self?.root.go(.browse) }
         }
         root.content.onChange = { [weak self] in self?.refreshChrome() }
+        root.onViewerChanged = { [weak self] open in
+            guard let self else { return }
+            self.viewerOpen = open
+            self.refreshChrome()
+        }
         // settings live in the sidebar (设置); ⌘, and the toolbar button go there and back
         root.content.settingsPanel = main.panel
         main.onEmbed = { [weak self] open in
@@ -1251,8 +1256,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     /// The toolbar follows what the content shows, as in Photos: the window's title and subtitle
     /// (what it is, how much), then at most three groups — the view's own controls, search, and
     /// 资料库管理. Every item is also in the menu bar.
-    private enum ToolbarMode: String { case browse, grid, folderGrid, selecting, folders, plain, settings, settingsSub }
+    private enum ToolbarMode: String { case browse, grid, folderGrid, selecting, folders, plain, settings, settingsSub, viewer, browseViewer }
     private var toolbarMode: ToolbarMode?
+    private var viewerOpen = false
 
     private enum ID {
         static let search = NSToolbarItem.Identifier("search")
@@ -1265,6 +1271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         static let share = NSToolbarItem.Identifier("share")
         static let addTo = NSToolbarItem.Identifier("addTo")
         static let takeOut = NSToolbarItem.Identifier("takeOut")
+        static let unfavorite = NSToolbarItem.Identifier("unfavorite")
         static let trash = NSToolbarItem.Identifier("trash")
         static let restore = NSToolbarItem.Identifier("restore")
         static let purge = NSToolbarItem.Identifier("purge")
@@ -1343,13 +1350,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     /// Title, subtitle and toolbar for what the content shows now.
     func refreshChrome() {
         let c = root.content
-        let (title, subtitle) = c.titles
+        let (title, subtitle) = viewerOpen ? ("", "") : c.titles
         window.title = title
         window.subtitle = subtitle
         titlePill.set(title: title, subtitle: subtitle)
         let mode: ToolbarMode
+        if viewerOpen { mode = c.place == .browse ? .browseViewer : .viewer }
         // a folder is a level below 文件夹: its page has a Back to all folders
-        if let p = c.page { mode = p.selecting ? .selecting : c.place.folderName != nil ? .folderGrid : .grid }
+        else if let p = c.page { mode = p.selecting ? .selecting : c.place.folderName != nil ? .folderGrid : .grid }
         else if c.place == .settings { mode = main.panel.backTitle == nil ? .settings : .settingsSub }
         else { mode = c.place == .browse ? .browse : c.place == .allFolders ? .folders : .plain }      // .plain: 整理 has no toolbar items of its own
         main.embeddedOpen = c.place == .settings
@@ -1367,11 +1375,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         }
         // a grid page shows its title as an item; the window's own title only elsewhere
         // The title item stays in place and the text inside it appears or goes at once.
-        let pill = c.page != nil
+        let pill = !viewerOpen && c.page != nil
         titlePill.setShown(pill)
-        // (浏览: the window keeps its name for the Window menu and VoiceOver, but shows none)
-        let hideTitle = pill || c.place == .browse
+        // (浏览 and media viewer show no title in the toolbar)
+        let hideTitle = pill || viewerOpen || c.place == .browse
         if window.titleVisibility != (hideTitle ? .hidden : .visible) { window.titleVisibility = hideTitle ? .hidden : .visible }
+        window.titlebarSeparatorStyle = (viewerOpen || c.place == .browse) ? .none : .automatic
         if let tb = window.toolbar {
             let desired = desiredToolbarIdentifiers(mode)
             if tb.items.map(\.itemIdentifier) != desired {
@@ -1442,7 +1451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                 (it as? NSMenuToolbarItem)?.menu = page?.addToFolderMenu() ?? NSMenu()
                 it.isEnabled = page?.hasSelection ?? false
             case ID.more: (it as? NSMenuToolbarItem)?.menu = page?.moreMenu() ?? NSMenu()
-            case ID.takeOut, ID.trash, ID.share, ID.restore, ID.purge: it.isEnabled = page?.hasSelection ?? false
+            case ID.takeOut, ID.unfavorite, ID.trash, ID.share, ID.restore, ID.purge: it.isEnabled = page?.hasSelection ?? false
             default: break
             }
         }
@@ -1450,7 +1459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
 
     /// Every page's items, in one fixed order; a page shows its own (`visibleItems`).
     private static let pageItems: [NSToolbarItem.Identifier] = [ID.back, ID.zoom, ID.select, ID.more, ID.newFolder,
-                                                               ID.selectAll, ID.share, ID.addTo, ID.takeOut, ID.trash, ID.restore, ID.purge, ID.done, ID.search]
+                                                               ID.selectAll, ID.share, ID.addTo, ID.takeOut, ID.unfavorite, ID.trash, ID.restore, ID.purge, ID.done, ID.search]
 
     /// What a page shows. Search belongs to 浏览 (results show there); elsewhere the toolbar
     /// has only the view's own controls.
@@ -1460,9 +1469,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         case .grid: return [ID.zoom, ID.select, ID.more]
         case .folderGrid: return [ID.back, ID.zoom, ID.select, ID.more]
         case .selecting where page?.bin == true: return [ID.selectAll, ID.restore, ID.purge, ID.done]
-        case .selecting: return [ID.selectAll, ID.share, ID.addTo] + (page?.folder != nil ? [ID.takeOut] : []) + [ID.trash, ID.done]
+        case .selecting: return [ID.selectAll, ID.share, ID.addTo] + (page?.folder != nil ? [ID.takeOut] : []) + (page?.isFavorites == true ? [ID.unfavorite] : []) + [ID.trash, ID.done]
         case .folders: return [ID.newFolder]
-        case .plain, .settings: return []
+        case .plain, .settings, .viewer, .browseViewer: return []
         case .settingsSub: return [ID.back]
         }
     }
@@ -1470,10 +1479,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     private func desiredToolbarIdentifiers(_ mode: ToolbarMode) -> [NSToolbarItem.Identifier] {
         let shown = visibleItems(mode)
         var ids: [NSToolbarItem.Identifier] = []
-        if mode != .browse { ids.append(.toggleSidebar) }
+        if mode != .browse && mode != .browseViewer { ids.append(.toggleSidebar) }
         ids.append(.sidebarTrackingSeparator)
+        if mode == .viewer || mode == .browseViewer { return ids }
         if shown.contains(ID.back) { ids.append(ID.back) }
-        ids.append(ID.title)
+        if mode == .grid || mode == .folderGrid || mode == .selecting { ids.append(ID.title) }
         ids.append(.flexibleSpace)
         ids.append(contentsOf: shown.filter { $0 != ID.back && $0 != ID.title })
         return ids
@@ -1572,6 +1582,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             item.autovalidates = false
             item.isEnabled = page?.hasSelection ?? false
             return item
+        case ID.unfavorite:
+            let item = button("star.slash", L("common.unfavorite"), #selector(unfavoriteSelection))
+            item.autovalidates = false
+            item.isEnabled = page?.hasSelection ?? false
+            return item
         case ID.trash:
             let item = button("trash", L("grid.moveToTrash"), #selector(trashSelection))
             item.autovalidates = false
@@ -1608,6 +1623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     @objc private func toggleSelecting() { page.map { $0.setSelecting(!$0.selecting) } }
     @objc private func selectAllInGrid() { page?.toggleAll() }
     @objc private func takeOutOfFolder() { page?.removeSelectedFromFolder() }
+    @objc private func unfavoriteSelection() { page?.unfavoriteSelected() }
     @objc private func trashSelection() { page?.trashSelected() }
     @objc private func restoreSelection() { page?.restoreSelected() }
     @objc private func purgeSelection() { page?.purgeSelected() }

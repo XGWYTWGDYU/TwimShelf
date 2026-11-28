@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../lib/hooks';
 import { mascotEnabled } from './Mascot';
 import { PetEngine } from './petEngine';
+import { viewerState } from '../viewer/Viewer';
 import './Mascot.css';
 
 const fits = () => window.innerWidth >= 700 && window.innerHeight >= 500;
@@ -84,11 +85,12 @@ function Pet() {
 
 export function PetLayer() {
   const enabled = useStore(mascotEnabled);
+  const viewing = useStore(viewerState) != null;
   const [room, setRoom] = useState(fits);
   useEffect(() => {
     const update = () => setRoom(fits());
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
   }, []);
-  return enabled && room ? <Pet /> : null;
+  return enabled && room && !viewing ? <Pet /> : null;
 }

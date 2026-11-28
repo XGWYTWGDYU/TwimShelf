@@ -4,6 +4,7 @@ import MetalKit
 
 protocol MacMediaGridDelegate: AnyObject {
     func mediaGrid(_ g: MacMediaGridView, didOpen index: Int)
+    func mediaGrid(_ g: MacMediaGridView, didTapFavoriteAt index: Int)
     func mediaGrid(_ g: MacMediaGridView, menuFor index: Int) -> NSMenu?
     func mediaGrid(_ g: MacMediaGridView, didSettleAt level: Int)
     func mediaGridSelectionChanged(_ g: MacMediaGridView)
@@ -34,6 +35,7 @@ final class MacMediaGridView: NSView {
     private(set) var scene: GridScene?
     private var drawn: [Tile] = []
     private var link: CADisplayLink?
+    private var isActive = true
     private var needsDraw = true
     private var frameTime: CFTimeInterval = CACurrentMediaTime()
     private var syncingScroll = false
@@ -100,7 +102,7 @@ final class MacMediaGridView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil, link == nil {
+        if window != nil, isActive, link == nil {
             let l = displayLink(target: self, selector: #selector(frameTick(_:)))
             l.add(to: .main, forMode: .common)
             link = l
@@ -111,6 +113,25 @@ final class MacMediaGridView: NSView {
         }
         needsLayout = true
         needsDraw = true
+    }
+
+    /// Pauses or resumes the display link while this grid stays cached in the window hierarchy.
+    func setActive(_ active: Bool) {
+        guard isActive != active else { return }
+        isActive = active
+        if active {
+            if window != nil, link == nil {
+                let l = displayLink(target: self, selector: #selector(frameTick(_:)))
+                l.add(to: .main, forMode: .common)
+                link = l
+            }
+            needsLayout = true
+            needsDraw = true
+        } else {
+            link?.invalidate()
+            link = nil
+            surfaces = []
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -452,6 +473,14 @@ final class MacMediaGridView: NSView {
             if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }
             delegate?.mediaGridSelectionChanged(self)
         } else {
+            if let scene, let tile = scene.tile(at: i), tile.favorited {
+                let pt = convert(p, from: document)
+                let f = scene.engine.restFrame(i, scene.engine.rest)
+                if f.width >= 40, pt.x - f.minX <= 30, f.maxY - pt.y <= 30 {
+                    delegate?.mediaGrid(self, didTapFavoriteAt: i)
+                    return
+                }
+            }
             delegate?.mediaGrid(self, didOpen: i)
         }
     }
@@ -512,7 +541,7 @@ final class MacMediaGridView: NSView {
         var t: [Tile] = []
         scene.frame(at: CACurrentMediaTime(), into: &t)
         guard let img = renderer.snapshot(t, size: bounds.size, scale: scale, background: MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1), info: { key in
-            scene.tile(key: key).map { ($0.item, $0.count, scene.isSelected(key: key)) }
+            scene.tile(key: key).map { ($0.item, $0.count, scene.isSelected(key: key), $0.favorited) }
         }) else { return }
         let rep = NSBitmapImageRep(cgImage: img)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
@@ -544,7 +573,7 @@ extension MacMediaGridView: MTKViewDelegate {
             renderer.placeholder = Self.simd(.quaternaryLabelColor, over: .windowBackgroundColor)
         }
         renderer.draw(drawn, in: metalView, scale: scale, background: MTLClearColor(red: Double(bg.x), green: Double(bg.y), blue: Double(bg.z), alpha: 1)) { key in
-            scene.tile(key: key).map { ($0.item, $0.count, scene.isSelected(key: key)) }
+            scene.tile(key: key).map { ($0.item, $0.count, scene.isSelected(key: key), $0.favorited) }
         }
         prefetch()
     }

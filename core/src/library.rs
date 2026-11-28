@@ -92,6 +92,8 @@ pub struct FeedFilter {
     #[serde(default)] pub loose_only: bool,
     /// Only media brought in through a share extension (从相册导入).
     #[serde(default)] pub album_only: bool,
+    /// Only favorited media (收藏).
+    #[serde(default)] pub favorite_only: bool,
     /// Only "最近添加" posts.
     #[serde(default)] pub recent_only: bool,
     /// Only photos or only videos.
@@ -109,6 +111,8 @@ pub struct FeedFilter {
     #[serde(default)] pub exclude_recent: bool,
     /// No loose media ("-外部导入").
     #[serde(default)] pub exclude_loose: bool,
+    /// No favorited media ("-收藏").
+    #[serde(default)] pub exclude_favorite: bool,
     /// A search of conditions only, without words to find ("共同", "用户", "标签 我的"): the
     /// media must have something in one of these fields: a tag of an origin the search counts
     /// (the scope, or `origins`), post text, an author. All off: nothing matches.
@@ -157,6 +161,8 @@ pub struct FeedItem {
     #[serde(default)] pub recent: bool,
     /// Brought in through a share extension (从相册导入).
     #[serde(default)] pub album: bool,
+    /// Favorited (收藏).
+    #[serde(default)] pub favorite: bool,
     /// Width and height as displayed, once read from the file (`media_size`).
     #[serde(default)] pub size: Option<(u32, u32)>,
 }
@@ -174,8 +180,8 @@ pub struct PackedFeed {
     /// Distinct tag lists: [label, origin, models] per tag.
     pub tag_lists: Vec<Vec<(String, u8, Vec<String>)>>,
     /// One per media: [media id, post (index), ordinal, kind ("p"/"v"), path below root,
-    /// tag list (index), damage or "", width and height (0 when not known) ].
-    pub media: Vec<(String, u32, i64, String, String, u32, String, u32, u32)>,
+    /// tag list (index), damage or "", width and height (0 when not known), favorite ].
+    pub media: Vec<(String, u32, i64, String, String, u32, String, u32, u32, bool)>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -206,13 +212,13 @@ impl PackedFeed {
             let t = match tag_index.get(&tags) { Some(&i) => i, None => { tag_lists.push(tags.clone()); let i = tag_lists.len() as u32 - 1; tag_index.insert(tags, i); i } };
             let path = it.path.strip_prefix(root).unwrap_or(&it.path).to_string();
             let kind = if matches!(it.kind, MediaKind::Video) { "v" } else { "p" };
-            media.push((it.media_id.clone(), p, it.ordinal, kind.to_string(), path, t, it.bad.clone().unwrap_or_default(), it.size.map_or(0, |s| s.0), it.size.map_or(0, |s| s.1)));
+            media.push((it.media_id.clone(), p, it.ordinal, kind.to_string(), path, t, it.bad.clone().unwrap_or_default(), it.size.map_or(0, |s| s.0), it.size.map_or(0, |s| s.1), it.favorite));
         }
         PackedFeed { root: root.to_string(), posts, tag_lists, media }
     }
 
     pub fn unpack(&self) -> Vec<FeedItem> {
-        self.media.iter().filter_map(|(id, p, ordinal, kind, path, t, bad, w, h)| {
+        self.media.iter().filter_map(|(id, p, ordinal, kind, path, t, bad, w, h, fav)| {
             let post = self.posts.get(*p as usize)?;
             let tags = self.tag_lists.get(*t as usize)?;
             Some(FeedItem {
@@ -222,7 +228,7 @@ impl PackedFeed {
                 text: post.text.clone(), author_name: post.author_name.clone(), screen_name: post.screen_name.clone(),
                 url: post.url.clone(), created_at: post.created_at.clone(),
                 tags: tags.iter().map(|(label, origin, models)| TagView { label: label.clone(), origin: *origin, models: models.clone() }).collect(),
-                bad: (!bad.is_empty()).then(|| bad.clone()), recent: post.recent, album: post.album,
+                bad: (!bad.is_empty()).then(|| bad.clone()), recent: post.recent, album: post.album, favorite: *fav,
                 size: (*w > 0 && *h > 0).then_some((*w, *h)),
             })
         }).collect()

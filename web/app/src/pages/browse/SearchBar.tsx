@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { createPortal } from 'react-dom';
 import {
   AlertTriangle, BadgeCheck, CheckCircle2, CircleDashed, CircleUser, Clock, Download, Folder, History, Image, Images,
-  LayoutGrid, MinusCircle, Quote, Search, Sparkles, Tag, User, Video, X,
+  LayoutGrid, MinusCircle, Quote, Search, Sparkles, Star, Tag, User, Video, X,
 } from 'lucide-react';
 import { KEYWORDS, folderKey, keyFor, keyTitle, keywordAliases, keywordHint, keywordWord, isExcluded, L, PENDING_FOLDER, quoteSearchWord, splitQuery, termKey, type SearchKeyword, type TagCount } from '@twimshelf/core';
 import { core } from '../../lib/core';
@@ -24,7 +24,7 @@ const SYMBOLS: Record<string, ReactNode> = {
   tags: <Tag size={14} />, text: <Quote size={14} />, author: <User size={14} />, mine: <CircleUser size={14} />,
   ai: <Sparkles size={14} />, common: <BadgeCheck size={14} />, all: <LayoutGrid size={14} />, video: <Video size={14} />,
   photo: <Image size={14} />, folder: <Folder size={14} />, recent: <Clock size={14} />, external: <Download size={14} />,
-  album: <Images size={14} />, reviewed: <CheckCircle2 size={14} />, unreviewed: <CircleDashed size={14} />, damaged: <AlertTriangle size={14} />,
+  album: <Images size={14} />, favorite: <Star size={14} />, reviewed: <CheckCircle2 size={14} />, unreviewed: <CircleDashed size={14} />, damaged: <AlertTriangle size={14} />,
 };
 
 const HISTORY = 'search.history';

@@ -99,7 +99,7 @@ class FoldersPage extends StatelessWidget {
                       for (final p in Place.offered)
                         ListTile(
                           key: ValueKey('more-${p.id}'),
-                          leading: SettingsIcon(p.icon, danger: p == Place.bad),
+                          leading: SettingsIcon(p.icon, danger: p == Place.bad, iconColor: p == Place.favorites ? const Color(0xFFF5B800) : null),
                           title: Text(p.title),
                           trailing: chevron(),
                           onTap: () => onOpen(p),

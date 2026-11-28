@@ -19,6 +19,7 @@ export interface ZoomGridHandle {
 }
 
 export interface ZoomGridProps {
+  active?: boolean;
   tiles: ZoomGridTile[];
   footer: string;
   selecting: boolean;
@@ -28,6 +29,7 @@ export interface ZoomGridProps {
   insetTop: number;
   bottomInset?: number;
   onOpen(index: number): void;
+  onUnfavorite?(index: number): void;
   onMenu(index: number, e: { clientX: number; clientY: number }): void;
   onSelected(next: Set<string>): void;
   onSettle(level: number): void;
@@ -181,9 +183,25 @@ export const ZoomGrid = forwardRef<ZoomGridHandle, ZoomGridProps>(function ZoomG
         ctx.fillRect(tile.x, tile.y, tile.side, tile.side);
       }
       const sd = tile.side;
-      // a video: a small play triangle bottom left, on tiles of 40 and up
+      // favorited: a golden five-pointed star bottom left, on tiles of 40 and up
+      const hasStar = Boolean(info?.favorited && sd >= 40);
+      if (hasStar) {
+        const cx = tile.x + 12.5, cy = tile.y + sd - 12.5, r = 6.5, rf = 0.46;
+        ctx.beginPath();
+        for (let k = 0; k < 10; k++) {
+          const a = -Math.PI / 2 + (k * Math.PI) / 5;
+          const rad = k % 2 === 0 ? r : r * rf;
+          const sx = cx + Math.cos(a) * rad, sy = cy + Math.sin(a) * rad;
+          if (k === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+        }
+        ctx.closePath();
+        ctx.shadowColor = 'rgba(0,0,0,0.38)'; ctx.shadowBlur = 2.5;
+        ctx.fillStyle = '#f5b800'; ctx.fill();
+        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+      }
+      // a video: a small play triangle bottom left (shifted right when favorited), on tiles of 40 and up
       if (info?.item.kind === 'video' && sd >= 40) {
-        const ox = tile.x + 6, oy = tile.y + sd - 18;
+        const ox = tile.x + (hasStar ? 22 : 6), oy = tile.y + sd - 18;
         ctx.beginPath(); ctx.moveTo(ox + 1.5, oy); ctx.lineTo(ox + 1.5, oy + 12); ctx.lineTo(ox + 12, oy + 6); ctx.closePath();
         ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 2;
         ctx.fillStyle = '#fff'; ctx.fill();
@@ -230,8 +248,11 @@ export const ZoomGrid = forwardRef<ZoomGridHandle, ZoomGridProps>(function ZoomG
     s.nearbyKeys(2).forEach((k, i) => { const t = s.tileOf(k); if (t) picture(t.item, side, 2000 + i, () => { needsDraw.current = true; }); });
   }, []);
 
-  // one frame loop for zooms, animations and pictures that arrived
+  // one frame loop for zooms, animations and pictures that arrived (paused while page is hidden)
+  const active = props.active ?? true;
   useEffect(() => {
+    if (!active) return;
+    needsDraw.current = true;
     let raf = 0;
     const loop = (ms: number) => {
       const s = scene.current;
@@ -242,7 +263,7 @@ export const ZoomGrid = forwardRef<ZoomGridHandle, ZoomGridProps>(function ZoomG
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draw]);
+  }, [draw, active]);
 
   // ── size ──
   useLayoutEffect(() => {
@@ -444,7 +465,19 @@ export const ZoomGrid = forwardRef<ZoomGridHandle, ZoomGridProps>(function ZoomG
         const next = new Set(p.current.selected);
         if (next.has(x)) next.delete(x); else next.add(x);
         p.current.onSelected(next);
-      } else p.current.onOpen(j);
+      } else {
+        const s = scene.current;
+        if (s && p.current.tiles[j]?.favorited && p.current.onUnfavorite) {
+          const r = box.current!.getBoundingClientRect();
+          const f = s.engine.restFrame(j, s.engine.rest);
+          const lx = ev.clientX - r.left, ly = ev.clientY - r.top;
+          if (f.w >= 40 && lx - f.x <= 30 && f.y + f.h - ly <= 30) {
+            p.current.onUnfavorite(j);
+            return;
+          }
+        }
+        p.current.onOpen(j);
+      }
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);

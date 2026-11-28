@@ -562,12 +562,13 @@ class _DensityRow extends StatelessWidget {
 
 /// A settings row's icon: a white symbol on a coloured tile, as the native settings.
 class SettingsIcon extends StatelessWidget {
-  const SettingsIcon(this.icon, {super.key, this.mascot, this.danger = false});
+  const SettingsIcon(this.icon, {super.key, this.mascot, this.danger = false, this.iconColor});
   final IconData icon;
   /// The mascot mode's icon in its place (no tile: the crab has its own colours).
   final String? mascot;
   /// What cannot be undone keeps its warning colour.
   final bool danger;
+  final Color? iconColor;
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -578,7 +579,7 @@ class SettingsIcon extends StatelessWidget {
         width: 38,
         height: 38,
         decoration: BoxDecoration(color: danger ? scheme.errorContainer : scheme.secondaryContainer, shape: BoxShape.circle),
-        child: Icon(icon, size: 20, color: danger ? scheme.onErrorContainer : scheme.onSecondaryContainer),
+        child: Icon(icon, size: 20, color: iconColor ?? (danger ? scheme.onErrorContainer : scheme.onSecondaryContainer)),
       ),
     );
   }

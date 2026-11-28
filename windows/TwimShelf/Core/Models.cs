@@ -21,7 +21,7 @@ public enum ReviewFilter { Any, Unreviewed, Reviewed }
 public enum DownloadRoute { Auto, Fx, Cookie }
 
 [JsonConverter(typeof(SnakeEnum<ActionKind>))]
-public enum ActionKind { Trash, Restore, Purge, FolderAdd, FolderRemove, Tag }
+public enum ActionKind { Trash, Restore, Purge, FolderAdd, FolderRemove, Tag, Favorite, Unfavorite }
 
 [JsonConverter(typeof(SnakeEnum<RepairResult>))]
 public enum RepairResult { Replaced, ReplacedNew, FromPeers }
@@ -55,6 +55,7 @@ public sealed class FeedItem
     public string? Bad { get; init; }
     public bool Recent { get; init; }
     public bool Album { get; init; }
+    public bool Favorite { get; init; }
     /// Size as displayed, 0 until read from the file.
     public int Width { get; init; }
     public int Height { get; init; }
@@ -99,6 +100,7 @@ public sealed class FeedFilter
     public string? Folder { get; set; }
     public bool LooseOnly { get; set; }
     public bool AlbumOnly { get; set; }
+    public bool FavoriteOnly { get; set; }
     public bool RecentOnly { get; set; }
     public MediaKind? Kind { get; set; }
     public List<string> ExcludeTerms { get; set; } = [];
@@ -106,6 +108,7 @@ public sealed class FeedFilter
     public List<string> ExcludeFolders { get; set; } = [];
     public bool ExcludeRecent { get; set; }
     public bool ExcludeLoose { get; set; }
+    public bool ExcludeFavorite { get; set; }
     /// Conditions without words ("共同", "用户"): something in one of these fields (a tag that
     /// counts, post text, an author). All off: nothing.
     public SearchFields? Require { get; set; }

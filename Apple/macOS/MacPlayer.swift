@@ -9,31 +9,43 @@ import SwiftUI
 final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     /// Called when the user closes the player (close button or Esc).
     var onClose: (() -> Void)?
+    /// Called when the user toggles the favorite button next to share.
+    var onToggleFavorite: (() -> Void)?
+    var isFavorited = false { didSet { updateFavoriteButton() } }
+    /// Notifies the parent viewer when the bottom control bar shows or hides (so the caption follows).
+    var onControlsVisible: ((Bool) -> Void)?
     /// Picture in picture started (the host hides the player but keeps it) / ended.
+    var onPiPWillStart: (() -> Void)?
     var onPiPStart: (() -> Void)?
     var onPiPRestore: (() -> Void)?
     var onPiPEnd: (() -> Void)?
+    var onPiPFailed: (() -> Void)?
+    static let barHeight: CGFloat = 52
+    static let starGold = NSColor(red: 0.96, green: 0.72, blue: 0.0, alpha: 1)
     private let player: AVPlayer
     private var initialSeekTime: CMTime?
     private let playerLayer = AVPlayerLayer()
     var onMediaGeometryChanged: (() -> Void)?
     private let hudBox = NSView()
     private let hud = NSTextField(labelWithString: "")
-    private let bar = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let scrubBar = MacTopEdgeScrubBar()
     private let time = NSTextField(labelWithString: "0:00 / 0:00")
     private let playButton = NSButton()
     private let closeButton = NSButton()
     private let pipButton = NSButton()
+    private let favoriteButton = NSButton()
     private let shareButton = NSButton()
     private let fileURL: URL
     private var pip: AVPictureInPictureController?
+    /// Solid black bottom dock (Twitter-style) with the progress track flush along its top edge.
     private let controls = NSView()
+    private let dockSurface = NSView()
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var hideTimer: Timer?
     private var scrubbing = false
-    /// Shown as a page of the media viewer: no picture in picture, and the viewer handles the keys.
-    var embedded = false { didSet { pipButton.isHidden = embedded || pip == nil } }
+    /// Shown as a page of the media viewer: the viewer handles the keys.
+    var embedded = false
 
     private var duration: Double { let d = player.currentItem?.duration.seconds ?? 0; return d.isFinite ? d : 0 }
     var playbackPosition: CMTime { initialSeekTime ?? player.currentTime() }
@@ -66,7 +78,8 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
         player.automaticallyWaitsToMinimizeStalling = false
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        appearance = NSAppearance(named: .darkAqua)
+        applyBackdropColor()
         playerLayer.player = player
         playerLayer.videoGravity = .resizeAspect
         layer?.addSublayer(playerLayer)
@@ -104,26 +117,33 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
             hud.leadingAnchor.constraint(equalTo: hudBox.leadingAnchor, constant: 16), hud.trailingAnchor.constraint(equalTo: hudBox.trailingAnchor, constant: -16),
         ])
 
-        // no bar behind the controls: a soft shadow keeps them readable on bright video
+        // Twitter-style solid black bottom dock with the progress bar flush along its top edge.
         controls.wantsLayer = true
-        controls.shadow = {
-            let sh = NSShadow()
-            sh.shadowColor = .black.withAlphaComponent(0.6)
-            sh.shadowBlurRadius = 6
-            sh.shadowOffset = .zero
-            return sh
-        }()
+        dockSurface.wantsLayer = true
+        dockSurface.layer?.backgroundColor = NSColor.black.cgColor
+        dockSurface.translatesAutoresizingMaskIntoConstraints = false
+        controls.addSubview(dockSurface)
+
         playButton.isBordered = false
         playButton.contentTintColor = .white
         playButton.target = self
         playButton.action = #selector(togglePlay)
-        bar.target = self
-        bar.action = #selector(scrub)
-        bar.isContinuous = true
-        time.textColor = .white
+        playButton.widthAnchor.constraint(equalToConstant: 28).isActive = true
+
+        scrubBar.onScrub = { [weak self] frac, ended in
+            guard let self else { return }
+            self.scrubbing = !ended
+            self.player.seek(to: CMTime(seconds: frac * self.duration, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            if ended { self.scheduleHide() } else { self.hideTimer?.invalidate() }
+        }
+        scrubBar.translatesAutoresizingMaskIntoConstraints = false
+
+        time.textColor = NSColor.white.withAlphaComponent(0.75)
         time.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         for (b, sym, label, id, sel) in [(closeButton, "xmark", L("viewer.close"), "playerClose", #selector(closeTapped)),
-                                         (pipButton, "pip.enter", L("viewer.pip"), "playerPiP", #selector(togglePiP)), (shareButton, "square.and.arrow.up", L("viewer.share"), "playerShare", #selector(shareTapped))] {
+                                         (pipButton, "pip.enter", L("viewer.pip"), "playerPiP", #selector(togglePiP)),
+                                         (favoriteButton, "star", L("common.favorite"), "playerFavorite", #selector(favoriteTapped)),
+                                         (shareButton, "square.and.arrow.up", L("viewer.share"), "playerShare", #selector(shareTapped))] {
             b.isBordered = false
             b.image = NSImage(systemSymbolName: sym, accessibilityDescription: label)
             b.symbolConfiguration = .init(pointSize: 14, weight: .semibold)
@@ -131,8 +151,9 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
             b.toolTip = label
             b.setAccessibilityIdentifier(id)
             b.target = self; b.action = sel
-            b.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            b.widthAnchor.constraint(equalToConstant: 28).isActive = true
         }
+        updateFavoriteButton()
         // the speed: a Mac without a touch screen has no finger to hold for 2.5×
         speedButton.isBordered = false
         speedButton.toolTip = L("player.speed")
@@ -140,18 +161,25 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
         speedButton.target = self
         speedButton.action = #selector(speedTapped)
         updateSpeedTitle()
-        let row = NSStackView(views: [playButton, bar, time, speedButton, shareButton, closeButton, pipButton])
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [playButton, time, spacer, speedButton, favoriteButton, shareButton, pipButton, closeButton])
         row.spacing = 12
-        row.setCustomSpacing(16, after: time)
+        row.alignment = .centerY
         row.translatesAutoresizingMaskIntoConstraints = false
-        controls.addSubview(row)
+        dockSurface.addSubview(row)
+        controls.addSubview(scrubBar)
         [hudBox, controls].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
         NSLayoutConstraint.activate([
-            hudBox.centerXAnchor.constraint(equalTo: centerXAnchor), hudBox.topAnchor.constraint(equalTo: topAnchor, constant: 48),
-            controls.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24), controls.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
-            controls.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20), controls.heightAnchor.constraint(equalToConstant: 44),
-            row.leadingAnchor.constraint(equalTo: controls.leadingAnchor, constant: 14), row.trailingAnchor.constraint(equalTo: controls.trailingAnchor, constant: -14),
-            row.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
+            hudBox.centerXAnchor.constraint(equalTo: centerXAnchor), hudBox.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 16),
+            controls.leadingAnchor.constraint(equalTo: leadingAnchor), controls.trailingAnchor.constraint(equalTo: trailingAnchor),
+            controls.bottomAnchor.constraint(equalTo: bottomAnchor), controls.heightAnchor.constraint(equalToConstant: Self.barHeight + 9),
+            dockSurface.leadingAnchor.constraint(equalTo: controls.leadingAnchor), dockSurface.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
+            dockSurface.bottomAnchor.constraint(equalTo: controls.bottomAnchor), dockSurface.heightAnchor.constraint(equalToConstant: Self.barHeight),
+            scrubBar.leadingAnchor.constraint(equalTo: controls.leadingAnchor), scrubBar.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
+            scrubBar.centerYAnchor.constraint(equalTo: dockSurface.topAnchor), scrubBar.heightAnchor.constraint(equalToConstant: 18),
+            row.leadingAnchor.constraint(equalTo: dockSurface.leadingAnchor, constant: 18), row.trailingAnchor.constraint(equalTo: dockSurface.trailingAnchor, constant: -18),
+            row.centerYAnchor.constraint(equalTo: dockSurface.centerYAnchor),
         ])
 
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in self?.sync() }
@@ -178,6 +206,13 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     // MARK: Close, picture in picture
 
     @objc private func closeTapped() { onClose?() }
+    @objc private func favoriteTapped() { onToggleFavorite?() }
+    private func updateFavoriteButton() {
+        let label = isFavorited ? L("common.unfavorite") : L("common.favorite")
+        favoriteButton.image = NSImage(systemSymbolName: isFavorited ? "star.fill" : "star", accessibilityDescription: label)
+        favoriteButton.contentTintColor = isFavorited ? Self.starGold : .white
+        favoriteButton.toolTip = label
+    }
 
     private let speedButton = NSButton(title: "1×", target: nil, action: nil)
     /// The chosen speed (a hold boosts from it to 2.5× and comes back to it).
@@ -211,16 +246,50 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
         if pip.isPictureInPictureActive { pip.stopPictureInPicture() } else { pip.startPictureInPicture() }
     }
 
-    func pictureInPictureControllerWillStartPictureInPicture(_ c: AVPictureInPictureController) { onPiPStart?() }
+    func pictureInPictureControllerWillStartPictureInPicture(_ c: AVPictureInPictureController) { onPiPWillStart?() }
+    func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) { onPiPStart?() }
+    func pictureInPictureController(_ c: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        AppLog.error("pip", error.localizedDescription)
+        onPiPFailed?()
+    }
     func pictureInPictureController(_ c: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler done: @escaping (Bool) -> Void) {
         onPiPRestore?(); done(true)
     }
     func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) { onPiPEnd?() }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Closes an active PiP window immediately in-place (without flying back to the main window)
+    /// when the user opens another video while this one is in PiP.
+    func closePiPImmediately() -> AVPlayer? {
+        hideTimer?.invalidate()
+        onPiPWillStart = nil
+        onPiPStart = nil
+        onPiPRestore = nil
+        onPiPEnd = nil
+        onPiPFailed = nil
+        if let t = timeObserver { player.removeTimeObserver(t); timeObserver = nil }
+        if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
+        let activePiP = pip
+        pip = nil
+        activePiP?.delegate = nil
+        let returned: AVPlayer? = isLent ? { handedBack = true; return player }() : nil
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer.player = nil
+        playerLayer.removeFromSuperlayer()
+        playerLayer.frame = .zero
+        CATransaction.commit()
+        if !handedBack { player.pause() }
+        if activePiP?.isPictureInPictureActive == true {
+            activePiP?.stopPictureInPicture()
+        }
+        return returned
+    }
+
     func teardown() {
         // gone from the screen: no timer of this view hides the pointer afterwards
         hideTimer?.invalidate()
+        if pip?.isPictureInPictureActive == true { pip?.stopPictureInPicture() }
         if !handedBack { player.pause() }
         if let t = timeObserver { player.removeTimeObserver(t); timeObserver = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
@@ -236,6 +305,15 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBackdropColor()
+    }
+
+    private func applyBackdropColor() {
+        layer?.backgroundColor = NSColor.black.cgColor
+    }
+
     override func layout() {
         super.layout()
         CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -246,7 +324,7 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     private func sync() {
         onMediaGeometryChanged?()
         let t = player.currentTime().seconds
-        if !scrubbing, duration > 0 { bar.doubleValue = t / duration }
+        if !scrubbing, duration > 0 { scrubBar.progress = t / duration }
         time.stringValue = "\(Self.fmt(t)) / \(Self.fmt(duration))"
         playButton.image = NSImage(systemSymbolName: player.timeControlStatus == .paused ? "play.fill" : "pause.fill", accessibilityDescription: nil)
     }
@@ -266,23 +344,13 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
     private func scheduleHide() {
         hideTimer?.invalidate()
         controls.animator().alphaValue = 1
+        onControlsVisible?(true)
         NSCursor.unhide()
-        hideTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
-            guard let self, self.player.timeControlStatus != .paused else { return }
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.3; $0.timingFunction = .springy; self.controls.animator().alphaValue = 0 }
-            NSCursor.setHiddenUntilMouseMoves(true)
-        }
     }
 
     @objc func togglePlay() {
         if player.timeControlStatus == .paused { player.playImmediately(atRate: speed); flash("▶︎") } else { player.pause(); flash("❚❚") }
         sync(); scheduleHide()
-    }
-
-    @objc private func scrub() {
-        scrubbing = true
-        player.seek(to: CMTime(seconds: bar.doubleValue * duration, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-        if NSApp.currentEvent?.type == .leftMouseUp { scrubbing = false }
     }
 
     func seek(by seconds: Double) {
@@ -339,7 +407,12 @@ final class MacPlayerView: NSView, AVPictureInPictureControllerDelegate {
 /// with the buttons.
 final class MacPhotoView: NSView {
     var onClose: (() -> Void)?
-    private let items: [FeedItem]
+    var onPiPWillStart: (() -> Void)?
+    var onPiPStart: (() -> Void)?
+    var onPiPRestore: (() -> Void)?
+    var onPiPEnd: (() -> Void)?
+    var onPiPFailed: (() -> Void)?
+    private var items: [FeedItem]
     private var videoPositions: [Int: CMTime] = [:]
     private let videoPosition: ((FeedItem) -> CMTime)?
     private let saveVideoPosition: ((FeedItem, CMTime) -> Void)?
@@ -349,14 +422,26 @@ final class MacPhotoView: NSView {
     /// How far the strip is moved from the current page (pt; negative = towards the next).
     private var offset: CGFloat = 0
     private static let gap: CGFloat = 40
-    private let close = ViewerRoundButton(diameter: 34)
-    private let share = ViewerRoundButton(diameter: 34)
+    /// Landscape photo controls: Favorite, Share and Close housed together in one Liquid Glass capsule.
+    private let photoPill = NSView()
+    private let close = NSButton()
+    private let favorite = NSButton()
+    private let share = NSButton()
+    /// Portrait photo controls: solid black bottom dock (matching Twitter).
+    private let photoDock = NSView()
+    private let dockCounter = NSTextField(labelWithString: "")
+    private let dockFavorite = NSButton()
+    private let dockShare = NSButton()
+    private let dockClose = NSButton()
     private let prev = ViewerRoundButton(diameter: 40)
     private let next = ViewerRoundButton(diameter: 40)
     private let counter = NSTextField(labelWithString: "")
     private let caption = CaptionHostView(rootView: PostCaptionView(item: nil))
     private var captionBottom: NSLayoutConstraint!
     private var chromeHidden = false
+    private var videoControlsVisible = true
+    private var isPortraitLayout: Bool { bounds.width > 0 && bounds.height >= bounds.width }
+    private var lastPortraitLayout: Bool?
 
     /// The feed card's player of the opened video (one player for both), and where it goes back.
     private var lentPlayer: AVPlayer?
@@ -374,12 +459,15 @@ final class MacPhotoView: NSView {
         self.index = max(0, min(index, items.count - 1))
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        appearance = NSAppearance(named: .darkAqua)
+        applyAppearance()
         setAccessibilityIdentifier("photoViewer")
         strip.wantsLayer = true
         strip.layer?.masksToBounds = true
         addSubview(strip)
         func style(_ b: NSButton, _ sym: String, _ label: String, _ id: String, _ sel: Selector, size: CGFloat = 14) {
+            b.isBordered = false
+            b.imagePosition = .imageOnly
             b.image = NSImage(systemSymbolName: sym, accessibilityDescription: label)
             b.symbolConfiguration = .init(pointSize: size, weight: .semibold)
             b.toolTip = label
@@ -388,34 +476,128 @@ final class MacPhotoView: NSView {
             b.setAccessibilityIdentifier(id)
         }
         style(close, "xmark", L("viewer.close.mac"), "photoClose", #selector(closeTapped))
+        style(favorite, "star", L("common.favorite"), "photoFavorite", #selector(toggleFavorite))
         style(share, "square.and.arrow.up", L("viewer.share.mac"), "photoShare", #selector(shareTapped))
+        style(dockClose, "xmark", L("viewer.close.mac"), "photoDockClose", #selector(closeTapped))
+        style(dockFavorite, "star", L("common.favorite"), "photoDockFavorite", #selector(toggleFavorite))
+        style(dockShare, "square.and.arrow.up", L("viewer.share.mac"), "photoDockShare", #selector(shareTapped))
         style(prev, "chevron.left", L("viewer.previous.mac"), "photoPrev", #selector(goPrev), size: 16)
         style(next, "chevron.right", L("viewer.next.mac"), "photoNext", #selector(goNext), size: 16)
+
+        // Landscape Liquid Glass pill holding Favorite + Share + Close
+        photoPill.wantsLayer = true
+        let pillBg: NSView
+        if #available(macOS 26.0, *) {
+            let g = NSGlassEffectView()
+            g.cornerRadius = 20
+            pillBg = g
+        } else {
+            let v = NSVisualEffectView()
+            v.material = .hudWindow
+            v.blendingMode = .withinWindow
+            v.state = .active
+            v.wantsLayer = true
+            v.layer?.cornerRadius = 20
+            v.layer?.cornerCurve = .continuous
+            v.layer?.masksToBounds = true
+            pillBg = v
+        }
+        pillBg.translatesAutoresizingMaskIntoConstraints = false
+        photoPill.addSubview(pillBg)
+        let pillRow = NSStackView(views: [favorite, share, close])
+        pillRow.spacing = 6
+        pillRow.alignment = .centerY
+        pillRow.translatesAutoresizingMaskIntoConstraints = false
+        photoPill.addSubview(pillRow)
+        for b in [favorite, share, close] {
+            b.widthAnchor.constraint(equalToConstant: 32).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        }
+        NSLayoutConstraint.activate([
+            pillBg.topAnchor.constraint(equalTo: photoPill.topAnchor), pillBg.bottomAnchor.constraint(equalTo: photoPill.bottomAnchor),
+            pillBg.leadingAnchor.constraint(equalTo: photoPill.leadingAnchor), pillBg.trailingAnchor.constraint(equalTo: photoPill.trailingAnchor),
+            pillRow.leadingAnchor.constraint(equalTo: photoPill.leadingAnchor, constant: 8),
+            pillRow.trailingAnchor.constraint(equalTo: photoPill.trailingAnchor, constant: -8),
+            pillRow.topAnchor.constraint(equalTo: photoPill.topAnchor, constant: 4),
+            pillRow.bottomAnchor.constraint(equalTo: photoPill.bottomAnchor, constant: -4),
+        ])
+
+        // Portrait solid black dock holding counter + Favorite + Share + Close
+        photoDock.wantsLayer = true
+        photoDock.layer?.backgroundColor = NSColor.black.cgColor
+        dockCounter.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        dockCounter.textColor = .white
+        for b in [dockFavorite, dockShare, dockClose] {
+            b.contentTintColor = .white
+            b.widthAnchor.constraint(equalToConstant: 32).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        }
+        let dockSpacer = NSView()
+        dockSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let dockRow = NSStackView(views: [dockCounter, dockSpacer, dockFavorite, dockShare, dockClose])
+        dockRow.spacing = 12
+        dockRow.alignment = .centerY
+        dockRow.translatesAutoresizingMaskIntoConstraints = false
+        photoDock.addSubview(dockRow)
+        NSLayoutConstraint.activate([
+            dockRow.leadingAnchor.constraint(equalTo: photoDock.leadingAnchor, constant: 18),
+            dockRow.trailingAnchor.constraint(equalTo: photoDock.trailingAnchor, constant: -18),
+            dockRow.centerYAnchor.constraint(equalTo: photoDock.centerYAnchor),
+        ])
+
         counter.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
-        counter.textColor = .white
         counter.setAccessibilityIdentifier("photoCounter")
         caption.setAccessibilityIdentifier("postCaptionHost")
         // Sized by its constraints only (it fills the viewer). With the default options the
         // SwiftUI content's size becomes required constraints: a loose media shows no caption,
         // its content is then 0 wide at most, and AppKit shrank the whole window to 0 to obey.
         caption.sizingOptions = []
-        [caption, close, share, prev, next, counter].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
+        [caption, photoPill, photoDock, prev, next, counter].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
         captionBottom = caption.bottomAnchor.constraint(equalTo: bottomAnchor)
         NSLayoutConstraint.activate([
             caption.leadingAnchor.constraint(equalTo: leadingAnchor), caption.trailingAnchor.constraint(equalTo: trailingAnchor), captionBottom,
             caption.topAnchor.constraint(equalTo: topAnchor),
-            close.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20), close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            share.centerYAnchor.constraint(equalTo: close.centerYAnchor), share.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -10),
+            photoPill.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20), photoPill.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            photoDock.leadingAnchor.constraint(equalTo: leadingAnchor), photoDock.trailingAnchor.constraint(equalTo: trailingAnchor),
+            photoDock.bottomAnchor.constraint(equalTo: bottomAnchor), photoDock.heightAnchor.constraint(equalToConstant: MacPlayerView.barHeight),
             // below the (transparent) title bar strip
             counter.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 16), counter.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             prev.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20), prev.centerYAnchor.constraint(equalTo: centerYAnchor),
             next.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20), next.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        appearance = NSAppearance(named: .darkAqua)
+        applyAppearance()
         preparePages()
         activatePage()
         updateChrome()
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAppearance()
+    }
+
+    private func applyAppearance() {
+        layer?.backgroundColor = NSColor.black.cgColor
+        counter.textColor = .white
+        share.contentTintColor = .white
+        close.contentTintColor = .white
+        updateFavoriteButtons()
+    }
+
+    private func updateFavoriteButtons() {
+        let fav = current.isFavorite
+        let label = fav ? L("common.unfavorite") : L("common.favorite")
+        let img = NSImage(systemSymbolName: fav ? "star.fill" : "star", accessibilityDescription: label)
+        let tint: NSColor = fav ? MacPlayerView.starGold : .white
+        for b in [favorite, dockFavorite] {
+            b.image = img
+            b.contentTintColor = tint
+            b.toolTip = label
+        }
+        page?.player?.isFavorited = fav
+    }
 
     var current: FeedItem { items[index] }
     private var page: MacViewerPage? { pages[index] }
@@ -430,7 +612,21 @@ final class MacPhotoView: NSView {
 
     private func activatePage() {
         let time = videoPositions[index] ?? videoPosition?(current) ?? .zero
-        page?.activate(videoStart: time, onClose: { [weak self] in self?.onClose?() }, player: index == lentIndex ? lentPlayer : nil)
+        videoControlsVisible = true
+        page?.activate(videoStart: time, isFavorited: current.isFavorite,
+                       onClose: { [weak self] in self?.onClose?() },
+                       onToggleFavorite: { [weak self] in self?.toggleFavorite() },
+                       onControlsVisible: { [weak self] on in
+            guard let self else { return }
+            self.videoControlsVisible = on
+            self.updateChrome()
+        },
+                       onPiPWillStart: { [weak self] in self?.onPiPWillStart?() },
+                       onPiPStart: { [weak self] in self?.onPiPStart?() },
+                       onPiPRestore: { [weak self] in self?.onPiPRestore?() },
+                       onPiPEnd: { [weak self] in self?.onPiPEnd?() },
+                       onPiPFailed: { [weak self] in self?.onPiPFailed?() },
+                       player: index == lentIndex ? lentPlayer : nil)
     }
 
     private func rememberCurrentVideo() {
@@ -474,6 +670,11 @@ final class MacPhotoView: NSView {
         strip.frame = bounds
         layoutPages()
         captionMaxHeight = bounds.height * 0.5
+        let portrait = isPortraitLayout
+        if lastPortraitLayout != portrait {
+            lastPortraitLayout = portrait
+            updateChrome()
+        }
     }
 
     /// The strip settled one page further (or back): that page is the current one now.
@@ -492,22 +693,28 @@ final class MacPhotoView: NSView {
     /// Counter, arrows, buttons and caption for the current page.
     private func updateChrome() {
         let it = current
+        let isVideo = it.kind == .video
+        let hidden = isVideo ? !videoControlsVisible : chromeHidden
+        let portrait = isPortraitLayout
         let multi = items.count > 1
-        prev.isHidden = !multi || index == 0 || chromeHidden
-        next.isHidden = !multi || index == items.count - 1 || chromeHidden
+        prev.isHidden = !multi || index == 0 || hidden
+        next.isHidden = !multi || index == items.count - 1 || hidden
         // the position within the current post
         let post = it.postId
         var lo = index, hi = index
         while lo > 0, items[lo - 1].postId == post, !post.isEmpty { lo -= 1 }
         while hi < items.count - 1, items[hi + 1].postId == post, !post.isEmpty { hi += 1 }
-        counter.stringValue = multi && hi > lo ? "\(index - lo + 1) / \(hi - lo + 1)" : ""
-        counter.setAccessibilityValue(counter.stringValue)
-        counter.isHidden = chromeHidden
-        // a video page has its own share and close among its controls
-        close.isHidden = it.kind == .video || chromeHidden
-        share.isHidden = it.kind == .video || chromeHidden
-        // over a video, the caption sits above the player's controls
-        captionBottom.constant = it.kind == .video ? -76 : 0
+        let counterText = multi && hi > lo ? "\(index - lo + 1) / \(hi - lo + 1)" : ""
+        counter.stringValue = counterText
+        counter.setAccessibilityValue(counterText)
+        dockCounter.stringValue = counterText
+        // Landscape photo: Liquid Glass pill with Share & Close; Portrait photo: solid black dock
+        photoPill.isHidden = isVideo || portrait || chromeHidden
+        photoDock.isHidden = isVideo || !portrait || chromeHidden
+        counter.isHidden = hidden || counterText.isEmpty || (!isVideo && portrait)
+        // Caption always sits in the media region right above the bottom dock (video or portrait photo)
+        captionBottom.constant = isVideo ? -(MacPlayerView.barHeight + 4) : (portrait ? -MacPlayerView.barHeight : 0)
+        updateFavoriteButtons()
         setCaption()
     }
 
@@ -518,9 +725,12 @@ final class MacPhotoView: NSView {
     #endif
     private func setCaption() {
         let it = current
-        caption.rootView = PostCaptionView(item: chromeHidden ? nil : it, maxExpandedHeight: captionMaxHeight, trailingInset: it.kind == .video ? 16 : 110,
+        let isVideo = it.kind == .video
+        let hidden = isVideo ? !videoControlsVisible : chromeHidden
+        let trailing: CGFloat = (isVideo || isPortraitLayout) ? 16 : 160
+        caption.rootView = PostCaptionView(item: hidden ? nil : it, maxExpandedHeight: captionMaxHeight, trailingInset: trailing,
                                            onHeight: { [weak self] h in self?.caption.contentHeight = h }, startsExpanded: captionStartsExpanded)
-        caption.isHidden = chromeHidden || !PostCaptionView.shows(it)
+        caption.isHidden = hidden || !PostCaptionView.shows(it)
     }
 
     // MARK: Moving between pages
@@ -713,9 +923,39 @@ final class MacPhotoView: NSView {
         pages.values.forEach { $0.teardown() }
     }
 
+    /// Closes an active PiP window immediately in-place (caller removes `self` from superview first
+    /// so PIP.framework has no replacementWindow to animate back to).
+    func closePiPImmediately() {
+        finishMotion()
+        stopLink()
+        rememberCurrentVideo()
+        onPiPWillStart = nil
+        onPiPStart = nil
+        onPiPRestore = nil
+        onPiPEnd = nil
+        onPiPFailed = nil
+        if lentPlayer != nil {
+            lentPlayer = nil
+            if let returned = pages[lentIndex]?.closePiPImmediately() {
+                giveBack?(returned)
+            }
+        }
+        pages.values.forEach { _ = $0.closePiPImmediately(); $0.teardown() }
+    }
+
     override var acceptsFirstResponder: Bool { true }
     @objc private func closeTapped() { onClose?() }
-    @objc private func shareTapped() { NSSharingServicePicker(items: [current.fileURL]).show(relativeTo: share.bounds, of: share, preferredEdge: .minY) }
+    @objc private func toggleFavorite() {
+        let next = !current.isFavorite
+        guard (try? Core.action(next ? .favorite : .unfavorite, media: [current.mediaId])) != nil else { return }
+        items[index].favorite = next
+        updateFavoriteButtons()
+        NotificationCenter.default.post(name: .libraryChanged, object: nil)
+    }
+    @objc private func shareTapped() {
+        let anchor = isPortraitLayout ? dockShare : share
+        NSSharingServicePicker(items: [current.fileURL]).show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+    }
     /// ⌘C: the file (and, for a photo, the image) on the clipboard.
     @objc func copy(_ sender: Any?) {
         let pb = NSPasteboard.general
@@ -818,16 +1058,36 @@ final class MacViewerPage: NSView {
     }
 
     /// It became the page on screen: a video starts playing.
-    func activate(videoStart: CMTime, onClose: @escaping () -> Void, player lent: AVPlayer? = nil) {
+    func activate(videoStart: CMTime, isFavorited: Bool = false, onClose: @escaping () -> Void,
+                  onToggleFavorite: (() -> Void)? = nil, onControlsVisible: ((Bool) -> Void)? = nil,
+                  onPiPWillStart: (() -> Void)? = nil, onPiPStart: (() -> Void)? = nil,
+                  onPiPRestore: (() -> Void)? = nil, onPiPEnd: (() -> Void)? = nil,
+                  onPiPFailed: (() -> Void)? = nil,
+                  player lent: AVPlayer? = nil) {
         guard item.kind == .video, player == nil else { return }
         let p = MacPlayerView(url: item.fileURL, startAt: videoStart, player: lent)
         p.embedded = true
+        p.isFavorited = isFavorited
         p.onMediaGeometryChanged = { [weak self] in self?.onMediaGeometryChanged?() }
         p.onClose = onClose
+        p.onToggleFavorite = onToggleFavorite
+        p.onControlsVisible = onControlsVisible
+        p.onPiPWillStart = onPiPWillStart
+        p.onPiPStart = onPiPStart
+        p.onPiPRestore = onPiPRestore
+        p.onPiPEnd = onPiPEnd
+        p.onPiPFailed = onPiPFailed
         p.frame = bounds
         p.autoresizingMask = [.width, .height]
         addSubview(p)
         player = p
+    }
+
+    func closePiPImmediately() -> AVPlayer? {
+        guard let p = player else { return nil }
+        player = nil
+        p.removeFromSuperview()
+        return p.closePiPImmediately()
     }
 
     /// The viewer closes on the feed card's player: let go of it, playing.
@@ -881,8 +1141,70 @@ final class PagingScrollView: NSScrollView {
     }
 }
 
-/// A viewer control: a white symbol on a dark translucent circle (no white disc), slightly
-/// brighter while hovered and pressed.
+/// Full-width hairline progress bar sitting flush on the top edge of the Twitter-style black video bar.
+final class MacTopEdgeScrubBar: NSView {
+    var progress: Double = 0 { didSet { needsDisplay = true } }
+    var onScrub: ((Double, Bool) -> Void)?
+    private var hovering = false { didSet { needsDisplay = true } }
+    private var dragging = false { didSet { needsDisplay = true } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+
+    private func fraction(for event: NSEvent) -> Double {
+        let x = convert(event.locationInWindow, from: nil).x
+        return bounds.width > 0 ? min(1, max(0, Double(x / bounds.width))) : 0
+    }
+    override func mouseDown(with event: NSEvent) {
+        dragging = true
+        let f = fraction(for: event)
+        progress = f
+        onScrub?(f, false)
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard dragging else { return }
+        let f = fraction(for: event)
+        progress = f
+        onScrub?(f, false)
+    }
+    override func mouseUp(with event: NSEvent) {
+        guard dragging else { return }
+        dragging = false
+        let f = fraction(for: event)
+        progress = f
+        onScrub?(f, true)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let trackH: CGFloat = (hovering || dragging) ? 4 : 2.5
+        let y = (bounds.height - trackH) / 2
+        let w = bounds.width
+        NSColor.white.withAlphaComponent(0.28).setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: y, width: w, height: trackH)).fill()
+        let fillW = max(0, min(w, w * CGFloat(progress)))
+        NSColor.white.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: y, width: fillW, height: trackH)).fill()
+        if hovering || dragging {
+            let d: CGFloat = dragging ? 12 : 10
+            let cx = max(d / 2, min(w - d / 2, fillW))
+            NSBezierPath(ovalIn: NSRect(x: cx - d / 2, y: (bounds.height - d) / 2, width: d, height: d)).fill()
+        }
+    }
+}
+
+/// A viewer control: adaptive frosted circle (light glass in Light mode, dark glass in Dark mode),
+/// slightly stronger while hovered and pressed.
 final class ViewerRoundButton: NSButton {
     private let diameter: CGFloat
     private var hovering = false { didSet { restyle() } }
@@ -892,11 +1214,9 @@ final class ViewerRoundButton: NSButton {
         super.init(frame: .zero)
         isBordered = false
         imagePosition = .imageOnly
-        contentTintColor = .white
         wantsLayer = true
         layer?.cornerRadius = diameter / 2
         layer?.borderWidth = 0.5
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
         restyle()
         widthAnchor.constraint(equalToConstant: diameter).isActive = true
         heightAnchor.constraint(equalToConstant: diameter).isActive = true
@@ -907,6 +1227,10 @@ final class ViewerRoundButton: NSButton {
     // a symbol image gives the button alignment insets, which would stretch the circle
     override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
     override var isHighlighted: Bool { didSet { restyle() } }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
@@ -916,8 +1240,10 @@ final class ViewerRoundButton: NSButton {
     override func mouseExited(with event: NSEvent) { hovering = false }
 
     private func restyle() {
+        contentTintColor = .white
         let a: CGFloat = isHighlighted ? 0.7 : hovering ? 0.55 : 0.4
         layer?.backgroundColor = NSColor.black.withAlphaComponent(a).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
     }
 }
 

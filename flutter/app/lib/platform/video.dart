@@ -36,6 +36,10 @@ abstract interface class VideoEngine {
   Future<void> pause();
   Future<void> seek(Duration position);
   Future<void> volume(double percent);
+  /// Enables or disables the audio output track (`aid=auto` vs `aid=no`). Keeping audio disabled
+  /// for muted inline cards prevents libmpv's iOS `ao_audiounit` from opening an AudioUnit or
+  /// deactivating the shared `AVAudioSession` when another card stops.
+  Future<void> setAudioEnabled(bool enabled);
   /// Playback speed (1 normal; the player's long press holds 2.5).
   Future<void> rate(double rate);
   Future<void> loop(bool enabled);
@@ -61,6 +65,7 @@ class MediaKitVideoEngine implements VideoEngine {
   }
   late final Player player;
   late final VideoController controller = _createController();
+  bool? _audioEnabled;
   VideoController _createController() {
     final result = VideoController(player);
     SchedulerBinding.instance.scheduleFrame();
@@ -78,6 +83,16 @@ class MediaKitVideoEngine implements VideoEngine {
   @override
   Future<void> open(String path) async {
     await controller.platform.future.timeout(const Duration(seconds: 10));
+    if (player.platform is NativePlayer) {
+      final native = player.platform as NativePlayer;
+      // Avoid disk caching for local files, fall back to null AO if AudioUnit ever rejects,
+      // and open with audio track disabled until unmuted so muted cards never touch iOS AudioUnit.
+      await native.setProperty('cache', 'auto');
+      await native.setProperty('cache-on-disk', 'no');
+      await native.setProperty('audio-fallback-to-null', 'yes');
+      await native.setProperty('aid', 'no');
+      _audioEnabled = false;
+    }
     await player.open(Media(File(path).absolute.uri.toString()), play: false);
     if (player.state.duration == Duration.zero) {
       await player.stream.duration
@@ -94,6 +109,12 @@ class MediaKitVideoEngine implements VideoEngine {
   Future<void> seek(Duration value) => player.seek(value);
   @override
   Future<void> volume(double value) => player.setVolume(value);
+  @override
+  Future<void> setAudioEnabled(bool enabled) async {
+    if (_audioEnabled == enabled) return;
+    _audioEnabled = enabled;
+    await player.setAudioTrack(enabled ? AudioTrack.auto() : AudioTrack.no());
+  }
 
   @override
   Future<void> rate(double value) => player.setRate(value);
@@ -383,7 +404,7 @@ class VideoSession extends ChangeNotifier {
     if (existing != null) {
       if (_openingFuture != null) return _openingFuture!;
       if (wantViewer) {
-        unawaited(existing.enterViewer().catchError((Object _) {}));
+        return existing.enterViewer().catchError((Object _) {}).then((_) => existing);
       } else if (wantCardPlay) {
         unawaited(existing.returnToCard().catchError((Object _) {}));
       } else if (keepCardPaused) {
@@ -730,6 +751,7 @@ class VideoPlayback {
     needsSpeakerConsent.value = false;
     muted.value = true;
     await _engine.volume(0);
+    await _engine.setAudioEnabled(false);
     await _engine.rate(1.0);
     await _engine.loop(true);
     if (!_closed) await _engine.play();
@@ -748,6 +770,7 @@ class VideoPlayback {
       needsSpeakerConsent.value =
           !_opening && _hasAudio && blocked && !_manualMute;
       muted.value = shouldMute;
+      await _engine.setAudioEnabled(!shouldMute);
       await _engine.volume(shouldMute ? 0 : 100);
     });
     _audioTail = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
@@ -823,6 +846,7 @@ class VideoPlayback {
         } catch (_) {}
       }
       await _engine.stop();
+      await _engine.setAudioEnabled(false);
       await _engine.volume(0);
       await _engine.rate(1.0);
     }();

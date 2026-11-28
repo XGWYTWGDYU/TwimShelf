@@ -441,7 +441,7 @@ public static class CardHeights
         var text = first.Text ?? "";
         if (text.Length > 0) h += Gap + Lines(text, width - Sides - 3) * Body;
         if (first.Url != null) h += 4 + Small;
-        if (media[at].Tags.Count > 0 || !loose) h += TagsGap + Tags;
+        if (media[at].Tags.Count > 0 || media[at].Favorite || !loose) h += TagsGap + Tags;
         return h + Bottom;
     }
 

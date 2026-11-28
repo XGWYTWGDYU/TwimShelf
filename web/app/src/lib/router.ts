@@ -5,11 +5,11 @@ import { store } from '@twimshelf/core';
 import { useStore } from './hooks';
 
 /** A place shown as the zoomable media grid. */
-export type GridPlace = 'photos' | 'videos' | 'folder' | 'loose' | 'album' | 'unreviewed' | 'reviewed' | 'bad' | 'trash';
-const GRID_PLACES: GridPlace[] = ['photos', 'videos', 'folder', 'loose', 'album', 'unreviewed', 'reviewed', 'bad', 'trash'];
+export type GridPlace = 'photos' | 'videos' | 'folder' | 'loose' | 'album' | 'favorites' | 'unreviewed' | 'reviewed' | 'bad' | 'trash';
+const GRID_PLACES: GridPlace[] = ['photos', 'videos', 'folder', 'loose', 'album', 'favorites', 'unreviewed', 'reviewed', 'bad', 'trash'];
 
 export type Route =
-  | { page: 'browse'; kind?: 'photo' | 'video'; folder?: string; view?: 'loose' | 'album' | 'unreviewed' | 'reviewed'; q?: string }
+  | { page: 'browse'; kind?: 'photo' | 'video'; folder?: string; view?: 'loose' | 'album' | 'favorites' | 'unreviewed' | 'reviewed'; q?: string }
   | { page: 'grid'; place: GridPlace; folder?: string }
   | { page: 'folders' }
   | { page: 'tags' }
@@ -33,7 +33,7 @@ function parse(hash: string): Route {
       const r: Route = { page: 'browse' };
       const kind = p.get('kind'); if (kind === 'photo' || kind === 'video') r.kind = kind;
       const folder = p.get('folder'); if (folder) r.folder = folder;
-      const view = p.get('view'); if (view === 'loose' || view === 'album' || view === 'unreviewed' || view === 'reviewed') r.view = view;
+      const view = p.get('view'); if (view === 'loose' || view === 'album' || view === 'favorites' || view === 'unreviewed' || view === 'reviewed') r.view = view;
       const q = p.get('q'); if (q) r.q = q;
       return r;
     }

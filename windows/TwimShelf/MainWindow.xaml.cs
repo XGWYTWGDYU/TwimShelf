@@ -26,6 +26,8 @@ public interface IShellPage
     /// Shown again (selected in the sidebar) or hidden.
     void Shown() { }
     void Hidden() { }
+    /// Permanently removed (deleted folder or window closed).
+    void Close() { }
 }
 
 public sealed partial class MainWindow : Window
@@ -33,12 +35,16 @@ public sealed partial class MainWindow : Window
     readonly LibraryModel _library;
     Place _place = Place.Browse;
     readonly BrowsePage _browse;
+    readonly Dictionary<string, IShellPage> _pages = [];
+    readonly PetLayer _pet;
     IShellPage? _page;
     string _lastSidebarKey = "";
     bool _building;
     Microsoft.UI.Dispatching.DispatcherQueueTimer? _extOpenPoll;
 
     public static new MainWindow? Current { get; private set; }
+    /// The content area beside the sidebar (where the media viewer opens, leaving the sidebar visible).
+    public Panel ViewerHost => ContentHost;
 
     public MainWindow(LibraryModel library)
     {
@@ -58,11 +64,15 @@ public sealed partial class MainWindow : Window
         RestoreSize();
 
         _browse = new BrowsePage(library);
+        _pages[Place.Browse.Id] = _browse;
+        PageHost.Children.Add(_browse);
         Activity.Attach(library);
         // the mascot's little Clawd over everything (its home is the bottom-right corner, where the
         // activity panel sits too); it shows itself when the mode is on
-        var pet = new PetLayer(ContentHost);
-        ContentHost.Children.Add(pet);
+        _pet = new PetLayer(ContentHost);
+        ContentHost.Children.Add(_pet);
+        Viewer.Opened += OnViewerChanged;
+        Viewer.Closed += OnViewerChanged;
         library.Changed += BuildSidebar;
         Prefs.Instance.Changed += BuildSidebar;
         library.RevealRequested += _ => Go(Place.Browse);
@@ -72,7 +82,15 @@ public sealed partial class MainWindow : Window
         DropImport.Attach(this, Root, library);
         BuildSidebar();
         Show(Place.Browse);
-        Closed += (_, _) => { _extOpenPoll?.Stop(); SaveSize(); };
+        Closed += (_, _) =>
+        {
+            Viewer.Opened -= OnViewerChanged;
+            Viewer.Closed -= OnViewerChanged;
+            _extOpenPoll?.Stop();
+            SaveSize();
+            foreach (var p in _pages.Values) p.Close();
+            _pages.Clear();
+        };
         _extOpenPoll = DispatcherQueue.CreateTimer();
         _extOpenPoll.Interval = TimeSpan.FromSeconds(1);
         _extOpenPoll.Tick += async (_, _) =>
@@ -94,19 +112,31 @@ public sealed partial class MainWindow : Window
             App.WindowHidden();
             Diagnostics.Log("window hidden: running in the background");
         };
-        // nothing moves while hidden (the little Clawd rests)
-        VisibilityChanged += (_, e) => pet.SetShown(e.Visible);
+        // nothing moves while hidden or covered by the viewer (the little Clawd rests)
+        VisibilityChanged += (_, e) => _pet.SetShown(e.Visible && !Viewer.IsOpen);
         // the system's light or dark, followed as it changes: what the pages drew in code is drawn again
         if (Content is FrameworkElement root)
             root.ActualThemeChanged += (_, _) =>
             {
                 Theming.Apply(this);
                 BuildSidebar();
-                if (_place != Place.Browse) Show(_place);
+                if (_pages.Remove(Place.Settings.Id, out var oldSettings))
+                {
+                    if (_page == oldSettings) { oldSettings.ChromeChanged -= RefreshChrome; oldSettings.Hidden(); _page = null; }
+                    PageHost.Children.Remove((UIElement)oldSettings);
+                    oldSettings.Close();
+                }
+                if (_place == Place.Settings) Show(_place);
             };
     }
 
-    /// The title bar moves the window again (after the viewer, which covers it, has closed).
+    void OnViewerChanged()
+    {
+        _pet.SetShown(Visible && !Viewer.IsOpen);
+        RefreshChrome();
+    }
+
+    /// The title bar moves the window again.
     public void RestoreTitleBar() => SetTitleBar(AppTitleBar);
 
     // ---- window size --------------------------------------------------------------------------
@@ -174,6 +204,16 @@ public sealed partial class MainWindow : Window
         // 设置 at the foot of the sidebar, always in view (Windows' place for it; the Mac's 应用 section)
         Nav.FooterMenuItems.Clear();
         Nav.FooterMenuItems.Add(Item(Place.Settings, null));
+        // evict cached pages for deleted folders so they do not linger in memory
+        var liveFolders = new HashSet<string>(folders.Select(f => Place.OfFolder(f.Name).Id));
+        foreach (var id in _pages.Keys.Where(k => k.StartsWith("folder:", StringComparison.Ordinal) && !liveFolders.Contains(k)).ToList())
+        {
+            var stale = _pages[id];
+            _pages.Remove(id);
+            if (_page == stale) { stale.ChromeChanged -= RefreshChrome; stale.Hidden(); _page = null; }
+            PageHost.Children.Remove((UIElement)stale);
+            stale.Close();
+        }
         // a deleted folder that was open: back to the folders
         if (_place.Folder != null && folders.All(f => f.Name != _place.Folder)) { _building = false; Go(Place.AllFolders); return; }
         Nav.SelectedItem = AllItems().FirstOrDefault(i => (i.Tag as Place) == _place);
@@ -220,6 +260,7 @@ public sealed partial class MainWindow : Window
     {
         var icon = new FontIcon { Glyph = p.Glyph };
         if (p == Place.Bad) icon.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCriticalBrush"];
+        else if (p == Place.Favorites) icon.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 184, 0));
         return icon;
     }
 
@@ -229,11 +270,12 @@ public sealed partial class MainWindow : Window
         Show(p);
     }
 
-    /// The place shown, clicked again: back to its top (设置 from one of its pages, as the Mac app).
+    /// The place shown, clicked again: closes an open viewer or returns to the page's top.
     void OnNavInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
         if (args.InvokedItemContainer is not NavigationViewItem item || item.Tag is not Place p) return;
         if (Clawd.On && Clawd.For(p) is { } name) Clawd.Pulse(item, name, () => PlaceIcon(p));
+        if (Viewer.IsOpen) Viewer.Shown?.Close(immediate: true);
         if (p != _place) return;
         for (var i = 0; i < 20 && _page?.CanGoBack == true; i++) _page.GoBack();
     }
@@ -266,29 +308,46 @@ public sealed partial class MainWindow : Window
 
     void Show(Place p)
     {
+        if (Viewer.IsOpen) Viewer.Shown?.Close(immediate: true);
         _place = p;
-        if (_page != null)
+        if (!_pages.TryGetValue(p.Id, out var page))
+        {
+            page = p.Id switch
+            {
+                "browse" => _browse,
+                "folders" => new FoldersPage(_library, name => Go(Place.OfFolder(name))),
+                "settings" => new SettingsPage(_library),
+                _ => new GridPage(_library, p),
+            };
+            _pages[p.Id] = page;
+            var el = (UIElement)page;
+            if (!PageHost.Children.Contains(el)) PageHost.Children.Add(el);
+        }
+        if (_page != null && _page != page)
         {
             _page.ChromeChanged -= RefreshChrome;
             _page.Hidden();
+            ((UIElement)_page).Visibility = Visibility.Collapsed;
         }
-        IShellPage page = p.Id switch
-        {
-            "browse" => _browse,
-            "folders" => new FoldersPage(_library, name => Go(Place.OfFolder(name))),
-            "settings" => new SettingsPage(_library),
-            _ => new GridPage(_library, p),
-        };
+        var changed = _page != page;
         _page = page;
-        PageHost.Children.Clear();
-        PageHost.Children.Add((UIElement)page);
-        page.ChromeChanged += RefreshChrome;
+        ((UIElement)page).Visibility = Visibility.Visible;
+        if (changed) page.ChromeChanged += RefreshChrome;
         page.Shown();
         RefreshChrome();
     }
 
     void RefreshChrome()
     {
+        if (Viewer.IsOpen)
+        {
+            AppTitleBar.Title = "";
+            AppTitleBar.Subtitle = "";
+            TitleContent.Content = null;
+            TitleRight.Content = null;
+            AppTitleBar.IsBackButtonVisible = false;
+            return;
+        }
         if (_page == null) return;
         AppTitleBar.Title = _page.Title;
         AppTitleBar.Subtitle = _page.Subtitle;

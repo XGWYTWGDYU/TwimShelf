@@ -13,7 +13,7 @@ void main() {
   });
   test('FeedItem wire round trip', () {
     final json = jsonDecode(
-            r'''{"media_id": "sample", "post_id": "sample", "ordinal": 7, "kind": "photo", "path": "sample", "text": null, "author_name": null, "screen_name": null, "url": null, "tags": [{"label": "sample", "origin": 7, "models": ["sample"]}], "created_at": null, "bad": null, "recent": true, "album": true}''')
+            r'''{"media_id": "sample", "post_id": "sample", "ordinal": 7, "kind": "photo", "path": "sample", "text": null, "author_name": null, "screen_name": null, "url": null, "tags": [{"label": "sample", "origin": 7, "models": ["sample"]}], "created_at": null, "bad": null, "recent": true, "album": true, "favorite": true}''')
         as Map<String, dynamic>;
     expect(FeedItem.fromJson(json).toJson(), json);
   });
@@ -36,13 +36,13 @@ void main() {
   });
   test('FeedFilter wire round trip', () {
     final json = jsonDecode(
-            r'''{"author": null, "labels": ["sample"], "review": "any", "bad_only": true, "folder": null, "loose_only": true, "album_only": true, "recent_only": true, "kind": null, "exclude_terms": ["sample"], "origins": null, "exclude_folders": ["sample"], "exclude_recent": true, "exclude_loose": true, "require": {"tags": true, "text": false, "author": true}}''')
+            r'''{"author": null, "labels": ["sample"], "review": "any", "bad_only": true, "folder": null, "loose_only": true, "album_only": true, "favorite_only": true, "recent_only": true, "kind": null, "exclude_terms": ["sample"], "origins": null, "exclude_folders": ["sample"], "exclude_recent": true, "exclude_loose": true, "exclude_favorite": true, "require": {"tags": true, "text": false, "author": true}}''')
         as Map<String, dynamic>;
     expect(FeedFilter.fromJson(json).toJson(), json);
   });
   test('FeedRequest wire round trip', () {
     final json = jsonDecode(
-            r'''{"terms": ["sample"], "scope": "mine", "seed": null, "newest_first": true, "fuzzy": true, "term_vectors": [null], "embed_model": null, "threshold": 0.55, "fields": {"tags": true, "text": true, "author": true}, "filter": {"author": null, "labels": ["sample"], "review": "any", "bad_only": true, "folder": null, "loose_only": true, "album_only": true, "recent_only": true, "kind": null, "exclude_terms": ["sample"], "origins": null, "exclude_folders": ["sample"], "exclude_recent": true, "exclude_loose": true, "require": {"tags": true, "text": false, "author": true}}, "whole_posts": true}''')
+            r'''{"terms": ["sample"], "scope": "mine", "seed": null, "newest_first": true, "fuzzy": true, "term_vectors": [null], "embed_model": null, "threshold": 0.55, "fields": {"tags": true, "text": true, "author": true}, "filter": {"author": null, "labels": ["sample"], "review": "any", "bad_only": true, "folder": null, "loose_only": true, "album_only": true, "favorite_only": true, "recent_only": true, "kind": null, "exclude_terms": ["sample"], "origins": null, "exclude_folders": ["sample"], "exclude_recent": true, "exclude_loose": true, "exclude_favorite": true, "require": {"tags": true, "text": false, "author": true}}, "whole_posts": true}''')
         as Map<String, dynamic>;
     expect(FeedRequest.fromJson(json).toJson(), json);
   });

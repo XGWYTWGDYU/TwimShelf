@@ -1,7 +1,7 @@
 // The card's context menu (matching Apple/macOS/MacFeed.swift) and the selection's.
 import {
   BadgeCheck, CircleUserRound, CloudDownload, ExternalLink, Filter, FolderInput, FolderMinus,
-  FolderPlus, Info, Layers, Pencil, Search, Sparkles, Tag, TagsIcon, Trash2, X,
+  FolderPlus, Info, Layers, Pencil, Search, Sparkles, Star, StarOff, Tag, TagsIcon, Trash2, X,
 } from 'lucide-react';
 import { L, KEYWORDS, keywordWord, quoteSearchWord, type FeedItem, type MediaRef, type TagView } from '@twimshelf/core';
 import type { MenuEntry } from '../../components/Menu';
@@ -77,6 +77,11 @@ export async function cardMenu(item: FeedItem, post: FeedItem[], host: CardMenuH
       run: () => window.open(`https://x.com/${item.screen_name}`, '_blank', 'noopener'),
     }] : []),
     'separator',
+    {
+      label: item.favorite ? L('common.unfavorite') : L('common.favorite'),
+      icon: item.favorite ? <StarOff size={z} /> : <Star size={z} />,
+      run: () => void runAction(item.favorite ? 'unfavorite' : 'favorite', { media: [item.media_id] }, (n) => L(item.favorite ? 'favorite.removed' : 'favorite.added', n)),
+    },
     {
       label: L('card.menu.tagMedia'),
       icon: <Tag size={z} />,
@@ -190,6 +195,18 @@ export function tagMenu(item: FeedItem, t: TagView, host: CardMenuHost): MenuEnt
     },
     'separator',
     { label: L('card.menu.deleteTag'), icon: <X size={z} />, danger: true, run: () => void deleteTag() },
+  ];
+}
+
+/** The menu of the favorite pill on a card (right-click to unfavorite with undo, matching deleteTag). */
+export function favoriteMenu(item: FeedItem): MenuEntry[] {
+  return [
+    {
+      label: L('common.unfavorite'),
+      icon: <StarOff size={z} />,
+      danger: true,
+      run: () => void runAction('unfavorite', { media: [item.media_id] }, (n) => L('favorite.removed', n)),
+    },
   ];
 }
 

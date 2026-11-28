@@ -18,6 +18,8 @@ enum SearchKeyword: Hashable {
     case media(MediaKind)
     /// "相册": only media brought in from the photo library (the share extension's 从相册导入).
     case album
+    /// "收藏": only favorited media.
+    case favorite
     /// "已认可" / "未认可": media with / without a tag you added or approved.
     case review(ReviewFilter)
     /// "损坏": only damaged or missing media.
@@ -25,7 +27,7 @@ enum SearchKeyword: Hashable {
 
     struct Info { let word: String; let aliases: [String]; let symbol: String; let hint: String; let excludeHint: String }
 
-    static let all: [SearchKeyword] = [.field(.tags), .field(.text), .field(.author), .scope(.mine), .scope(.ai), .scope(.common), .scope(.both), .media(.video), .media(.photo), .folder, .recent, .external, .album, .review(.reviewed), .review(.unreviewed), .damaged]
+    static let all: [SearchKeyword] = [.field(.tags), .field(.text), .field(.author), .scope(.mine), .scope(.ai), .scope(.common), .scope(.both), .media(.video), .media(.photo), .folder, .recent, .external, .album, .favorite, .review(.reviewed), .review(.unreviewed), .damaged]
 
     /// The catalog name of the keyword ("search.kw.<id>.word", ".aliases", ".hint", ".exclude").
     var id: String {
@@ -37,6 +39,7 @@ enum SearchKeyword: Hashable {
         case .folder: "folder"
         case .media(let k): k.rawValue
         case .album: "album"
+        case .favorite: "favorite"
         case .review(let r): r.rawValue
         case .damaged: "damaged"
         }
@@ -57,6 +60,7 @@ enum SearchKeyword: Hashable {
         case .recent: "clock.badge.checkmark"
         case .external: "square.and.arrow.down"
         case .album: "photo.on.rectangle"
+        case .favorite: "star"
         case .review(.unreviewed): "circle.dashed"
         case .review: "checkmark.circle"
         case .damaged: "exclamationmark.triangle"
@@ -96,6 +100,7 @@ enum SearchKeyword: Hashable {
         case .folder: TokenQuery.pendingFolder
         case .media(let k): "k:" + k.rawValue
         case .album: "a:album"
+        case .favorite: "fav:favorite"
         case .review(let r): "v:" + r.rawValue
         case .damaged: "b:damaged"
         }
@@ -124,6 +129,8 @@ struct TokenQuery: Equatable {
     var excludeRecent = false
     var excludeExternal = false
     var album = false
+    var favorite = false
+    var excludeFavorite = false
     /// 已认可 / 未认可 (both: nothing can match).
     var reviews: Set<ReviewFilter> = []
     var damaged = false
@@ -193,7 +200,7 @@ struct TokenQuery: Equatable {
     /// same folder with a minus, words to find with every field taken away): nothing can match.
     var isContradictory: Bool {
         let f = searchFields
-        return allowedKinds.isEmpty || (recent && excludeRecent) || (external && excludeExternal) || reviews.count > 1
+        return allowedKinds.isEmpty || (recent && excludeRecent) || (external && excludeExternal) || (favorite && excludeFavorite) || reviews.count > 1
             || (folder.map { excludedFolders.contains($0) } ?? false)
             || (!terms.isEmpty && !f.tags && !f.text && !f.author)
     }
@@ -202,6 +209,7 @@ struct TokenQuery: Equatable {
     func filter(over base: FeedFilter) -> FeedFilter {
         var f = base
         if album { f.albumOnly = true }
+        if favorite { f.favoriteOnly = true }
         if damaged { f.badOnly = true }
         if reviews.count == 1, let r = reviews.first { f.review = r }
         if let d = folder { f.folder = d }
@@ -215,6 +223,7 @@ struct TokenQuery: Equatable {
         f.excludeFolders = excludedFolders
         f.excludeRecent = excludeRecent
         f.excludeLoose = excludeExternal
+        if excludeFavorite { f.excludeFavorite = true }
         f.require = require
         return f
     }
@@ -234,6 +243,7 @@ struct TokenQuery: Equatable {
             else if k == "x:external" { external = true }
             else if k.hasPrefix("k:"), let m = MediaKind(rawValue: String(k.dropFirst(2))) { kinds.insert(m) }
             else if k == "a:album" { album = true }
+            else if k == "fav:favorite" { favorite = true }
             else if k.hasPrefix("v:"), let r = ReviewFilter(rawValue: String(k.dropFirst(2))), r != .any { reviews.insert(r) }
             else if k == "b:damaged" { damaged = true }
         }
@@ -255,6 +265,8 @@ struct TokenQuery: Equatable {
         if f.recentOnly { k.append(SearchKeyword.recent.key) }
         if f.looseOnly { k.append(SearchKeyword.external.key) }
         if f.albumOnly { k.append(SearchKeyword.album.key) }
+        if f.favoriteOnly { k.append(SearchKeyword.favorite.key) }
+        if f.excludeFavorite { k.append(minus + SearchKeyword.favorite.key) }
         if f.review != .any { k.append(SearchKeyword.review(f.review).key) }
         if f.badOnly { k.append(SearchKeyword.damaged.key) }
         return k
@@ -279,6 +291,7 @@ struct TokenQuery: Equatable {
         else if k.hasPrefix("d:") { let n = String(k.dropFirst(2)); if !excludedFolders.contains(n) { excludedFolders.append(n) } }
         else if k == "r:recent" { excludeRecent = true }
         else if k == "x:external" { excludeExternal = true }
+        else if k == "fav:favorite" { excludeFavorite = true }
         else if k.hasPrefix("k:"), let m = MediaKind(rawValue: String(k.dropFirst(2))) { excludedKinds.insert(m) }
     }
 

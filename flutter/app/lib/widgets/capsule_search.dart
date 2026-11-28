@@ -288,6 +288,7 @@ class CapsuleSearchState extends State<CapsuleSearch> {
         'folder' => Icons.folder_outlined,
         'clock.badge.checkmark' => Icons.history_toggle_off,
         'square.and.arrow.down' => Icons.download_outlined,
+        'star' => Icons.star_outline,
         'minus.circle' => Icons.remove_circle_outline,
         'clock' || 'clock.arrow.circlepath' => Icons.history,
         'trash' => Icons.delete_outline,

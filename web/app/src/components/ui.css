@@ -49,6 +49,7 @@
 .empty-title { font-size: 17px; font-weight: 600; color: var(--fg); }
 .dialog-scrim { position: fixed; inset: 0; background: rgba(10,10,12,0.28); display: flex; align-items: center; justify-content: center; z-index: 100; animation: fade 0.14s var(--ease); }
 .dialog { background: var(--bg-elevated); border-radius: var(--r-xl); box-shadow: var(--shadow-float); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; padding: 22px; outline: none; animation: pop 0.16s var(--ease); }
+.dialog:focus-visible { outline: none; }
 .dialog-wide { width: min(760px, calc(100vw - 32px)); }
 .dialog-title { margin: 0 0 16px; font-size: 17px; font-weight: 600; line-height: 1.3; color: var(--fg); overflow-wrap: anywhere; }
 /* the 4 px of padding keep a field's focus ring inside the scrolling body */

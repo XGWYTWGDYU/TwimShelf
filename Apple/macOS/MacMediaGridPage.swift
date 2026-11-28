@@ -27,6 +27,8 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
     private let toast = MacToast()
     private let reloadWork = LatestWork()
     private var generation = 0
+    private var isActive = true
+    private var needsReload = false
     private var countsLine = ""
     private var grouped: Bool { UserDefaults.standard.object(forKey: "grouped") as? Bool ?? true }
 
@@ -64,7 +66,22 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Pauses background work while cached off-screen; resumes and catches up when shown again.
+    func setActive(_ active: Bool) {
+        guard isActive != active else { return }
+        isActive = active
+        grid.setActive(active)
+        if !active {
+            setSelecting(false)
+        } else if needsReload {
+            needsReload = false
+            reload()
+        }
+    }
+
     @objc func reload() {
+        guard isActive else { needsReload = true; return }
+        needsReload = false
         generation += 1
         let gen = generation
         let req = FeedRequest(filter: filter)
@@ -109,7 +126,7 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
         if photos > 0 { parts.append(L("grid.photos", photos)) }
         if videos > 0 { parts.append(L("grid.videos", videos)) }
         countsLine = parts.joined(separator: L("list.separator"))
-        grid.setTiles(entries.compactMap { e in e.first.map { ZoomGridTile(item: $0, count: e.count) } }, footer: countsLine)
+        grid.setTiles(entries.compactMap { e in e.first.map { ZoomGridTile(item: $0, count: e.count, favorited: e.contains(where: \.isFavorite)) } }, footer: countsLine)
         onStateChanged?()
     }
 
@@ -126,6 +143,13 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
         guard i < entries.count, let first = entries[i].first else { return }
         // ← → goes through every media of the grid, starting here
         onOpenMedia?(first, grouped ? entries.flatMap { $0 } : items)
+    }
+
+    func mediaGrid(_ g: MacMediaGridView, didTapFavoriteAt i: Int) {
+        guard !bin, i < entries.count else { return }
+        let ids = entries[i].filter(\.isFavorite).map(\.mediaId)
+        guard !ids.isEmpty else { return }
+        setFavorite(false, media: ids)
     }
 
     func viewerSourceFrame(for item: FeedItem) -> NSRect? {
@@ -180,6 +204,10 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
         }
         // tags and folders, as on a card in 浏览 (the same in every app)
         if let first = entry.first {
+            let fav = entry.contains(where: \.isFavorite)
+            m.addItem(ClosureMenuItem(fav ? L("common.unfavorite") : L("common.favorite")) { [weak self] in
+                self?.setFavorite(!fav, media: ids)
+            })
             m.addItem(ClosureMenuItem(L("card.menu.tagMedia")) { [weak self] in self?.showTagPicker(first, wholePost: false) })
             if !first.isLoose { m.addItem(ClosureMenuItem(L("card.menu.tagPost")) { [weak self] in self?.showTagPicker(first, wholePost: true) }) }
         }
@@ -319,6 +347,7 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
     }
 
     var selecting: Bool { grid.selecting }
+    var isFavorites: Bool { filter.favoriteOnly }
     var selectedURLs: [URL] { selectedMedia.map(\.fileURL).filter { FileManager.default.fileExists(atPath: $0.path) } }
     var hasSelection: Bool { !selectedMedia.isEmpty }
     var allSelected: Bool { !entries.isEmpty && grid.selected.count == entries.count }
@@ -371,6 +400,22 @@ final class MacMediaGridPage: NSView, MacMediaGridDelegate {
             do { self?.toast.show(try Core.undo(receipt)) } catch { self?.toast.show(error.localizedDescription) }
             NotificationCenter.default.post(name: .libraryChanged, object: nil)
         }
+    }
+
+    private func setFavorite(_ on: Bool, media ids: [String]) {
+        guard let receipt = try? Core.action(on ? .favorite : .unfavorite, media: ids), receipt.count > 0 else { return }
+        NotificationCenter.default.post(name: .libraryChanged, object: nil)
+        toast.show(L(on ? "favorite.added" : "favorite.removed", receipt.count), action: L("common.undo")) { [weak self] in
+            do { self?.toast.show(try Core.undo(receipt)) } catch { self?.toast.show(error.localizedDescription) }
+            NotificationCenter.default.post(name: .libraryChanged, object: nil)
+        }
+    }
+
+    func unfavoriteSelected() {
+        let ids = selectedMedia.map(\.mediaId)
+        guard !ids.isEmpty else { return }
+        setSelecting(false)
+        setFavorite(false, media: ids)
     }
 
     func trashSelected() {

@@ -11,7 +11,7 @@
 //    sliding, edge bounce, 1:1 trackpad/touch swipe with velocity settle, and cross-post caption fade.
 //  * Unified photo & video experience: cursor-anchored 1×–8× photo zoom, animated double-click
 //    1× <-> 2.5× zoom, seamless InlineVideo single-player handover, press-and-hold 2.5× video
-//    boost, scrubbable progress bar, persisted volume, fullscreen (F/F11), expandable post caption.
+//    boost, scrubbable progress bar, persisted volume, expandable post caption.
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
@@ -20,7 +20,6 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Text;
-using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
@@ -41,10 +40,12 @@ namespace TwimShelf.Controls;
 public sealed class ViewerOpenOptions
 {
     public Place? Place { get; init; }
-    /// Resolves `item`'s current rect in `MainWindow.Current.Content` coordinates (null if off-screen).
+    /// Resolves `item`'s current rect in `MainWindow.Current.ViewerHost` coordinates (null if off-screen).
     public Func<FeedItem, Rect?>? SourceRect { get; init; }
     /// Notifies the underlying Grid or Browse page which `mediaId` is currently displayed (null when closed).
     public Action<string?>? ActiveMediaChanged { get; init; }
+    /// Notifies the underlying Grid when the opaque Viewer fully covers or reveals it (prevents SwapChainPanel bleed-through).
+    public Action<bool>? UnderlayCoveredChanged { get; init; }
     /// Optional hook called right before measuring the close target (e.g., sync a visible multi-media Browse card's page).
     public Action<FeedItem>? SyncBeforeClose { get; init; }
     public double SourceCornerRadius { get; init; }
@@ -94,7 +95,6 @@ public sealed partial class Viewer : UserControl
     readonly Border _drag = new() { Background = new SolidColorBrush(Colors.Transparent), Margin = new Thickness(90, 0, 0, 0) };
     readonly TextBlock _counter = new()
     {
-        Foreground = new SolidColorBrush(Colors.White),
         FontSize = 13,
         FontWeight = FontWeights.SemiBold,
         VerticalAlignment = VerticalAlignment.Center,
@@ -105,28 +105,29 @@ public sealed partial class Viewer : UserControl
     // Navigation arrows
     readonly Button _prev, _next;
 
-    // Bottom chrome: shade + expandable caption + video bar / photo action buttons
+    // Bottom chrome: caption in media area + Twitter-style black video dock (top-edge scrubber) +
+    // Fluent 2 photo card (landscape) / black photo dock (portrait)
     readonly Grid _bottom;
-    readonly ViewerCaption _caption = new() { Margin = new Thickness(0, 0, 0, 8) };
-    readonly Grid _videoRow = new() { ColumnSpacing = 8 };
-    readonly Button _play, _speed, _mute, _videoShare, _videoFull, _videoClose;
-    readonly TextBlock _at = TimeText(), _length = TimeText();
-    readonly Slider _position = new()
-    {
-        Minimum = 0,
-        Maximum = 1,
-        StepFrequency = 0.0005,
-        IsThumbToolTipEnabled = false,
-        VerticalAlignment = VerticalAlignment.Center,
-    };
-    readonly StackPanel _photoActions = new()
-    {
-        Orientation = Orientation.Horizontal,
-        Spacing = 4,
-        HorizontalAlignment = HorizontalAlignment.Right,
-        VerticalAlignment = VerticalAlignment.Center,
-    };
-    readonly Button _photoShare, _photoFull, _photoClose;
+    readonly ViewerCaption _caption = new() { VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Left };
+    readonly Grid _videoDock = new() { VerticalAlignment = VerticalAlignment.Bottom, RequestedTheme = ElementTheme.Dark };
+    readonly Grid _scrubHit = new() { Height = 18, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -9, 0, 0), Background = new SolidColorBrush(Colors.Transparent) };
+    readonly Border _scrubTrack = new() { Height = 2.5, VerticalAlignment = VerticalAlignment.Center, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x47, 255, 255, 255)) };
+    readonly Border _scrubFill = new() { Height = 2.5, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Left, Background = new SolidColorBrush(Colors.White), Width = 0 };
+    readonly Border _scrubKnob = new() { Width = 10, Height = 10, CornerRadius = new CornerRadius(5), Background = new SolidColorBrush(Colors.White), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Opacity = 0, IsHitTestVisible = false };
+    readonly Grid _videoRow = new() { ColumnSpacing = 8, Padding = new Thickness(18, 0, 18, 0), Height = 52 };
+    readonly Button _play, _speed, _mute, _videoFavorite, _videoShare, _videoClose;
+    readonly TextBlock _timeText = TimeText();
+    double _scrubFraction;
+    bool _scrubHover;
+    readonly Border _photoCard;
+    readonly Button _photoFavorite, _photoShare, _photoClose;
+    readonly Grid _photoDock = new() { Height = 52, Padding = new Thickness(18, 0, 18, 0), Background = new SolidColorBrush(Colors.Black), VerticalAlignment = VerticalAlignment.Bottom, RequestedTheme = ElementTheme.Dark };
+    readonly TextBlock _dockCounter = new() { Foreground = new SolidColorBrush(Colors.White), FontSize = 13, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+    readonly Button _dockFavorite, _dockShare, _dockClose;
+    readonly Dictionary<string, bool> _favoriteOverrides = [];
+    bool _initialPagesCreated;
+    bool _underlayCovered;
+    bool IsPortraitLayout => _viewW > 0 && _viewH >= _viewW;
 
     // 3-page strip state
     readonly Dictionary<int, FrameworkElement> _pages = [];
@@ -149,7 +150,6 @@ public sealed partial class Viewer : UserControl
     bool _sourceHidden;
     bool _unhiddenForClose;
     bool _closing;
-    bool _enteredFullScreen;
 
     Visual? _clipVisual;
     CompositionRoundedRectangleGeometry? _clipGeo;
@@ -189,13 +189,10 @@ public sealed partial class Viewer : UserControl
     enum GestureMode { None, Pan, Swipe, Dismiss }
     GestureMode _dragGesture;
 
-    // Chrome visibility & video auto-hide
+    // Chrome visibility
     bool _chromeHidden;
     bool _videoIdle;
-    bool _pointerOverControls;
-    bool _settingPosition;
     bool _scrubbing;
-    DispatcherQueueTimer? _hideTimer;
 
     // Lent player from Browse card
     MediaPlayer? _lent;
@@ -211,7 +208,7 @@ public sealed partial class Viewer : UserControl
 
     public static void Open(List<FeedItem> items, int index, ViewerOpenOptions? options)
     {
-        if (_open != null || items.Count == 0 || MainWindow.Current?.Content is not Panel root) return;
+        if (_open != null || items.Count == 0 || MainWindow.Current?.ViewerHost is not Panel host) return;
         var opts = options ?? new ViewerOpenOptions();
         var clamped = Math.Clamp(index, 0, items.Count - 1);
         var first = items[clamped];
@@ -221,14 +218,10 @@ public sealed partial class Viewer : UserControl
         InlineVideo.StopAll(exceptPath: first.IsVideo ? first.Path : null);
 
         var v = new Viewer(items, clamped, opts, lent, first.Path);
-        Grid.SetRowSpan(v, 2);
-        v._returnFocus = FocusManager.GetFocusedElement(root.XamlRoot) as Control;
-        v._host = root;
+        v._returnFocus = FocusManager.GetFocusedElement(host.XamlRoot) as Control;
+        v._host = host;
         _open = v;
-        root.Children.Add(v);
-
-        MainWindow.Current.SetTitleBar(v._drag);
-        MainWindow.Current.AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Collapsed;
+        host.Children.Add(v);
         Opened?.Invoke();
     }
 
@@ -240,17 +233,17 @@ public sealed partial class Viewer : UserControl
         _options = options;
         _lent = lent;
         _lentPath = lentPath;
-        RequestedTheme = ElementTheme.Dark;
 
         IsTabStop = true;
         UseSystemFocusVisuals = false;
+        RequestedTheme = ElementTheme.Dark;
 
-        // Top bar (window drag + counter)
-        _top = new Grid { Height = 48, VerticalAlignment = VerticalAlignment.Top, Background = Fade(true) };
+        // Top bar (window drag + counter; transparent so light/dark backdrop stays clean)
+        _top = new Grid { Height = 48, VerticalAlignment = VerticalAlignment.Top };
         _top.Children.Add(_drag);
         _top.Children.Add(_counter);
 
-        // Prev / Next Fluent 2 vertical rounded-rectangle navigation buttons (Windows 11 Photos style)
+        // Prev / Next Fluent 2 vertical rounded-rectangle navigation buttons
         _prev = NavButton("\uE76B", L("viewer.previous"), () => Step(-1), "viewerPrev");
         _prev.HorizontalAlignment = HorizontalAlignment.Left;
         _prev.VerticalAlignment = VerticalAlignment.Center;
@@ -261,7 +254,7 @@ public sealed partial class Viewer : UserControl
         _next.VerticalAlignment = VerticalAlignment.Center;
         _next.Margin = new Thickness(16);
 
-        // Video controls row
+        // Twitter-style solid black bottom dock for videos, with full-width progress bar flush on top edge
         _play = IconButton("\uE768", L("viewer.play"), () => ActiveVideo?.TogglePlay(showHud: false), "videoPlay");
         _speed = new Button
         {
@@ -269,15 +262,22 @@ public sealed partial class Viewer : UserControl
             {
                 Text = FormatSpeed(ViewerVideoPage.SavedRate),
                 Foreground = new SolidColorBrush(Colors.White),
-                FontSize = 13,
+                FontSize = 16,
                 FontWeight = FontWeights.SemiBold,
+                TextLineBounds = TextLineBounds.Tight,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, -2, 0, 0),
             },
             Background = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
-            MinWidth = 44,
+            MinWidth = 42,
             Height = 36,
             Padding = new Thickness(8, 0, 8, 0),
             CornerRadius = new CornerRadius(6),
+            VerticalAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
         };
         ApplySubtleResources(_speed);
         ToolTipService.SetToolTip(_speed, L("player.speed"));
@@ -286,66 +286,91 @@ public sealed partial class Viewer : UserControl
         _speed.Flyout = SpeedMenu();
 
         _mute = IconButton("\uE767", L("audio.turnOn"), () => ActiveVideo?.ToggleMute(), "videoMute");
+        _videoFavorite = IconButton("\uE734", L("common.favorite"), ToggleFavorite, "videoFavorite");
         _videoShare = IconButton("\uE72D", L("viewer.share"), () => { }, "viewerShare");
         _videoShare.Flyout = ShareMenu.For(() => Current);
-        _videoFull = IconButton("\uE740", "F", ToggleFullscreen, "viewerFullscreen");
         _videoClose = IconButton("\uE711", L("viewer.close"), () => Close(), "videoClose");
 
-        _position.AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => _scrubbing = true), true);
-        _position.AddHandler(PointerReleasedEvent, new PointerEventHandler((_, _) => _scrubbing = false), true);
-        _position.AddHandler(PointerCaptureLostEvent, new PointerEventHandler((_, _) => _scrubbing = false), true);
-        _position.ValueChanged += (_, e) =>
-        {
-            if (!_settingPosition && ActiveVideo is { } vp)
-            {
-                vp.SeekToFraction(e.NewValue);
-                WakeVideoChrome();
-            }
-        };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_position, L("windows.viewer.position"));
+        _scrubHit.Children.Add(_scrubTrack);
+        _scrubHit.Children.Add(_scrubFill);
+        _scrubHit.Children.Add(_scrubKnob);
+        _scrubHit.PointerEntered += (_, _) => { _scrubHover = true; UpdateScrubVisuals(); };
+        _scrubHit.PointerExited += (_, _) => { _scrubHover = false; UpdateScrubVisuals(); };
+        _scrubHit.PointerPressed += OnScrubPointerPressed;
+        _scrubHit.PointerMoved += OnScrubPointerMoved;
+        _scrubHit.PointerReleased += OnScrubPointerReleased;
+        _scrubHit.PointerCaptureLost += (_, _) => { _scrubbing = false; UpdateScrubVisuals(); };
+        _scrubHit.SizeChanged += (_, _) => UpdateScrubVisuals();
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_scrubHit, L("windows.viewer.position"));
 
-        UIElement[] row = [_play, _at, _position, _length, _speed, _mute, _videoShare, _videoFull, _videoClose];
+        var videoSpacer = new Border { IsHitTestVisible = false };
+        UIElement[] row = [_play, _timeText, videoSpacer, _speed, _mute, _videoFavorite, _videoShare, _videoClose];
         for (var i = 0; i < row.Length; i++)
         {
             _videoRow.ColumnDefinitions.Add(new ColumnDefinition
             {
-                Width = row[i] == _position ? new GridLength(1, GridUnitType.Star) : GridLength.Auto,
+                Width = row[i] == videoSpacer ? new GridLength(1, GridUnitType.Star) : GridLength.Auto,
             });
             Grid.SetColumn((FrameworkElement)row[i], i);
             _videoRow.Children.Add(row[i]);
         }
+        var dockSurface = new Border { Background = new SolidColorBrush(Colors.Black), Height = 52, VerticalAlignment = VerticalAlignment.Bottom, Child = _videoRow };
+        _videoDock.Children.Add(dockSurface);
+        _videoDock.Children.Add(_scrubHit);
+        _videoDock.PointerPressed += (_, e) => e.Handled = true;
 
-        // Photo action buttons: unified Fluent 2 Subtle icon buttons (matching video controls)
-        _photoShare = IconButton("\uE72D", L("viewer.share"), () => { }, "photoShare");
+        // Landscape photo controls: Favorite, Share & Close together on one Fluent 2 Acrylic rounded-rectangle card
+        _photoFavorite = AdaptiveIconButton("\uE734", L("common.favorite"), ToggleFavorite, "photoFavorite");
+        _photoShare = AdaptiveIconButton("\uE72D", L("viewer.share"), () => { }, "photoShare");
         _photoShare.Flyout = ShareMenu.For(() => Current);
-        _photoFull = IconButton("\uE740", "F", ToggleFullscreen, "photoFullscreen");
-        _photoClose = IconButton("\uE711", L("viewer.close"), () => Close(), "photoClose");
-        _photoActions.Children.Add(_photoShare);
-        _photoActions.Children.Add(_photoFull);
-        _photoActions.Children.Add(_photoClose);
-
-        // Bottom shade containing caption + video bar / photo actions
-        _bottom = new Grid
+        _photoClose = AdaptiveIconButton("\uE711", L("viewer.close"), () => Close(), "photoClose");
+        var photoPillRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        photoPillRow.Children.Add(_photoFavorite);
+        photoPillRow.Children.Add(_photoShare);
+        photoPillRow.Children.Add(_photoClose);
+        _photoCard = new Border
         {
-            Padding = new Thickness(20, 44, 20, 14),
+            Child = photoPillRow,
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(4),
+            BorderThickness = new Thickness(1),
+            Shadow = new ThemeShadow(),
+            Translation = new Vector3(0, 0, 24),
+            HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Background = Fade(false),
+            Margin = new Thickness(20),
         };
-        _bottom.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _bottom.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _photoCard.PointerPressed += (_, e) => e.Handled = true;
+
+        // Portrait photo controls: Twitter-style solid black bottom dock
+        _dockFavorite = IconButton("\uE734", L("common.favorite"), ToggleFavorite, "photoDockFavorite");
+        _dockShare = IconButton("\uE72D", L("viewer.share"), () => { }, "photoDockShare");
+        _dockShare.Flyout = ShareMenu.For(() => Current);
+        _dockClose = IconButton("\uE711", L("viewer.close"), () => Close(), "photoDockClose");
+        var dockSpacer = new Border { IsHitTestVisible = false };
+        UIElement[] dockItems = [_dockCounter, dockSpacer, _dockFavorite, _dockShare, _dockClose];
+        for (var i = 0; i < dockItems.Length; i++)
+        {
+            _photoDock.ColumnDefinitions.Add(new ColumnDefinition { Width = dockItems[i] == dockSpacer ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
+            Grid.SetColumn((FrameworkElement)dockItems[i], i);
+            _photoDock.Children.Add(dockItems[i]);
+        }
+        _photoDock.PointerPressed += (_, e) => e.Handled = true;
+
+        // Bottom container holding caption (in media region) + video dock / photo card / portrait photo dock
+        _bottom = new Grid { VerticalAlignment = VerticalAlignment.Bottom };
         _bottom.Children.Add(_caption);
-        Grid.SetRow(_videoRow, 1);
-        _bottom.Children.Add(_videoRow);
-        Grid.SetRow(_photoActions, 1);
-        _bottom.Children.Add(_photoActions);
-        _bottom.PointerEntered += (_, _) => { _pointerOverControls = true; WakeVideoChrome(); };
-        _bottom.PointerExited += (_, _) => { _pointerOverControls = false; WakeVideoChrome(); };
-        _bottom.PointerPressed += (_, e) => e.Handled = true;
+        _bottom.Children.Add(_videoDock);
+        _bottom.Children.Add(_photoCard);
+        _bottom.Children.Add(_photoDock);
 
         _chromeLayer.Children.Add(_top);
         _chromeLayer.Children.Add(_prev);
         _chromeLayer.Children.Add(_next);
         _chromeLayer.Children.Add(_bottom);
+
+        ActualThemeChanged += (_, _) => ApplyTheme();
+        ApplyTheme();
 
         _clipHost.Children.Add(_strip);
         _surface.Children.Add(_clipHost);
@@ -400,6 +425,7 @@ public sealed partial class Viewer : UserControl
         _viewW = Math.Max(1, ActualWidth);
         _viewH = Math.Max(1, ActualHeight);
         _caption.SetMaxExpandedHeight(_viewH * 0.45);
+        ApplyTheme();
 
         InitComposition();
         EnsurePages();
@@ -423,7 +449,6 @@ public sealed partial class Viewer : UserControl
             CompositionTarget.Rendering -= OnRendering;
             _renderingHooked = false;
         }
-        _hideTimer?.Stop();
         _wheelEndTimer?.Stop();
         _singleClickTimer?.Stop();
     }
@@ -445,6 +470,7 @@ public sealed partial class Viewer : UserControl
         _viewH = e.NewSize.Height;
         _caption.SetMaxExpandedHeight(_viewH * 0.45);
         LayoutStrip();
+        UpdateChrome();
         if (_flight == null)
             ApplyTransitionVisual(CurrentRestFrame());
     }
@@ -511,7 +537,6 @@ public sealed partial class Viewer : UserControl
         _springBack = null;
         _singleClickTimer?.Stop();
         _wheelEndTimer?.Stop();
-        _hideTimer?.Stop();
         FinishStripMotion();
 
         // Keep video playing live (muted, 1×) inside the shrinking zoom card during close!
@@ -519,6 +544,8 @@ public sealed partial class Viewer : UserControl
 
         // Sync a visible multi-media Browse card's page before measuring SourceRect.
         try { _options.SyncBeforeClose?.Invoke(Current); } catch { }
+        if (_sourceHidden) _options.ActiveMediaChanged?.Invoke(Current.MediaId);
+        SetUnderlayCovered(false);
 
         var targetSource = _options.SourceRect?.Invoke(Current);
 
@@ -582,26 +609,15 @@ public sealed partial class Viewer : UserControl
             CompositionTarget.Rendering -= OnRendering;
             _renderingHooked = false;
         }
-        _hideTimer?.Stop();
         _wheelEndTimer?.Stop();
         _singleClickTimer?.Stop();
-
-        if (_enteredFullScreen && MainWindow.Current is { } mw)
-        {
-            try
-            {
-                if (mw.AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen)
-                    mw.AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
-            }
-            catch { }
-            _enteredFullScreen = false;
-        }
 
         if (_sourceHidden)
         {
             _sourceHidden = false;
             _options.ActiveMediaChanged?.Invoke(null);
         }
+        SetUnderlayCovered(false);
 
         // Remove from visual tree BEFORE returning the MediaPlayer to its Browse card.
         var host = _host;
@@ -624,11 +640,6 @@ public sealed partial class Viewer : UserControl
             InlineVideo.Return(l, _lentPath, closing: true);
         }
 
-        if (MainWindow.Current is { } w)
-        {
-            w.AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
-            w.RestoreTitleBar();
-        }
         try { _returnFocus?.Focus(FocusState.Programmatic); } catch { }
         Closed?.Invoke();
     }
@@ -698,6 +709,7 @@ public sealed partial class Viewer : UserControl
                     _dismiss = DismissState.None;
                     SyncNeighborVisibility();
                     ApplyTransitionVisual(CurrentRestFrame());
+                    SetUnderlayCovered(true);
                 }
             }
         }
@@ -721,6 +733,7 @@ public sealed partial class Viewer : UserControl
                 _springBack = null;
                 _dismiss = DismissState.None;
                 SyncNeighborVisibility();
+                SetUnderlayCovered(true);
             }
             else
             {
@@ -773,11 +786,14 @@ public sealed partial class Viewer : UserControl
             if (_pages.ContainsKey(i)) continue;
             var item = _items[i];
             var previewImg = _options.PreviewImage?.Invoke(item);
-            var squarePreview = i == _startIndex || _options.CropSource ? _options.SquarePreviewPath?.Invoke(item) : null;
+            // Only use the square grid tile preview for the initial zoom-open tile, never for
+            // neighbor pages swiped into view (prevents square/stretched frames during swipes).
+            var useSquarePreview = !_initialPagesCreated && i == _startIndex && _options.CropSource;
+            var squarePreview = useSquarePreview ? _options.SquarePreviewPath?.Invoke(item) : null;
             FrameworkElement page;
             if (item.IsVideo)
             {
-                var vp = new ViewerVideoPage(item, previewImg, squarePreview, _options.CropSource);
+                var vp = new ViewerVideoPage(item, previewImg, squarePreview, useSquarePreview);
                 vp.StateChanged += () => { if (ReferenceEquals(ActiveVideo, vp)) SyncVideoControls(); };
                 vp.UserActivity += WakeVideoChrome;
                 vp.UpdatePosterSize(_viewW, _viewH);
@@ -785,13 +801,14 @@ public sealed partial class Viewer : UserControl
             }
             else
             {
-                var pp = new ViewerPhotoPage(item, previewImg, squarePreview, _options.CropSource);
+                var pp = new ViewerPhotoPage(item, previewImg, squarePreview, useSquarePreview);
                 pp.UpdateLayoutSize(_viewW, _viewH);
                 page = pp;
             }
             _pages[i] = page;
             _strip.Children.Add(page);
         }
+        _initialPagesCreated = true;
         LayoutStrip();
         SyncNeighborVisibility();
     }
@@ -811,7 +828,6 @@ public sealed partial class Viewer : UserControl
         }
         else
         {
-            _hideTimer?.Stop();
             _videoIdle = false;
         }
     }
@@ -887,6 +903,7 @@ public sealed partial class Viewer : UserControl
             if (!_sourceHidden) { _sourceHidden = true; _options.ActiveMediaChanged?.Invoke(Current.MediaId); }
             SyncNeighborVisibility();
             ApplyTransitionVisual(CurrentRestFrame());
+            SetUnderlayCovered(true);
         }
         FinishStripMotion();
         if (_index + delta < 0 || _index + delta >= _items.Count)
@@ -908,22 +925,170 @@ public sealed partial class Viewer : UserControl
 
     // ---- Chrome & Controls Sync ----
 
+    static AcrylicBrush DarkAcrylic(byte shade = 0x20, double opacity = 0.68, double luminosity = 0.74) => new()
+    {
+        TintColor = Windows.UI.Color.FromArgb(0xFF, shade, shade, shade),
+        TintOpacity = opacity,
+        TintLuminosityOpacity = luminosity,
+        FallbackColor = Windows.UI.Color.FromArgb(0xE0, shade, shade, shade),
+    };
+
+    void ApplyTheme()
+    {
+        _backdrop.Background = new SolidColorBrush(Colors.Black);
+        var ink = new SolidColorBrush(Colors.White);
+        _counter.Foreground = ink;
+        _photoCard.Background = DarkAcrylic();
+        _photoCard.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x28, 255, 255, 255));
+        ((FontIcon)_photoShare.Content).Foreground = ink;
+        ((FontIcon)_photoClose.Content).Foreground = ink;
+        SyncFavoriteButtons();
+        StyleNavButton(_prev);
+        StyleNavButton(_next);
+        _caption.ApplyTheme();
+    }
+
+    static void StyleNavButton(Button b)
+    {
+        ((FontIcon)b.Content).Foreground = new SolidColorBrush(Colors.White);
+        var idle = DarkAcrylic(0x20, 0.66, 0.72);
+        var hover = DarkAcrylic(0x32, 0.74, 0.78);
+        var press = DarkAcrylic(0x18, 0.78, 0.82);
+        var stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(0x28, 255, 255, 255));
+        var strokeHover = new SolidColorBrush(Windows.UI.Color.FromArgb(0x3C, 255, 255, 255));
+        b.Background = idle;
+        b.BorderBrush = stroke;
+        b.Resources["ButtonBackgroundPointerOver"] = hover;
+        b.Resources["ButtonBackgroundPressed"] = press;
+        b.Resources["ButtonBorderBrushPointerOver"] = strokeHover;
+        b.Resources["ButtonBorderBrushPressed"] = stroke;
+    }
+
+    void OnScrubPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _scrubbing = true;
+        _scrubHit.CapturePointer(e.Pointer);
+        ScrubAt(e.GetCurrentPoint(_scrubHit).Position.X);
+        e.Handled = true;
+    }
+
+    void OnScrubPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_scrubbing) return;
+        ScrubAt(e.GetCurrentPoint(_scrubHit).Position.X);
+        e.Handled = true;
+    }
+
+    void OnScrubPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_scrubbing) return;
+        ScrubAt(e.GetCurrentPoint(_scrubHit).Position.X);
+        _scrubbing = false;
+        _scrubHit.ReleasePointerCapture(e.Pointer);
+        UpdateScrubVisuals();
+        e.Handled = true;
+    }
+
+    void ScrubAt(double x)
+    {
+        var w = _scrubHit.ActualWidth;
+        if (w <= 0) return;
+        _scrubFraction = Math.Clamp(x / w, 0, 1);
+        UpdateScrubVisuals();
+        if (ActiveVideo is { } vp)
+        {
+            vp.SeekToFraction(_scrubFraction);
+            WakeVideoChrome();
+        }
+    }
+
+    void UpdateScrubVisuals()
+    {
+        var w = _scrubHit.ActualWidth;
+        var active = _scrubHover || _scrubbing;
+        var trackH = active ? 4.0 : 2.5;
+        _scrubTrack.Height = trackH;
+        _scrubFill.Height = trackH;
+        var fillW = Math.Max(0, Math.Min(w, w * _scrubFraction));
+        _scrubFill.Width = fillW;
+        _scrubKnob.Opacity = active ? 1 : 0;
+        var kx = Math.Clamp(fillW - 5, 0, Math.Max(0, w - 10));
+        _scrubKnob.Margin = new Thickness(kx, 0, 0, 0);
+    }
+
     void UpdateChrome()
     {
         var item = Current;
         var multi = _items.Count > 1;
-        _counter.Text = multi ? $"{_index + 1} / {_items.Count}" : "";
+        var portrait = IsPortraitLayout;
+        var counterText = multi ? $"{_index + 1} / {_items.Count}" : "";
+        _counter.Text = counterText;
+        _dockCounter.Text = counterText;
+        _counter.Visibility = (!item.IsVideo && portrait) || string.IsNullOrEmpty(counterText) ? Visibility.Collapsed : Visibility.Visible;
         _prev.Visibility = multi && _index > 0 ? Visibility.Visible : Visibility.Collapsed;
         _next.Visibility = multi && _index < _items.Count - 1 ? Visibility.Visible : Visibility.Collapsed;
 
         _caption.SetItem(item);
-        _videoRow.Visibility = item.IsVideo ? Visibility.Visible : Visibility.Collapsed;
-        _photoActions.Visibility = item.IsVideo ? Visibility.Collapsed : Visibility.Visible;
+        _videoDock.Visibility = item.IsVideo ? Visibility.Visible : Visibility.Collapsed;
+        _photoCard.Visibility = !item.IsVideo && !portrait ? Visibility.Visible : Visibility.Collapsed;
+        _photoDock.Visibility = !item.IsVideo && portrait ? Visibility.Visible : Visibility.Collapsed;
+        _caption.Margin = item.IsVideo || portrait
+            ? new Thickness(20, 0, 20, 62)
+            : new Thickness(20, 0, _options.Place == Place.Trash ? 128 : 168, 20);
 
+        SyncFavoriteButtons();
         if (item.IsVideo) SyncVideoControls();
-        UpdateFullscreenGlyph();
         if (_flight == null)
             ApplyTransitionVisual(CurrentRestFrame());
+    }
+
+    void SetUnderlayCovered(bool covered)
+    {
+        if (_underlayCovered == covered) return;
+        _underlayCovered = covered;
+        _options.UnderlayCoveredChanged?.Invoke(covered);
+    }
+
+    bool IsFavorite(FeedItem item) => _favoriteOverrides.TryGetValue(item.MediaId, out var v) ? v : item.Favorite;
+
+    void SyncFavoriteButtons()
+    {
+        var show = _options.Place != Place.Trash;
+        var vis = show ? Visibility.Visible : Visibility.Collapsed;
+        var fav = IsFavorite(Current);
+        var glyph = fav ? "\uE735" : "\uE734";
+        var tip = fav ? L("common.unfavorite") : L("common.favorite");
+        var brush = fav
+            ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 184, 0))
+            : new SolidColorBrush(Colors.White);
+        foreach (var b in new[] { _videoFavorite, _photoFavorite, _dockFavorite })
+        {
+            b.Visibility = vis;
+            var icon = (FontIcon)b.Content;
+            icon.Glyph = glyph;
+            icon.Foreground = brush;
+            ToolTipService.SetToolTip(b, tip);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
+        }
+    }
+
+    async void ToggleFavorite()
+    {
+        if (_options.Place == Place.Trash) return;
+        var item = Current;
+        var next = !IsFavorite(item);
+        _favoriteOverrides[item.MediaId] = next;
+        SyncFavoriteButtons();
+        try
+        {
+            await TlCore.Run(() => TlCore.Action(next ? ActionKind.Favorite : ActionKind.Unfavorite, [item.MediaId]));
+            _ = LibraryModel.Current.Refresh();
+        }
+        catch
+        {
+            _favoriteOverrides[item.MediaId] = !next;
+            SyncFavoriteButtons();
+        }
     }
 
     void SyncVideoControls()
@@ -943,13 +1108,11 @@ public sealed partial class Viewer : UserControl
 
         var pos = vp.Position;
         var dur = vp.Duration;
-        _at.Text = ViewerVideoPage.FormatTime(pos);
-        _length.Text = ViewerVideoPage.FormatTime(dur);
+        _timeText.Text = $"{ViewerVideoPage.FormatTime(pos)} / {ViewerVideoPage.FormatTime(dur)}";
         if (!_scrubbing)
         {
-            _settingPosition = true;
-            _position.Value = dur.TotalMilliseconds > 0 ? Math.Clamp(pos.TotalMilliseconds / dur.TotalMilliseconds, 0, 1) : 0;
-            _settingPosition = false;
+            _scrubFraction = dur.TotalMilliseconds > 0 ? Math.Clamp(pos.TotalMilliseconds / dur.TotalMilliseconds, 0, 1) : 0;
+            UpdateScrubVisuals();
         }
     }
 
@@ -961,45 +1124,6 @@ public sealed partial class Viewer : UserControl
             _videoIdle = false;
             if (_flight == null) ApplyTransitionVisual(CurrentRestFrame());
         }
-        _hideTimer ??= MakeHideTimer();
-        _hideTimer.Stop();
-        _hideTimer.Start();
-    }
-
-    DispatcherQueueTimer MakeHideTimer()
-    {
-        var t = DispatcherQueue.CreateTimer();
-        t.Interval = TimeSpan.FromMilliseconds(2500);
-        t.IsRepeating = false;
-        t.Tick += (_, _) =>
-        {
-            if (_closing || !Current.IsVideo || _pointerOverControls || _caption.IsExpanded) return;
-            if (ActiveVideo?.IsPlaying != true) return;
-            _videoIdle = true;
-            if (_flight == null) ApplyTransitionVisual(CurrentRestFrame());
-        };
-        return t;
-    }
-
-    void ToggleFullscreen()
-    {
-        if (MainWindow.Current is not { } w) return;
-        try
-        {
-            var isFull = w.AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
-            w.AppWindow.SetPresenter(isFull ? AppWindowPresenterKind.Overlapped : AppWindowPresenterKind.FullScreen);
-            _enteredFullScreen = !isFull;
-            UpdateFullscreenGlyph();
-        }
-        catch { }
-    }
-
-    void UpdateFullscreenGlyph()
-    {
-        var isFull = MainWindow.Current?.AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
-        var glyph = isFull ? "\uE73F" : "\uE740";
-        ((FontIcon)_photoFull.Content).Glyph = glyph;
-        ((FontIcon)_videoFull.Content).Glyph = glyph;
     }
 
     // ---- Wheel & Trackpad Gestures ----
@@ -1380,6 +1504,8 @@ public sealed partial class Viewer : UserControl
 
     void BeginDismissDrag(bool fromEdge, int edgeDir, Point grabPoint, double initialDx, double initialDy, double now)
     {
+        if (_sourceHidden) _options.ActiveMediaChanged?.Invoke(Current.MediaId);
+        SetUnderlayCovered(false);
         _springBack = null;
         _stripMotion = null;
         _stripOffset = 0;
@@ -1486,10 +1612,6 @@ public sealed partial class Viewer : UserControl
             case VirtualKey.M when ActiveVideo is { } vm:
                 vm.ToggleMute();
                 break;
-            case VirtualKey.F when !ctrl:
-            case VirtualKey.F11:
-                ToggleFullscreen();
-                break;
             case VirtualKey.Add or (VirtualKey)187 when ActivePhoto is { } pIn:
                 pIn.ZoomToScale(pIn.CurrentScale * 1.4, new Point(_viewW * 0.5, _viewH * 0.5), Now());
                 break;
@@ -1541,18 +1663,6 @@ public sealed partial class Viewer : UserControl
 
     // ---- UI Builders ----
 
-    static Brush Fade(bool top) => new LinearGradientBrush
-    {
-        StartPoint = new Point(0, top ? 0 : 1),
-        EndPoint = new Point(0, top ? 1 : 0),
-        GradientStops =
-        {
-            new GradientStop { Color = Windows.UI.Color.FromArgb(0xB8, 0, 0, 0), Offset = 0 },
-            new GradientStop { Color = Windows.UI.Color.FromArgb(0x66, 0, 0, 0), Offset = 0.55 },
-            new GradientStop { Color = Windows.UI.Color.FromArgb(0, 0, 0, 0), Offset = 1 },
-        },
-    };
-
     static void ApplySubtleResources(Button b)
     {
         var hover = new SolidColorBrush(Windows.UI.Color.FromArgb(0x18, 255, 255, 255));
@@ -1564,11 +1674,11 @@ public sealed partial class Viewer : UserControl
         b.Resources["ButtonBorderBrushPressed"] = none;
     }
 
-    static Button IconButton(string glyph, string tip, Action click, string automationId)
+    static Button AdaptiveIconButton(string glyph, string tip, Action click, string automationId)
     {
         var b = new Button
         {
-            Content = new FontIcon { Glyph = glyph, FontSize = 15, Foreground = new SolidColorBrush(Colors.White) },
+            Content = new FontIcon { Glyph = glyph, FontSize = 15, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center },
             Background = new SolidColorBrush(Colors.Transparent),
             BorderBrush = new SolidColorBrush(Colors.Transparent),
             BorderThickness = new Thickness(0),
@@ -1576,6 +1686,33 @@ public sealed partial class Viewer : UserControl
             Height = 36,
             Padding = new Thickness(0),
             CornerRadius = new CornerRadius(6),
+            VerticalAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+        };
+        ApplySubtleResources(b);
+        ToolTipService.SetToolTip(b, tip);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, tip);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(b, automationId);
+        b.Click += (_, _) => click();
+        return b;
+    }
+
+    static Button IconButton(string glyph, string tip, Action click, string automationId)
+    {
+        var b = new Button
+        {
+            Content = new FontIcon { Glyph = glyph, FontSize = 16, Foreground = new SolidColorBrush(Colors.White), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center },
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderBrush = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Width = 36,
+            Height = 36,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(6),
+            VerticalAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
         };
         ApplySubtleResources(b);
         ToolTipService.SetToolTip(b, tip);
@@ -1614,6 +1751,7 @@ public sealed partial class Viewer : UserControl
         Foreground = new SolidColorBrush(Colors.White),
         FontSize = 12,
         FontWeight = FontWeights.Medium,
+        TextLineBounds = TextLineBounds.Tight,
         VerticalAlignment = VerticalAlignment.Center,
     };
 

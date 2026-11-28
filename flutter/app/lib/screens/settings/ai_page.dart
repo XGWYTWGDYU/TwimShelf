@@ -1,9 +1,7 @@
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tl_core/tl_core.dart';
 
-import '../../actions/search_export.dart';
 import '../../ai/auto_tagger.dart';
 import '../../ai/external_models.dart';
 import '../../ai/local_models.dart';
@@ -14,7 +12,6 @@ import '../../mascot/mascot.dart';
 import '../settings_page.dart';
 import 'model_hub_page.dart';
 import '../../widgets/text_menu.dart';
-import '../../platform/files.dart';
 
 /// 打标签: automatic tagging of new media, the model that tags, a run over the whole library, the
 /// on-device models (MLX on Apple devices, llama.cpp elsewhere) and the OpenAI-compatible
@@ -298,7 +295,7 @@ class _LocalModelsSection extends StatelessWidget {
 }
 
 /// Models between devices of the same kind (MLX between Apple devices, GGUF between the others):
-/// import a folder or ZIP, export one, pull one from another device of the account.
+/// pull one from another device of the account on the LAN.
 class _ModelTransferSection extends StatefulWidget {
   const _ModelTransferSection({required this.local, this.sync});
   final LocalModels local;
@@ -314,30 +311,6 @@ class _ModelTransferSectionState extends State<_ModelTransferSection> {
   LocalModels get local => widget.local;
 
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
-
-  Future<void> _import() async {
-    final file = await openFile(acceptedTypeGroups: const [XTypeGroup(label: 'ZIP', extensions: ['zip'])]); // i18n-exempt: file type name
-    if (file == null) return;
-    _toast(L('models.importing'));
-    try {
-      await local.import(await pickedPath(file));
-      _toast(L('models.imported'));
-    } catch (e) {
-      _toast('$e');
-    }
-  }
-
-  Future<void> _export(ModelInfo m) async {
-    // no save dialog on iOS: a temporary file, then the share sheet
-    final to = await outputPath('${m.id}.zip');
-    if (to == null) return;
-    try {
-      await local.export(m.id, to);
-      await deliver(to);
-    } catch (e) {
-      _toast('$e');
-    }
-  }
 
   Future<void> _query() async {
     // the core keeps the models of this device's format (MLX on Apple devices, GGUF elsewhere)
@@ -385,27 +358,23 @@ class _ModelTransferSectionState extends State<_ModelTransferSection> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.sync == null) return const SizedBox.shrink();
     final offers = _offers;
-    return SettingsSection(title: L('models.appleOnly'), footer: L('models.appleOnly.footer'), children: [
-      ListTile(key: const ValueKey('local-import'), leading: const Icon(Icons.file_open_outlined), title: Text(L('models.import.button')), onTap: _import),
-      for (final m in local.installed)
-        ListTile(leading: const Icon(Icons.ios_share), title: Text(L('models.exportZip')), subtitle: Text(local.title(m)), onTap: () => _export(m)),
-      if (widget.sync != null) ...[
+    return SettingsSection(title: L('models.peers.title'), footer: L('models.appleOnly.footer'), children: [
+      ListTile(
+        key: const ValueKey('local-peers'),
+        leading: _querying ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.devices),
+        title: Text(_querying ? L('models.peers.querying') : L('models.peers.query')),
+        onTap: _querying ? null : _query,
+      ),
+      if (offers != null && offers.isEmpty) ListTile(title: Text(L('models.peers.nothing'))),
+      for (final (p, m) in offers ?? const <(DiscoveredPeer, ModelInfo)>[])
         ListTile(
-          key: const ValueKey('local-peers'),
-          leading: _querying ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.devices),
-          title: Text(_querying ? L('models.peers.querying') : L('models.peers.query')),
-          onTap: _querying ? null : _query,
+          leading: const Icon(Icons.download_for_offline_outlined),
+          title: Text(local.title(m)),
+          subtitle: Text('${p.name} · ${_size(m.bytes)}'),
+          trailing: TextButton(onPressed: () => _pull(p, m), child: Text(L('models.pull'))),
         ),
-        if (offers != null && offers.isEmpty) ListTile(title: Text(L('models.peers.nothing'))),
-        for (final (p, m) in offers ?? const <(DiscoveredPeer, ModelInfo)>[])
-          ListTile(
-            leading: const Icon(Icons.download_for_offline_outlined),
-            title: Text(local.title(m)),
-            subtitle: Text('${p.name} · ${_size(m.bytes)}'),
-            trailing: TextButton(onPressed: () => _pull(p, m), child: Text(L('models.pull'))),
-          ),
-      ],
     ]);
   }
 }

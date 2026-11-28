@@ -52,7 +52,7 @@ const pages = {
   'clear-all-data': WipePage,
 };
 
-export default function SettingsPage({ sub }: { sub?: string }) {
+export default function SettingsPage({ sub, active = true }: { sub?: string; active?: boolean }) {
   useEffect(enableAutoTagging, []);
 
   if (sub && Object.hasOwn(pages, sub)) {
@@ -60,10 +60,10 @@ export default function SettingsPage({ sub }: { sub?: string }) {
     return <Screen key={sub} />;
   }
 
-  return <SettingsOverview />;
+  return <SettingsOverview active={active} />;
 }
 
-function SettingsOverview() {
+function SettingsOverview({ active }: { active: boolean }) {
   const counts = useStore(stats);
   const density = useStore(cardDensity);
   const version = useStore(libraryVersion);
@@ -96,7 +96,7 @@ function SettingsOverview() {
     return { dl, aiCounts, taggers, localAI, sync, discovery, ext, modelDl, verify, imp };
   }, [version]);
 
-  useInterval(live.reload, live.loading ? null : 2000);
+  useInterval(live.reload, !active || live.loading ? null : 2000);
 
   const d = live.data;
   const dl = d?.dl;

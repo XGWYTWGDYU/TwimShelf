@@ -32,6 +32,10 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
     /// Runs a search on the search tab's page (selecting that tab first).
     var searchHandoff: ((@escaping (FeedViewController) -> Void) -> Void)?
+    /// Opens Settings → Download Posts on the real Settings tab (no legacy modal sheet).
+    var onOpenDownloads: ((String) -> Void)?
+    /// Tap queued while the previous media viewer is finishing its dismiss settle.
+    private var pendingViewerOpen: (() -> Void)?
 
     // State
     var allItems: [FeedItem] = []
@@ -171,13 +175,8 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         if role == .browse, CrashWatch.shared.lastRunAbnormal {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.toast.show(L("feed.lastRunAbnormal"), action: L("feed.exportDiagnostics")) { [weak self] in
-                    // a sheet of its own: 设置 may be in any state on its tab
                     guard let self else { return }
-                    let m = SettingsViewController()
-                    let nav = UINavigationController(rootViewController: m)
-                    nav.modalPresentationStyle = .formSheet
-                    m.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak nav] _ in nav?.dismiss(animated: true) })
-                    self.present(nav, animated: true) { m.exportDiagnostics() }
+                    SettingsViewController.exportDiagnostics(from: self)
                 }
             }
         }
@@ -1410,12 +1409,17 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     private func openDownloads() {
+        let links = quickDownloadDraft.links
+        quickDownloadDraft.links = ""
+        if let onOpenDownloads {
+            onOpenDownloads(links)
+            return
+        }
         let vc = SettingsViewController()
         vc.onLibraryChanged = { [weak self] in self?.reload(keepPosition: true) }
         let nav = UINavigationController(rootViewController: vc)
         vc.loadViewIfNeeded()
-        vc.openDownloads(links: quickDownloadDraft.links)
-        quickDownloadDraft.links = ""
+        vc.openDownloads(links: links)
         nav.modalPresentationStyle = .formSheet
         present(nav, animated: true)
     }
@@ -1549,6 +1553,11 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     }
 
     func feedCell(_ cell: FeedCell, didTapTag label: String) { addTerm(label) }
+    func feedCellDidTapFavorite(_ cell: FeedCell) {
+        guard !query.favorite else { return }
+        var f = FeedFilter(); f.favoriteOnly = true
+        search(f)
+    }
     func feedCellDidTapRecent(_ cell: FeedCell) {
         guard !query.recent else { return }
         var f = FeedFilter(); f.recentOnly = true
@@ -1560,8 +1569,27 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
         UIMenu(title: t.label, children: tagActions(t, item: item))
     }
 
+    /// Long-press menu of the favorite chip.
+    func feedCell(_ cell: FeedCell, menuForFavoriteOf item: FeedItem) -> UIMenu {
+        UIMenu(title: L("card.favoritePill"), children: [
+            UIAction(title: L("common.unfavorite"), image: UIImage(systemName: "star.slash"), attributes: .destructive) { [weak self] _ in
+                self?.setFavorite(false, for: item)
+            },
+        ])
+    }
+
     func feedCell(_ cell: FeedCell, didTapPage index: Int) {
-        guard !showingMediaViewer, presentedViewController == nil, let item = cell.currentItem else { return }
+        if showingMediaViewer || presentedViewController != nil {
+            if presentedViewController?.isBeingDismissed == true || showingMediaViewer {
+                pendingViewerOpen = { [weak self, weak cell] in
+                    guard let self, let cell else { return }
+                    self.feedCell(cell, didTapPage: index)
+                }
+            }
+            return
+        }
+        guard let item = cell.currentItem else { return }
+        pendingViewerOpen = nil
         // a video goes on from where it was playing in the card: the full-screen player takes the
         // card's own player (one player for both: nothing starts again), and gives it back
         let lent = item.kind == .video ? cell.currentPageView.flatMap { inline.lend(for: $0, item: item) } : nil
@@ -1574,24 +1602,57 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                                      player: lent, giveBack: giveBack)
         vc.videoPosition = { [weak self] in self?.inline.position(for: $0.mediaId) ?? .zero }
         vc.saveVideoPosition = { [weak self] in self?.inline.savePosition($1, for: $0.mediaId) }
-        vc.onDismissed = { [weak self] in
-            self?.showingMediaViewer = false
-            self?.updateInlinePlayback()
+        vc.onEnteringPiP = { [weak self] in
+            guard let self else { return }
+            for case let c as FeedCell in self.collectionView.visibleCells {
+                c.rebuildCurrentPageView()
+            }
+        }
+        vc.onDismissed = { [weak self, weak vc] in
+            guard let self else { return }
+            self.showingMediaViewer = false
+            if vc?.didMutate == true { self.reload(keepPosition: true) }
+            if self.pendingViewerOpen != nil {
+                self.flushPendingViewerOpen()
+            } else {
+                self.updateInlinePlayback()
+            }
         }
         vc.setZoomSource { [weak self, weak cell] media in
             guard let self else { return nil }
             let visible = self.collectionView.visibleCells.compactMap { $0 as? FeedCell }
+            if let live = visible.first(where: { $0.currentItem?.mediaId == media.mediaId })?.currentPageView {
+                return live
+            }
             let tapped = cell.flatMap { card -> MediaPageView? in
                 guard card.currentItem?.mediaId == item.mediaId, card.isDescendant(of: self.collectionView),
-                      card.frame.intersects(self.collectionView.bounds) else { return nil }
+                      card.frame.intersects(self.collectionView.bounds), card.currentPageView?.window != nil else { return nil }
                 return card.currentPageView
             }
-            if media.mediaId == item.mediaId, let tapped { return tapped }
-            return visible.first { $0.currentItem?.mediaId == media.mediaId }?.currentPageView ?? tapped
+            return tapped
         }
         showingMediaViewer = true
         detachInline()
         present(vc, animated: true)
+    }
+
+    /// Runs a queued viewer tap once UIKit finishes clearing `presentedViewController`
+    /// (during `transitionCoordinator`'s completion block, `presentedViewController` is still non-nil).
+    private func flushPendingViewerOpen(attempts: Int = 20) {
+        guard let next = pendingViewerOpen else { return }
+        if presentedViewController == nil && !showingMediaViewer {
+            pendingViewerOpen = nil
+            next()
+            return
+        }
+        guard attempts > 0 else {
+            pendingViewerOpen = nil
+            updateInlinePlayback()
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.flushPendingViewerOpen(attempts: attempts - 1)
+        }
     }
 
     /// Plays every video page that is at least half in view, each with its own muted player.
@@ -1718,7 +1779,11 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
                 self.deletePost(item) })
             var children: [UIMenuElement] = []
             if !top.isEmpty { children.append(UIMenu(title: "", options: .displayInline, children: top)) }
-            children.append(UIMenu(title: "", options: .displayInline, children: tagging))
+            let favAction = UIAction(title: item.isFavorite ? L("common.unfavorite") : L("common.favorite"),
+                                     image: UIImage(systemName: item.isFavorite ? "star.slash" : "star.fill")) { _ in
+                self.setFavorite(!item.isFavorite, for: item)
+            }
+            children.append(UIMenu(title: "", options: .displayInline, children: [favAction] + tagging))
             if !perTag.isEmpty { children.append(UIMenu(title: "", options: .displayInline, children: perTag)) }
             children.append(UIMenu(title: "", options: .displayInline, children: folderItems))
             if item.canRedownload { children.append(UIMenu(title: "", options: .displayInline, children: [redownload])) }
@@ -1825,6 +1890,17 @@ final class FeedViewController: UIViewController, UICollectionViewDataSource, UI
     private func onlyLabel(_ label: String) {
         var f = FeedFilter(); f.labels = [label]
         search(f)
+    }
+
+    private func setFavorite(_ on: Bool, for item: FeedItem) {
+        guard let receipt = try? Core.action(on ? .favorite : .unfavorite, media: [item.mediaId]), receipt.count > 0 else { return }
+        NotificationCenter.default.post(name: .libraryChanged, object: self)
+        reload(keepPosition: true)
+        toast.show(L(on ? "favorite.added" : "favorite.removed", receipt.count), action: L("common.undo")) { [weak self] in
+            do { self?.toast.show(try Core.undo(receipt)) } catch { self?.toast.show(error.localizedDescription) }
+            NotificationCenter.default.post(name: .libraryChanged, object: self)
+            self?.reload(keepPosition: true)
+        }
     }
 
     private func deleteTag(_ t: TagView, from item: FeedItem) {

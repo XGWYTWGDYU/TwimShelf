@@ -180,6 +180,7 @@ fn spec(ops: &[LoggedOp]) -> BTreeSet<String> {
             Op::Recent { post_id, at } => { let e = recent.entry(post_id.clone()).or_insert(0); *e = (*e).max(*at); }
             Op::Setting { key, value, hlc } => { let mut s = settings.get(key).cloned(); up(&mut s, (*hlc, value.clone())); settings.insert(key.clone(), s.unwrap()); }
             Op::Album { .. } => {}
+            Op::Favorite { .. } => {}
             Op::Added { post_id, at } => { if *at > 0 { let e = added.entry(post_id.clone()).or_insert(*at); *e = (*e).min(*at); } }
             Op::Unknown(_) => {}
         }
