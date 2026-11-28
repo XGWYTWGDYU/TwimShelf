@@ -793,7 +793,7 @@
   "prompt.default": "默认",
   "prompt.default.context": "帖子文字（仅供参考）：\n{text}",
   "prompt.default.existing": "这张图片目前已有的标签：{existing}",
-  "prompt.default.prompt": "为这张图片生成 5 到 10 个简短的中文标签，每个标签 1 到 6 个字。只输出 JSON 字符串数组。",
+  "prompt.default.prompt": "为这张图片生成 5 到 10 个简短的简体中文标签，每个标签 1 到 6 个字。只输出 JSON 字符串数组。",
   "prompt.default.system": "你是一个图片标注器。你只输出 JSON 字符串数组，不输出任何其他文字。",
   "prompt.default.vocabulary": "资料库里已有的标签（描述同一事物时直接用原词）：{tags}",
   "prompt.existing": "已有标签",

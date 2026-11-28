@@ -36,6 +36,15 @@ TL_LLAMA_API tl_llama *tl_llama_load(const char *weights, const char *projector,
 TL_LLAMA_API char *tl_llama_describe(tl_llama *m, const char *image, const char *system, const char *question,
                                      int32_t max_tokens, char **error);
 
+// Why an answer ended (tl_llama_describe_ex's *finish).
+#define TL_FINISH_ENDED 0    // the model ended its turn (an end-of-generation token)
+#define TL_FINISH_LENGTH 1   // max_tokens ran out
+#define TL_FINISH_CONTROL 2  // a control token that ends no generation (the model left its turn)
+#define TL_FINISH_DECODE 3   // llama_decode failed midway: the answer is partial
+// tl_llama_describe, and why the answer ended.
+TL_LLAMA_API char *tl_llama_describe_ex(tl_llama *m, const char *image, const char *system, const char *question,
+                                        int32_t max_tokens, int32_t *finish, char **error);
+
 // An L2-normalized embedding of `text` into `out` (room for tl_llama_dimensions floats).
 TL_LLAMA_API int32_t tl_llama_dimensions(tl_llama *m);
 TL_LLAMA_API int32_t tl_llama_embed(tl_llama *m, const char *text, float *out, char **error);

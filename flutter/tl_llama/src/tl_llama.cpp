@@ -79,10 +79,27 @@ static const char *type_name(enum ggml_backend_dev_type t) {
   }
 }
 
+// cuBLAS computes in FP32 unless someone chose otherwise. On a card with fast FP16 (RTX 20 on),
+// ggml-cuda multiplies quantized and FP16 weights in FP16 unless the graph asks for FP32, and Gemma 4's
+// does not: it overflows (llama.cpp v0.8.0, CUDA 12.9, RTX 4070 SUPER), and every answer is one token
+// repeated ("<unused6226>…"), while the same model reads the same picture right on Vulkan. With FP32 the CUDA answers match Vulkan's, at a quarter of the time; Qwen2.5-VL's answers
+// and speed do not change. ggml-cuda reads the variable at each matrix product, so it is set before
+// any backend is loaded; a value already in the environment wins.
+static void prefer_fp32_cublas() {
+  const char *name = "GGML_CUDA_CUBLAS_COMPUTE_TYPE";
+  if (std::getenv(name)) return;
+#ifdef _WIN32
+  _putenv_s(name, "f32");
+#else
+  setenv(name, "f32", 0);
+#endif
+}
+
 extern "C" void tl_llama_init(const char *dir) {
   // once per process
   static std::once_flag once;
   std::call_once(once, [dir] {
+    prefer_fp32_cublas();
 #ifdef __ANDROID__
     llama_log_set(log_to_logcat, nullptr);
     mtmd_helper_log_set(mtmd_to_logcat, nullptr);
@@ -202,7 +219,7 @@ static std::string picture_prompt(tl_llama *m, const char *system, const char *q
 }
 
 static char *describe_picture(tl_llama *m, const char *image, const char *system, const char *question,
-                                   int32_t max_tokens, char **error) {
+                                   int32_t max_tokens, int32_t *finish, char **error) {
   if (!m || !m->vision) { fail(error, "no vision model"); return nullptr; }
   const llama_vocab *vocab = llama_model_get_vocab(m->model);
   llama_memory_clear(llama_get_memory(m->ctx), true);
@@ -230,20 +247,29 @@ static char *describe_picture(tl_llama *m, const char *image, const char *system
   mtmd_bitmap_free(bitmap);
   if (r != 0) { fail(error, "prompt"); return nullptr; }
 
-  // nearly greedy, as the MLX engine (temperature 0.1)
+  // nearly greedy, as the MLX engine (temperature 0.1), but not caught in a loop: at 0.1 alone
+  // half of Gemma 4's lists repeated one entry until the token budget ran out ("藍色 衣服" ...);
+  // a mild repetition penalty over the last 64 tokens ended all of them (measured, 18 + 18 runs)
   llama_sampler *smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+  llama_sampler_chain_add(smpl, llama_sampler_init_penalties(llama_vocab_n_tokens(vocab), 64, 1.1f, 0.0f, 0.0f));
   llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.1f));
   llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
   std::string out;
+  // what the caller needs to tell an answer from a part of one: it ended, or something cut it
+  int32_t why = TL_FINISH_LENGTH;
   for (int32_t i = 0; i < max_tokens; i++) {
     llama_token tok = llama_sampler_sample(smpl, m->ctx, -1);
-    if (llama_vocab_is_eog(vocab, tok)) break;
+    if (llama_vocab_is_eog(vocab, tok)) { why = TL_FINISH_ENDED; break; }
+    // a control token is no text: `special = false` below would write nothing for it, and the
+    // model would go on unseen (Gemma 4's <|channel> is user-defined and does show)
+    if (llama_vocab_is_control(vocab, tok)) { why = TL_FINISH_CONTROL; break; }
     char piece[256];
     int32_t k = llama_token_to_piece(vocab, tok, piece, sizeof piece, 0, false);
     if (k > 0) out.append(piece, k);
     llama_batch b = llama_batch_get_one(&tok, 1);
-    if (llama_decode(m->ctx, b) != 0) break;
+    if (llama_decode(m->ctx, b) != 0) { why = TL_FINISH_DECODE; break; }
   }
+  if (finish) *finish = why;
   llama_sampler_free(smpl);
 #ifdef __ANDROID__
   using ms = std::chrono::milliseconds;
@@ -276,8 +302,13 @@ extern "C" tl_llama *tl_llama_load(const char *weights, const char *projector, c
 
 extern "C" char *tl_llama_describe(tl_llama *m, const char *image, const char *system, const char *question,
                                    int32_t max_tokens, char **error) {
+  return tl_llama_describe_ex(m, image, system, question, max_tokens, nullptr, error);
+}
+
+extern "C" char *tl_llama_describe_ex(tl_llama *m, const char *image, const char *system, const char *question,
+                                      int32_t max_tokens, int32_t *finish, char **error) {
   const auto start = std::chrono::steady_clock::now();
-  char *answer = guarded(error, [&] { return describe_picture(m, image, system, question, max_tokens, error); });
+  char *answer = guarded(error, [&] { return describe_picture(m, image, system, question, max_tokens, finish, error); });
 #ifdef __ANDROID__
   const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
   __android_log_print(ANDROID_LOG_INFO, "tl_llama", "picture: %lld ms, %s", (long long)ms, answer ? "ok" : "failed");

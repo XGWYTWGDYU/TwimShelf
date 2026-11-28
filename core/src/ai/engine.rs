@@ -3,6 +3,7 @@
 //! place through a function the app registers (`tl_ai_set_mlx`).
 //!
 //! One model is kept loaded (one job at a time) and unloaded 30 s after its last use.
+use crate::ai::reply::Finish;
 use super::error::{AiError, AiResult, Kind};
 use serde::Deserialize;
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -54,10 +55,12 @@ type InitFn = unsafe extern "C" fn(*const c_char);
 type DevicesFn = unsafe extern "C" fn() -> *mut c_char;
 type LoadFn = unsafe extern "C" fn(*const c_char, *const c_char, *const c_char, i32, i32, *mut *mut c_char) -> *mut c_void;
 type DescribeFn = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *const c_char, i32, *mut *mut c_char) -> *mut c_char;
+/// `tl_llama_describe_ex`: also why the answer ended (TL_FINISH_*).
+type DescribeExFn = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *const c_char, i32, *mut i32, *mut *mut c_char) -> *mut c_char;
 type UnloadFn = unsafe extern "C" fn(*mut c_void);
 type FreeFn = unsafe extern "C" fn(*mut c_char);
 
-struct Llama { devices: DevicesFn, load: LoadFn, describe: DescribeFn, unload: UnloadFn, free: FreeFn }
+struct Llama { devices: DevicesFn, load: LoadFn, describe: DescribeFn, describe_ex: Option<DescribeExFn>, unload: UnloadFn, free: FreeFn }
 
 /// The function the Apple apps register: MLX's answer about the picture at `image` from the model in
 /// `model_dir`, or null with `*error` set. Strings it returns are freed with the second function.
@@ -115,7 +118,8 @@ fn llama() -> Option<&'static Llama> {
             let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).map(|p| CString::new(p.to_string_lossy().as_bytes()).unwrap_or_default());
             init(dir.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()));
             eprintln!("local ai: loaded {}", path.display());
-            return Some(Llama { devices, load, describe, unload, free });
+            let describe_ex = sym!(b"tl_llama_describe_ex\0", DescribeExFn);
+            return Some(Llama { devices, load, describe, describe_ex, unload, free });
         }
         None
     }).as_ref()
@@ -159,7 +163,8 @@ pub fn devices() -> Vec<Device> {
 struct Loaded { key: String, handle: *mut c_void }
 unsafe impl Send for Loaded {}
 
-struct State { loaded: Option<Loaded>, last_used: Instant }
+/// `load`: what the latest load took, until [`take_load_time`] reads it.
+struct State { loaded: Option<Loaded>, last_used: Instant, load: Duration }
 
 fn state() -> &'static Mutex<State> {
     static S: OnceLock<Mutex<State>> = OnceLock::new();
@@ -172,7 +177,7 @@ fn state() -> &'static Mutex<State> {
                 if let Some(m) = g.loaded.take() { unsafe { (l.unload)(m.handle) }; }
             }
         });
-        Mutex::new(State { loaded: None, last_used: Instant::now() })
+        Mutex::new(State { loaded: None, last_used: Instant::now(), load: Duration::ZERO })
     })
 }
 
@@ -183,8 +188,12 @@ fn cpath(p: &Path) -> CString { cstr(&p.to_string_lossy()) }
 #[derive(Debug, Clone)]
 pub struct Gguf { pub weights: PathBuf, pub projector: Option<PathBuf> }
 
+/// What loading a model took since this was last asked (nothing loaded: zero), for the GPU trial,
+/// which times the GPU and not the reading of the model file.
+pub fn take_load_time() -> Duration { std::mem::take(&mut state().lock().unwrap_or_else(|e| e.into_inner()).load) }
+
 /// The model's answer about the picture at `image`, from the model loaded on `device`.
-pub fn describe_gguf(model: &Gguf, device: &str, image: &Path, system: &str, question: &str, max_tokens: i32) -> AiResult<String> {
+pub fn describe_gguf(model: &Gguf, device: &str, image: &Path, system: &str, question: &str, max_tokens: i32) -> AiResult<(String, Finish)> {
     let l = llama().ok_or_else(|| AiError::new(Kind::NoGpu))?;
     let key = format!("{device}\n{}\n{}", model.weights.display(), model.projector.as_deref().map(|p| p.display().to_string()).unwrap_or_default());
     let mut g = state().lock().unwrap_or_else(|e| e.into_inner());
@@ -192,21 +201,31 @@ pub fn describe_gguf(model: &Gguf, device: &str, image: &Path, system: &str, que
         if let Some(m) = g.loaded.take() { unsafe { (l.unload)(m.handle) }; }
         let (w, p, d) = (cpath(&model.weights), model.projector.as_deref().map(cpath), cstr(device));
         let mut err: *mut c_char = std::ptr::null_mut();
+        let started = Instant::now();
         let handle = unsafe { (l.load)(w.as_ptr(), p.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()), d.as_ptr(), 4096, 0, &mut err) };
         if handle.is_null() {
             let why = unsafe { take(l, err) }.unwrap_or_default();
             return Err(AiError::detail(Kind::Engine, why));
         }
         g.loaded = Some(Loaded { key, handle });
+        g.load = started.elapsed();
     }
     let handle = g.loaded.as_ref().map(|m| m.handle).unwrap_or(std::ptr::null_mut());
     let (i, s, q) = (cpath(image), cstr(system), cstr(question));
     let mut err: *mut c_char = std::ptr::null_mut();
-    let answer = unsafe { (l.describe)(handle, i.as_ptr(), s.as_ptr(), q.as_ptr(), max_tokens, &mut err) };
+    // a bridge without tl_llama_describe_ex cannot say: taken as ended, the list checks still apply
+    let mut why: i32 = 0;
+    let answer = match l.describe_ex {
+        Some(ex) => unsafe { ex(handle, i.as_ptr(), s.as_ptr(), q.as_ptr(), max_tokens, &mut why, &mut err) },
+        None => unsafe { (l.describe)(handle, i.as_ptr(), s.as_ptr(), q.as_ptr(), max_tokens, &mut err) },
+    };
     g.last_used = Instant::now();
+    let finish = match why { 0 => Finish::Ended, 1 => Finish::Length, 2 => Finish::Control, _ => Finish::Decode };
     match unsafe { take(l, answer) } {
-        // a token budget can end inside a character: what is half a character is dropped
-        Some(a) => Ok(a.replace('\u{FFFD}', "")),
+        // only a budget that ran out can end inside a character; a broken character anywhere
+        // else is kept, and reply::malformed leaves its label out
+        Some(a) if finish == Finish::Length => Ok((a.trim_end_matches('\u{FFFD}').to_string(), finish)),
+        Some(a) => Ok((a, finish)),
         None => {
             let why = unsafe { take(l, err) }.unwrap_or_default();
             // a GPU that gave up leaves the model unusable: loaded afresh next time

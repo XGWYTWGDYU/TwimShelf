@@ -1215,11 +1215,31 @@ pub extern "C" fn tl_ai_set_mlx(describe: crate::ai::engine::MlxDescribe, free: 
 
 /// The tags for one picture. `request_json`: a `TagRequest` (ai/mod.rs). `{"ok": {tags, device?, ms}}`.
 /// Blocks until the model answers: call it off the app's main thread.
+/// [`Store::own_labels`](crate::store::Store::own_labels), worked out again only when the library,
+/// the model or the vocabulary the app sends changes: it reads every AI tag, and the apps send the
+/// same vocabulary for ten pictures in a row (they refresh it as often).
+fn own_labels(lib: &Arc<Library>, model: &str, vocabulary: &[String]) -> Option<Arc<std::collections::HashSet<String>>> {
+    type Key = (std::sync::Weak<Library>, String, Vec<String>);
+    static LAST: Mutex<Option<(Key, Arc<std::collections::HashSet<String>>)>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(((l, m, v), own)) = last.as_ref() {
+        if l.ptr_eq(&Arc::downgrade(lib)) && m == model && v == vocabulary { return Some(own.clone()); }
+    }
+    let own = Arc::new(lib.db().own_labels(model).ok()?);
+    *last = Some(((Arc::downgrade(lib), model.to_string(), vocabulary.to_vec()), own.clone()));
+    Some(own)
+}
+
 #[no_mangle]
 pub extern "C" fn tl_ai_tag(request_json: *const c_char) -> *mut c_char {
     respond_ai(|| {
-        let req: crate::ai::TagRequest = serde_json::from_str(&s(request_json))?;
+        let mut req: crate::ai::TagRequest = serde_json::from_str(&s(request_json))?;
         let lib = current_library();
+        // the library's tags, without those only this model gave (Store::own_labels): every app
+        // sends its most used tags, and a model must not be fed its own words back as the library's
+        if let Some(l) = lib.as_ref() {
+            if let Some(own) = own_labels(l, req.model.id(), &req.vocabulary) { req.vocabulary.retain(|t| !own.contains(t)); }
+        }
         let setting = |k: &str| lib.as_ref().and_then(|l| l.db().setting(k).ok().flatten());
         Ok(crate::ai::tag(&models_dir(), setting, &req)?)
     })
