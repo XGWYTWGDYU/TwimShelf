@@ -332,6 +332,20 @@ impl Store {
         Ok(ids.len())
     }) }
 
+    /// The labels only `model` has given, anywhere: no mark of mine on them, no other model's,
+    /// no AI tag of unknown source. They are not offered back to that model as the library's
+    /// tags: a model that reads its own words as the library's copies its own mistakes onto
+    /// more and more pictures (Gemma 4: "潔" in the list became "潔", "潔潔", "藍色t 潔", …).
+    pub fn own_labels(&self, model: &str) -> rusqlite::Result<std::collections::HashSet<String>> {
+        let mut st = self.conn.prepare(
+            "SELECT c.label FROM tag_media tm JOIN tag_c c ON c.raw_id=tm.tag_id WHERE tm.origin!=0 GROUP BY c.label \
+             HAVING SUM((tm.origin & 1)!=0)=0 \
+             AND SUM(NOT EXISTS(SELECT 1 FROM tag_src s WHERE s.media_id=tm.media_id AND s.tag_id=tm.tag_id AND s.present=1 AND s.model=?1))=0 \
+             AND SUM(EXISTS(SELECT 1 FROM tag_src s WHERE s.media_id=tm.media_id AND s.tag_id=tm.tag_id AND s.present=1 AND s.model!=?1))=0")?;
+        let v = st.query_map([model], |r| r.get(0))?.collect();
+        v
+    }
+
     /// Removes what the AI added, everywhere: the AI bit of every tag (an AI-only tag goes, one
     /// I endorsed stays as mine) and every record of which model proposed it. All are ordinary
     /// writes, so they sync. What the AI has analysed stays recorded, so it does not tag the same
@@ -1711,6 +1725,26 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn own_labels_are_what_only_that_model_gave() {
+        let s = Store::open(":memory:").unwrap();
+        s.upsert_post(&PostMeta { id: "1".into(), ..Default::default() }).unwrap();
+        for m in ["a", "b", "c"] { s.conn().execute("INSERT INTO media VALUES(?1,'1',0,'photo','p')", [m]).unwrap(); }
+        let v = |l: &[&str]| l.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        s.retag("a", "gemma", &v(&["潔", "藍色", "猫", "雨"]), false).unwrap();
+        s.retag("b", "gemma", &v(&["潔", "白墙"]), false).unwrap();
+        s.retag("b", "qwen", &v(&["猫"]), false).unwrap();          // another model gave it too
+        s.tag_media("c", "雨", Origin::USER).unwrap();               // and this one is mine
+        s.tag_media("c", "白墙", Origin::AI).unwrap();               // an AI tag of unknown source
+        let mut own: Vec<String> = s.own_labels("gemma").unwrap().into_iter().collect();
+        own.sort();
+        assert_eq!(own, ["潔", "藍色"]);
+        assert_eq!(s.own_labels("qwen").unwrap().len(), 0);           // 猫 is gemma's too
+        // a rename keeps the rule: the label is the tag's current name
+        s.rename_tag("藍色", "蓝色").unwrap();
+        assert!(s.own_labels("gemma").unwrap().contains("蓝色"));
+    }
+
     #[test]
     fn endorse_via_user_add() {
         let s = Store::open(":memory:").unwrap();
